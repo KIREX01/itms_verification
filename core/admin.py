@@ -2,10 +2,22 @@ from django.contrib import admin
 
 from core.models import (
     EvidenceImage,
+    IngestionBatch,
     InstallationOrder,
     SubmissionAuditLog,
     VehicleInstallationPair,
 )
+
+
+@admin.register(IngestionBatch)
+class IngestionBatchAdmin(admin.ModelAdmin):
+    list_display = (
+        "batch_id", "source_type", "source_label", "created_at",
+        "total_files", "ingested_count", "duplicate_count", "failed_count",
+    )
+    list_filter = ("source_type", "created_at")
+    search_fields = ("batch_id", "source_label")
+    readonly_fields = ("id", "created_at")
 
 
 @admin.register(InstallationOrder)
@@ -18,12 +30,12 @@ class InstallationOrderAdmin(admin.ModelAdmin):
 @admin.register(EvidenceImage)
 class EvidenceImageAdmin(admin.ModelAdmin):
     list_display = (
-        "id", "detected_plate", "orientation", "orientation_confidence",
-        "ocr_confidence", "status", "ingested_at",
+        "id", "detected_plate", "orientation", "batch", "status",
+        "is_file_pruned", "ocr_confidence", "ingested_at", "submitted_at",
     )
-    list_filter = ("status", "orientation")
-    search_fields = ("detected_plate", "file_hash", "original_source_path")
-    readonly_fields = ("id", "file_hash", "ingested_at")
+    list_filter = ("status", "orientation", "is_file_pruned", "batch")
+    search_fields = ("detected_plate", "file_hash", "original_source_path", "batch__batch_id")
+    readonly_fields = ("id", "file_hash", "ingested_at", "submitted_at", "pruned_at")
 
 
 class AuditLogInline(admin.TabularInline):
@@ -37,7 +49,7 @@ class AuditLogInline(admin.TabularInline):
 class VehicleInstallationPairAdmin(admin.ModelAdmin):
     list_display = (
         "registration_number_detected", "order", "match_type", "match_score",
-        "is_complete", "verification_status", "updated_at",
+        "is_complete", "verification_status", "submitted_at", "updated_at",
     )
     list_filter = ("verification_status", "match_type", "is_complete")
     search_fields = ("registration_number_detected", "order__order_number")

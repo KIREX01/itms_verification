@@ -2,21 +2,22 @@
 Side-by-side visual evidence viewer.
 
 Launches a composed front|rear comparison image so an operator can
-visually confirm vehicle identity (color, model, damage) before
-approving a pair -- OCR/orientation confidence alone isn't enough for a
-human sign-off.
+visually confirm vehicle identity (color, model, damage, plate placement)
+before approving a pair.
 
-Two display modes:
-  - OpenCV window (cv2.imshow) when a display is available.
-  - Fallback: writes the composed comparison image to a temp file and
-    opens it with the OS's default image viewer, for headless-TUI
-    setups (e.g. run over SSH without X11 forwarding but with a local
-    file-open capability), or simply returns the path if neither works
-    so the TUI can show it inline via terminal graphics protocols.
+Architecture:
+- Standalone, highly responsive Python GUI window powered by OpenCV HighGUI.
+- When invoked from the TUI, it runs as a non-blocking background Python process,
+  ensuring the TUI event loop stays 100% responsive with zero lag or freezes.
+- Active message loop at 50 Hz ensures the window is smooth, resizable, and
+  never triggers Windows "Not Responding" alerts.
+- Single-key close: [Esc], [Q], or clicking the window close button.
 """
+import argparse
 import os
 import platform
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -24,73 +25,173 @@ from typing import Optional
 import cv2
 import numpy as np
 
-HEADER_HEIGHT = 40
-GUTTER = 8
+HEADER_HEIGHT = 44
+FOOTER_HEIGHT = 32
+GUTTER_WIDTH = 10
 
 
-def _label(img: np.ndarray, text: str) -> np.ndarray:
-    """Add a labeled header bar above an image."""
-    h, w = img.shape[:2]
-    bar = np.zeros((HEADER_HEIGHT, w, 3), dtype=np.uint8)
-    bar[:] = (40, 40, 40)
+def _create_header_bar(width: int, text: str, bg_bgr: tuple) -> np.ndarray:
+    """Creates a colored banner bar with clean typography."""
+    bar = np.zeros((HEADER_HEIGHT, width, 3), dtype=np.uint8)
+    bar[:] = bg_bgr
     cv2.putText(
-        bar, text, (10, HEADER_HEIGHT - 12),
-        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA,
+        bar, text, (14, HEADER_HEIGHT - 14),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2, cv2.LINE_AA,
     )
-    return np.vstack([bar, img])
+    return bar
 
 
-def compose_side_by_side(front_path: str, rear_path: str, target_height: int = 480) -> np.ndarray:
-    """Build a single image: [FRONT header+photo] | gutter | [REAR header+photo]."""
-    front = cv2.imread(front_path, cv2.IMREAD_COLOR)
-    rear = cv2.imread(rear_path, cv2.IMREAD_COLOR)
+def _create_footer_bar(width: int, left_text: str, right_text: str) -> np.ndarray:
+    """Creates a dark guidance footer bar at the bottom of the comparison."""
+    bar = np.zeros((FOOTER_HEIGHT, width, 3), dtype=np.uint8)
+    bar[:] = (28, 28, 28)
+    cv2.putText(
+        bar, left_text, (12, FOOTER_HEIGHT - 10),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.48, (200, 200, 200), 1, cv2.LINE_AA,
+    )
+    # Right-aligned text calculation
+    (w, _), _ = cv2.getTextSize(right_text, cv2.FONT_HERSHEY_SIMPLEX, 0.48, 1)
+    cv2.putText(
+        bar, right_text, (max(12, width - w - 14), FOOTER_HEIGHT - 10),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.48, (140, 180, 240), 1, cv2.LINE_AA,
+    )
+    return bar
 
+
+def compose_side_by_side(
+    front_path: str,
+    rear_path: str,
+    target_height: int = 560,
+    title_label: str = "",
+) -> np.ndarray:
+    """
+    Builds a high-visibility composed canvas:
+      [ FRONT EVIDENCE BANNER ]  │  [ REAR EVIDENCE BANNER ]
+      [ Front Photograph      ]  │  [ Rear Photograph       ]
+      [ Guidance Footer: Esc/Q to Close | ITMS Forensic Audit ]
+    """
+    front = cv2.imread(front_path, cv2.IMREAD_COLOR) if os.path.isfile(front_path) else None
+    rear = cv2.imread(rear_path, cv2.IMREAD_COLOR) if os.path.isfile(rear_path) else None
+
+    # Fallback placeholder for missing photo
     if front is None:
-        front = np.zeros((target_height, target_height, 3), dtype=np.uint8)
-    if rear is None:
-        rear = np.zeros((target_height, target_height, 3), dtype=np.uint8)
+        front = np.zeros((target_height, int(target_height * 1.33), 3), dtype=np.uint8)
+        cv2.putText(front, "FRONT PHOTO NOT FOUND", (40, target_height // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 220), 2, cv2.LINE_AA)
 
-    def _resize(img):
+    if rear is None:
+        rear = np.zeros((target_height, int(target_height * 1.33), 3), dtype=np.uint8)
+        cv2.putText(rear, "REAR PHOTO NOT FOUND", (40, target_height // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 220), 2, cv2.LINE_AA)
+
+    # Uniform height scaling
+    def _scale(img):
         h, w = img.shape[:2]
         scale = target_height / float(h)
-        return cv2.resize(img, (int(w * scale), target_height))
+        return cv2.resize(img, (max(1, int(w * scale)), target_height), interpolation=cv2.INTER_AREA)
 
-    front, rear = _resize(front), _resize(rear)
-    front = _label(front, "FRONT")
-    rear = _label(rear, "REAR")
+    front_scaled = _scale(front)
+    rear_scaled = _scale(rear)
 
-    gutter = np.full((front.shape[0], GUTTER, 3), 200, dtype=np.uint8)
-    return np.hstack([front, gutter, rear])
+    # Headers: Green for Front (34, 139, 34), Blue for Rear (180, 105, 38 in BGR)
+    front_header = _create_header_bar(front_scaled.shape[1], "▶ FRONT EVIDENCE", (34, 139, 34))
+    rear_header = _create_header_bar(rear_scaled.shape[1], "▶ REAR EVIDENCE", (180, 105, 38))
+
+    front_col = np.vstack([front_header, front_scaled])
+    rear_col = np.vstack([rear_header, rear_scaled])
+
+    # Gutter separator
+    gutter = np.full((front_col.shape[0], GUTTER_WIDTH, 3), 40, dtype=np.uint8)
+
+    # Combined top section
+    top_grid = np.hstack([front_col, gutter, rear_col])
+
+    # Footer
+    label = f"Evidence ID: {title_label}" if title_label else "ITMS Forensic Inspection"
+    footer = _create_footer_bar(
+        top_grid.shape[1],
+        "[ESC] or [Q] to Close  │  Resize window freely",
+        label,
+    )
+
+    return np.vstack([top_grid, footer])
 
 
-def show_side_by_side(front_path: str, rear_path: str, window_title: str = "Evidence Review") -> Optional[str]:
+def _run_window(front_path: str, rear_path: str, window_title: str) -> None:
+    """Runs a dedicated GUI window with an active Windows event loop."""
+    composed = compose_side_by_side(front_path, rear_path, title_label=window_title)
+
+    cv2.namedWindow(window_title, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+
+    # Scale initial window to comfortable desktop dimensions
+    h, w = composed.shape[:2]
+    max_w, max_h = 1200, 680
+    scale = min(max_w / float(w), max_h / float(h), 1.0)
+    cv2.resizeWindow(window_title, int(w * scale), int(h * scale))
+
+    cv2.imshow(window_title, composed)
+
+    # Continuous active event loop (50 Hz) - keeps the window 100% responsive
+    while True:
+        key = cv2.waitKey(20) & 0xFF
+        if key in (27, ord("q"), ord("Q"), ord("x"), ord("X")):
+            break
+        try:
+            # Detect user clicking the window 'X' close button
+            if cv2.getWindowProperty(window_title, cv2.WND_PROP_VISIBLE) < 1:
+                break
+        except Exception:
+            break
+
+    cv2.destroyAllWindows()
+
+
+def show_side_by_side(
+    front_path: str,
+    rear_path: str,
+    window_title: str = "ITMS Evidence Review",
+    block: bool = False,
+) -> Optional[str]:
     """
-    Attempts to display the composed comparison interactively. Returns the
-    path of the composed image on disk (always written, so the TUI can
-    reference it regardless of which display path succeeds).
+    Displays the composed comparison in a standalone, responsive Python window.
+    Saves the composed image to a temp file and launches a lightweight Python
+    subprocess so the calling TUI never freezes or becomes unresponsive.
     """
-    composed = compose_side_by_side(front_path, rear_path)
-
+    # Always write temporary preview image
+    composed = compose_side_by_side(front_path, rear_path, title_label=window_title)
     tmp_path = os.path.join(tempfile.gettempdir(), "itms_evidence_compare.png")
     cv2.imwrite(tmp_path, composed)
 
-    if os.environ.get("DISPLAY") or platform.system() in ("Windows", "Darwin"):
-        try:
-            cv2.imshow(window_title, composed)
-            cv2.waitKey(1)  # non-blocking; TUI event loop keeps running
-            return tmp_path
-        except Exception:
-            pass
+    if block:
+        # Run blocking in-process (e.g. from CLI scripts)
+        _run_window(front_path, rear_path, window_title)
+        return tmp_path
 
-    # Headless fallback: open with OS default viewer
+    # Launch non-blocking background Python process (pure Python, NO Windows Photo Viewer)
     try:
-        if platform.system() == "Darwin":
-            subprocess.Popen(["open", tmp_path])
-        elif platform.system() == "Windows":
-            os.startfile(tmp_path)  # type: ignore[attr-defined]
-        else:
-            subprocess.Popen(["xdg-open", tmp_path])
+        subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "core.services.viewer",
+                front_path,
+                rear_path,
+                window_title,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return tmp_path
     except Exception:
-        pass  # Caller can still use the returned path (e.g. terminal image protocol)
+        # Fallback to direct window if subprocess spawn fails
+        _run_window(front_path, rear_path, window_title)
+        return tmp_path
 
-    return tmp_path
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="ITMS Side-by-Side Evidence Viewer")
+    parser.add_argument("front", help="Path to front photo")
+    parser.add_argument("rear", help="Path to rear photo")
+    parser.add_argument("title", nargs="?", default="ITMS Evidence Review", help="Window title")
+    args = parser.parse_args()
+    _run_window(args.front, args.rear, args.title)

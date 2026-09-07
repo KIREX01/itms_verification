@@ -42,18 +42,25 @@ python manage.py seed_orders --csv sample_data/orders.csv
 # Options:
 #   --clear                Wipe existing orders before seeding
 
-# 2. Ingest raw photos from a folder (e.g. a copied SD card / phone export)
-python manage.py ingest_photos "C:\Users\KIREX\Pictures\image" --recursive
+# 2. Ingest raw photos from a folder (or upload via browser at http://localhost:8000/upload/)
+python manage.py ingest_photos "C:\Users\KIREX\Pictures\image" --recursive --batch-label "Shift 1 Entebbe"
 # Options:
 #   --recursive            Traverse subdirectories
-#   --limit N              Ingest at most N images
+#   --batch-label "name"   Human-readable label for this ingestion batch
+
+# Web Upload UI & REST API:
+#   - Browser UI:   http://localhost:8000/upload/   (drag-and-drop, multiple files, mobile camera)
+#   - REST API:     POST http://localhost:8000/api/upload/ (multipart form with 'photos' field)
 
 # 3. Run detection + OCR + normalization + orientation over evidence
 python manage.py process_vision
 # Options:
+#   --batch <batch_id>     Process only images belonging to a specific IngestionBatch
 #   --reprocess-failed     Retry images that previously encountered errors
 #   --include-needs-review Reprocess NEEDS_REVIEW images that lack a detected plate
 #   --reprocess-all        Reset retry budgets and re-run all unsubmitted images
+#   --save-crops           Save localized plate crops to media/crops/ for inspection
+#   --cleanup-crops        Clean up intermediate crops in media/crops/ after run
 #   --max-retries N        Maximum retry attempts before permanently failing (default: 3)
 #   --limit N              Process at most N images in this run
 
@@ -62,13 +69,21 @@ python manage.py associate_pairs
 # Options:
 #   --skip-matching        Group into pairs only; skip fuzzy matching against orders
 
-# 5. Review in the TUI: inspect pairs, view side-by-side evidence, approve/swap
+# 5. Interactive Operator Dashboard (TUI): Review queue, history, and live console
 python manage.py run_tui
-# TUI hotkeys:
-#   V                      View evidence side-by-side in viewer
+# TUI Navigation & Hotkeys:
+#   1 / 2 / 3              Switch Tabs: [1] Review Queue, [2] History & Audit, [3] Batches
+#   I                      Add Photos via Native Desktop Dialog (select files or entire folder/SD card)
+#   W                      Launch Web Upload Interface in Browser (auto-falls back to native dialog if server offline)
+#   F                      Cycle History Label Filter (ALL -> SUBMITTED -> FAILED -> APPROVED -> AUDIT)
+#   P                      Run Vision Pipeline (background thread, streams to bottom console)
+#   M                      Run Pair Matcher (background thread, streams to bottom console)
+#   U                      Submit Selected Pair to ITMS (live step-by-step progress logging)
 #   A                      Approve selected pair for submission
 #   S                      Swap front and rear image assignments
-#   R                      Refresh data table from database
+#   V                      View evidence side-by-side in standalone Python window (fast, 50Hz, no Photo Viewer)
+#   C                      Clean temporary crops & enforce vault retention policy
+#   R                      Refresh data tables and metrics from database
 #   Q                      Quit the TUI
 
 # 6. Submit approved pairs to ITMS (simulated sandbox or live server)
@@ -98,6 +113,41 @@ python manage.py itms_auth --refresh
 
 # Clear cached tokens and logout
 python manage.py itms_auth --logout
+```
+
+### 3.2 Plate Crop Management & Storage Cleanup
+
+When running vision processing or troubleshooting detection accuracy, intermediate plate crops can be saved to a organized date-partitioned directory (`media/crops/YYYY-MM-DD/{image_id}_plate.jpg`) instead of polluting the project root. Immutable vault originals (`media/vault/`) are protected and never touched.
+
+```bash
+# Clean up temporary crops and remove any stray root debug images
+python manage.py clean_crops
+
+# Preview files that would be deleted without removing them
+python manage.py clean_crops --dry-run
+
+# Only delete temporary crops older than 7 days
+python manage.py clean_crops --older-than-days 7
+```
+
+### 3.3 Evidence Vault 1-Week Lifecycle Retention (`prune_vault`)
+
+To prevent storage exhaustion when operating at high volume, the system implements an automated retention lifecycle:
+* **Successfully Submitted Evidence (`SUBMITTED`)**: Photos that have already been validated, verified, and submitted to ITMS have a **1-week (7-day)** retention window. After 7 days, heavy JPG files on disk are safely pruned to reclaim storage, while all database records (plate numbers, orientation, confidence, timestamps, and audit trail) are permanently preserved with status `PRUNED`.
+* **Evidence with Issues (`FAILED`, `NEEDS_REVIEW`, `INCOMPLETE`, etc.)**: Photos requiring human intervention, unresolved pairs, or pending uploads are **STRICTLY PROTECTED** and retained indefinitely until explicitly resolved by an operator.
+
+```bash
+# Preview files that would be pruned under the 7-day retention policy
+python manage.py prune_vault --dry-run
+
+# Execute lifecycle pruning (defaults to 7 days)
+python manage.py prune_vault
+
+# Enforce custom retention window (e.g. 14 days)
+python manage.py prune_vault --days 14
+
+# Prune expired files for a specific ingestion batch only
+python manage.py prune_vault --batch BATCH-20260907-142030-ab12
 ```
 
 ## 4. Running the test suite

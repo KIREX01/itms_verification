@@ -46,6 +46,45 @@ class InstallationOrder(models.Model):
         return f"{self.order_number} ({self.registration_number})"
 
 
+class IngestionBatch(models.Model):
+    """Tracks a distinct photo upload / ingestion session."""
+
+    class SourceType(models.TextChoices):
+        CLI = "CLI", "Command Line Ingestion"
+        WEB = "WEB", "Web Upload"
+        API = "API", "REST API"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    batch_id = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        help_text="Human-readable batch identifier, e.g. BATCH-20260907-142030-ab12",
+    )
+    source_type = models.CharField(
+        max_length=16,
+        choices=SourceType.choices,
+        default=SourceType.CLI,
+    )
+    source_label = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Folder name, operator name, or upload note for this batch.",
+    )
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    total_files = models.PositiveIntegerField(default=0)
+    ingested_count = models.PositiveIntegerField(default=0)
+    duplicate_count = models.PositiveIntegerField(default=0)
+    failed_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name_plural = "Ingestion batches"
+
+    def __str__(self):
+        return f"{self.batch_id} ({self.source_type}) - {self.ingested_count} ingested"
+
+
 class EvidenceImage(models.Model):
     """A single ingested photo, permanently copied into the evidence vault."""
 
@@ -63,11 +102,20 @@ class EvidenceImage(models.Model):
         NEEDS_REVIEW = "NEEDS_REVIEW", "Needs Operator Review"
         READY = "READY", "Ready for Submission"
         SUBMITTED = "SUBMITTED", "Submitted"
+        PRUNED = "PRUNED", "Pruned (Retention Policy)"
         FAILED = "FAILED", "Failed"
         DUPLICATE_SKIPPED = "DUPLICATE_SKIPPED", "Duplicate Skipped"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
+    batch = models.ForeignKey(
+        IngestionBatch,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="images",
+        help_text="The ingestion batch this image was uploaded in.",
+    )
     file_hash = models.CharField(
         max_length=64, unique=True, db_index=True,
         help_text="SHA-256 hex digest of the file contents, used for deduplication.",
@@ -102,12 +150,25 @@ class EvidenceImage(models.Model):
 
     ingested_at = models.DateTimeField(default=timezone.now)
     processed_at = models.DateTimeField(null=True, blank=True)
+    submitted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Timestamp when this evidence was successfully submitted to ITMS.",
+    )
+    is_file_pruned = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="True if the heavy vault file has been pruned per the 7-day retention policy.",
+    )
+    pruned_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-ingested_at"]
         indexes = [
             models.Index(fields=["detected_plate", "orientation"]),
             models.Index(fields=["status"]),
+            models.Index(fields=["status", "submitted_at"]),
         ]
 
     def __str__(self):
@@ -157,6 +218,13 @@ class VehicleInstallationPair(models.Model):
     is_complete = models.BooleanField(default=False)
 
     operator_note = models.TextField(blank=True)
+
+    submitted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Timestamp when this pair was successfully submitted to ITMS.",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

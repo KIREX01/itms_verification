@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evidence Photo Vault Ingestion - ITMS</title>
+    <style>
+        :root {
+            --primary: #1976d2;
+            --primary-dark: #115293;
+            --success: #2e7d32;
+            --warning: #ed6c02;
+            --danger: #d32f2f;
+            --bg: #f4f6f8;
+            --card: #ffffff;
+            --text: #212529;
+            --text-muted: #6c757d;
+            --border: #dee2e6;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            padding: 24px 16px;
+        }
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+        }
+        header {
+            margin-bottom: 24px;
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 16px;
+        }
+        h1 { font-size: 1.75rem; font-weight: 700; color: #0d47a1; }
+        p.subtitle { color: var(--text-muted); font-size: 0.95rem; margin-top: 4px; }
+        .card {
+            background: var(--card);
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            padding: 24px;
+            margin-bottom: 24px;
+            border: 1px solid var(--border);
+        }
+        .card-title {
+            font-size: 1.15rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #1a237e;
+        }
+        .form-group {
+            margin-bottom: 18px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            font-size: 0.9rem;
+            margin-bottom: 6px;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.95rem;
+        }
+        .dropzone {
+            border: 2px dashed var(--primary);
+            border-radius: 8px;
+            background: #eef5fc;
+            padding: 36px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .dropzone.dragover {
+            background: #dbeafe;
+            border-color: var(--primary-dark);
+            transform: scale(1.01);
+        }
+        .dropzone-icon {
+            font-size: 40px;
+            color: var(--primary);
+            margin-bottom: 8px;
+        }
+        .dropzone-text {
+            font-size: 1rem;
+            font-weight: 500;
+            color: #1e3a8a;
+        }
+        .dropzone-hint {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+        .file-input { display: none; }
+        .file-summary {
+            margin-top: 14px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--primary-dark);
+        }
+        .btn {
+            display: inline-block;
+            background: var(--primary);
+            color: #fff;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s ease;
+            width: 100%;
+        }
+        .btn:hover { background: var(--primary-dark); }
+        .btn:disabled { background: var(--border); cursor: not-allowed; }
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        .badge-success { background: #e8f5e9; color: var(--success); }
+        .badge-warning { background: #fff3e0; color: var(--warning); }
+        .badge-danger { background: #ffebee; color: var(--danger); }
+        .badge-info { background: #e3f2fd; color: var(--primary); }
+        .alert {
+            padding: 14px 18px;
+            border-radius: 6px;
+            margin-bottom: 18px;
+            font-size: 0.95rem;
+        }
+        .alert-success { background: #e8f5e9; color: #1b5e20; border: 1px solid #c8e6c9; }
+        .alert-error { background: #ffebee; color: #b71c1c; border: 1px solid #ffcdd2; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+            margin-top: 12px;
+        }
+        th, td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        th { background: #fafafa; font-weight: 600; color: #495057; }
+        code {
+            background: #272822;
+            color: #f8f8f2;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-family: Consolas, monospace;
+            font-size: 0.88rem;
+            display: inline-block;
+        }
+        .code-banner {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 14px;
+            border-radius: 6px;
+            margin-top: 12px;
+            font-family: Consolas, monospace;
+            font-size: 0.9rem;
+            overflow-x: auto;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .stat-card {
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px;
+            text-align: center;
+        }
+        .stat-val { font-size: 1.5rem; font-weight: 700; color: #0f172a; }
+        .stat-lbl { font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>ITMS Evidence Vault Ingestion</h1>
+        <p class="subtitle">Upload vehicle installation photos into permanent, forensic-grade storage with automatic cryptographic deduplication.</p>
+    </header>
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    {% if success and batch %}
+    <div class="card" style="border-left: 5px solid var(--success);">
+        <h2 class="card-title">Upload Batch Summary</h2>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-val">{{ batch.total_files }}</div>
+                <div class="stat-lbl">Total Uploaded</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val" style="color: var(--success);">{{ batch.ingested_count }}</div>
+                <div class="stat-lbl">Ingested</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val" style="color: var(--warning);">{{ batch.duplicate_count }}</div>
+                <div class="stat-lbl">Duplicates Skipped</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val" style="color: var(--danger);">{{ batch.failed_count }}</div>
+                <div class="stat-lbl">Errors</div>
+            </div>
+        </div>
+
+        <p><strong>Batch Identifier:</strong> <code>{{ batch.batch_id }}</code> (Source: {{ batch.source_label }})</p>
+        <p style="margin-top: 10px;"><strong>Next Step - Process or Review in TUI:</strong></p>
+        <div class="code-banner">
+            # Run vision pipeline from CLI:
+            python manage.py process_vision --batch {{ batch.batch_id }}
+
+            # Or open interactive dashboard (Tab [3] Batches -> Press [P]):
+            python manage.py run_tui
+        </div>
+        <p style="margin-top: 8px; font-size: 0.9rem; color: #1565c0;">
+            ✓ Uploaded photos are vaulted. You can immediately switch to your active TUI terminal and press <strong>[R]</strong> to refresh.
+        </p>
+
+        {% if results %}
+        <h3 style="margin-top: 20px; font-size: 1rem; font-weight: 600;">Uploaded Files</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Original Filename</th>
+                    <th>Ingestion Status</th>
+                    <th>Vault Location</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for res in results %}
+                <tr>
+                    <td>{{ res.name }}</td>
+                    <td>
+                        {% if res.status == "INGESTED" %}
+                            <span class="badge badge-success">Ingested</span>
+                        {% elif res.status == "DUPLICATE_SKIPPED" %}
+                            <span class="badge badge-warning">Duplicate Skipped</span>
+                        {% else %}
+                            <span class="badge badge-danger">{{ res.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td><small>{{ res.vault_file|default:"-" }}</small></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <h2 class="card-title">New Photo Upload</h2>
+        <form method="POST" enctype="multipart/form-data" id="uploadForm">
+            {% csrf_token %}
+            <div class="form-group">
+                <label for="batch_label">Batch Label / Operator Note (Optional)</label>
+                <input type="text" id="batch_label" name="batch_label" placeholder="e.g. Entebbe Field Station - Shift 1">
+            </div>
+
+            <div class="form-group">
+                <div class="dropzone" id="dropzone">
+                    <div class="dropzone-icon">📷</div>
+                    <div class="dropzone-text">Click or Drag & Drop Photos Here</div>
+                    <div class="dropzone-hint">Supports JPEG, PNG, WEBP, BMP, TIFF (Multiple files allowed)</div>
+                    <input type="file" name="photos" id="photosInput" class="file-input" multiple accept="image/*">
+                </div>
+                <div class="file-summary" id="fileSummary"></div>
+            </div>
+
+            <button type="submit" class="btn" id="submitBtn" disabled>Upload Photos to Vault</button>
+        </form>
+    </div>
+
+    {% if recent_batches %}
+    <div class="card">
+        <h2 class="card-title">Recent Ingestion Batches</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Batch ID</th>
+                    <th>Source</th>
+                    <th>Ingested</th>
+                    <th>Duplicates</th>
+                    <th>Created At</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for b in recent_batches %}
+                <tr>
+                    <td><code>{{ b.batch_id }}</code></td>
+                    <td>{{ b.source_type }} ({{ b.source_label }})</td>
+                    <td><strong>{{ b.ingested_count }}</strong> / {{ b.total_files }}</td>
+                    <td>{{ b.duplicate_count }}</td>
+                    <td><small>{{ b.created_at|date:"Y-m-d H:i" }}</small></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+    const dropzone = document.getElementById('dropzone');
+    const input = document.getElementById('photosInput');
+    const summary = document.getElementById('fileSummary');
+    const submitBtn = document.getElementById('submitBtn');
+
+    dropzone.addEventListener('click', () => input.click());
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropzone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            dropzone.classList.add('dragover');
+        });
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropzone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            dropzone.classList.remove('dragover');
+        });
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+        if (e.dataTransfer.files.length > 0) {
+            input.files = e.dataTransfer.files;
+            updateSummary();
+        }
+    });
+
+    input.addEventListener('change', updateSummary);
+
+    function updateSummary() {
+        const count = input.files.length;
+        if (count > 0) {
+            summary.textContent = `Selected ${count} photo(s) ready for ingestion.`;
+            submitBtn.disabled = false;
+        } else {
+            summary.textContent = '';
+            submitBtn.disabled = true;
+        }
+    }
+</script>
+</body>
+</html>

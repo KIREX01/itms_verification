@@ -12,6 +12,7 @@ from typing import List
 
 from django.conf import settings
 from django.db import transaction
+from django.utils import timezone
 
 from core.models import EvidenceImage, InstallationOrder, SubmissionAuditLog, VehicleInstallationPair
 from core.services import itms_client, itms_mock
@@ -85,16 +86,20 @@ def submit_pair(pair: VehicleInstallationPair, backend: Optional[str] = None) ->
         order.save(update_fields=["status"])
         return SubmissionOutcome(pair_id=pair.id, success=False, error=str(exc))
 
+    now = timezone.now()
     with transaction.atomic():
         pair.verification_status = VehicleInstallationPair.VerificationStatus.SUBMITTED
-        pair.save(update_fields=["verification_status"])
+        pair.submitted_at = now
+        pair.save(update_fields=["verification_status", "submitted_at"])
 
         order.status = InstallationOrder.Status.SUBMITTED
         order.save(update_fields=["status"])
 
         for image in (pair.front_image, pair.rear_image):
-            image.status = EvidenceImage.Status.SUBMITTED
-            image.save(update_fields=["status"])
+            if image:
+                image.status = EvidenceImage.Status.SUBMITTED
+                image.submitted_at = now
+                image.save(update_fields=["status", "submitted_at"])
 
     return SubmissionOutcome(pair_id=pair.id, success=True, token=step.token or "")
 

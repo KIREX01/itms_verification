@@ -44,7 +44,11 @@ class Command(BaseCommand):
                     if mtime <= cutoff_time or older_days == 0:
                         size = file_path.stat().st_size
                         if dry_run:
-                            self.stdout.write(f"[DRY-RUN] Would delete: {file_path.relative_to(settings.BASE_DIR)}")
+                            try:
+                                rel_display = file_path.relative_to(settings.BASE_DIR)
+                            except ValueError:
+                                rel_display = file_path
+                            self.stdout.write(f"[DRY-RUN] Would delete: {rel_display}")
                         else:
                             try:
                                 file_path.unlink()

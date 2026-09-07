@@ -29,11 +29,11 @@ from pathlib import Path
 import cv2
 from django.conf import settings
 from django.core.management import call_command
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db.models import Q
 from django.utils import timezone
 
-from core.models import EvidenceImage
+from core.models import EvidenceImage, IngestionBatch
 from core.vision import detector, normalizer, ocr_engine, orientation, preprocess
 
 # Default cap — overridable via VISION_MAX_RETRIES in settings or the CLI flag.
@@ -90,6 +90,10 @@ class Command(BaseCommand):
             "--cleanup-crops", action="store_true",
             help="Clean up temporary crop files in media/crops/ after processing completes.",
         )
+        parser.add_argument(
+            "--batch", type=str, default=None,
+            help="Process only images belonging to a specific IngestionBatch (batch_id).",
+        )
 
     def handle(self, *args, **options):
         max_retries = options["max_retries"]
@@ -142,6 +146,15 @@ class Command(BaseCommand):
             )
             if options["include_needs_review"]:
                 base_filter = base_filter | Q(status=EvidenceImage.Status.NEEDS_REVIEW)
+
+        batch_arg = options.get("batch")
+        if batch_arg:
+            try:
+                batch_obj = IngestionBatch.objects.get(batch_id=batch_arg)
+                base_filter = base_filter & Q(batch=batch_obj)
+                self.stdout.write(f"Filtering to IngestionBatch: {batch_obj.batch_id}")
+            except IngestionBatch.DoesNotExist:
+                raise CommandError(f"IngestionBatch with id '{batch_arg}' does not exist.")
 
         if options.get("reprocess_all"):
             qs = EvidenceImage.objects.filter(base_filter).order_by("ingested_at")

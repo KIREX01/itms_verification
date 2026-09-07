@@ -125,3 +125,6 @@ ITMS_PASSWORD = env("ITMS_PASSWORD", default="")
 ITMS_REQUEST_TIMEOUT_SECONDS = env.int("ITMS_REQUEST_TIMEOUT_SECONDS", default=30)
 ITMS_TOKEN_STORAGE_FILE = env("ITMS_TOKEN_STORAGE_FILE", default=str(VAULT_ROOT / ".itms_tokens.json"))
 
+# Evidence vault retention lifecycle (prunes submitted photos older than N days)
+VAULT_RETENTION_DAYS = env.int("VAULT_RETENTION_DAYS", default=7)
+

@@ -1,7 +1,8 @@
-import numpy as np
-from django.test import TestCase
+from pathlib import Path
 
 import cv2
+import numpy as np
+from django.test import TestCase
 
 from core.vision import detector, orientation, preprocess
 
@@ -130,3 +131,49 @@ class OrientationTests(TestCase):
         frame = np.zeros((400, 600, 3), dtype=np.uint8)
         result = orientation.classify_orientation(frame)
         self.assertEqual(result.orientation, "UNKNOWN")
+
+
+class CleanCropsCommandTests(TestCase):
+    def setUp(self):
+        import shutil
+        import tempfile
+        self.temp_dir = tempfile.mkdtemp()
+        self.crops_dir = Path(self.temp_dir) / "crops"
+        self.crops_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_clean_crops_deletes_crop_files(self):
+        import io
+        from django.core.management import call_command
+        from django.test import override_settings
+
+        date_dir = self.crops_dir / "2026-09-07"
+        date_dir.mkdir()
+        crop_file = date_dir / "test_plate.jpg"
+        crop_file.write_bytes(b"dummy image bytes")
+
+        with override_settings(CROPS_ROOT=self.crops_dir):
+            out = io.StringIO()
+            call_command("clean_crops", stdout=out)
+            self.assertFalse(crop_file.exists())
+            self.assertIn("Cleaned up 1 temporary crop/debug file", out.getvalue())
+
+    def test_clean_crops_dry_run_preserves_files(self):
+        import io
+        from django.core.management import call_command
+        from django.test import override_settings
+
+        date_dir = self.crops_dir / "2026-09-07"
+        date_dir.mkdir()
+        crop_file = date_dir / "test_plate.jpg"
+        crop_file.write_bytes(b"dummy image bytes")
+
+        with override_settings(CROPS_ROOT=self.crops_dir):
+            out = io.StringIO()
+            call_command("clean_crops", dry_run=True, stdout=out)
+            self.assertTrue(crop_file.exists())
+            self.assertIn("[DRY RUN]", out.getvalue())
+

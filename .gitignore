@@ -1,0 +1,13 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+db.sqlite3
+media/vault/
+*.pt
+.pytest_cache/
+.DS_Store
+staticfiles/
+tools/tesseract/

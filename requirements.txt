@@ -1,0 +1,29 @@
+# --- Core framework & DB ---
+Django>=5.0,<5.3
+psycopg2-binary>=2.9
+python-dotenv>=1.0
+django-environ>=0.11
+requests>=2.31.0
+
+# --- Computer vision & OCR ---
+opencv-python-headless>=4.9
+numpy>=1.26
+Pillow>=10.2
+ultralytics>=8.2          # YOLOv8/YOLOv11 plate detector
+# PaddlePaddle currently provides Windows wheels only through Python 3.11.
+# On newer Python versions the OCR engine falls back to pytesseract.
+paddlepaddle>=2.6; python_version < "3.12"  # CPU build; see README for GPU wheel
+paddleocr>=2.7; python_version < "3.12"
+pytesseract>=0.3.10       # fallback OCR if PaddleOCR unavailable
+
+# --- Matching ---
+rapidfuzz>=3.6
+
+# --- TUI ---
+textual>=0.58
+rich>=13.7
+
+# --- Testing / benchmarking ---
+pytest>=8.0
+pytest-django>=4.8
+tabulate>=0.9

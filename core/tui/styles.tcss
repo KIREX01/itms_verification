@@ -1,0 +1,168 @@
+Screen {
+    background: $background;
+}
+#metrics {
+    height: 1;
+    background: $panel;
+    color: $text;
+    padding: 0 1;
+}
+#tabs-content {
+    height: 1fr;
+}
+.tab-horizontal {
+    height: 1fr;
+}
+.table-panel {
+    width: 65%;
+    height: 100%;
+}
+.inspector-panel {
+    width: 35%;
+    height: 100%;
+    border-left: solid $primary;
+    padding: 1;
+    overflow-y: auto;
+}
+#history-filter-bar {
+    height: 1;
+    background: $surface;
+    color: $text-muted;
+    padding: 0 1;
+}
+#batches-upload-bar {
+    height: 1;
+    background: $surface;
+    color: $text-muted;
+    padding: 0 1;
+}
+#batches-table-title {
+    height: 1;
+    background: $panel;
+    color: $text;
+    padding: 0 1;
+}
+#table-batches {
+    height: 8;
+}
+#batch-images-table-title {
+    height: 1;
+    background: $panel;
+    color: $text;
+    padding: 0 1;
+}
+#table-batch-images {
+    height: 1fr;
+}
+#activity-container {
+    height: 11;
+    border-top: solid $primary;
+    background: $surface;
+}
+#activity-header {
+    height: 1;
+    background: $panel;
+    color: $text;
+    padding: 0 1;
+}
+#activity-log {
+    height: 1fr;
+    background: #111111;
+    color: #e2e8f0;
+    padding: 0 1;
+}
+
+PhotoLinkerModal {
+    align: center middle;
+    background: rgba(0, 0, 0, 0.75);
+}
+
+#modal-dialog {
+    width: 85%;
+    height: 80%;
+    background: $surface;
+    border: thick $primary;
+    padding: 1 2;
+}
+
+#modal-header {
+    height: auto;
+    background: $panel;
+    color: $text;
+    padding: 1;
+    margin-bottom: 1;
+}
+
+#modal-table {
+    height: 1fr;
+}
+
+#modal-footer {
+    height: 3;
+    align: right middle;
+    padding-top: 1;
+}
+
+#modal-footer Button {
+    margin-left: 2;
+}
+
+LandingAuthScreen {
+    align: center middle;
+    background: #0b0f19;
+}
+
+#auth-container {
+    width: auto;
+    height: auto;
+    max-height: 98%;
+    background: #111827;
+    border: thick $primary;
+    padding: 1 2;
+}
+
+#auth-banner {
+    width: auto;
+    height: auto;
+    content-align: center middle;
+}
+
+#auth-subtitle {
+    text-align: center;
+    color: #94a3b8;
+    margin-top: 1;
+    margin-bottom: 1;
+}
+
+#auth-tabs {
+    height: auto;
+}
+
+.auth-hint {
+    color: #cbd5e1;
+    margin-bottom: 1;
+}
+
+.error-label {
+    height: 1;
+    margin-top: 1;
+    margin-bottom: 1;
+}
+
+.itms-button-row {
+    height: 3;
+    margin-top: 1;
+}
+
+.itms-button-row Button {
+    margin-right: 2;
+}
+
+#itms-status-summary {
+    background: #0b0f19;
+    padding: 1;
+    border: solid #374151;
+    margin-bottom: 1;
+}
+
+

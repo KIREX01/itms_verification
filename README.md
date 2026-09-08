@@ -150,6 +150,21 @@ python manage.py prune_vault --days 14
 python manage.py prune_vault --batch BATCH-20260907-142030-ab12
 ```
 
+### 3.4 Resetting / Clearing Test Data (`clear_data`)
+
+When testing new photo sets, onboarding new batches, or re-evaluating the vision pipeline from scratch, use `clear_data` to wipe all temporary evidence state and remove vaulted files on disk so SHA-256 hash deduplication does not mark re-uploaded photos as skipped duplicates:
+
+```bash
+# Clear all evidence images, batches, pairs, audit logs, and vaulted/crop files on disk
+python manage.py clear_data
+
+# Also clear the InstallationOrder registry table
+python manage.py clear_data --include-orders
+
+# Clear database records only, keeping files on disk in media/vault
+python manage.py clear_data --keep-files
+```
+
 ## 4. Running the test suite
 
 Tests use SQLite in-memory (no Postgres required) via `itms_project/settings_test.py`:
@@ -175,10 +190,10 @@ synthetic benchmark; time it directly against your own photo set if you need rea
 
 > **Full Documentation**: See [docs/training.md](file:///F:/website%20backup/projects/itms_verification/itms_verification/docs/training.md) for the complete guide on dataset collection, auto-annotation bootstrapping, hyperparameters, and evaluation benchmarks.
 
-Out of the box, `PLATE_YOLO_WEIGHTS=yolov8n.pt` points at a generic COCO-pretrained
-checkpoint, which was **not** trained to find license plates specifically -- it exists so
-the pipeline is runnable immediately, and the OpenCV heuristic fallback in
-`core/vision/detector.py` picks up the slack when YOLO doesn't find a confident box.
+Out of the box, `PLATE_YOLO_WEIGHTS=models/license-plate-finetune-v1n.pt` points at a fine-tuned
+YOLOv11 license plate detection model (cached from Hugging Face `morsetechlab/yolov11-license-plate-detection`).
+The system supports both YOLOv11 and custom YOLOv8 models, with automatic fallback to the OpenCV
+heuristic detector if weights are unavailable.
 
 For maximum accuracy on Ugandan vehicle and motorcycle plates:
 
@@ -250,7 +265,8 @@ core/
   services/              itms_mock.py, itms_client.py, submission_worker.py, viewer.py
   tui/                   app.py (Textual dashboard)
   management/commands/   seed_orders, ingest_photos, process_vision, associate_pairs,
-                          submit_itms, itms_auth, run_tui, benchmark_pipeline, create_superuser_if_none
+                          submit_itms, itms_auth, run_tui, benchmark_pipeline,
+                          clean_crops, prune_vault, clear_data, create_superuser_if_none
   tests*.py              pytest/Django test suite
 sample_data/orders.csv  Demo installation-order registry
 docs/                   propsal.md, ROADMAP.md

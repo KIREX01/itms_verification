@@ -199,9 +199,10 @@ class Command(BaseCommand):
             except Exception as exc:  # noqa: BLE001 - want to log any vision failure without killing the batch
                 image.status = EvidenceImage.Status.FAILED
                 image.error_message = str(exc)
+                image.processed_at = timezone.now()
                 if image.retry_count >= max_retries:
                     image.error_message += f" [max retries ({max_retries}) exhausted]"
-                image.save(update_fields=["status", "error_message"])
+                image.save(update_fields=["status", "error_message", "processed_at"])
                 self.stderr.write(
                     self.style.ERROR(
                         f"FAILED  {image.id} (attempt {image.retry_count}/{max_retries}): {exc}"
@@ -226,14 +227,31 @@ class Command(BaseCommand):
         raw = preprocess.load_image(abs_path)
         pre = preprocess.preprocess_pipeline(raw)
 
+        # Orientation: preserve folder ground-truth if known, otherwise classify
+        if image.folder_orientation:
+            image.orientation = image.folder_orientation
+            image.orientation_confidence = 1.0
+            orient_result = orientation.classify_orientation(pre)  # still compute for forensic scoring
+        else:
+            orient_result = orientation.classify_orientation(pre)
+            image.orientation = orient_result.orientation
+            image.orientation_confidence = orient_result.confidence
+
         detection = detector.detect_plate(pre)
         if detection is None:
             image.status = EvidenceImage.Status.NEEDS_REVIEW
             image.error_message = "No plate candidate detected."
+            image.detected_plate = ""
+            image.ocr_confidence = None
+            image.detector_confidence = None
+            image.bbox = None
             image.processed_at = timezone.now()
-            image.save(update_fields=["status", "error_message", "processed_at"])
+            image.save(update_fields=[
+                "status", "error_message", "detected_plate", "ocr_confidence",
+                "detector_confidence", "bbox", "orientation", "orientation_confidence", "processed_at"
+            ])
             self.stdout.write(
-                f"NO_PLATE    {image.id}  (attempt {image.retry_count})"
+                f"NO_PLATE    {image.id}  orient={orient_result.orientation}({orient_result.confidence})  (attempt {image.retry_count})"
             )
             return
 
@@ -247,27 +265,32 @@ class Command(BaseCommand):
 
         ocr_result = ocr_engine.read_plate_text(crop)
 
-        plate_text, ocr_conf = "", None
+        plate_text, ocr_conf, is_valid = "", None, False
         if ocr_result is not None:
             norm = normalizer.normalize_plate(ocr_result.text)
             plate_text = norm["canonical"]
+            is_valid = norm["is_valid"]
             ocr_conf = ocr_result.confidence
 
-        orient_result = orientation.classify_orientation(pre)
-
-        image.detected_plate = plate_text
+        image.detected_plate = (plate_text or "")[:32]
         image.ocr_confidence = ocr_conf
         image.detector_confidence = detection.confidence
         image.bbox = detection.bbox
-        image.orientation = orient_result.orientation
-        image.orientation_confidence = orient_result.confidence
         image.processed_at = timezone.now()
 
         min_conf = getattr(settings, "OCR_MIN_CONFIDENCE", 0.55)
-        if plate_text and (ocr_conf is None or ocr_conf >= min_conf):
+        if plate_text and is_valid and (ocr_conf is None or ocr_conf >= min_conf):
             image.status = EvidenceImage.Status.PLATE_DETECTED
+            image.error_message = ""
         else:
             image.status = EvidenceImage.Status.NEEDS_REVIEW
+            if not ocr_result:
+                image.error_message = "Plate localized but OCR extracted no readable text."
+            elif not is_valid:
+                raw_txt = ocr_result.text if ocr_result else ""
+                image.error_message = f"Invalid plate syntax '{plate_text or raw_txt}'"
+            elif ocr_conf is not None and ocr_conf < min_conf:
+                image.error_message = f"OCR confidence {ocr_conf:.2f} below threshold {min_conf:.2f}"
 
         image.save()
         self.stdout.write(

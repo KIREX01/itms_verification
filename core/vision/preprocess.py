@@ -128,9 +128,24 @@ def normalize_resolution(image: np.ndarray, target_height: int = TARGET_HEIGHT) 
     return cv2.resize(image, (new_w, target_height), interpolation=interp)
 
 
-def preprocess_pipeline(image: np.ndarray) -> np.ndarray:
-    """Full preprocessing chain applied before plate detection."""
+def preprocess_pipeline(image: np.ndarray, enhance_whole: bool = True) -> np.ndarray:
+    """Full preprocessing chain applied before plate detection.
+
+    Steps:
+      1. Resolution normalization (standardize height to 720p)
+      2. Dynamic tone enhancement (Pillow autocontrast, luminance variance scaling,
+         saturation boost, sharpness, brightness normalization)
+      3. Bilateral denoising (reduces noise while keeping plate edges sharp)
+      4. CLAHE contrast enhancement (in LAB color space)
+      5. Hough-line deskewing (compensates for camera tilt)
+    """
     image = normalize_resolution(image)
+    if enhance_whole:
+        try:
+            from core.vision.plate_enhancer import enhance_whole_image_array
+            image = enhance_whole_image_array(image)
+        except Exception as exc:
+            logger.debug("enhance_whole_image_array skipped: %s", exc)
     image = denoise(image)
     image = enhance_contrast_clahe(image)
     image = deskew(image)
@@ -138,13 +153,21 @@ def preprocess_pipeline(image: np.ndarray) -> np.ndarray:
 
 
 def load_image(path: str) -> np.ndarray:
-    """Load an image from disk.
+    """Load an image from disk, guaranteeing correct upright orientation via Pillow EXIF transpose.
 
-    OpenCV 4+ automatically reads EXIF orientation tags when using
-    ``cv2.IMREAD_COLOR``, ensuring photos taken on smartphones are loaded in
-    their intended upright orientation.
+    Smartphone cameras store the raw sensor raster and rely on EXIF orientation
+    tags (0x0112). Using Pillow's ``exif_transpose`` physically rotates the pixel
+    buffer upright so that all downstream vision stages (YOLO plate detection,
+    OCR, vehicle orientation classification) receive standing upright photos.
     """
-    image = cv2.imread(path, cv2.IMREAD_COLOR)
-    if image is None:
-        raise FileNotFoundError(f"Could not read image (unsupported format or missing file): {path}")
-    return image
+    from PIL import Image, ImageOps
+    try:
+        with Image.open(path) as img:
+            img = ImageOps.exif_transpose(img)
+            rgb = np.array(img.convert("RGB"))
+            return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+    except Exception:
+        image = cv2.imread(path, cv2.IMREAD_COLOR)
+        if image is None:
+            raise FileNotFoundError(f"Could not read image (unsupported format or missing file): {path}")
+        return image

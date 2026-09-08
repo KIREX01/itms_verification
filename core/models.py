@@ -148,6 +148,17 @@ class EvidenceImage(models.Model):
         help_text="Number of times vision processing has been attempted on this image.",
     )
 
+    captured_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="EXIF capture timestamp (DateTimeOriginal).",
+    )
+    folder_orientation = models.CharField(
+        max_length=16,
+        blank=True,
+        help_text="Orientation inferred from folder structure (FRONT or REAR).",
+    )
     ingested_at = models.DateTimeField(default=timezone.now)
     processed_at = models.DateTimeField(null=True, blank=True)
     submitted_at = models.DateTimeField(

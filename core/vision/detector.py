@@ -15,8 +15,10 @@ Fallback: OpenCV heuristic detector (Sobel gradients + rectangular contour
 Both paths return a common `Detection` shape so downstream code (OCR,
 normalizer) never needs to know which backend produced the box.
 """
+import os
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 from typing import List, Optional
 
 import cv2
@@ -25,11 +27,87 @@ import numpy as np
 try:
     from django.conf import settings
     _CONF_THRESHOLD = float(getattr(settings, "PLATE_DETECTOR_CONF_THRESHOLD", 0.35))
-    _YOLO_WEIGHTS = getattr(settings, "PLATE_YOLO_WEIGHTS", "yolov8n.pt")
+    _YOLO_WEIGHTS = getattr(settings, "PLATE_YOLO_WEIGHTS", "models/license-plate-finetune-v1n.pt")
 except Exception:
     # Allows this module to be imported/tested outside a configured Django project.
     _CONF_THRESHOLD = 0.35
-    _YOLO_WEIGHTS = "yolov8n.pt"
+    _YOLO_WEIGHTS = "models/license-plate-finetune-v1n.pt"
+
+
+def _resolve_weights_path(weights_name: str) -> str:
+    """Resolve model weights path locally or fetch from Hugging Face if needed."""
+    if os.path.isabs(weights_name) and os.path.exists(weights_name):
+        return weights_name
+
+    # Project root is 2 levels up from core/vision/
+    project_root = Path(__file__).resolve().parent.parent.parent
+    local_path = project_root / weights_name
+    if local_path.exists():
+        return str(local_path)
+
+    # Check models/ directory inside project root
+    alt_local = project_root / "models" / Path(weights_name).name
+    if alt_local.exists():
+        return str(alt_local)
+
+    # If specified as Hugging Face repo or YOLOv11 license plate model
+    if "yolov11" in weights_name.lower() or "morsetechlab" in weights_name.lower() or "/" in weights_name:
+        repo_id = "morsetechlab/yolov11-license-plate-detection"
+        fname = "license-plate-finetune-v1n.pt"
+        models_dir = project_root / "models"
+        models_dir.mkdir(parents=True, exist_ok=True)
+        dest = models_dir / fname
+        if dest.exists():
+            return str(dest)
+        try:
+            from huggingface_hub import hf_hub_download
+            import shutil
+            downloaded = hf_hub_download(repo_id=repo_id, filename=fname)
+            shutil.copy(downloaded, dest)
+            return str(dest)
+        except Exception:
+            pass
+
+    return weights_name
+
+
+class YOLOvv11:
+    """YOLOv11 model wrapper providing the user-requested from_pretrained API:
+    model = YOLOvv11.from_pretrained("morsetechlab/yolov11-license-plate-detection")
+    """
+    @classmethod
+    def from_pretrained(
+        cls,
+        repo_or_path: str = "morsetechlab/yolov11-license-plate-detection",
+        filename: str = "license-plate-finetune-v1n.pt",
+        **kwargs,
+    ):
+        from ultralytics import YOLO
+        resolved = _resolve_weights_path(repo_or_path)
+        if not os.path.exists(resolved) and "/" in repo_or_path:
+            try:
+                from huggingface_hub import hf_hub_download
+                resolved = hf_hub_download(repo_id=repo_or_path, filename=filename)
+            except Exception:
+                pass
+        return YOLO(resolved, **kwargs)
+
+
+YOLO11 = YOLOvv11
+
+# Monkey-patch into ultralytics module for compatibility with `from ultralytics import YOLOvv11`
+try:
+    import ultralytics
+    ultralytics.YOLOvv11 = YOLOvv11
+    ultralytics.YOLO11 = YOLOvv11
+    if hasattr(ultralytics, "YOLO") and not hasattr(ultralytics.YOLO, "from_pretrained"):
+        setattr(
+            ultralytics.YOLO,
+            "from_pretrained",
+            classmethod(lambda cls, repo="morsetechlab/yolov11-license-plate-detection", **kw: YOLOvv11.from_pretrained(repo, **kw)),
+        )
+except Exception:
+    pass
 
 
 @dataclass
@@ -47,7 +125,8 @@ def _get_yolo_model():
     except ImportError:
         return None
     try:
-        return YOLO(_YOLO_WEIGHTS)
+        weights_path = _resolve_weights_path(_YOLO_WEIGHTS)
+        return YOLO(weights_path)
     except Exception:
         return None
 
@@ -57,7 +136,11 @@ def _detect_with_yolo(image: np.ndarray) -> Optional[Detection]:
     if model is None:
         return None
 
-    results = model.predict(source=image, conf=_CONF_THRESHOLD, verbose=False)
+    try:
+        results = model.predict(source=image, conf=_CONF_THRESHOLD, verbose=False)
+    except Exception:
+        return None
+
     if not results:
         return None
 
@@ -67,15 +150,18 @@ def _detect_with_yolo(image: np.ndarray) -> Optional[Detection]:
         if boxes is None:
             continue
         for box, conf in zip(boxes.xyxy.tolist(), boxes.conf.tolist()):
+            x1, y1, x2, y2 = [int(v) for v in box]
+            w_box, h_box = x2 - x1, y2 - y1
+            if w_box < 25 or h_box < 10:
+                continue
             if conf > best_conf:
                 best_conf = conf
-                best_box = box
+                best_box = [x1, y1, x2, y2]
 
     if best_box is None or best_conf < _CONF_THRESHOLD:
         return None
 
-    x1, y1, x2, y2 = [int(v) for v in best_box]
-    return Detection(bbox=[x1, y1, x2, y2], confidence=float(best_conf), backend="yolo")
+    return Detection(bbox=best_box, confidence=float(best_conf), backend="yolo")
 
 
 def _detect_with_heuristic(image: np.ndarray) -> Optional[Detection]:
@@ -107,12 +193,19 @@ def _detect_with_heuristic(image: np.ndarray) -> Optional[Detection]:
         x, y, w, h = cv2.boundingRect(c)
         if h == 0:
             continue
+        # Reject candidates in the bottom ground area (gravel / pebbles / asphalt)
+        if y > 0.78 * h_img and (y + h) >= 0.96 * h_img:
+            continue
         aspect_ratio = w / float(h)
         area_ratio = (w * h) / float(w_img * h_img)
-        if 1.0 <= aspect_ratio <= 6.5 and 0.005 <= area_ratio <= 0.35:
+        if 1.0 <= aspect_ratio <= 6.5 and 0.005 <= area_ratio <= 0.55:
             dist_car = abs(aspect_ratio - 4.5) / 4.5
-            dist_moto = abs(aspect_ratio - 1.5) / 1.5
+            dist_moto = abs(aspect_ratio - 1.45) / 1.45
             score = max(0.0, 1.0 - min(dist_car, dist_moto))
+            if 1.2 <= aspect_ratio <= 1.8:
+                score += 0.20
+            if area_ratio >= 0.08:
+                score += 0.20
             candidates.append((score, [x, y, x + w, y + h]))
 
     # ── Strategy 2: High-contrast bright plate region ──────────────
@@ -125,13 +218,21 @@ def _detect_with_heuristic(image: np.ndarray) -> Optional[Detection]:
         x, y, w, h = cv2.boundingRect(c)
         if h == 0:
             continue
+        # Reject candidates in the bottom ground area (gravel / pebbles / asphalt)
+        if y > 0.78 * h_img and (y + h) >= 0.96 * h_img:
+            continue
         aspect_ratio = w / float(h)
         area_ratio = (w * h) / float(w_img * h_img)
-        if 1.0 <= aspect_ratio <= 3.5 and 0.015 <= area_ratio <= 0.30:
+        if 1.0 <= aspect_ratio <= 3.8 and 0.015 <= area_ratio <= 0.55:
             roi_edges = sobel_x[y:y + h, x:x + w]
             density = float(np.mean(roi_edges > 40))
             if density > 0.07:
-                score = 0.85 + min(0.15, density)
+                dist_car = abs(aspect_ratio - 4.5) / 4.5
+                dist_moto = abs(aspect_ratio - 1.45) / 1.45
+                shape_match = max(0.0, 1.0 - min(dist_car, dist_moto))
+                score = 0.85 + 0.25 * shape_match + 0.10 * min(1.0, density / 0.15)
+                if area_ratio >= 0.08:
+                    score += 0.25
                 candidates.append((score, [x, y, x + w, y + h]))
 
     # ── Strategy 3: Plate character cluster detection ─────────────

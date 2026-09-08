@@ -80,7 +80,13 @@ end-to-end on any machine with no extra downloads.
 
 * `[x]` **Orientation Classifier** (`core/vision/orientation.py`): edge-weighted color-cue
   heuristic (red taillight clusters vs. white/yellow headlight clusters).
-* `[x]` **Pairwise Association Engine** (`core/matcher/association.py`).
+* `[x]` **Pairwise Association Engine** (`core/matcher/association.py`):
+  - U-Turn / Snake traversal sequence alignment (row of $N$ bikes).
+  - Walk session clustering ($>10$ min gap threshold).
+  - Candidate photo ranking via time proximity, text similarity, and camera sequential numbers.
+  - See full specification: [PAIRWISE_ASSOCIATION_TIME_AND_NAMING.md](PAIRWISE_ASSOCIATION_TIME_AND_NAMING.md).
+* `[x]` **Camera Naming & Sequential Parser** (`core/services/camera_naming.py`):
+  - Apple iPhone (`IMG_####`), Samsung (`YYYYMMDD_HHMMSS`), Google Pixel, Tecno/Xiaomi, WhatsApp (`WA####`).
 * `[x]` **Association Command** (`core/management/commands/associate_pairs.py`).
 
 ## Level 3: Fuzzy Order Matcher & Lifecycle Engine
@@ -92,10 +98,10 @@ end-to-end on any machine with no extra downloads.
 
 ## Level 4: Python Operator Terminal User Interface (TUI)
 
-* `[x]` **Textual TUI Dashboard** (`core/tui/app.py`): live metrics, `DataTable`,
-  inspector pane.
+* `[x]` **Modular Textual TUI Dashboard** (`core/tui/app.py`, `tables.py`, `handlers.py`, `actions.py`, `inspectors.py`).
+* `[x]` **Interactive Closest Photo Picker Modal** (`core/tui/dialogs.py`): Press `[L]` to browse, preview with BBox (`[V]`), and link (`[Enter]` / `[1-9]`).
 * `[x]` **Side-by-Side Visual Evidence Viewer** (`core/services/viewer.py`).
-* `[x]` **Single-Key Actions**: `[V]`iew, `[A]`pprove, `[S]`wap, `[R]`efresh, `[Q]`uit.
+* `[x]` **Single-Key Actions**: `[V]`iew, `[A]`pprove, `[S]`wap, `[L]`ink/Pick, `[R]`efresh, `[Q]`uit.
 * `[x]` **TUI Command**: `python manage.py run_tui`.
 
 ## Level 5: Simulated ITMS Automation Worker & Fallback Engine

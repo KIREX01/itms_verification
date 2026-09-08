@@ -96,7 +96,7 @@ CROPS_ROOT = MEDIA_ROOT / CROPS_SUBDIR
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # --- Vision pipeline config (read by core/vision modules) ---
-PLATE_YOLO_WEIGHTS = env("PLATE_YOLO_WEIGHTS", default="yolov8n.pt")
+PLATE_YOLO_WEIGHTS = env("PLATE_YOLO_WEIGHTS", default="models/license-plate-finetune-v1n.pt")
 PLATE_DETECTOR_CONF_THRESHOLD = env.float("PLATE_DETECTOR_CONF_THRESHOLD", default=0.35)
 OCR_MIN_CONFIDENCE = env.float("OCR_MIN_CONFIDENCE", default=0.55)
 USE_PADDLEOCR = env.bool("USE_PADDLEOCR", default=True)

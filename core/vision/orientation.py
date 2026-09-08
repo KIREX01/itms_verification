@@ -63,8 +63,59 @@ def _edge_weighted_mask_score(hsv: np.ndarray, ranges) -> float:
     return matched_weight / total_weight if total_weight > 0 else 0.0
 
 
+def _detect_central_taillight(hsv: np.ndarray) -> tuple[bool, float]:
+    """
+    Motorcycles feature a prominent red taillight mounted on the
+    vertical centerline of the vehicle in the upper 70% of the frame.
+    Returns (detected: bool, estimated_confidence: float).
+    """
+    h, w = hsv.shape[:2]
+    mask_red = np.zeros((h, w), dtype=np.uint8)
+    for lower, upper in _RED_RANGES:
+        mask_red |= cv2.inRange(hsv, np.array(lower), np.array(upper))
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    cleaned = cv2.morphologyEx(mask_red, cv2.MORPH_OPEN, kernel)
+    cnts, _ = cv2.findContours(cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    best_conf = 0.0
+    found = False
+    for c in cnts:
+        x, y, bw, bh = cv2.boundingRect(c)
+        area = bw * bh
+        cx = x + bw / 2.0
+        center_offset = abs(cx - w / 2.0) / (w / 2.0)  # 0.0 at center, 1.0 at edge
+        is_centered = center_offset <= 0.45
+        is_upper = (y + bh / 2.0) <= 0.75 * h
+        if area >= 1800 and bw >= 45 and is_centered and is_upper:
+            found = True
+            # Compute continuous confidence:
+            # - size bonus: up to 0.18 for full-size lamp (6000 px)
+            # - centering bonus: up to 0.10 for perfect center
+            # - base confidence: 0.68
+            size_factor = min(1.0, area / 6000.0)
+            center_factor = max(0.0, 1.0 - (center_offset / 0.45))
+            conf = 0.68 + 0.18 * size_factor + 0.10 * center_factor
+            if conf > best_conf:
+                best_conf = conf
+
+    return found, min(0.98, best_conf)
+
+
 def classify_orientation(image: np.ndarray) -> OrientationResult:
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+    # 1. First check for a motorcycle central taillight cue
+    has_taillight, taillight_conf = _detect_central_taillight(hsv)
+    if has_taillight:
+        rear_score = _edge_weighted_mask_score(hsv, _RED_RANGES)
+        front_score = _edge_weighted_mask_score(hsv, [_WHITE_YELLOW_RANGE])
+        return OrientationResult(
+            orientation="REAR",
+            confidence=round(taillight_conf, 3),
+            front_score=round(front_score, 4),
+            rear_score=round(max(0.15, rear_score), 4),
+        )
 
     rear_score = _edge_weighted_mask_score(hsv, _RED_RANGES)
     front_score = _edge_weighted_mask_score(hsv, [_WHITE_YELLOW_RANGE])

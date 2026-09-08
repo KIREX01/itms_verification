@@ -19,6 +19,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from core.models import EvidenceImage, IngestionBatch
+from core.vision.plate_enhancer import enhance_whole_image
 
 VALID_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
 HASH_CHUNK_SIZE = 1024 * 1024
@@ -86,6 +87,54 @@ def hash_stream(stream: BinaryIO) -> str:
     return digest.hexdigest()
 
 
+def detect_folder_orientation(path: Union[str, Path]) -> str:
+    """Infers vehicle orientation from directory names (e.g. 'front/', 'rear/')."""
+    p = Path(path).resolve()
+    parts = [part.lower() for part in p.parts[-4:-1]]
+    for part in reversed(parts):
+        if any(f in part for f in ("front", "forward", "fronts")):
+            return EvidenceImage.Orientation.FRONT
+        if any(r in part for r in ("rear", "back", "rears", "backs")):
+            return EvidenceImage.Orientation.REAR
+    return ""
+
+
+def extract_exif_timestamp(path: Union[str, Path]) -> Optional[datetime]:
+    """Extracts capture timestamp from EXIF DateTimeOriginal with fallback to mtime."""
+    from PIL import Image
+    from datetime import datetime as _dt
+    p = Path(path)
+    if not p.exists():
+        return None
+    try:
+        with Image.open(p) as img:
+            exif = img.getexif()
+            dt_str = exif.get(0x9003) or exif.get(0x0132)
+            if not dt_str:
+                exif_ifd = exif.get_ifd(0x8769)
+                dt_str = exif_ifd.get(0x9003) or exif_ifd.get(0x9004) or exif_ifd.get(0x0132)
+            if dt_str:
+                dt = _dt.strptime(str(dt_str), "%Y:%m:%d %H:%M:%S")
+                return timezone.make_aware(dt) if timezone.is_naive(dt) else dt
+    except Exception:
+        pass
+    # 2. Check if filename encodes capture timestamp (Samsung, Pixel, Xiaomi, Tecno, WhatsApp)
+    try:
+        from core.services.camera_naming import parse_camera_filename
+        sig = parse_camera_filename(p.name)
+        if sig.embedded_datetime:
+            return sig.embedded_datetime
+    except Exception:
+        pass
+    # 3. Fallback to file system mtime
+    try:
+        mtime = p.stat().st_mtime
+        dt = _dt.fromtimestamp(mtime)
+        return timezone.make_aware(dt) if timezone.is_naive(dt) else dt
+    except Exception:
+        return None
+
+
 def ingest_from_disk(
     path: Union[str, Path],
     batch: Optional[IngestionBatch] = None,
@@ -126,7 +175,16 @@ def ingest_from_disk(
     vault_abs_path = target_dir / vault_filename
     shutil.copy2(path, vault_abs_path)
 
+    # Enhance the vault copy in-place: autocontrast, dynamic contrast,
+    # saturation boost, sharpness, brightness normalization.
+    enhance_whole_image(str(vault_abs_path))
+
     vault_relative = str(vault_abs_path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
+
+    folder_orient = detect_folder_orientation(path)
+    captured_at = extract_exif_timestamp(path)
+    initial_orient = folder_orient if folder_orient else EvidenceImage.Orientation.UNKNOWN
+    initial_orient_conf = 1.0 if folder_orient else None
 
     image = EvidenceImage.objects.create(
         batch=batch,
@@ -135,6 +193,10 @@ def ingest_from_disk(
         vault_file=vault_relative,
         file_size_bytes=path.stat().st_size,
         status=EvidenceImage.Status.NEW,
+        folder_orientation=folder_orient,
+        orientation=initial_orient,
+        orientation_confidence=initial_orient_conf,
+        captured_at=captured_at,
     )
 
     if batch:
@@ -187,6 +249,10 @@ def ingest_uploaded_file(
     with vault_abs_path.open("wb") as dest:
         for chunk in uploaded_file.chunks():
             dest.write(chunk)
+
+    # Enhance the vault copy in-place: autocontrast, dynamic contrast,
+    # saturation boost, sharpness, brightness normalization.
+    enhance_whole_image(str(vault_abs_path))
 
     vault_relative = str(vault_abs_path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
 

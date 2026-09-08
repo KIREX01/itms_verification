@@ -14,14 +14,22 @@ import re
 PLATE_REGEX = re.compile(r"^([A-Z]{3})\s*(\d{3})([A-Z]{1,2})$")
 
 # letter-slot confusions: OCR digit -> intended letter
-_DIGIT_TO_LETTER = {"0": "O", "1": "I", "8": "B", "5": "S", "2": "Z", "4": "A"}
+_DIGIT_TO_LETTER = {"0": "O", "1": "I", "8": "B", "5": "S", "2": "Z", "4": "A", "6": "G", "7": "T"}
 # digit-slot confusions: OCR letter -> intended digit
-_LETTER_TO_DIGIT = {"O": "0", "I": "1", "B": "8", "S": "5", "Z": "2", "A": "4"}
+_LETTER_TO_DIGIT = {
+    "O": "0", "D": "0", "Q": "0",
+    "I": "1", "T": "1", "J": "1", "L": "1",
+    "B": "8", "S": "5", "Z": "2", "A": "4",
+    "G": "6", "E": "5",
+}
 
 # In Uganda, all standard registrations begin with 'U'. Common OCR confusions for leading 'U':
 _LEADING_U_CONFUSIONS = {"V": "U", "W": "U", "Y": "U", "0": "U", "O": "U", "J": "U"}
 # Motorcycle prefix confusions for 'UM':
-_MOTORCYCLE_PREFIX_CONFUSIONS = {"WH": "UM", "VW": "UM", "UW": "UM", "WM": "UM", "VM": "UM"}
+_MOTORCYCLE_PREFIX_CONFUSIONS = {
+    "WH": "UM", "VW": "UM", "UW": "UM", "WM": "UM", "VM": "UM",
+    "MUA": "UMA", "LMA": "UMA", "UML": "UMA", "TIM": "UMA", "UNA": "UMA", "VMA": "UMA",
+}
 
 
 def canonicalize(raw_text: str) -> str:
@@ -45,16 +53,36 @@ def _correct_positional(cleaned: str) -> str:
     if not cleaned:
         return cleaned
 
-    # Handle motorcycle plates where 2-line OCR read prefix as 2 letters (e.g. UM145PD or WH145PD)
+    # 1. Substring extraction if text picked up surrounding frame/chassis text (e.g. BAAUMA208NC -> UMA208NC)
+    if len(cleaned) > 8:
+        sub_m = re.search(r"(UM[A-Z]\d{3}[A-Z]{1,2})", cleaned) or re.search(r"([A-Z]{3}\d{3}[A-Z]{1,2})", cleaned)
+        if sub_m:
+            cleaned = sub_m.group(1)
+        else:
+            sub_conf = re.search(r"(UM[A-Z][0-9A-Z]{3}[A-Z]{1,2})", cleaned)
+            if sub_conf and len(sub_conf.group(1)) in (7, 8):
+                cleaned = sub_conf.group(1)
+
+    # 2. Check 3-letter motorcycle prefix confusions (e.g. MUA421NC -> UMA421NC)
+    for bad_pfx, good_pfx in _MOTORCYCLE_PREFIX_CONFUSIONS.items():
+        if len(bad_pfx) == 3 and cleaned.startswith(bad_pfx):
+            cleaned = good_pfx + cleaned[3:]
+            break
+
+    # Missing leading U (e.g. MA145PD -> UMA145PD)
+    if cleaned.startswith("MA") and len(cleaned) in (6, 7):
+        cleaned = "U" + cleaned
+
+    # 3. Handle motorcycle plates where 2-line OCR read prefix as 2 letters (e.g. UM145PD or WH145PD)
     # Pattern: 2 letters + 3 digits + 1-2 letters (length 6 or 7)
-    m_2letter = re.match(r"^([A-Z]{2})(\d{3})([A-Z]{1,2})$", cleaned)
+    m_2letter = re.match(r"^([A-Z]{2})([0-9A-Z]{3})([A-Z]{1,2})$", cleaned)
     if m_2letter:
         pfx, digits, sfx = m_2letter.groups()
         # If prefix is UM or an OCR confusion of UM (like WH, VW, UW)
         resolved_pfx = _MOTORCYCLE_PREFIX_CONFUSIONS.get(pfx, pfx)
         if resolved_pfx == "UM":
             # Current Ugandan motorcycle series is UMA; 3rd letter is 'A'
-            return f"UMA{digits}{sfx}"
+            cleaned = f"UMA{digits}{sfx}"
 
     if len(cleaned) not in (7, 8):
         return cleaned
@@ -65,8 +93,8 @@ def _correct_positional(cleaned: str) -> str:
     if chars[0] in _LEADING_U_CONFUSIONS:
         chars[0] = _LEADING_U_CONFUSIONS[chars[0]]
 
-    # For motorcycles (starts with U and 2nd char is M or M confusion like W, H, N)
-    if chars[0] == "U" and chars[1] in ("W", "H", "N"):
+    # For motorcycles (starts with U and 2nd char is M or M confusion like W, H, N, L)
+    if chars[0] == "U" and chars[1] in ("W", "H", "N", "L"):
         chars[1] = "M"
 
     # Slots: 0-2 letters, 3-5 digits, 6..end letters

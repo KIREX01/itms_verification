@@ -134,158 +134,164 @@ def _ocr_with_tesseract(plate_crop: np.ndarray) -> Optional[OCRResult]:
         return None
 
     import cv2
-    from core.vision.normalizer import normalize_plate
+    import re
+    from core.vision.normalizer import normalize_plate, is_valid_plate
 
     h, w = plate_crop.shape[:2]
     aspect_ratio = w / float(h) if h > 0 else 0.0
 
-    # We collect all candidates and pick the best one at the end.
-    # Each candidate is (priority, text, confidence) where higher priority wins.
-    # Priority tiers:  3 = valid plate, 7-8 chars
-    #                  2 = valid plate, other length
-    #                  1 = non-valid, 7-8 chars
-    #                  0 = non-valid, other
+    digit_map = {
+        "T": "1", "I": "1", "J": "1", "L": "1",
+        "O": "0", "D": "0", "Q": "0",
+        "B": "8", "S": "5", "Z": "2",
+        "G": "6", "E": "5",
+    }
+
     all_candidates = []
 
-    def _score_candidate(text, conf):
-        norm = normalize_plate(text)
-        if norm["is_valid"] and len(norm["canonical"]) in (7, 8):
-            # All Ugandan motorcycles start with UMA (only the 3rd letter changes in future: UMB...)
-            moto_match = 1 if norm["canonical"].startswith("UM") else 0
-            return (4, moto_match, len(norm["canonical"]), conf, norm["canonical"])
+    def _parse_motorcycle_sublines(t1: str, t2: str) -> Optional[OCRResult]:
+        if not t2:
+            return None
+        cleaned2 = re.sub(r"[^A-Z0-9]", "", t2.upper())
+        m_bot = re.search(r"([0-9TIJLOBSZGE]{3})([A-Z]{1,2})", cleaned2)
+        if not m_bot:
+            return None
+        d_raw, sfx = m_bot.groups()
+        digits = "".join(digit_map.get(c, c) for c in d_raw)
+        top_clean = re.sub(r"[^A-Z]", "", t1.upper()) if t1 else ""
+        if len(top_clean) == 3 and top_clean.startswith("UM"):
+            pfx = top_clean
+        elif len(top_clean) == 3 and top_clean[0] in ("V", "W") and top_clean[1] in ("W", "H", "M"):
+            pfx = f"UM{top_clean[2]}"
+        else:
+            pfx = "UMA"
+        norm = normalize_plate(f"{pfx}{digits}{sfx}")
         if norm["is_valid"]:
-            return (3, 0, len(norm["canonical"]), conf, norm["canonical"])
-        if len(text) in (7, 8):
-            return (2, 0, len(text), conf, text)
-        return (1, 0, len(text), conf, text)
+            return OCRResult(text=norm["canonical"], confidence=0.95, backend="tesseract")
+        return None
 
     # ── 1. For squarish crops (aspect ratio < 2.8), try 2-line recognition ──
-    # Typical for Ugandan motorcycle plates: top line has letters (e.g. UMA),
-    # bottom line has digits and suffix (e.g. 145PD), with a flag/emblem on the left.
     if 0.8 <= aspect_ratio < 2.8:
-        # --- Inner plate refinement: isolate the white plate rectangle ---
-        # The heuristic detector bbox can include surrounding dark regions
-        # (reflectors, exhaust, frame). Find the largest bright contour and
-        # crop to it so Tesseract sees only the plate interior.
         work_crop = plate_crop
         gray_ref = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY) if plate_crop.ndim == 3 else plate_crop
         _, th_ref = cv2.threshold(gray_ref, 130, 255, cv2.THRESH_BINARY)
         cnts_ref, _ = cv2.findContours(th_ref, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        total_area = w * h
-        bright_boxes = [
-            cv2.boundingRect(c) for c in cnts_ref
-            if cv2.contourArea(c) > 0.25 * total_area
-        ]
+        bright_boxes = [cv2.boundingRect(c) for c in cnts_ref if cv2.contourArea(c) > 0.25 * (w * h)]
         if bright_boxes:
             bright_boxes.sort(key=lambda b: b[2] * b[3], reverse=True)
             bx, by, bw, bh = bright_boxes[0]
             pad_ref = 8
-            ry1 = max(0, by - pad_ref)
-            ry2 = min(h, by + bh + pad_ref)
-            rx1 = max(0, bx - pad_ref)
-            rx2 = min(w, bx + bw + pad_ref)
-            work_crop = plate_crop[ry1:ry2, rx1:rx2]
+            work_crop = plate_crop[max(0, by - pad_ref):min(h, by + bh + pad_ref), max(0, bx - pad_ref):min(w, bx + bw + pad_ref)]
 
         wh, ww = work_crop.shape[:2]
-        for split_ratio in (0.46, 0.48, 0.50):
-            mid_y = int(wh * split_ratio)
-            raw_top = work_crop[:mid_y, :]
-            raw_bot = work_crop[mid_y:, :]
 
-            # The Ugandan flag/emblem is only on the top line (left ~18-26%).
-            # The bottom line (digits + suffix) starts near the left plate edge (~2-6%).
-            for top_m in (0.18, 0.22, 0.26):
-                top_x = int(ww * top_m)
-                top_half = raw_top[:, top_x:]
+        # Primary passes: test inter-line bolt trim 0.08 first (to clear mounting screws on digit 1), then 0.0
+        for bot_trim in (0.08, 0.0):
+            for split_ratio in (0.46, 0.48):
+                mid_y = int(wh * split_ratio)
+                raw_top = work_crop[:mid_y, :]
+                raw_bot = work_crop[mid_y:, :]
 
-                for bot_m in (0.03, 0.06, top_m):
-                    bot_x = int(ww * bot_m)
-                    bot_half = raw_bot[:, bot_x:]
+                top_half = raw_top[:, int(ww * 0.15):]
+                top_padded = cv2.copyMakeBorder(top_half, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=[255, 255, 255])
 
-                    # Add white padding around sublines -- Tesseract reads small
-                    # crops much more reliably when characters aren't jammed
-                    # against the image edge.
-                    top_padded = cv2.copyMakeBorder(
-                        top_half, 10, 10, 10, 10,
-                        cv2.BORDER_CONSTANT, value=[255, 255, 255],
-                    )
-                    bot_padded = cv2.copyMakeBorder(
-                        bot_half, 10, 10, 10, 10,
-                        cv2.BORDER_CONSTANT, value=[255, 255, 255],
-                    )
+                bot_sub = raw_bot[int(raw_bot.shape[0] * bot_trim):, int(ww * 0.03):]
+                bot_padded = cv2.copyMakeBorder(bot_sub, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=[255, 255, 255])
+                bot_gray = cv2.cvtColor(bot_padded, cv2.COLOR_BGR2GRAY) if bot_padded.ndim == 3 else bot_padded
+                _, bot_otsu = cv2.threshold(bot_gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
 
-                    for psm in ("7", "8"):
-                        cfg = f"--psm {psm} -c tessedit_char_whitelist={PLATE_CHAR_WHITELIST}"
+                for psm in ("6", "7"):
+                    cfg_line = f"--psm {psm} -c tessedit_char_whitelist={PLATE_CHAR_WHITELIST}"
+                    try:
+                        t1 = pytesseract.image_to_string(top_padded, config=cfg_line).strip()
+                    except Exception:
+                        t1 = ""
+
+                    for b_img in (bot_otsu, bot_gray):
                         try:
-                            t1 = pytesseract.image_to_string(top_padded, config=cfg).strip()
-                            t2 = pytesseract.image_to_string(bot_padded, config=cfg).strip()
+                            t2 = pytesseract.image_to_string(b_img, config=cfg_line).strip()
+                            res = _parse_motorcycle_sublines(t1, t2)
+                            if res and is_valid_plate(res.text):
+                                return res  # Early exit on valid syntax!
                             if t1 and t2:
-                                comb = t1 + t2
-                                all_candidates.append(_score_candidate(comb, 0.88))
-
-                            # Motorcycle plate logic:
-                            # In Uganda, all motorcycles start with UMA (only the 3rd letter changes in future).
-                            # Line 2 contains the digits + suffix (e.g. 145PD).
-                            if t2:
-                                import re
-                                bot_match = re.search(r"(\d{3}[A-Z]{1,2})", t2)
-                                if bot_match:
-                                    bot_code = bot_match.group(1)
-                                    top_clean = re.sub(r"[^A-Z]", "", t1.upper()) if t1 else ""
-                                    if len(top_clean) == 3 and top_clean.startswith("UM"):
-                                        pfx = top_clean
-                                    elif len(top_clean) == 3 and top_clean[0] in ("V", "W") and top_clean[1] in ("W", "H", "M"):
-                                        pfx = f"UM{top_clean[2]}"
-                                    else:
-                                        pfx = "UMA"
-                                    all_candidates.append(_score_candidate(f"{pfx}{bot_code}", 0.95))
+                                all_candidates.append((t1 + t2, 0.75))
                         except Exception:
-                            continue
+                            pass
 
     # ── 2. Standard single/multi-line recognition on the whole crop ──────
     gray = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY) if plate_crop.ndim == 3 else plate_crop
     _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
 
-    for img_variant in (plate_crop, thresh, gray):
-        for psm in ("7", "6", "11"):
-            config = (
-                f"--psm {psm} "
-                f"-c tessedit_char_whitelist={PLATE_CHAR_WHITELIST}"
-            )
+    variants = [thresh, gray]
+    try:
+        from core.vision.plate_enhancer import prepare_ocr_variants
+        extra_variants = prepare_ocr_variants(plate_crop)
+        for var in extra_variants:
+            variants.append(var)
+    except Exception:
+        pass
+
+    for img_variant in variants:
+        for psm in ("7", "6"):
+            cfg = f"--psm {psm} -c tessedit_char_whitelist={PLATE_CHAR_WHITELIST}"
             try:
-                data = pytesseract.image_to_data(img_variant, config=config, output_type=Output.DICT)
+                txt = pytesseract.image_to_string(img_variant, config=cfg).strip()
+                norm = normalize_plate(txt)
+                if norm["is_valid"]:
+                    return OCRResult(text=norm["canonical"], confidence=0.92, backend="tesseract")
+                if txt:
+                    all_candidates.append((norm["canonical"] if norm["canonical"] else txt, 0.60))
             except Exception:
-                continue
+                pass
 
-            words, confs = [], []
-            for text, conf in zip(data.get("text", []), data.get("conf", [])):
-                text = text.strip()
-                conf = float(conf)
-                if text and conf > 0:
-                    words.append(text)
-                    confs.append(conf)
+    if all_candidates:
+        all_candidates.sort(key=lambda c: len(c[0]), reverse=True)
+        return OCRResult(text=all_candidates[0][0], confidence=all_candidates[0][1], backend="tesseract")
 
-            if words:
-                combined_text = "".join(words)
-                avg_conf = (sum(confs) / len(confs)) / 100.0
-                all_candidates.append(_score_candidate(combined_text, avg_conf))
-
-    # ── 3. Pick the best candidate ───────────────────────────────────────
-    if not all_candidates:
-        return None
-
-    # Sort by (tier DESC, moto_match DESC, length DESC, confidence DESC)
-    all_candidates.sort(key=lambda c: (c[0], c[1], c[2], c[3]), reverse=True)
-    best = all_candidates[0]
-    return OCRResult(text=best[4], confidence=best[3], backend="tesseract")
+    return None
 
 
 def read_plate_text(plate_crop: np.ndarray) -> Optional[OCRResult]:
-    """Run OCR on an already-localized plate crop. Returns None if both engines fail."""
+    """Run OCR on an already-localized plate crop with multi-stage enhancement.
+
+    Strategy:
+      1. Primary: PaddleOCR on raw crop. If valid Ugandan syntax, return immediately.
+      2. Plate-specific enhanced crop (CLAHE, gamma, unsharp mask, saturation suppression).
+         If PaddleOCR on enhanced crop yields valid syntax, return immediately.
+      3. Fallback: Tesseract with motorcycle 2-line splitting and adaptive binarization.
+         If valid syntax, return immediately.
+      4. If none produce valid syntax, return the best partial candidate.
+    """
     if plate_crop is None or plate_crop.size == 0:
         return None
 
-    result = _ocr_with_paddle(plate_crop)
-    if result is not None:
-        return result
-    return _ocr_with_tesseract(plate_crop)
+    from core.vision.normalizer import is_valid_plate
+
+    # 1. Primary: PaddleOCR on raw crop
+    res_raw = _ocr_with_paddle(plate_crop)
+    if res_raw is not None and is_valid_plate(res_raw.text):
+        return res_raw
+
+    # 2. Enhanced crop (targeted white/yellow background and black text optimization)
+    res_enh = None
+    try:
+        from core.vision.plate_enhancer import enhance_plate_crop
+        enhanced_crop = enhance_plate_crop(plate_crop)
+        res_enh = _ocr_with_paddle(enhanced_crop)
+        if res_enh is not None and is_valid_plate(res_enh.text):
+            return res_enh
+    except Exception:
+        pass
+
+    # 3. Tesseract fallback (with 2-line split & adaptive Gaussian thresholding)
+    tess_result = _ocr_with_tesseract(plate_crop)
+    if tess_result is not None and is_valid_plate(tess_result.text):
+        return tess_result
+
+    # 4. Return best candidate available if no strict match
+    candidates = [r for r in (res_raw, res_enh, tess_result) if r and r.text]
+    if candidates:
+        candidates.sort(key=lambda r: (r.confidence, len(r.text)), reverse=True)
+        return candidates[0]
+
+    return None

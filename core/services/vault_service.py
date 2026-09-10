@@ -11,7 +11,7 @@ import hashlib
 import os
 import shutil
 import uuid
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import BinaryIO, Optional, Tuple, Union
 
@@ -88,14 +88,32 @@ def hash_stream(stream: BinaryIO) -> str:
 
 
 def detect_folder_orientation(path: Union[str, Path]) -> str:
-    """Infers vehicle orientation from directory names (e.g. 'front/', 'rear/')."""
-    p = Path(path).resolve()
-    parts = [part.lower() for part in p.parts[-4:-1]]
+    """
+    Infers vehicle orientation from directory names or path components.
+    Recognizes 'front', 'forward', 'fronts' vs 'rear', 'back', 'rears', 'backs'.
+    """
+    raw_str = str(path).replace("\\", "/").strip().lower()
+    # Check parent directory segments (ignoring the filename itself)
+    parts = [seg for seg in raw_str.split("/")[:-1] if seg]
     for part in reversed(parts):
-        if any(f in part for f in ("front", "forward", "fronts")):
+        tokens = [t.strip() for t in part.replace("_", " ").replace("-", " ").split()]
+        if any(f in tokens or f == part for f in ("front", "forward", "fronts")):
             return EvidenceImage.Orientation.FRONT
-        if any(r in part for r in ("rear", "back", "rears", "backs")):
+        if any(r in tokens or r == part for r in ("rear", "back", "rears", "backs")):
             return EvidenceImage.Orientation.REAR
+        if any(f in part for f in ("front", "forward")):
+            return EvidenceImage.Orientation.FRONT
+        if any(r in part for r in ("rear", "back")):
+            return EvidenceImage.Orientation.REAR
+
+    # Check filename stem fallback
+    stem = Path(path).stem.lower()
+    stem_tokens = [t.strip() for t in stem.replace("_", " ").replace("-", " ").split()]
+    if any(f in stem_tokens for f in ("front", "forward", "fronts")):
+        return EvidenceImage.Orientation.FRONT
+    if any(r in stem_tokens for r in ("rear", "back", "rears", "backs")):
+        return EvidenceImage.Orientation.REAR
+
     return ""
 
 
@@ -138,9 +156,11 @@ def extract_exif_timestamp(path: Union[str, Path]) -> Optional[datetime]:
 def ingest_from_disk(
     path: Union[str, Path],
     batch: Optional[IngestionBatch] = None,
+    orientation_override: Optional[str] = None,
 ) -> Tuple[Optional[EvidenceImage], str]:
     """
     Ingests a photo from local disk into the vault.
+    Supports explicit orientation_override ('FRONT' or 'REAR').
     Returns: (EvidenceImage or None, status_code: "INGESTED" | "DUPLICATE_SKIPPED" | "INVALID_EXT" | "READ_ERROR")
     """
     path = Path(path)
@@ -168,6 +188,13 @@ def ingest_from_disk(
             batch.total_files += 1
             batch.duplicate_count += 1
             batch.save(update_fields=["total_files", "duplicate_count"])
+        if orientation_override and existing.orientation == EvidenceImage.Orientation.UNKNOWN:
+            clean_orient = orientation_override.upper()
+            if clean_orient in (EvidenceImage.Orientation.FRONT, EvidenceImage.Orientation.REAR):
+                existing.folder_orientation = clean_orient
+                existing.orientation = clean_orient
+                existing.orientation_confidence = 1.0
+                existing.save(update_fields=["folder_orientation", "orientation", "orientation_confidence"])
         return existing, "DUPLICATE_SKIPPED"
 
     target_dir = get_batch_vault_dir(batch)
@@ -181,10 +208,17 @@ def ingest_from_disk(
 
     vault_relative = str(vault_abs_path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
 
-    folder_orient = detect_folder_orientation(path)
+    clean_override = orientation_override.upper() if orientation_override else None
+    if clean_override in (EvidenceImage.Orientation.FRONT, EvidenceImage.Orientation.REAR):
+        folder_orient = clean_override
+        initial_orient = clean_override
+        initial_orient_conf = 1.0
+    else:
+        folder_orient = detect_folder_orientation(path)
+        initial_orient = folder_orient if folder_orient else EvidenceImage.Orientation.UNKNOWN
+        initial_orient_conf = 1.0 if folder_orient else None
+
     captured_at = extract_exif_timestamp(path)
-    initial_orient = folder_orient if folder_orient else EvidenceImage.Orientation.UNKNOWN
-    initial_orient_conf = 1.0 if folder_orient else None
 
     image = EvidenceImage.objects.create(
         batch=batch,
@@ -210,9 +244,11 @@ def ingest_from_disk(
 def ingest_uploaded_file(
     uploaded_file,
     batch: Optional[IngestionBatch] = None,
+    orientation_override: Optional[str] = None,
 ) -> Tuple[Optional[EvidenceImage], str]:
     """
     Ingests an in-memory or temporary UploadedFile (from Django request.FILES).
+    Supports explicit orientation_override ('FRONT' or 'REAR').
     Returns: (EvidenceImage or None, status_code: "INGESTED" | "DUPLICATE_SKIPPED" | "INVALID_EXT" | "READ_ERROR")
     """
     name = getattr(uploaded_file, "name", "upload.jpg")
@@ -239,6 +275,13 @@ def ingest_uploaded_file(
             batch.total_files += 1
             batch.duplicate_count += 1
             batch.save(update_fields=["total_files", "duplicate_count"])
+        if orientation_override and existing.orientation == EvidenceImage.Orientation.UNKNOWN:
+            clean_orient = orientation_override.upper()
+            if clean_orient in (EvidenceImage.Orientation.FRONT, EvidenceImage.Orientation.REAR):
+                existing.folder_orientation = clean_orient
+                existing.orientation = clean_orient
+                existing.orientation_confidence = 1.0
+                existing.save(update_fields=["folder_orientation", "orientation", "orientation_confidence"])
         return existing, "DUPLICATE_SKIPPED"
 
     target_dir = get_batch_vault_dir(batch)
@@ -256,6 +299,19 @@ def ingest_uploaded_file(
 
     vault_relative = str(vault_abs_path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
 
+    clean_override = orientation_override.upper() if orientation_override else None
+    if clean_override in (EvidenceImage.Orientation.FRONT, EvidenceImage.Orientation.REAR):
+        folder_orient = clean_override
+        initial_orient = clean_override
+        initial_orient_conf = 1.0
+    else:
+        folder_orient = detect_folder_orientation(name)
+        initial_orient = folder_orient if folder_orient else EvidenceImage.Orientation.UNKNOWN
+        initial_orient_conf = 1.0 if folder_orient else None
+
+    # Extract EXIF timestamp from the vaulted file
+    captured_at = extract_exif_timestamp(vault_abs_path)
+
     image = EvidenceImage.objects.create(
         batch=batch,
         file_hash=file_hash,
@@ -263,6 +319,10 @@ def ingest_uploaded_file(
         vault_file=vault_relative,
         file_size_bytes=vault_abs_path.stat().st_size,
         status=EvidenceImage.Status.NEW,
+        folder_orientation=folder_orient,
+        orientation=initial_orient,
+        orientation_confidence=initial_orient_conf,
+        captured_at=captured_at,
     )
 
     if batch:

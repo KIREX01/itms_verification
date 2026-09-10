@@ -15,13 +15,17 @@ from core.services import vault_service
 def upload_photos_view(request: HttpRequest) -> HttpResponse:
     """
     Web Upload Interface for operators to drag-and-drop or select photos.
+    Supports separate front and rear photo uploads as well as general batches.
     Supports both traditional browser form submissions and AJAX requests.
     """
     if request.method == "POST":
-        files = request.FILES.getlist("photos")
+        front_files = request.FILES.getlist("front_photos")
+        rear_files = request.FILES.getlist("rear_photos")
+        general_files = request.FILES.getlist("photos")
         batch_label = request.POST.get("batch_label", "").strip() or "Web Upload"
 
-        if not files:
+        total_count = len(front_files) + len(rear_files) + len(general_files)
+        if total_count == 0:
             if request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.headers.get("Accept") == "application/json":
                 return JsonResponse({"success": False, "error": "No image files selected."}, status=400)
             messages.error(request, "No image files were selected for upload.")
@@ -33,16 +37,59 @@ def upload_photos_view(request: HttpRequest) -> HttpResponse:
         )
 
         results = []
-        for uploaded_file in files:
-            img, status = vault_service.ingest_uploaded_file(uploaded_file, batch=batch)
+
+        # Process FRONT photos
+        for f in front_files:
+            img, status = vault_service.ingest_uploaded_file(f, batch=batch, orientation_override="FRONT")
             results.append({
-                "name": uploaded_file.name,
+                "name": f.name,
                 "status": status,
+                "orientation": "FRONT",
+                "id": str(img.id) if img else None,
+                "vault_file": img.vault_file if img else None,
+            })
+
+        # Process REAR photos
+        for f in rear_files:
+            img, status = vault_service.ingest_uploaded_file(f, batch=batch, orientation_override="REAR")
+            results.append({
+                "name": f.name,
+                "status": status,
+                "orientation": "REAR",
+                "id": str(img.id) if img else None,
+                "vault_file": img.vault_file if img else None,
+            })
+
+        # Process General photos (detect orientation from filename or path)
+        for f in general_files:
+            img, status = vault_service.ingest_uploaded_file(f, batch=batch)
+            results.append({
+                "name": f.name,
+                "status": status,
+                "orientation": img.orientation if img else "",
                 "id": str(img.id) if img else None,
                 "vault_file": img.vault_file if img else None,
             })
 
         batch.refresh_from_db()
+        front_count = batch.images.filter(orientation="FRONT").count()
+        rear_count = batch.images.filter(orientation="REAR").count()
+        is_symmetric = (front_count == rear_count and front_count > 0)
+        discrepancy = abs(front_count - rear_count)
+
+        count_warning = ""
+        if front_count > 0 and rear_count > 0 and not is_symmetric:
+            missing_side = "REAR" if front_count > rear_count else "FRONT"
+            count_warning = f"⚠️ Photo count mismatch: {front_count} Front vs {rear_count} Rear ({discrepancy} missing from {missing_side}). Pairs will be incomplete."
+            messages.warning(request, count_warning)
+        elif front_count > 0 and rear_count > 0 and is_symmetric:
+            messages.success(request, f"✓ Symmetric batch validated: {front_count} Front and {rear_count} Rear photos uploaded into {batch.batch_id} (1:1 ratio).")
+        elif front_count > 0 and rear_count == 0:
+            count_warning = f"⚠️ Incomplete upload: {front_count} Front photos uploaded without any Rear photos. Pair matching will remain incomplete."
+            messages.warning(request, count_warning)
+        elif rear_count > 0 and front_count == 0:
+            count_warning = f"⚠️ Incomplete upload: {rear_count} Rear photos uploaded without any Front photos. Pair matching will remain incomplete."
+            messages.warning(request, count_warning)
 
         # AJAX / JSON response
         if request.headers.get("X-Requested-With") == "XMLHttpRequest" or "application/json" in request.headers.get("Accept", ""):
@@ -54,12 +101,22 @@ def upload_photos_view(request: HttpRequest) -> HttpResponse:
                 "ingested": batch.ingested_count,
                 "duplicates": batch.duplicate_count,
                 "failed": batch.failed_count,
+                "front_count": front_count,
+                "rear_count": rear_count,
+                "is_symmetric": is_symmetric,
+                "discrepancy": discrepancy,
+                "count_warning": count_warning,
                 "results": results,
             })
 
         # Regular HTML response
         context = {
             "batch": batch,
+            "front_count": front_count,
+            "rear_count": rear_count,
+            "is_symmetric": is_symmetric,
+            "discrepancy": discrepancy,
+            "count_warning": count_warning,
             "results": results,
             "success": True,
         }
@@ -76,15 +133,20 @@ def api_upload_photos(request: HttpRequest) -> JsonResponse:
     REST API endpoint for programmatic multi-photo upload.
     POST /api/upload/
     Form-Data:
-      - photos: one or more image files
+      - front_photos: one or more front image files (optional)
+      - rear_photos: one or more rear image files (optional)
+      - photos: one or more general image files (optional)
       - batch_label (optional): human readable string
     """
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed. Use POST."}, status=405)
 
-    files = request.FILES.getlist("photos")
-    if not files:
-        return JsonResponse({"error": "No files provided under field 'photos'."}, status=400)
+    front_files = request.FILES.getlist("front_photos")
+    rear_files = request.FILES.getlist("rear_photos")
+    general_files = request.FILES.getlist("photos")
+
+    if not (front_files or rear_files or general_files):
+        return JsonResponse({"error": "No files provided under 'front_photos', 'rear_photos', or 'photos'."}, status=400)
 
     batch_label = request.POST.get("batch_label", "").strip() or "API Upload"
     batch = vault_service.create_ingestion_batch(
@@ -93,16 +155,42 @@ def api_upload_photos(request: HttpRequest) -> JsonResponse:
     )
 
     items = []
-    for f in files:
+    for f in front_files:
+        img, status = vault_service.ingest_uploaded_file(f, batch=batch, orientation_override="FRONT")
+        items.append({
+            "filename": f.name,
+            "status": status,
+            "orientation": "FRONT",
+            "id": str(img.id) if img else None,
+            "vault_file": img.vault_file if img else None,
+        })
+
+    for f in rear_files:
+        img, status = vault_service.ingest_uploaded_file(f, batch=batch, orientation_override="REAR")
+        items.append({
+            "filename": f.name,
+            "status": status,
+            "orientation": "REAR",
+            "id": str(img.id) if img else None,
+            "vault_file": img.vault_file if img else None,
+        })
+
+    for f in general_files:
         img, status = vault_service.ingest_uploaded_file(f, batch=batch)
         items.append({
             "filename": f.name,
             "status": status,
+            "orientation": img.orientation if img else "",
             "id": str(img.id) if img else None,
             "vault_file": img.vault_file if img else None,
         })
 
     batch.refresh_from_db()
+    front_count = batch.images.filter(orientation="FRONT").count()
+    rear_count = batch.images.filter(orientation="REAR").count()
+    is_symmetric = (front_count == rear_count and front_count > 0)
+    discrepancy = abs(front_count - rear_count)
+
     return JsonResponse({
         "success": True,
         "batch_id": batch.batch_id,
@@ -112,6 +200,10 @@ def api_upload_photos(request: HttpRequest) -> JsonResponse:
         "ingested_count": batch.ingested_count,
         "duplicate_count": batch.duplicate_count,
         "failed_count": batch.failed_count,
+        "front_count": front_count,
+        "rear_count": rear_count,
+        "is_symmetric": is_symmetric,
+        "discrepancy": discrepancy,
         "items": items,
     }, status=201)
 

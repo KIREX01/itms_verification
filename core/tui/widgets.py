@@ -54,10 +54,20 @@ class MetricsBar(Static):
         user = getattr(self.app, "current_user", None)
         op_str = f"[bold green]● {user.username}[/bold green]" if user else "[dim]Guest[/dim]"
 
+        # Detect ITMS Web Session Role & Status
+        from core.services.itms_web_client import get_web_client
+        itms_status = get_web_client().get_status()
+        if itms_status.get("authenticated"):
+            itms_user = itms_status.get("user_email") or "Active"
+            itms_badge = f"[bold green]● ITMS ({itms_user.split('@')[0]})[/bold green]"
+        else:
+            itms_badge = "[dim]○ ITMS (Offline)[/dim]"
+
         self.update(
-            f"[b]Operator:[/b] {op_str}  │  "
+            f"[b]System Op:[/b] {op_str}  │  "
+            f"[b]Link:[/b] {itms_badge}  │  "
             f"[b]Orders:[/b] {orders}  │  "
-            f"[b]Vault Photos:[/b] {vault_images}  │  "
+            f"[b]Vault:[/b] {vault_images}  │  "
             f"[b]Queue:[/b] [yellow]{queue}[/yellow]  │  "
             f"[b]Approved:[/b] [green]{approved}[/green]  │  "
             f"[b]Submitted:[/b] [cyan]{submitted}[/cyan]  │  "

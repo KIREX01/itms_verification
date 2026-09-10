@@ -23,6 +23,7 @@ class InstallationOrder(models.Model):
         PENDING = "PENDING", "Pending Installation Evidence"
         MATCHED = "MATCHED", "Matched to Evidence"
         SUBMITTED = "SUBMITTED", "Submitted to ITMS"
+        INSTALLED = "INSTALLED", "Installed (Verified in Archive)"
         FAILED = "FAILED", "Submission Failed"
         CANCELLED = "CANCELLED", "Cancelled"
 
@@ -35,6 +36,35 @@ class InstallationOrder(models.Model):
     plate_serial = models.CharField(max_length=64, blank=True)
     tracker_id = models.CharField(max_length=64, blank=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+
+    # ITMS WebApp Registry & Archive Metadata
+    sales_order = models.CharField(max_length=64, blank=True, default="")
+    service_type = models.CharField(max_length=64, blank=True, default="")
+    vin = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    old_registration_number = models.CharField(max_length=32, blank=True, default="")
+    warehouse_name = models.CharField(max_length=128, blank=True, default="")
+    warehouse_id = models.CharField(max_length=64, blank=True, default="")
+    order_status = models.CharField(max_length=64, blank=True, default="", help_text="e.g. Under installation, Ready for approve, Installed")
+    registration_status = models.CharField(max_length=64, blank=True, default="", help_text="e.g. Active")
+    installation_officer = models.CharField(max_length=128, blank=True, default="")
+    installation_date = models.CharField(max_length=64, blank=True, default="")
+    itms_order_uuid = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    itms_action_url = models.CharField(max_length=255, blank=True, default="")
+    is_archived = models.BooleanField(default=False, db_index=True, help_text="True if order is in /installation-orders/archive")
+
+    # ITMS Detailed Order & Hardware Inventory
+    front_plate_serial = models.CharField(max_length=64, blank=True, default="")
+    rear_plate_serial = models.CharField(max_length=64, blank=True, default="")
+    front_plate_type = models.CharField(max_length=64, blank=True, default="")
+    rear_plate_type = models.CharField(max_length=64, blank=True, default="")
+    gps_tracker_id = models.CharField(max_length=64, blank=True, default="")
+    front_beacon_id = models.CharField(max_length=64, blank=True, default="")
+    rear_beacon_id = models.CharField(max_length=64, blank=True, default="")
+    front_photo_url = models.CharField(max_length=255, blank=True, default="")
+    rear_photo_url = models.CharField(max_length=255, blank=True, default="")
+    details_json = models.JSONField(default=dict, blank=True)
+    photos_json = models.JSONField(default=list, blank=True)
+    info_fetched_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -264,6 +294,9 @@ class SubmissionAuditLog(models.Model):
         OPERATOR_OVERRIDE = "OPERATOR_OVERRIDE", "Operator Override"
         OPERATOR_APPROVE = "OPERATOR_APPROVE", "Operator Approve"
         OPERATOR_SWAP = "OPERATOR_SWAP", "Operator Front/Rear Swap"
+        ARCHIVE_VERIFY = "ARCHIVE_VERIFY", "Archive Installation Verification"
+        ORDER_INFO_FETCH = "ORDER_INFO_FETCH", "Order Info Inspection"
+        PHOTO_DOWNLOAD = "PHOTO_DOWNLOAD", "ITMS Photo Download"
         FALLBACK = "FALLBACK", "Manual Fallback Triggered"
 
     class ResultStatus(models.TextChoices):

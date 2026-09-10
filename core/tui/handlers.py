@@ -60,7 +60,10 @@ class NavigationHandlersMixin:
         return None
 
     def _update_queue_inspector(self, row_key=None):
-        inspector = self.query_one("#inspector-queue", InspectorPane)
+        try:
+            inspector = self.query_one("#inspector-queue", InspectorPane)
+        except Exception:
+            return
         pair = None
         if row_key and row_key.value:
             pair = VehicleInstallationPair.objects.filter(id=row_key.value).select_related(
@@ -71,7 +74,10 @@ class NavigationHandlersMixin:
         inspector.show_pair(pair)
 
     def _update_history_inspector(self, row_key=None):
-        inspector = self.query_one("#inspector-history", InspectorPane)
+        try:
+            inspector = self.query_one("#inspector-history", InspectorPane)
+        except Exception:
+            return
         if self.current_history_filter == "AUDIT_LOGS":
             inspector.update("[dim]Direct audit logs view. Select pair filter to inspect individual trails.[/dim]")
             return
@@ -86,7 +92,10 @@ class NavigationHandlersMixin:
         inspector.show_audit_history(pair)
 
     def _update_batch_inspector(self, row_key=None):
-        inspector = self.query_one("#inspector-batches", InspectorPane)
+        try:
+            inspector = self.query_one("#inspector-batches", InspectorPane)
+        except Exception:
+            return
         batch = None
         batch_id = row_key.value if row_key and row_key.value else None
         if not batch_id:
@@ -97,7 +106,10 @@ class NavigationHandlersMixin:
         inspector.show_batch_info(batch)
 
     def _update_batch_image_inspector(self, row_key=None):
-        inspector = self.query_one("#inspector-batches", InspectorPane)
+        try:
+            inspector = self.query_one("#inspector-batches", InspectorPane)
+        except Exception:
+            return
         img = None
         if row_key and row_key.value:
             img = EvidenceImage.objects.filter(id=row_key.value).first()

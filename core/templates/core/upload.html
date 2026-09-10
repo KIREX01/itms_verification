@@ -8,14 +8,16 @@
         :root {
             --primary: #1976d2;
             --primary-dark: #115293;
+            --front-blue: #0284c7;
+            --rear-green: #16a34a;
             --success: #2e7d32;
             --warning: #ed6c02;
             --danger: #d32f2f;
             --bg: #f4f6f8;
             --card: #ffffff;
-            --text: #212529;
-            --text-muted: #6c757d;
-            --border: #dee2e6;
+            --text: #1e293b;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -26,7 +28,7 @@
             padding: 24px 16px;
         }
         .container {
-            max-width: 960px;
+            max-width: 1040px;
             margin: 0 auto;
         }
         header {
@@ -34,21 +36,21 @@
             border-bottom: 2px solid var(--border);
             padding-bottom: 16px;
         }
-        h1 { font-size: 1.75rem; font-weight: 700; color: #0d47a1; }
+        h1 { font-size: 1.85rem; font-weight: 700; color: #0d47a1; }
         p.subtitle { color: var(--text-muted); font-size: 0.95rem; margin-top: 4px; }
         .card {
             background: var(--card);
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
             padding: 24px;
             margin-bottom: 24px;
             border: 1px solid var(--border);
         }
         .card-title {
-            font-size: 1.15rem;
+            font-size: 1.2rem;
             font-weight: 600;
             margin-bottom: 16px;
-            color: #1a237e;
+            color: #0f172a;
         }
         .form-group {
             margin-bottom: 18px;
@@ -61,82 +63,192 @@
         }
         input[type="text"] {
             width: 100%;
-            padding: 10px 12px;
+            padding: 10px 14px;
             border: 1px solid var(--border);
             border-radius: 6px;
             font-size: 0.95rem;
         }
-        .dropzone {
-            border: 2px dashed var(--primary);
-            border-radius: 8px;
-            background: #eef5fc;
-            padding: 36px 20px;
-            text-align: center;
+        /* Mode Switcher Tabs */
+        .tab-bar {
+            display: flex;
+            gap: 8px;
+            border-bottom: 2px solid var(--border);
+            margin-bottom: 20px;
+        }
+        .tab-btn {
+            padding: 10px 18px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            color: var(--text-muted);
             cursor: pointer;
             transition: all 0.2s ease;
         }
-        .dropzone.dragover {
-            background: #dbeafe;
-            border-color: var(--primary-dark);
-            transform: scale(1.01);
+        .tab-btn.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+            background: #eff6ff;
+            border-top-left-radius: 6px;
+            border-top-right-radius: 6px;
+        }
+        .tab-pane { display: none; }
+        .tab-pane.active { display: block; }
+
+        /* Dual Classified Dropzones */
+        .dual-drop-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        @media (max-width: 768px) {
+            .dual-drop-grid { grid-template-columns: 1fr; }
+        }
+        .dropzone {
+            border: 2px dashed #93c5fd;
+            border-radius: 10px;
+            background: #f0f9ff;
+            padding: 28px 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+        .dropzone:hover, .dropzone.dragover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(2, 132, 199, 0.15);
+        }
+        .dropzone-front {
+            border-color: #38bdf8;
+            background: #f0f9ff;
+        }
+        .dropzone-front:hover, .dropzone-front.dragover {
+            background: #e0f2fe;
+            border-color: var(--front-blue);
+        }
+        .dropzone-rear {
+            border-color: #4ade80;
+            background: #f0fdf4;
+        }
+        .dropzone-rear:hover, .dropzone-rear.dragover {
+            background: #dcfce7;
+            border-color: var(--rear-green);
+        }
+        .dropzone-mixed {
+            border-color: #a855f7;
+            background: #faf5ff;
+        }
+        .dropzone-mixed:hover, .dropzone-mixed.dragover {
+            background: #f3e8ff;
+            border-color: #9333ea;
         }
         .dropzone-icon {
-            font-size: 40px;
-            color: var(--primary);
+            font-size: 42px;
             margin-bottom: 8px;
         }
-        .dropzone-text {
-            font-size: 1rem;
-            font-weight: 500;
-            color: #1e3a8a;
+        .dropzone-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            margin-bottom: 4px;
         }
+        .front-title { color: #0369a1; }
+        .rear-title { color: #15803d; }
+        .mixed-title { color: #7e22ce; }
         .dropzone-hint {
-            font-size: 0.85rem;
+            font-size: 0.82rem;
             color: var(--text-muted);
             margin-top: 4px;
         }
         .file-input { display: none; }
-        .file-summary {
-            margin-top: 14px;
-            font-size: 0.9rem;
-            font-weight: 600;
-            color: var(--primary-dark);
+        .zone-counter {
+            margin-top: 10px;
+            display: inline-block;
+            font-size: 0.82rem;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 9999px;
+            background: #ffffff;
+            border: 1px solid currentColor;
         }
+        .front-counter { color: #0284c7; }
+        .rear-counter { color: #16a34a; }
+        .mixed-counter { color: #9333ea; }
+
+        /* Summary Bar */
+        .selection-summary {
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .summary-tags {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            font-size: 0.9rem;
+        }
+        .btn-clear {
+            background: none;
+            border: none;
+            color: var(--danger);
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
         .btn {
             display: inline-block;
             background: var(--primary);
             color: #fff;
             padding: 12px 24px;
             border: none;
-            border-radius: 6px;
-            font-size: 1rem;
+            border-radius: 8px;
+            font-size: 1.05rem;
             font-weight: 600;
             cursor: pointer;
             transition: background 0.15s ease;
             width: 100%;
         }
         .btn:hover { background: var(--primary-dark); }
-        .btn:disabled { background: var(--border); cursor: not-allowed; }
+        .btn:disabled { background: #cbd5e1; cursor: not-allowed; color: #94a3b8; }
+
+        /* Badges & Tables */
         .badge {
             display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
+            padding: 4px 10px;
+            border-radius: 9999px;
             font-size: 0.75rem;
             font-weight: 700;
             text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
+        .badge-front { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+        .badge-rear { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+        .badge-unknown { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
         .badge-success { background: #e8f5e9; color: var(--success); }
         .badge-warning { background: #fff3e0; color: var(--warning); }
         .badge-danger { background: #ffebee; color: var(--danger); }
         .badge-info { background: #e3f2fd; color: var(--primary); }
+
         .alert {
             padding: 14px 18px;
-            border-radius: 6px;
+            border-radius: 8px;
             margin-bottom: 18px;
             font-size: 0.95rem;
         }
         .alert-success { background: #e8f5e9; color: #1b5e20; border: 1px solid #c8e6c9; }
         .alert-error { background: #ffebee; color: #b71c1c; border: 1px solid #ffcdd2; }
+
         table {
             width: 100%;
             border-collapse: collapse;
@@ -144,52 +256,53 @@
             margin-top: 12px;
         }
         th, td {
-            padding: 10px 12px;
+            padding: 10px 14px;
             text-align: left;
             border-bottom: 1px solid var(--border);
         }
-        th { background: #fafafa; font-weight: 600; color: #495057; }
+        th { background: #f8fafc; font-weight: 600; color: #475569; }
         code {
-            background: #272822;
-            color: #f8f8f2;
-            padding: 4px 8px;
+            background: #1e293b;
+            color: #f8fafc;
+            padding: 3px 8px;
             border-radius: 4px;
             font-family: Consolas, monospace;
             font-size: 0.88rem;
             display: inline-block;
         }
         .code-banner {
-            background: #1e1e1e;
-            color: #d4d4d4;
+            background: #0f172a;
+            color: #e2e8f0;
             padding: 14px;
-            border-radius: 6px;
+            border-radius: 8px;
             margin-top: 12px;
             font-family: Consolas, monospace;
-            font-size: 0.9rem;
+            font-size: 0.88rem;
             overflow-x: auto;
+            line-height: 1.6;
         }
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
             gap: 12px;
-            margin-bottom: 16px;
+            margin-bottom: 18px;
         }
         .stat-card {
             background: #f8fafc;
             border: 1px solid var(--border);
-            border-radius: 6px;
+            border-radius: 8px;
             padding: 12px;
             text-align: center;
         }
-        .stat-val { font-size: 1.5rem; font-weight: 700; color: #0f172a; }
-        .stat-lbl { font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; }
+        .stat-val { font-size: 1.6rem; font-weight: 800; color: #0f172a; }
+        .stat-lbl { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-top: 2px; }
     </style>
 </head>
 <body>
 <div class="container">
     <header>
         <h1>ITMS Evidence Vault Ingestion</h1>
-        <p class="subtitle">Upload vehicle installation photos into permanent, forensic-grade storage with automatic cryptographic deduplication.</p>
+        <p class="subtitle">Upload classified Front and Rear motorcycle photos into permanent forensic-grade storage with SHA-256 deduplication.</p>
     </header>
 
     {% if messages %}
@@ -207,12 +320,20 @@
                 <div class="stat-lbl">Total Uploaded</div>
             </div>
             <div class="stat-card">
+                <div class="stat-val" style="color: var(--front-blue);">{{ front_count|default:0 }}</div>
+                <div class="stat-lbl">Front Photos</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val" style="color: var(--rear-green);">{{ rear_count|default:0 }}</div>
+                <div class="stat-lbl">Rear Photos</div>
+            </div>
+            <div class="stat-card">
                 <div class="stat-val" style="color: var(--success);">{{ batch.ingested_count }}</div>
                 <div class="stat-lbl">Ingested</div>
             </div>
             <div class="stat-card">
                 <div class="stat-val" style="color: var(--warning);">{{ batch.duplicate_count }}</div>
-                <div class="stat-lbl">Duplicates Skipped</div>
+                <div class="stat-lbl">Duplicates</div>
             </div>
             <div class="stat-card">
                 <div class="stat-val" style="color: var(--danger);">{{ batch.failed_count }}</div>
@@ -221,32 +342,42 @@
         </div>
 
         <p><strong>Batch Identifier:</strong> <code>{{ batch.batch_id }}</code> (Source: {{ batch.source_label }})</p>
-        <p style="margin-top: 10px;"><strong>Next Step - Process or Review in TUI:</strong></p>
+        <p style="margin-top: 10px;"><strong>Next Step - Process Vision Pipeline:</strong></p>
         <div class="code-banner">
-            # Run vision pipeline from CLI:
-            python manage.py process_vision --batch {{ batch.batch_id }}
+# 1. Run joint dual-stream vision pipeline on this batch:
+python manage.py process_vision --batch {{ batch.batch_id }} --joint-pairs
 
-            # Or open interactive dashboard (Tab [3] Batches -> Press [P]):
-            python manage.py run_tui
+# 2. Or review in interactive TUI (Press [P] to process, [M] to pair):
+python manage.py run_tui
         </div>
         <p style="margin-top: 8px; font-size: 0.9rem; color: #1565c0;">
-            ✓ Uploaded photos are vaulted. You can immediately switch to your active TUI terminal and press <strong>[R]</strong> to refresh.
+            ✓ Photos are securely stored in the Evidence Vault. In your active TUI terminal, press <strong>[R]</strong> to refresh and see the new batch.
         </p>
 
         {% if results %}
-        <h3 style="margin-top: 20px; font-size: 1rem; font-weight: 600;">Uploaded Files</h3>
+        <h3 style="margin-top: 22px; font-size: 1.05rem; font-weight: 600;">Uploaded Files</h3>
         <table>
             <thead>
                 <tr>
                     <th>Original Filename</th>
+                    <th>Orientation</th>
                     <th>Ingestion Status</th>
-                    <th>Vault Location</th>
+                    <th>Vault Storage Path</th>
                 </tr>
             </thead>
             <tbody>
                 {% for res in results %}
                 <tr>
-                    <td>{{ res.name }}</td>
+                    <td><strong>{{ res.name }}</strong></td>
+                    <td>
+                        {% if res.orientation == "FRONT" %}
+                            <span class="badge badge-front">🚘 FRONT</span>
+                        {% elif res.orientation == "REAR" %}
+                            <span class="badge badge-rear">🏍️ REAR</span>
+                        {% else %}
+                            <span class="badge badge-unknown">{{ res.orientation|default:"UNKNOWN" }}</span>
+                        {% endif %}
+                    </td>
                     <td>
                         {% if res.status == "INGESTED" %}
                             <span class="badge badge-success">Ingested</span>
@@ -266,25 +397,75 @@
     {% endif %}
 
     <div class="card">
-        <h2 class="card-title">New Photo Upload</h2>
+        <h2 class="card-title">Ingest Evidence Photos</h2>
         <form method="POST" enctype="multipart/form-data" id="uploadForm">
             {% csrf_token %}
             <div class="form-group">
-                <label for="batch_label">Batch Label / Operator Note (Optional)</label>
-                <input type="text" id="batch_label" name="batch_label" placeholder="e.g. Entebbe Field Station - Shift 1">
+                <label for="batch_label">Batch Label / Field Station Note</label>
+                <input type="text" id="batch_label" name="batch_label" placeholder="e.g. Entebbe Station - Morning Shift Field Photos">
             </div>
 
-            <div class="form-group">
-                <div class="dropzone" id="dropzone">
-                    <div class="dropzone-icon">📷</div>
-                    <div class="dropzone-text">Click or Drag & Drop Photos Here</div>
-                    <div class="dropzone-hint">Supports JPEG, PNG, WEBP, BMP, TIFF (Multiple files allowed)</div>
-                    <input type="file" name="photos" id="photosInput" class="file-input" multiple accept="image/*">
+            <!-- Tabs: Dual Classified vs Batch Folder -->
+            <div class="tab-bar">
+                <button type="button" class="tab-btn active" id="tabBtnDual" onclick="switchTab('dual')">
+                    🚘🏍️ Classified Front & Rear Dropzones (Recommended)
+                </button>
+                <button type="button" class="tab-btn" id="tabBtnMixed" onclick="switchTab('mixed')">
+                    📂 Batch Folder / Mixed Upload
+                </button>
+            </div>
+
+            <!-- Tab 1: Dual Classified Zones -->
+            <div class="tab-pane active" id="paneDual">
+                <div class="dual-drop-grid">
+                    <!-- Front Dropzone -->
+                    <div class="dropzone dropzone-front" id="frontDropzone">
+                        <div class="dropzone-icon">🚘</div>
+                        <div class="dropzone-title front-title">FRONT Photos Only</div>
+                        <div class="dropzone-hint">Headlamp, front mudguard, front plate angle</div>
+                        <div class="dropzone-hint" style="margin-top: 6px;">Click or drag & drop files here</div>
+                        <span class="zone-counter front-counter" id="frontCounter">0 files selected</span>
+                        <input type="file" name="front_photos" id="frontPhotosInput" class="file-input" multiple accept="image/*">
+                    </div>
+
+                    <!-- Rear Dropzone -->
+                    <div class="dropzone dropzone-rear" id="rearDropzone">
+                        <div class="dropzone-icon">🏍️</div>
+                        <div class="dropzone-title rear-title">REAR Photos Only</div>
+                        <div class="dropzone-hint">Taillight, rear bracket, rear plate angle</div>
+                        <div class="dropzone-hint" style="margin-top: 6px;">Click or drag & drop files here</div>
+                        <span class="zone-counter rear-counter" id="rearCounter">0 files selected</span>
+                        <input type="file" name="rear_photos" id="rearPhotosInput" class="file-input" multiple accept="image/*">
+                    </div>
                 </div>
-                <div class="file-summary" id="fileSummary"></div>
             </div>
 
-            <button type="submit" class="btn" id="submitBtn" disabled>Upload Photos to Vault</button>
+            <!-- Tab 2: Batch Folder / Mixed Upload -->
+            <div class="tab-pane" id="paneMixed">
+                <div class="dropzone dropzone-mixed" id="mixedDropzone">
+                    <div class="dropzone-icon">📂</div>
+                    <div class="dropzone-title mixed-title">Batch Folder or Mixed Files</div>
+                    <div class="dropzone-hint">Select a folder containing <code>front/</code> and <code>rear/</code> subfolders, or mixed files.</div>
+                    <div class="dropzone-hint" style="margin-top: 6px;">Subfolder names are automatically classified into FRONT and REAR.</div>
+                    <span class="zone-counter mixed-counter" id="mixedCounter">0 files selected</span>
+                    <input type="file" name="photos" id="mixedPhotosInput" class="file-input" multiple webkitdirectory accept="image/*">
+                </div>
+            </div>
+
+            <!-- Live Selection Summary Bar -->
+            <div class="selection-summary" id="summaryBar">
+                <div class="summary-tags">
+                    <span>Selection:</span>
+                    <span class="badge badge-front" id="sumFront">Front: 0</span>
+                    <span class="badge badge-rear" id="sumRear">Rear: 0</span>
+                    <span class="badge badge-unknown" id="sumMixed">General: 0</span>
+                    <strong id="sumTotal">Total: 0 files</strong>
+                </div>
+                <button type="button" class="btn-clear" onclick="clearAllSelections()">Clear All</button>
+                <div id="symmetryBadge" style="display: none; font-size: 0.85rem; font-weight: 600; padding: 8px 12px; border-radius: 6px; margin-top: 8px; width: 100%;"></div>
+            </div>
+
+            <button type="submit" class="btn" id="submitBtn" disabled>Upload Photos to Evidence Vault</button>
         </form>
     </div>
 
@@ -295,7 +476,7 @@
             <thead>
                 <tr>
                     <th>Batch ID</th>
-                    <th>Source</th>
+                    <th>Source Label</th>
                     <th>Ingested</th>
                     <th>Duplicates</th>
                     <th>Created At</th>
@@ -318,45 +499,124 @@
 </div>
 
 <script>
-    const dropzone = document.getElementById('dropzone');
-    const input = document.getElementById('photosInput');
-    const summary = document.getElementById('fileSummary');
+    // Tab switching
+    function switchTab(tab) {
+        document.getElementById('tabBtnDual').classList.toggle('active', tab === 'dual');
+        document.getElementById('tabBtnMixed').classList.toggle('active', tab === 'mixed');
+        document.getElementById('paneDual').classList.toggle('active', tab === 'dual');
+        document.getElementById('paneMixed').classList.toggle('active', tab === 'mixed');
+    }
+
+    const frontDrop = document.getElementById('frontDropzone');
+    const frontInput = document.getElementById('frontPhotosInput');
+    const frontCounter = document.getElementById('frontCounter');
+
+    const rearDrop = document.getElementById('rearDropzone');
+    const rearInput = document.getElementById('rearPhotosInput');
+    const rearCounter = document.getElementById('rearCounter');
+
+    const mixedDrop = document.getElementById('mixedDropzone');
+    const mixedInput = document.getElementById('mixedPhotosInput');
+    const mixedCounter = document.getElementById('mixedCounter');
+
+    const sumFront = document.getElementById('sumFront');
+    const sumRear = document.getElementById('sumRear');
+    const sumMixed = document.getElementById('sumMixed');
+    const sumTotal = document.getElementById('sumTotal');
     const submitBtn = document.getElementById('submitBtn');
 
-    dropzone.addEventListener('click', () => input.click());
+    function setupDropzone(dropEl, inputEl, onChange) {
+        dropEl.addEventListener('click', () => inputEl.click());
 
-    ['dragenter', 'dragover'].forEach(eventName => {
-        dropzone.addEventListener(eventName, (e) => {
-            e.preventDefault();
-            dropzone.classList.add('dragover');
+        ['dragenter', 'dragover'].forEach(ev => {
+            dropEl.addEventListener(ev, (e) => {
+                e.preventDefault();
+                dropEl.classList.add('dragover');
+            });
         });
-    });
 
-    ['dragleave', 'drop'].forEach(eventName => {
-        dropzone.addEventListener(eventName, (e) => {
-            e.preventDefault();
-            dropzone.classList.remove('dragover');
+        ['dragleave', 'drop'].forEach(ev => {
+            dropEl.addEventListener(ev, (e) => {
+                e.preventDefault();
+                dropEl.classList.remove('dragover');
+            });
         });
-    });
 
-    dropzone.addEventListener('drop', (e) => {
-        if (e.dataTransfer.files.length > 0) {
-            input.files = e.dataTransfer.files;
-            updateSummary();
-        }
-    });
+        dropEl.addEventListener('drop', (e) => {
+            if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+                inputEl.files = e.dataTransfer.files;
+                onChange();
+            }
+        });
 
-    input.addEventListener('change', updateSummary);
+        inputEl.addEventListener('change', onChange);
+    }
+
+    setupDropzone(frontDrop, frontInput, updateSummary);
+    setupDropzone(rearDrop, rearInput, updateSummary);
+    setupDropzone(mixedDrop, mixedInput, updateSummary);
 
     function updateSummary() {
-        const count = input.files.length;
-        if (count > 0) {
-            summary.textContent = `Selected ${count} photo(s) ready for ingestion.`;
-            submitBtn.disabled = false;
+        const nFront = frontInput.files ? frontInput.files.length : 0;
+        const nRear = rearInput.files ? rearInput.files.length : 0;
+        const nMixed = mixedInput.files ? mixedInput.files.length : 0;
+        const total = nFront + nRear + nMixed;
+
+        frontCounter.textContent = `${nFront} file${nFront === 1 ? '' : 's'} selected`;
+        rearCounter.textContent = `${nRear} file${nRear === 1 ? '' : 's'} selected`;
+        mixedCounter.textContent = `${nMixed} file${nMixed === 1 ? '' : 's'} selected`;
+
+        sumFront.textContent = `Front: ${nFront}`;
+        sumRear.textContent = `Rear: ${nRear}`;
+        sumMixed.textContent = `General: ${nMixed}`;
+        sumTotal.textContent = `Total: ${total} files`;
+
+        const symBadge = document.getElementById('symmetryBadge');
+        if (nFront > 0 && nRear > 0) {
+            symBadge.style.display = 'block';
+            if (nFront === nRear) {
+                symBadge.style.background = '#dcfce7';
+                symBadge.style.color = '#15803d';
+                symBadge.style.border = '1px solid #86efac';
+                symBadge.innerHTML = `✓ <strong>1:1 Symmetry Validated:</strong> ${nFront} Front and ${nRear} Rear photos selected. Ready for complete pairing!`;
+            } else {
+                const diff = Math.abs(nFront - nRear);
+                const missing = nFront > nRear ? 'Rear' : 'Front';
+                symBadge.style.background = '#fef3c7';
+                symBadge.style.color = '#92400e';
+                symBadge.style.border = '1px solid #fcd34d';
+                symBadge.innerHTML = `⚠️ <strong>Photo Count Mismatch:</strong> ${nFront} Front vs ${nRear} Rear (${diff} ${missing} photo(s) missing). Asymmetric photos will remain INCOMPLETE!`;
+            }
+        } else if (nFront > 0 && nRear === 0) {
+            symBadge.style.display = 'block';
+            symBadge.style.background = '#fee2e2';
+            symBadge.style.color = '#991b1b';
+            symBadge.style.border = '1px solid #fca5a5';
+            symBadge.innerHTML = `⚠️ <strong>Incomplete Upload:</strong> Only FRONT photos selected (${nFront}). Both front and rear photos are required in the same batch to form pairs!`;
+        } else if (nRear > 0 && nFront === 0) {
+            symBadge.style.display = 'block';
+            symBadge.style.background = '#fee2e2';
+            symBadge.style.color = '#991b1b';
+            symBadge.style.border = '1px solid #fca5a5';
+            symBadge.innerHTML = `⚠️ <strong>Incomplete Upload:</strong> Only REAR photos selected (${nRear}). Both front and rear photos are required in the same batch to form pairs!`;
         } else {
-            summary.textContent = '';
-            submitBtn.disabled = true;
+            symBadge.style.display = 'none';
         }
+
+        if (total > 0) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = `Upload ${total} Photo${total === 1 ? '' : 's'} to Evidence Vault`;
+        } else {
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Upload Photos to Evidence Vault';
+        }
+    }
+
+    function clearAllSelections() {
+        frontInput.value = '';
+        rearInput.value = '';
+        mixedInput.value = '';
+        updateSummary();
     }
 </script>
 </body>

@@ -94,8 +94,67 @@ class Command(BaseCommand):
             "--batch", type=str, default=None,
             help="Process only images belonging to a specific IngestionBatch (batch_id).",
         )
+        parser.add_argument(
+            "--joint-pairs", action="store_true",
+            help="Process candidate pairs using the Dual-Stream Joint Vision Pipeline (cross-validation, PSV/PMO color check, syntax resolution).",
+        )
 
     def handle(self, *args, **options):
+        # ── Joint Pair Vision Mode ─────────────────────────────────────
+        if options.get("joint_pairs"):
+            self.stdout.write("Running Dual-Stream Joint Vision Pipeline on vehicle pairs...\n")
+            from core.vision.joint_pipeline import DualStreamVisionEngine
+            from core.models import VehicleInstallationPair
+
+            pair_qs = VehicleInstallationPair.objects.filter(
+                front_image__isnull=False, rear_image__isnull=False
+            ).exclude(
+                verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED
+            )
+            if options.get("batch"):
+                pair_qs = pair_qs.filter(
+                    Q(front_image__batch__batch_id=options["batch"]) |
+                    Q(rear_image__batch__batch_id=options["batch"])
+                )
+
+            total_pairs = pair_qs.count()
+            if total_pairs == 0:
+                self.stdout.write(self.style.WARNING("No candidate pairs found to process with joint vision."))
+                return
+
+            self.stdout.write(f"Processing {total_pairs} candidate pair(s) with Dual-Stream Vision Engine...\n")
+            engine = DualStreamVisionEngine(save_crops=options.get("save_crops", False))
+            reconciled, conflicts, errors = 0, 0, 0
+
+            for pair in pair_qs:
+                res = engine.process_pair(pair)
+                if res.success:
+                    reconciled += 1
+                    status_style = self.style.SUCCESS
+                elif res.reconciliation_status in ("COLOR_CONFLICT", "PLATE_MISMATCH"):
+                    conflicts += 1
+                    status_style = self.style.ERROR
+                else:
+                    errors += 1
+                    status_style = self.style.WARNING
+
+                self.stdout.write(
+                    status_style(
+                        f"Pair #{pair.id:<4} [{res.reconciliation_status:<18}] Plate={res.plate_number or '???'} "
+                        f"Cat={res.vehicle_category} Conf={res.consensus_conf:.2f} "
+                        f"(Front={res.front_plate_raw} [{res.front_color}] ↔ Rear={res.rear_plate_raw} [{res.rear_color}])"
+                    )
+                )
+
+            self.stdout.write("")
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"Dual-Stream Vision Complete: {reconciled} reconciled & verified, "
+                    f"{conflicts} conflicts flagged, {errors} issues."
+                )
+            )
+            return
+
         max_retries = options["max_retries"]
 
         # If user passed --reprocess-failed, reset retry_count on all FAILED images

@@ -164,7 +164,7 @@ class VaultLifecycleTests(TestCase):
             self.assertFalse(img_failed.is_file_pruned)
             self.assertFalse(img_review.is_file_pruned)
 
-            self.assertIn("Successfully pruned 1 expired evidence file", output)
+            self.assertIn("Successfully pruned/cleaned 1 file(s)", output)
             self.assertIn("Retained 2 unresolved/issue images indefinitely", output)
 
     def test_prune_vault_dry_run(self):

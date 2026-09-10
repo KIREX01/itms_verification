@@ -22,64 +22,83 @@ class OperatorActionsMixin:
         tabs = self.query_one("#tabs-content", TabbedContent)
         tabs.active = "tab-batches"
 
+    def action_tab_itms(self):
+        tabs = self.query_one("#tabs-content", TabbedContent)
+        tabs.active = "tab-itms"
+
     @work(thread=True)
     def action_native_ingest(self) -> None:
         """Opens native desktop dialog to pick files or folders, and ingests them into a new batch."""
         self.call_from_thread(
             self.log_message,
-            "Opening native photo picker dialog (select files or folder)...",
+            "Opening native photo picker dialog (select front/rear files or folder)...",
             level="INFO",
         )
-        selected_paths = file_dialog.prompt_native_photo_selection()
-        if not selected_paths:
+        selected_items = file_dialog.prompt_native_photo_selection()
+        if not selected_items:
             self.call_from_thread(self.log_message, "Photo selection cancelled by operator.", level="INFO")
             return
 
-        total = len(selected_paths)
+        total = len(selected_items)
+        front_sel = sum(1 for it in selected_items if isinstance(it, dict) and it.get("orientation") == "FRONT")
+        rear_sel = sum(1 for it in selected_items if isinstance(it, dict) and it.get("orientation") == "REAR")
+
         self.call_from_thread(
             self.log_message,
-            f"Selected {total} photo(s). Initializing ingestion batch...",
+            f"Selected {total} photo(s) [{front_sel} Front, {rear_sel} Rear]. Initializing ingestion batch...",
             level="INFO",
         )
 
         batch = vault_service.create_ingestion_batch(
             source_type=IngestionBatch.SourceType.CLI,
-            source_label=f"Native Dialog ({total} photos)",
+            source_label=f"Native Dialog ({total} photos: {front_sel}F/{rear_sel}R)",
         )
 
         ingested = 0
         skipped = 0
         failed = 0
 
-        for p in selected_paths:
-            img, status = vault_service.ingest_from_disk(p, batch=batch)
+        for it in selected_items:
+            if isinstance(it, dict):
+                p = it["path"]
+                orient_override = it.get("orientation") or None
+            else:
+                p = it
+                orient_override = None
+
+            img, status = vault_service.ingest_from_disk(p, batch=batch, orientation_override=orient_override)
             base_name = os.path.basename(p)
+            orient_tag = f"[{img.orientation}]" if img and img.orientation else (f"[{orient_override}]" if orient_override else "[UNKNOWN]")
+
             if status == "INGESTED":
                 ingested += 1
                 self.call_from_thread(
                     self.log_message,
-                    f"Ingested {base_name} -> {img.vault_file}",
+                    f"Ingested {orient_tag:8} {base_name} -> {img.vault_file}",
                     level="INFO",
                 )
             elif status == "DUPLICATE_SKIPPED":
                 skipped += 1
                 self.call_from_thread(
                     self.log_message,
-                    f"Duplicate skipped: {base_name} (already in vault)",
+                    f"Duplicate skipped {orient_tag:8} {base_name} (already in vault)",
                     level="WARNING",
                 )
             else:
                 failed += 1
                 self.call_from_thread(
                     self.log_message,
-                    f"Failed to ingest {base_name} ({status})",
+                    f"Failed to ingest {orient_tag:8} {base_name} ({status})",
                     level="ERROR",
                 )
 
         batch.refresh_from_db()
+        front_total = batch.images.filter(orientation="FRONT").count()
+        rear_total = batch.images.filter(orientation="REAR").count()
+
         self.call_from_thread(
             self.log_message,
-            f"Batch {batch.batch_id} complete: {ingested} ingested, {skipped} duplicates skipped, {failed} failed.",
+            f"Batch {batch.batch_id} complete: {ingested} ingested ({front_total} Front, {rear_total} Rear), {skipped} duplicates skipped, {failed} failed.",
             level="SUCCESS",
         )
         self.call_from_thread(
@@ -87,7 +106,7 @@ class OperatorActionsMixin:
             "Tip: Press [b yellow]P[/b yellow] to run vision recognition on newly added photos.",
             level="INFO",
         )
-        self.call_from_thread(self.notify, f"Batch {batch.batch_id}: {ingested} photos ingested!")
+        self.call_from_thread(self.notify, f"Batch {batch.batch_id}: {ingested} photos ({front_total}F / {rear_total}R) ingested!")
         self.call_from_thread(self.reload_data)
 
     def action_open_upload_ui(self):
@@ -118,6 +137,12 @@ class OperatorActionsMixin:
             self.action_native_ingest()
 
     def action_cycle_filter(self):
+        tabs = self.query_one("#tabs-content", TabbedContent)
+        if tabs.active == "tab-itms":
+            from core.tui.itms_pane import ITMSConnectionPane
+            itms_pane = self.query_one("#itms-connection-pane", ITMSConnectionPane)
+            itms_pane.action_cycle_filter()
+            return
         self.history_filter_index = (self.history_filter_index + 1) % len(HISTORY_FILTERS)
         self.current_history_filter = HISTORY_FILTERS[self.history_filter_index]
         self._update_history_filter_bar()
@@ -171,15 +196,16 @@ class OperatorActionsMixin:
         self.reload_data()
 
     def action_logout(self):
-        """Signs out of current operator session and returns to landing portal."""
+        """Signs out of current operator session and returns to landing portal. Preserves ITMS WebApp session."""
         from core.services import auth_service
         from core.tui.auth_screens import LandingAuthScreen
 
         auth_service.clear_remembered_session()
         old_user = getattr(self, "current_user", None)
         self.current_user = None
-        self.notify("Signed out. Returning to landing portal...")
-        self.log_message(f"Operator '{old_user.username if old_user else 'Guest'}' signed out.", level="INFO")
+        op_name = old_user.username if old_user else "Guest"
+        self.notify(f"System Operator '{op_name}' signed out. ITMS session remains active in vault.", severity="information")
+        self.log_message(f"System Operator '{op_name}' signed out. ITMS WebApp session remains preserved in vault.", level="AUTH")
         self.push_screen(LandingAuthScreen(), self._on_auth_completed)
 
     def action_link_pair(self):
@@ -244,6 +270,12 @@ class OperatorActionsMixin:
         tabs = self.query_one("#tabs-content", TabbedContent)
         active_tab = tabs.active
 
+        if active_tab == "tab-itms":
+            from core.tui.itms_pane import ITMSConnectionPane
+            itms_pane = self.query_one("#itms-connection-pane", ITMSConnectionPane)
+            itms_pane.action_view_photos()
+            return
+
         if active_tab == "tab-batches":
             img = self._get_active_batch_image()
             if not img:
@@ -300,6 +332,32 @@ class OperatorActionsMixin:
     @work(thread=True)
     def action_process_vision(self) -> None:
         """Runs the vision pipeline in a background thread and streams progress to the bottom log."""
+        try:
+            tabs = self.query_one("#tabs-content", TabbedContent)
+            if tabs.active == "tab-queue":
+                pair = self._get_active_pair("table-queue")
+                if pair and pair.front_image and pair.rear_image:
+                    self.call_from_thread(
+                        self.log_message,
+                        f"Running Dual-Stream Joint Vision on Pair #{pair.id} ({pair.registration_number_detected})...",
+                        level="VISION",
+                    )
+                    from core.vision.joint_pipeline import DualStreamVisionEngine
+                    engine = DualStreamVisionEngine()
+                    res = engine.process_pair(pair)
+                    lvl = "SUCCESS" if res.success else "WARNING"
+                    self.call_from_thread(
+                        self.log_message,
+                        f"Joint Vision [{res.reconciliation_status}]: Plate={res.plate_number} Cat={res.vehicle_category} (Conf: {res.consensus_conf:.2f})",
+                        level=lvl,
+                    )
+                    for detail in res.details:
+                        self.call_from_thread(self.log_message, f"  → {detail}", level="INFO")
+                    self.call_from_thread(self.reload_data)
+                    return
+        except Exception:
+            pass
+
         batch_filter = self._selected_batch_id
 
         def stream_cb(msg, tag):
@@ -406,8 +464,8 @@ class OperatorActionsMixin:
         self.call_from_thread(self.log_message, "Executing temporary crop cleanup...", level="INFO")
         try:
             call_command("clean_crops", stdout=out_stream, stderr=err_stream)
-            self.call_from_thread(self.log_message, "Enforcing 7-day vault retention lifecycle...", level="INFO")
-            call_command("prune_vault", stdout=out_stream, stderr=err_stream)
+            self.call_from_thread(self.log_message, "Enforcing 7-day vault retention and sweeping orphaned files...", level="INFO")
+            call_command("prune_vault", orphans=True, stdout=out_stream, stderr=err_stream)
             out_stream.flush()
             err_stream.flush()
             self.call_from_thread(self.log_message, "Storage maintenance completed.", level="SUCCESS")

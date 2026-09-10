@@ -52,13 +52,25 @@ class InspectorPane(Static):
         rear_conf = f"({round(rear.orientation_confidence, 2)})" if rear and rear.orientation_confidence is not None else ""
         rear_cam = f" [cyan]({parse_camera_filename(rear.original_source_path or rear.vault_file).display_tag})[/cyan]" if rear else ""
 
+        category_badge = "—"
+        latest_audit = pair.audit_logs.filter(message__icontains="Category:").first()
+        if latest_audit:
+            if "Category: PSV" in latest_audit.message:
+                category_badge = "[bold white on dark_blue] PSV [/] [bold cyan]Commercial Boda (White Plates)[/]"
+            elif "Category: PMO" in latest_audit.message:
+                category_badge = "[bold black on gold1] PMO [/] [bold yellow]Private Motorcycle (Yellow Plates)[/]"
+            elif "COLOR_CONFLICT" in latest_audit.message:
+                category_badge = "[bold white on red] COLOR CONFLICT [/] [red]Mismatched White/Yellow Plates[/]"
+
         lines = [
             f"[b cyan]═══ Pair Inspector ═══[/b cyan]",
             f"[b]Detected Plate:[/b] [bold yellow]{pair.registration_number_detected}[/bold yellow]",
-            f"[b]Status:[/b] [{status_color}]{pair.verification_status}[/{status_color}]",
-            f"[b]Match Quality:[/b] {pair.match_type} (score: {pair.match_score if pair.match_score is not None else 'N/A'})",
-            f"[b]Matched Order:[/b] {order_line}",
-            f"[b]Plate Serial:[/b] {serial_line}  │  [b]Tracker ID:[/b] {tracker_line}",
+            f"[b]Vehicle Class:[/b]  {category_badge}",
+            f"[b]Status:[/b]         [{status_color}]{pair.verification_status}[/{status_color}]",
+            f"[b]Match Quality:[/b]  {pair.match_type} (score: {pair.match_score if pair.match_score is not None else 'N/A'})",
+            f"[b]Pairing Reason:[/b] [cyan]{pair.operator_note or '—'}[/cyan]",
+            f"[b]Matched Order:[/b]  {order_line}",
+            f"[b]Plate Serial:[/b]   {serial_line}  │  [b]Tracker ID:[/b] {tracker_line}",
             "",
             "[b underline]Photographic Evidence[/b underline]:",
             f" [b]Front:[/b] {front_file}{front_cam}",
@@ -221,3 +233,55 @@ class InspectorPane(Static):
             " Press [b yellow]P[/b yellow] to reprocess this batch",
         ])
         self.update("\n".join(lines))
+
+    def show_itms_order(self, order: Optional[Dict[str, Any]], is_archive: bool = False):
+        """Displays rich metadata and photo vault status for a selected ITMS order."""
+        if not order:
+            self.update(
+                "[dim]No ITMS order selected.\n"
+                "Use ↑/↓ arrow keys to browse table.\n"
+                "Press [b yellow]V[/b yellow] to view side-by-side photos.\n"
+                "Press [b yellow]F[/b yellow] to cycle sub-views.[/dim]"
+            )
+            return
+
+        order_num = order.get("order_number", "N/A")
+        plate = order.get("registration_number", "N/A")
+        vin = order.get("vin", "N/A")
+        status = order.get("order_status") or order.get("status", "N/A")
+        reg_status = order.get("registration_status", "Active" if is_archive else "—")
+        officer = order.get("officer") or order.get("installation_officer", "N/A")
+        date_str = order.get("installation_date", "N/A")
+        warehouse = order.get("warehouse", "N/A")
+        sales_order = order.get("sales_order", "N/A")
+
+        status_color = "bold green" if "installed" in status.lower() else "yellow"
+
+        vault_root = getattr(settings, "VAULT_ROOT", "media/vault")
+        order_dir = os.path.join(vault_root, "itms_photos", order_num)
+        has_local_vault = os.path.isdir(order_dir)
+        vault_status = "[bold green]✓ Downloaded in Vault[/bold green]" if has_local_vault else "[dim]Not downloaded[/dim]"
+
+        lines = [
+            f"[b cyan]═══ ITMS Order Inspector ═══[/b cyan]",
+            f"[b]Order #:[/b]        [bold white]#{order_num}[/bold white]",
+            f"[b]Registration:[/b]   [bold green]{plate}[/bold green]",
+            f"[b]Chassis / VIN:[/b]  {vin}",
+            f"[b]Order Status:[/b]   [{status_color}]{status}[/{status_color}]",
+            f"[b]Reg Status:[/b]     {reg_status}",
+            f"[b]Officer:[/b]        {officer}",
+            f"[b]Install Date:[/b]   {date_str}",
+            f"[b]Warehouse:[/b]      {warehouse[:32]}",
+            f"[b]Sales Order:[/b]    {sales_order}",
+            "",
+            "[b underline]Photographic Evidence & Vault[/b underline]:",
+            f" [b]Safe Storage:[/b]  {vault_status}",
+            f" [b]Vault Folder:[/b]  media/vault/itms_photos/{order_num}/",
+            "",
+            "[b]Quick Actions:[/b]",
+            " [b yellow]V[/b yellow]: View Side-by-Side Photos (GUI)",
+            " [b cyan]Enter[/b cyan]: Inspect Full Hardware & Serials",
+            " [b green]F[/b green]: Cycle Navigation Sub-View",
+        ]
+        self.update("\n".join(lines))
+

@@ -42,6 +42,9 @@ def _active_registry():
 
 
 def find_best_match(detected_plate: str) -> MatchOutcome:
+    if not detected_plate or detected_plate.startswith("PAIR-") or detected_plate.startswith("MISSING-") or detected_plate == "MANUAL_LINK":
+        return MatchOutcome(order=None, score=0.0, match_type=VehicleInstallationPair.MatchType.NONE)
+
     registry = _active_registry()
     if not registry:
         return MatchOutcome(order=None, score=0.0, match_type=VehicleInstallationPair.MatchType.NONE)
@@ -73,17 +76,27 @@ def match_pair_to_order(pair: VehicleInstallationPair) -> VehicleInstallationPai
     Run fuzzy matching for a single pair and update its order/match_type/
     match_score/verification_status fields (does not save related images).
     """
+    # If pair is incomplete, keep INCOMPLETE status
+    if not pair.is_complete:
+        pair.verification_status = VehicleInstallationPair.VerificationStatus.INCOMPLETE
+        pair.match_type = VehicleInstallationPair.MatchType.NONE
+        pair.match_score = None
+        pair.order = None
+        pair.save()
+        return pair
+
     outcome = find_best_match(pair.registration_number_detected)
     pair.match_score = outcome.score
     pair.match_type = outcome.match_type
 
     if outcome.match_type in (VehicleInstallationPair.MatchType.EXACT, VehicleInstallationPair.MatchType.FUZZY):
         pair.order = outcome.order
-        if pair.is_complete:
-            pair.verification_status = VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
+        pair.verification_status = VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
     elif outcome.score < _REJECT:
         pair.order = None
-        pair.verification_status = VehicleInstallationPair.VerificationStatus.UNREGISTERED
+        # Don't mark UNREGISTERED if plate is a provisional tag
+        if not pair.registration_number_detected.startswith("PAIR-"):
+            pair.verification_status = VehicleInstallationPair.VerificationStatus.UNREGISTERED
     else:
         # In the ambiguous 75-85 band: leave for manual operator review, don't auto-link
         pair.order = None

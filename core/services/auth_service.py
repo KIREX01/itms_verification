@@ -28,6 +28,8 @@ SESSION_FILE = Path(getattr(settings, "VAULT_ROOT", "media/vault")) / ".operator
 PREFS_FILE = Path(getattr(settings, "VAULT_ROOT", "media/vault")) / ".operator_prefs.json"
 DEFAULT_BANNER_ANS = Path("assets/landing_banner.ans")
 SOURCE_BANNER_PNG = Path("assets/ascii-magic-1.png")
+SHIELD_BANNER_ANS = Path("assets/shield_banner.ans")
+SHIELD_EMBLEM_PNG = Path("assets/shield_emblem.png")
 
 
 def authenticate_operator(username: str, password: str) -> Tuple[Optional[User], str]:
@@ -184,18 +186,19 @@ def save_operator_preferences(updates: Dict[str, Any]) -> None:
 
 def get_itms_status() -> Dict[str, Any]:
     """Queries current ITMS WebApp connection status."""
-    from core.services.itms_client import ITMSClient
-    client = ITMSClient()
-    auth_status = client.get_auth_status()
+    from core.services.itms_web_client import get_web_client
+    client = get_web_client()
+    status = client.get_status()
     ping_status = client.test_connection()
     return {
         "url": client.base_url,
         "online": ping_status.get("success", False),
         "online_error": ping_status.get("error", ""),
-        "authenticated": auth_status.get("access_token_valid", False),
-        "has_token": auth_status.get("has_access_token", False),
-        "user_email": auth_status.get("user_email", ""),
-        "expires_in": auth_status.get("expires_in_seconds"),
+        "authenticated": status.get("authenticated", False),
+        "user_email": status.get("user_email", ""),
+        "user_uuid": status.get("user_uuid", ""),
+        "expires_in_days": status.get("expires_in_days", 0),
+        "last_status_message": status.get("status_message", ""),
     }
 
 
@@ -204,19 +207,19 @@ def connect_itms_account(
     password: str,
     base_url: Optional[str] = None,
 ) -> Tuple[bool, str]:
-    """Authenticates against the live ITMS WebApp and stores session tokens."""
-    from core.services.itms_client import ITMSClient, ITMSAuthError, ITMSConnectionError
-    client = ITMSClient(base_url=base_url) if base_url else ITMSClient()
+    """Authenticates against the live ITMS WebApp and stores session cookies."""
+    from core.services.itms_web_client import ITMSWebClient, get_web_client
+    client = ITMSWebClient(base_url=base_url) if base_url else get_web_client()
     try:
-        tokens = client.login(email=email, password=password)
-        save_operator_preferences({
-            "itms_email": email,
-            "itms_url": client.base_url,
-            "itms_mode": "live",
-        })
-        return True, f"Successfully connected to ITMS WebApp as {tokens.user_email or email}."
-    except (ITMSAuthError, ITMSConnectionError) as exc:
-        return False, str(exc)
+        ok, msg, sess = client.login(email=email, password=password)
+        if ok:
+            save_operator_preferences({
+                "itms_email": email,
+                "itms_url": client.base_url,
+                "itms_mode": "live",
+            })
+            return True, msg
+        return False, msg
     except Exception as exc:
         return False, f"Unexpected error connecting to ITMS: {exc}"
 
@@ -259,7 +262,45 @@ def render_banner_ansi(
     return ansi_art
 
 
-def get_banner_rich_text(width: int = 150, height: Optional[int] = None) -> Text:
+def get_shield_rich_text(width: int = 22, height: int = 14) -> Text:
+    """Returns a Rich Text renderable of the focused, high-contrast ITMS Shield emblem."""
+    needs_render = False
+    if not SHIELD_BANNER_ANS.is_file():
+        needs_render = True
+    elif SHIELD_EMBLEM_PNG.is_file() and SHIELD_EMBLEM_PNG.stat().st_mtime > SHIELD_BANNER_ANS.stat().st_mtime:
+        needs_render = True
+
+    if needs_render:
+        if not SHIELD_EMBLEM_PNG.is_file() and SOURCE_BANNER_PNG.is_file():
+            try:
+                from PIL import Image, ImageEnhance
+                src_img = Image.open(SOURCE_BANNER_PNG)
+                shield = src_img.crop((115, 45, 785, 1055))
+                enhancer = ImageEnhance.Sharpness(shield.convert("RGB"))
+                shield_sharp = enhancer.enhance(1.4)
+                contrast = ImageEnhance.Contrast(shield_sharp)
+                shield_crisp = contrast.enhance(1.15)
+                shield_crisp.save(SHIELD_EMBLEM_PNG)
+            except Exception as exc:
+                logger.warning("Could not crop shield emblem from source: %s", exc)
+
+        if SHIELD_EMBLEM_PNG.is_file():
+            try:
+                render_banner_ansi(SHIELD_EMBLEM_PNG, SHIELD_BANNER_ANS, width=width, height=height)
+            except Exception as exc:
+                logger.warning("Could not render shield banner ANSI: %s", exc)
+
+    if SHIELD_BANNER_ANS.is_file():
+        try:
+            with open(SHIELD_BANNER_ANS, "r", encoding="utf-8") as f:
+                return Text.from_ansi(f.read())
+        except Exception as exc:
+            logger.warning("Could not load shield banner ANSI: %s", exc)
+
+    return get_banner_rich_text(width=width, height=height)
+
+
+def get_banner_rich_text(width: int = 70, height: Optional[int] = None) -> Text:
     """Returns a Rich Text renderable of the ITMS Landing Banner."""
     # If .ans file doesn't exist or PNG is newer, re-render
     needs_render = False

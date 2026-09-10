@@ -1,12 +1,23 @@
 import asyncio
 from django.test import TransactionTestCase
 
+from django.contrib.auth.models import User
 from core.models import EvidenceImage, IngestionBatch, InstallationOrder, VehicleInstallationPair
+from core.services import auth_service
 from core.tui.app import ITMSOperatorApp
 
 
 class TUIAppTests(TransactionTestCase):
     def setUp(self):
+        VehicleInstallationPair.objects.all().delete()
+        EvidenceImage.objects.all().delete()
+        InstallationOrder.objects.all().delete()
+        IngestionBatch.objects.all().delete()
+        User.objects.filter(username="testoperator").delete()
+
+        self.user = User.objects.create_user(username="testoperator", password="password123")
+        auth_service.save_remembered_session(self.user, remember=True)
+
         self.order = InstallationOrder.objects.create(
             order_number="ORD-TUI-01",
             registration_number="UMA145PD",
@@ -47,6 +58,9 @@ class TUIAppTests(TransactionTestCase):
             ingested_count=2,
         )
 
+    def tearDown(self):
+        auth_service.clear_remembered_session()
+
     def test_tui_pilot_navigation_and_actions(self):
         async def run_pilot():
             app = ITMSOperatorApp()
@@ -85,8 +99,12 @@ class TUIAppTests(TransactionTestCase):
                 batches_table = app.query_one("#table-batches")
                 self.assertGreaterEqual(batches_table.row_count, 1)
 
-                # 6. Test Web Upload action via 'w'
-                await pilot.press("w")
+                # 6. Test Web Upload action via 'w' (mocked dialog to avoid blocking GUI prompt)
+                from unittest.mock import patch
+                with patch("core.services.file_dialog.prompt_native_photo_selection", return_value=[]), \
+                     patch("webbrowser.open", return_value=True):
+                    await pilot.press("w")
+                    await pilot.pause(0.1)
 
                 # 7. Test logging to Activity Log
                 log_widget = app.query_one("#activity-log")

@@ -32,6 +32,8 @@ class AssociationSummary:
     conflicts: int = 0
     pairs_created: int = 0
     pairs_updated: int = 0
+    discrepancies: List[str] = field(default_factory=list)
+    missing_photos: List[Dict] = field(default_factory=list)
     details: List[str] = field(default_factory=list)
 
 
@@ -65,6 +67,7 @@ def _resolve_group(plate: str, images: List[EvidenceImage]) -> VehicleInstallati
         pair.front_image = fronts[0]
         pair.rear_image = rears[0]
         pair.is_complete = True
+        pair.operator_note = f"Auto-paired via Plate String Equality ('{plate}') | 1 Front + 1 Rear detected"
         # Don't clobber a status an operator/matcher already advanced past review
         if pair.verification_status in (
             VehicleInstallationPair.VerificationStatus.INCOMPLETE,
@@ -81,8 +84,10 @@ def _resolve_group(plate: str, images: List[EvidenceImage]) -> VehicleInstallati
         only = (fronts + rears)[0]
         if fronts:
             pair.front_image = only
+            pair.operator_note = f"Incomplete Pair: Only 1 FRONT photo detected for plate '{plate}' (Rear photo missing)"
         else:
             pair.rear_image = only
+            pair.operator_note = f"Incomplete Pair: Only 1 REAR photo detected for plate '{plate}' (Front photo missing)"
         only.status = EvidenceImage.Status.INCOMPLETE
         only.save(update_fields=["status"])
 
@@ -90,6 +95,7 @@ def _resolve_group(plate: str, images: List[EvidenceImage]) -> VehicleInstallati
         # 2+ fronts, 2+ rears, or some other ambiguous mix
         pair.is_complete = False
         pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
+        pair.operator_note = f"Conflict: Ambiguous orientation makeup ({len(fronts)} Fronts, {len(rears)} Rears) detected for plate '{plate}'"
         for img in images:
             img.status = EvidenceImage.Status.NEEDS_REVIEW
             img.save(update_fields=["status"])
@@ -114,6 +120,26 @@ def _plate_similarity(p1: str, p2: str) -> float:
     if p1_clean in p2_clean or p2_clean in p1_clean:
         return 0.85
     return SequenceMatcher(None, p1_clean, p2_clean).ratio()
+
+
+def _clean_stem_name(path_str: str) -> str:
+    """Strips common orientation tokens and prefixes to find canonical base matching stem."""
+    if not path_str:
+        return ""
+    base = os.path.basename(path_str)
+    stem, _ = os.path.splitext(base)
+    stem_clean = stem.lower().strip()
+    # Remove leading common prefixes
+    for pfx in ("front_", "rear_", "front-", "rear-", "f_", "r_", "img_", "image_", "dsc_", "pic_", "cam01_", "cam02_", "cam1_", "cam2_"):
+        if stem_clean.startswith(pfx):
+            stem_clean = stem_clean[len(pfx):]
+            break
+    # Remove trailing common orientation suffixes
+    for sfx in ("_front", "_rear", "-front", "-rear", "_f", "_r", "-f", "-r"):
+        if stem_clean.endswith(sfx):
+            stem_clean = stem_clean[:-len(sfx)]
+            break
+    return stem_clean.strip()
 
 
 def _associate_batch_sequences(batch, summary: AssociationSummary) -> set:
@@ -160,10 +186,11 @@ def _associate_batch_sequences(batch, summary: AssociationSummary) -> set:
         sessions.append(current_session)
 
     from django.db.models import Q
+    from django.db.models import Q
     from core.matcher.order_matcher import match_pair_to_order
 
     # 2. Process each session independently
-    for session in sessions:
+    for session_idx, session in enumerate(sessions, 1):
         rears = [img for img in session if img.orientation == EvidenceImage.Orientation.REAR]
         fronts = [img for img in session if img.orientation == EvidenceImage.Orientation.FRONT]
         unknowns = [img for img in session if img.orientation not in (EvidenceImage.Orientation.REAR, EvidenceImage.Orientation.FRONT)]
@@ -184,47 +211,221 @@ def _associate_batch_sequences(batch, summary: AssociationSummary) -> set:
                     u_img.save(update_fields=["orientation"])
                     rears.append(u_img)
 
-        # Re-sort rears and fronts by composite chronological key (EXIF + sequential counter)
-        rears.sort(key=lambda img: extract_chronological_sort_key(img.original_source_path or img.vault_file, img.captured_at, img.ingested_at))
-        fronts.sort(key=lambda img: extract_chronological_sort_key(img.original_source_path or img.vault_file, img.captured_at, img.ingested_at))
+        n_fronts = len(fronts)
+        n_rears = len(rears)
 
-        if not rears or not fronts:
+        # Detect and record orientation discrepancy
+        if n_fronts != n_rears:
+            missing_count = abs(n_fronts - n_rears)
+            missing_type = "REAR" if n_fronts > n_rears else "FRONT"
+            disc_msg = (
+                f"Batch {batch.batch_id} (Session {session_idx}): Count discrepancy — "
+                f"{n_fronts} Front photo(s) vs {n_rears} Rear photo(s). "
+                f"{missing_count} {missing_type} photo(s) MISSING!"
+            )
+            summary.discrepancies.append(disc_msg)
+            summary.details.append(f"⚠️  {disc_msg}")
+
+        # Case A: Only Fronts in this session
+        if n_rears == 0 and n_fronts > 0:
+            for idx, f_img in enumerate(fronts, 1):
+                clean_plate = f_img.detected_plate or f"MISSING-REAR-{batch.batch_id.split('-')[-1].upper()}-{idx:02d}"
+                pair = VehicleInstallationPair.objects.filter(front_image=f_img).first()
+                if not pair:
+                    pair = VehicleInstallationPair.objects.create(
+                        registration_number_detected=clean_plate,
+                        front_image=f_img,
+                        rear_image=None,
+                        is_complete=False,
+                        verification_status=VehicleInstallationPair.VerificationStatus.INCOMPLETE,
+                        operator_note=f"Discrepancy: Rear photo missing ({n_fronts} Fronts vs 0 Rears)",
+                    )
+                else:
+                    pair.is_complete = False
+                    pair.verification_status = VehicleInstallationPair.VerificationStatus.INCOMPLETE
+                    pair.operator_note = f"Discrepancy: Rear photo missing ({n_fronts} Fronts vs 0 Rears)"
+                    pair.save()
+
+                f_img.status = EvidenceImage.Status.INCOMPLETE
+                f_img.save(update_fields=["status"])
+                match_pair_to_order(pair)
+                paired_image_ids.add(f_img.id)
+                summary.incomplete += 1
+                fname = os.path.basename(f_img.original_source_path or f_img.vault_file)
+                summary.missing_photos.append({
+                    "image": f_img,
+                    "orientation": "FRONT",
+                    "missing": "REAR",
+                    "filename": fname,
+                    "batch": batch.batch_id,
+                })
+                summary.details.append(f"⚠️  All-Front: {fname} (ID {f_img.id.hex[:6]}) has NO rear counterpart!")
             continue
 
-        r_first_time = (rears[0].captured_at or rears[0].ingested_at).timestamp()
-        r_last_time = (rears[-1].captured_at or rears[-1].ingested_at).timestamp()
-        f_first_time = (fronts[0].captured_at or fronts[0].ingested_at).timestamp()
-        f_last_time = (fronts[-1].captured_at or fronts[-1].ingested_at).timestamp()
+        # Case B: Only Rears in this session
+        if n_fronts == 0 and n_rears > 0:
+            for idx, r_img in enumerate(rears, 1):
+                clean_plate = r_img.detected_plate or f"MISSING-FRONT-{batch.batch_id.split('-')[-1].upper()}-{idx:02d}"
+                pair = VehicleInstallationPair.objects.filter(rear_image=r_img).first()
+                if not pair:
+                    pair = VehicleInstallationPair.objects.create(
+                        registration_number_detected=clean_plate,
+                        front_image=None,
+                        rear_image=r_img,
+                        is_complete=False,
+                        verification_status=VehicleInstallationPair.VerificationStatus.INCOMPLETE,
+                        operator_note=f"Discrepancy: Front photo missing (0 Fronts vs {n_rears} Rears)",
+                    )
+                else:
+                    pair.is_complete = False
+                    pair.verification_status = VehicleInstallationPair.VerificationStatus.INCOMPLETE
+                    pair.operator_note = f"Discrepancy: Front photo missing (0 Fronts vs {n_rears} Rears)"
+                    pair.save()
 
-        # Turnaround gap vs Parallel gap
-        gap_uturn = min(abs(f_first_time - r_last_time), abs(r_first_time - f_last_time))
-        gap_parallel = abs(f_first_time - r_first_time)
+                r_img.status = EvidenceImage.Status.INCOMPLETE
+                r_img.save(update_fields=["status"])
+                match_pair_to_order(pair)
+                paired_image_ids.add(r_img.id)
+                summary.incomplete += 1
+                fname = os.path.basename(r_img.original_source_path or r_img.vault_file)
+                summary.missing_photos.append({
+                    "image": r_img,
+                    "orientation": "REAR",
+                    "missing": "FRONT",
+                    "filename": fname,
+                    "batch": batch.batch_id,
+                })
+            continue
 
-        is_uturn = gap_uturn <= gap_parallel
+        # Case C: Both Fronts and Rears present in this walk session
+        # Multi-Tier Association Synergy:
+        #   Tier 1: Plate OCR Direct Match (Gold standard ground truth)
+        #   Tier 2: Filename Synergy (Matching stems e.g. 01.jpg or camera shutter counters #1)
+        #   Tier 3: Temporal Trajectory Alignment (Parallel vs U-Turn Walk based on timestamps)
+        #   Tier 4: Surplus / Incomplete Photos Handling
+        unpaired_fronts = list(fronts)
+        unpaired_rears = list(rears)
+        resolved_pairs = []  # List[Tuple[EvidenceImage, EvidenceImage, str, str]]
 
-        if is_uturn:
-            # Whichever orientation started later was walked in reverse
-            if f_first_time >= r_first_time:
-                aligned_rears = list(rears)
-                aligned_fronts = list(reversed(fronts))
-            else:
-                aligned_rears = list(reversed(rears))
-                aligned_fronts = list(fronts)
-        else:
-            aligned_rears = list(rears)
-            aligned_fronts = list(fronts)
-
-        pair_count = min(len(aligned_rears), len(aligned_fronts))
-        for i in range(pair_count):
-            r_img = aligned_rears[i]
-            f_img = aligned_fronts[i]
-
-            # Use rear plate as the canonical truth; fallback to front plate
-            canonical_plate = r_img.detected_plate or f_img.detected_plate
-            if not canonical_plate:
+        # --- Tier 1: Plate OCR Direct Match ---
+        matched_f_ids = set()
+        matched_r_ids = set()
+        for f_img in unpaired_fronts:
+            if not f_img.detected_plate:
                 continue
+            best_r = None
+            best_sim = 0.0
+            for r_img in unpaired_rears:
+                if r_img.id in matched_r_ids or not r_img.detected_plate:
+                    continue
+                sim = _plate_similarity(f_img.detected_plate, r_img.detected_plate)
+                if sim >= 0.85 and sim > best_sim:
+                    best_sim = sim
+                    best_r = r_img
+            if best_r:
+                matched_f_ids.add(f_img.id)
+                matched_r_ids.add(best_r.id)
+                canonical_plate = best_r.detected_plate or f_img.detected_plate
+                sim_pct = int(best_sim * 100)
+                note = f"Auto-paired via Plate OCR Match ('{canonical_plate}', {sim_pct}% similarity)"
+                resolved_pairs.append((f_img, best_r, canonical_plate, note))
 
-            # Delete any stale single-image incomplete pairs referencing these images
+        unpaired_fronts = [f for f in unpaired_fronts if f.id not in matched_f_ids]
+        unpaired_rears = [r for r in unpaired_rears if r.id not in matched_r_ids]
+
+        # --- Tier 2: Filename Synergy (Matching Stems & Shutter Indices) ---
+        # 2A: Exact stem match (e.g. front/01.jpg <-> rear/01.jpg or front/bike1.jpg <-> rear/bike1.jpg)
+        matched_f_ids = set()
+        matched_r_ids = set()
+        for f_img in unpaired_fronts:
+            f_clean = _clean_stem_name(f_img.original_source_path or f_img.vault_file)
+            if not f_clean or f_clean in ("front", "rear"):
+                continue
+            for r_img in unpaired_rears:
+                if r_img.id in matched_r_ids:
+                    continue
+                r_clean = _clean_stem_name(r_img.original_source_path or r_img.vault_file)
+                if r_clean == f_clean:
+                    matched_f_ids.add(f_img.id)
+                    matched_r_ids.add(r_img.id)
+                    canonical_plate = r_img.detected_plate or f_img.detected_plate or f"PAIR-{f_clean.upper()}"
+                    f_name = os.path.basename(f_img.original_source_path or f_img.vault_file)
+                    r_name = os.path.basename(r_img.original_source_path or r_img.vault_file)
+                    note = f"Auto-paired via Filename Stem Alignment ('{f_name}' <-> '{r_name}') | Identical stem '{f_clean}'"
+                    resolved_pairs.append((f_img, r_img, canonical_plate, note))
+                    break
+
+        unpaired_fronts = [f for f in unpaired_fronts if f.id not in matched_f_ids]
+        unpaired_rears = [r for r in unpaired_rears if r.id not in matched_r_ids]
+
+        # 2B: Exact shutter sequence index match (e.g. CAM01_0005 vs CAM02_0005)
+        matched_f_ids = set()
+        matched_r_ids = set()
+        for f_img in unpaired_fronts:
+            f_sig = parse_camera_filename(f_img.original_source_path or f_img.vault_file)
+            if f_sig.sequence_number is None:
+                continue
+            for r_img in unpaired_rears:
+                if r_img.id in matched_r_ids:
+                    continue
+                r_sig = parse_camera_filename(r_img.original_source_path or r_img.vault_file)
+                if r_sig.sequence_number == f_sig.sequence_number:
+                    matched_f_ids.add(f_img.id)
+                    matched_r_ids.add(r_img.id)
+                    canonical_plate = r_img.detected_plate or f_img.detected_plate or f"PAIR-SEQ{f_sig.sequence_number:02d}"
+                    note = f"Auto-paired via Camera Shutter Index (#{f_sig.sequence_number} <-> #{r_sig.sequence_number}) | {f_sig.vendor_convention}"
+                    resolved_pairs.append((f_img, r_img, canonical_plate, note))
+                    break
+
+        unpaired_fronts = [f for f in unpaired_fronts if f.id not in matched_f_ids]
+        unpaired_rears = [r for r in unpaired_rears if r.id not in matched_r_ids]
+
+        # --- Tier 3: Temporal Trajectory Alignment (Parallel vs U-Turn Walk) ---
+        if unpaired_fronts and unpaired_rears:
+            unpaired_rears.sort(key=lambda img: extract_chronological_sort_key(img.original_source_path or img.vault_file, img.captured_at, img.ingested_at))
+            unpaired_fronts.sort(key=lambda img: extract_chronological_sort_key(img.original_source_path or img.vault_file, img.captured_at, img.ingested_at))
+
+            r_first_time = (unpaired_rears[0].captured_at or unpaired_rears[0].ingested_at).timestamp()
+            r_last_time = (unpaired_rears[-1].captured_at or unpaired_rears[-1].ingested_at).timestamp()
+            f_first_time = (unpaired_fronts[0].captured_at or unpaired_fronts[0].ingested_at).timestamp()
+            f_last_time = (unpaired_fronts[-1].captured_at or unpaired_fronts[-1].ingested_at).timestamp()
+
+            gap_uturn = min(abs(f_first_time - r_last_time), abs(r_first_time - f_last_time))
+            gap_parallel = abs(f_first_time - r_first_time)
+            is_uturn = gap_uturn <= gap_parallel and len(unpaired_fronts) > 1 and len(unpaired_rears) > 1
+
+            if is_uturn:
+                if f_first_time >= r_first_time:
+                    aligned_rears = list(unpaired_rears)
+                    aligned_fronts = list(reversed(unpaired_fronts))
+                else:
+                    aligned_rears = list(reversed(unpaired_rears))
+                    aligned_fronts = list(unpaired_fronts)
+                walk_desc = f"Temporal Trajectory (U-Turn Walk, Δt turnaround = {int(gap_uturn)}s)"
+            else:
+                aligned_rears = list(unpaired_rears)
+                aligned_fronts = list(unpaired_fronts)
+                walk_desc = f"Temporal Proximity (Parallel Walk, Δt = {int(gap_parallel)}s)"
+
+            t_pair_count = min(len(aligned_rears), len(aligned_fronts))
+            for i in range(t_pair_count):
+                r_img = aligned_rears[i]
+                f_img = aligned_fronts[i]
+                canonical_plate = r_img.detected_plate or f_img.detected_plate
+                if not canonical_plate:
+                    batch_tag = batch.batch_id.split("-")[-1] if batch else "SEQ"
+                    canonical_plate = f"PAIR-{batch_tag.upper()}-{len(resolved_pairs)+i+1:02d}"
+                note = f"Auto-paired via {walk_desc} | Walk Step #{i+1}"
+                resolved_pairs.append((f_img, r_img, canonical_plate, note))
+
+            surplus_fronts = aligned_fronts[t_pair_count:]
+            surplus_rears = aligned_rears[t_pair_count:]
+        else:
+            surplus_fronts = list(unpaired_fronts)
+            surplus_rears = list(unpaired_rears)
+
+        # Commit resolved complete pairs
+        for f_img, r_img, canonical_plate, note in resolved_pairs:
             VehicleInstallationPair.objects.filter(is_complete=False).filter(
                 Q(front_image=f_img) | Q(rear_image=r_img) | Q(front_image=r_img) | Q(rear_image=f_img)
             ).delete()
@@ -236,6 +437,7 @@ def _associate_batch_sequences(batch, summary: AssociationSummary) -> set:
             pair.front_image = f_img
             pair.rear_image = r_img
             pair.is_complete = True
+            pair.operator_note = note
 
             if pair.verification_status in (
                 VehicleInstallationPair.VerificationStatus.INCOMPLETE,
@@ -249,14 +451,83 @@ def _associate_batch_sequences(batch, summary: AssociationSummary) -> set:
             f_img.save(update_fields=["status"])
             pair.save()
 
-            # Attempt order match
             match_pair_to_order(pair)
 
             paired_image_ids.add(r_img.id)
             paired_image_ids.add(f_img.id)
             summary.complete_pairs += 1
-            walk_str = "U-turn" if is_uturn else "Parallel"
-            summary.details.append(f"Seq ({walk_str}): {canonical_plate} linked Front[{f_img.id.hex[:6]}] + Rear[{r_img.id.hex[:6]}]")
+            summary.details.append(f"✓ Pair [{canonical_plate}]: {note}")
+
+        # Handle surplus / leftover photos beyond resolved pairs
+        base_idx = len(resolved_pairs)
+
+        for s_idx, f_img in enumerate(surplus_fronts, base_idx + 1):
+            clean_plate = f_img.detected_plate or f"MISSING-REAR-{batch.batch_id.split('-')[-1].upper()}-{s_idx:02d}"
+            pair = VehicleInstallationPair.objects.filter(front_image=f_img).first()
+            if not pair:
+                pair = VehicleInstallationPair.objects.create(
+                    registration_number_detected=clean_plate,
+                    front_image=f_img,
+                    rear_image=None,
+                    is_complete=False,
+                    verification_status=VehicleInstallationPair.VerificationStatus.INCOMPLETE,
+                    operator_note=f"Discrepancy: Rear photo missing in batch sequence ({n_fronts} Fronts vs {n_rears} Rears)",
+                )
+            else:
+                pair.rear_image = None
+                pair.is_complete = False
+                pair.verification_status = VehicleInstallationPair.VerificationStatus.INCOMPLETE
+                pair.operator_note = f"Discrepancy: Rear photo missing in batch sequence ({n_fronts} Fronts vs {n_rears} Rears)"
+                pair.save()
+
+            f_img.status = EvidenceImage.Status.INCOMPLETE
+            f_img.save(update_fields=["status"])
+            match_pair_to_order(pair)
+            paired_image_ids.add(f_img.id)
+            summary.incomplete += 1
+            fname = os.path.basename(f_img.original_source_path or f_img.vault_file)
+            summary.missing_photos.append({
+                "image": f_img,
+                "orientation": "FRONT",
+                "missing": "REAR",
+                "filename": fname,
+                "batch": batch.batch_id,
+            })
+            summary.details.append(f"⚠️  Surplus Front: {fname} (ID {f_img.id.hex[:6]}) is MISSING a Rear counterpart!")
+
+        for s_idx, r_img in enumerate(surplus_rears, base_idx + 1):
+            clean_plate = r_img.detected_plate or f"MISSING-FRONT-{batch.batch_id.split('-')[-1].upper()}-{s_idx:02d}"
+            pair = VehicleInstallationPair.objects.filter(rear_image=r_img).first()
+            if not pair:
+                pair = VehicleInstallationPair.objects.create(
+                    registration_number_detected=clean_plate,
+                    front_image=None,
+                    rear_image=r_img,
+                    is_complete=False,
+                    verification_status=VehicleInstallationPair.VerificationStatus.INCOMPLETE,
+                    operator_note=f"Discrepancy: Front photo missing in batch sequence ({n_fronts} Fronts vs {n_rears} Rears)",
+                )
+            else:
+                pair.front_image = None
+                pair.is_complete = False
+                pair.verification_status = VehicleInstallationPair.VerificationStatus.INCOMPLETE
+                pair.operator_note = f"Discrepancy: Front photo missing in batch sequence ({n_fronts} Fronts vs {n_rears} Rears)"
+                pair.save()
+
+            r_img.status = EvidenceImage.Status.INCOMPLETE
+            r_img.save(update_fields=["status"])
+            match_pair_to_order(pair)
+            paired_image_ids.add(r_img.id)
+            summary.incomplete += 1
+            fname = os.path.basename(r_img.original_source_path or r_img.vault_file)
+            summary.missing_photos.append({
+                "image": r_img,
+                "orientation": "REAR",
+                "missing": "FRONT",
+                "filename": fname,
+                "batch": batch.batch_id,
+            })
+            summary.details.append(f"⚠️  Surplus Rear: {fname} (ID {r_img.id.hex[:6]}) is MISSING a Front counterpart!")
 
     return paired_image_ids
 
@@ -402,36 +673,49 @@ def link_pair_manually(
 
 
 @transaction.atomic
-def run_association() -> AssociationSummary:
+def run_association(batch_id: Optional[str] = None) -> AssociationSummary:
     """Runs full pairwise association:
 
     1. Batch-level U-Turn & timestamp sequence alignment (for front/rear folders).
     2. Plate-driven grouping for remaining unassociated photos.
+    3. Residual unassociated photo sweep to register incomplete pairs for any orphan photos.
     """
     from core.models import IngestionBatch
+    from core.matcher.order_matcher import match_pair_to_order
+    from django.db.models import Q
+
     summary = AssociationSummary()
     already_paired = set()
 
     # Pass 1: U-Turn & Sequence Association across batches
-    for batch in IngestionBatch.objects.all():
+    if batch_id:
+        batches = list(IngestionBatch.objects.filter(batch_id=batch_id))
+    else:
+        batches = list(IngestionBatch.objects.all())
+
+    for batch in batches:
         paired_in_batch = _associate_batch_sequences(batch, summary)
         already_paired.update(paired_in_batch)
 
-    # Pass 2: Plate-driven grouping for remaining photos
+    # Pass 2: Plate-driven grouping for remaining photos with detected plates
     excluded_status = {EvidenceImage.Status.SUBMITTED, EvidenceImage.Status.DUPLICATE_SKIPPED}
     qs = (
         EvidenceImage.objects.exclude(status__in=excluded_status)
         .exclude(id__in=already_paired)
         .exclude(detected_plate="")
-        .order_by("ingested_at")
     )
+    if batch_id:
+        qs = qs.filter(batch__batch_id=batch_id)
+
     groups: Dict[str, List[EvidenceImage]] = defaultdict(list)
-    for image in qs:
+    for image in qs.order_by("ingested_at"):
         groups[image.detected_plate].append(image)
 
     for plate, images in groups.items():
         pair = _resolve_group(plate, images)
         summary.groups_processed += 1
+        for img in images:
+            already_paired.add(img.id)
 
         if pair.verification_status == VehicleInstallationPair.VerificationStatus.CONFLICT:
             summary.conflicts += 1
@@ -439,7 +723,54 @@ def run_association() -> AssociationSummary:
             summary.complete_pairs += 1
         else:
             summary.incomplete += 1
+            missing_side = "REAR" if pair.front_image and not pair.rear_image else "FRONT"
+            present_img = pair.front_image or pair.rear_image
+            fname = os.path.basename(present_img.original_source_path or present_img.vault_file) if present_img else "unknown"
+            summary.missing_photos.append({
+                "image": present_img,
+                "orientation": present_img.orientation if present_img else "UNKNOWN",
+                "missing": missing_side,
+                "filename": fname,
+                "batch": present_img.batch.batch_id if present_img and present_img.batch else "",
+            })
 
         summary.details.append(f"{plate}: {pair.verification_status} (images={len(images)})")
+
+    # Pass 3: Residual unassociated photo sweep (ensures NO photo is left without a pair record)
+    residual_qs = EvidenceImage.objects.exclude(status__in=excluded_status).exclude(id__in=already_paired)
+    if batch_id:
+        residual_qs = residual_qs.filter(batch__batch_id=batch_id)
+
+    for res_img in residual_qs:
+        existing_pair = VehicleInstallationPair.objects.filter(
+            Q(front_image=res_img) | Q(rear_image=res_img)
+        ).first()
+
+        if not existing_pair:
+            orient_tag = "FRONT" if res_img.orientation == EvidenceImage.Orientation.FRONT else ("REAR" if res_img.orientation == EvidenceImage.Orientation.REAR else "UNKNOWN")
+            missing_side = "REAR" if orient_tag == "FRONT" else "FRONT"
+            plate_tag = res_img.detected_plate or f"UNPAIRED-{orient_tag}-{res_img.id.hex[:6].upper()}"
+
+            new_pair = VehicleInstallationPair.objects.create(
+                registration_number_detected=plate_tag,
+                front_image=res_img if orient_tag == "FRONT" else None,
+                rear_image=res_img if orient_tag == "REAR" else None,
+                is_complete=False,
+                verification_status=VehicleInstallationPair.VerificationStatus.INCOMPLETE,
+                operator_note=f"Unpaired {orient_tag} photo: Missing {missing_side} partner",
+            )
+            res_img.status = EvidenceImage.Status.INCOMPLETE
+            res_img.save(update_fields=["status"])
+            match_pair_to_order(new_pair)
+            summary.incomplete += 1
+            fname = os.path.basename(res_img.original_source_path or res_img.vault_file)
+            summary.missing_photos.append({
+                "image": res_img,
+                "orientation": orient_tag,
+                "missing": missing_side,
+                "filename": fname,
+                "batch": res_img.batch.batch_id if res_img.batch else "",
+            })
+            summary.details.append(f"⚠️  Residual: {fname} (ID {res_img.id.hex[:6]}) has no opposite partner -> Registered as INCOMPLETE pair.")
 
     return summary

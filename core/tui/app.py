@@ -49,6 +49,7 @@ from textual.widgets import (
 
 from core.tui.widgets import MetricsBar
 from core.tui.inspectors import InspectorPane
+from core.tui.itms_pane import ITMSConnectionPane
 from core.tui.tables import TableLoaderMixin, HISTORY_FILTERS
 from core.tui.handlers import NavigationHandlersMixin
 from core.tui.actions import OperatorActionsMixin
@@ -62,6 +63,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         ("1", "tab_queue", "Queue"),
         ("2", "tab_history", "History"),
         ("3", "tab_batches", "Batches"),
+        ("4", "tab_itms", "ITMS WebApp"),
         ("i", "native_ingest", "Add Photos (Dialog)"),
         ("w", "open_upload_ui", "Web Upload"),
         ("p", "process_vision", "Run Vision"),
@@ -121,6 +123,9 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
                         yield DataTable(id="table-batch-images")
                     yield InspectorPane(id="inspector-batches", classes="inspector-panel")
 
+            with TabPane("🌐 ITMS WebApp (4)", id="tab-itms"):
+                yield ITMSConnectionPane(id="itms-connection-pane")
+
         with Vertical(id="activity-container"):
             yield Static(
                 "[b]Console & Activity Log[/b] (Real-time Vision, Automation & Execution)",
@@ -169,7 +174,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         else:
             self.push_screen(LandingAuthScreen(), self._on_auth_completed)
 
-        self.log_message("[dim]Press [1-3] tabs │ [P] Vision │ [M] Match │ [U] Submit │ [A] Approve │ [S] Swap │ [L] Link │ [X] Sign Out[/dim]")
+        self.log_message("[dim]Press [1-4] tabs │ [P] Vision │ [M] Match │ [U] Submit │ [A] Approve │ [S] Swap │ [L] Link │ [X] Sign Out[/dim]")
 
     def _on_auth_completed(self, user):
         if not user:

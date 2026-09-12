@@ -32,8 +32,17 @@ class InspectorPane(Static):
             if pair.order
             else "[yellow]— unmatched —[/yellow]"
         )
-        serial_line = pair.order.plate_serial if pair.order and pair.order.plate_serial else "—"
-        tracker_line = pair.order.tracker_id if pair.order and pair.order.tracker_id else "—"
+        serial_line = (
+            pair.order.plate_serial
+            or pair.order.front_plate_serial
+            or pair.order.rear_plate_serial
+            or "—"
+        ) if pair.order else "—"
+        tracker_line = (
+            pair.order.tracker_id
+            or pair.order.gps_tracker_id
+            or "—"
+        ) if pair.order else "—"
         front = pair.front_image
         rear = pair.rear_image
         status_color = STATUS_STYLE.get(pair.verification_status, "white")
@@ -62,12 +71,27 @@ class InspectorPane(Static):
             elif "COLOR_CONFLICT" in latest_audit.message:
                 category_badge = "[bold white on red] COLOR CONFLICT [/] [red]Mismatched White/Yellow Plates[/]"
 
+        matched_via_tag = getattr(pair, "matched_via", "VISION")
+        override_tag = " [bold cyan](Manual Operator Override)[/bold cyan]" if getattr(pair, "is_manual_override", False) else ""
+
+        account_str = pair.account_email or (pair.order.account_email if pair.order else "") or "[dim]Unassigned[/dim]"
+
         lines = [
             f"[b cyan]═══ Pair Inspector ═══[/b cyan]",
-            f"[b]Detected Plate:[/b] [bold yellow]{pair.registration_number_detected}[/bold yellow]",
+            f"[b]Detected Plate:[/b] [bold yellow]{pair.registration_number_detected}[/bold yellow]{override_tag}",
+            f"[b]ITMS Account:[/b]  [bold green]{account_str}[/bold green]",
             f"[b]Vehicle Class:[/b]  {category_badge}",
             f"[b]Status:[/b]         [{status_color}]{pair.verification_status}[/{status_color}]",
-            f"[b]Match Quality:[/b]  {pair.match_type} (score: {pair.match_score if pair.match_score is not None else 'N/A'})",
+        ]
+
+        if pair.verification_status == VehicleInstallationPair.VerificationStatus.FAILED:
+            latest_fail = pair.audit_logs.filter(result=SubmissionAuditLog.ResultStatus.FAILURE).first()
+            if latest_fail:
+                fail_msg = latest_fail.message[:75] + ("..." if len(latest_fail.message) > 75 else "")
+                lines.append(f"[b]Failure Reason:[/b] [bold red]{fail_msg}[/bold red]")
+
+        lines.extend([
+            f"[b]Match Quality:[/b]  {pair.match_type} (score: {pair.match_score if pair.match_score is not None else 'N/A'}, via: [cyan]{matched_via_tag}[/cyan])",
             f"[b]Pairing Reason:[/b] [cyan]{pair.operator_note or '—'}[/cyan]",
             f"[b]Matched Order:[/b]  {order_line}",
             f"[b]Plate Serial:[/b]   {serial_line}  │  [b]Tracker ID:[/b] {tracker_line}",
@@ -79,10 +103,10 @@ class InspectorPane(Static):
             f"        ocr_conf={rear_ocr} orient={rear_orient} {rear_conf}".rstrip(),
             "",
             "[b]Quick Actions:[/b]",
-            " [b green]A[/b green]: Approve Pair     [b yellow]S[/b yellow]: Swap Front/Rear",
-            " [b cyan]V[/b cyan]: View Evidence    [b magenta]L[/b magenta]: Link / Pick Photo",
-            " [b blue]U[/b blue]: Submit to ITMS",
-        ]
+            " [b green]A[/b green]: Approve / Retry   [b green]T[/b green]: Type Plate / Match",
+            " [b yellow]S[/b yellow]: Swap Front/Rear       [b magenta]L[/b magenta]: Link / Pick Photo",
+            " [b cyan]V[/b cyan]: View Evidence         [b blue]U[/b blue]: Submit to ITMS",
+        ])
         self.update("\n".join(lines))
 
     def show_audit_history(self, pair: VehicleInstallationPair):
@@ -267,6 +291,7 @@ class InspectorPane(Static):
             f"[b]Order #:[/b]        [bold white]#{order_num}[/bold white]",
             f"[b]Registration:[/b]   [bold green]{plate}[/bold green]",
             f"[b]Chassis / VIN:[/b]  {vin}",
+            f"[b]Linked Account:[/b] [bold green]{order.get('account_email') or 'Active Session'}[/bold green]",
             f"[b]Order Status:[/b]   [{status_color}]{status}[/{status_color}]",
             f"[b]Reg Status:[/b]     {reg_status}",
             f"[b]Officer:[/b]        {officer}",

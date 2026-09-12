@@ -13,4 +13,8 @@ class Command(BaseCommand):
     help = "Launches the Textual operator dashboard (keyboard-driven review & approval UI)."
 
     def handle(self, *args, **options):
+        # Ensure database tables and columns exist before querying
+        from core.services.config_service import ensure_migrations_applied, ensure_operator_accounts_synced
+        ensure_migrations_applied()
+        ensure_operator_accounts_synced()
         ITMSOperatorApp().run()

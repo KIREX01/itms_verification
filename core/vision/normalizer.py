@@ -12,6 +12,7 @@ an `O` in a digit slot is almost always a `0`).
 import re
 
 PLATE_REGEX = re.compile(r"^([A-Z]{3})\s*(\d{3})([A-Z]{1,2})$")
+SPECIAL_PLATE_REGEX = re.compile(r"^(UG|UPF|UPS|CD)\s*(\d{3,4})([A-Z]?)$")
 
 # letter-slot confusions: OCR digit -> intended letter
 _DIGIT_TO_LETTER = {"0": "O", "1": "I", "8": "B", "5": "S", "2": "Z", "4": "A", "6": "G", "7": "T"}
@@ -24,7 +25,7 @@ _LETTER_TO_DIGIT = {
 }
 
 # In Uganda, all standard registrations begin with 'U'. Common OCR confusions for leading 'U':
-_LEADING_U_CONFUSIONS = {"V": "U", "W": "U", "Y": "U", "0": "U", "O": "U", "J": "U"}
+_LEADING_U_CONFUSIONS = {"V": "U", "W": "U", "Y": "U", "0": "U", "O": "U", "J": "U", "D": "U", "Q": "U"}
 # Motorcycle prefix confusions for 'UM':
 _MOTORCYCLE_PREFIX_CONFUSIONS = {
     "WH": "UM", "VW": "UM", "UW": "UM", "WM": "UM", "VM": "UM",
@@ -84,6 +85,30 @@ def _correct_positional(cleaned: str) -> str:
             # Current Ugandan motorcycle series is UMA; 3rd letter is 'A'
             cleaned = f"UMA{digits}{sfx}"
 
+    # 4. Handle Government & Institutional plates (UG, UPF, UPS, CD)
+    for spec_pfx in ("UPF", "UPS", "UG", "CD"):
+        if cleaned.startswith(spec_pfx):
+            p_len = len(spec_pfx)
+            rem = cleaned[p_len:]
+            if 3 <= len(rem) <= 5:
+                # Digits followed by optional letter
+                chars = list(cleaned)
+                # Ensure prefix is letters
+                for i in range(p_len):
+                    if chars[i] in _DIGIT_TO_LETTER:
+                        chars[i] = _DIGIT_TO_LETTER[chars[i]]
+                # Digits segment (all but optional trailing letter)
+                digit_end = len(chars) if chars[-1].isdigit() else len(chars) - 1
+                for i in range(p_len, digit_end):
+                    if chars[i] in _LETTER_TO_DIGIT:
+                        chars[i] = _LETTER_TO_DIGIT[chars[i]]
+                if digit_end < len(chars):
+                    if chars[-1] in _DIGIT_TO_LETTER:
+                        chars[-1] = _DIGIT_TO_LETTER[chars[-1]]
+                candidate = "".join(chars)
+                if SPECIAL_PLATE_REGEX.match(candidate):
+                    return candidate
+
     if len(cleaned) not in (7, 8):
         return cleaned
 
@@ -118,14 +143,14 @@ def normalize_plate(raw_text: str) -> dict:
     Returns:
         {
             "canonical": str,     # best-effort canonical string
-            "is_valid": bool,     # matches PLATE_REGEX after correction
+            "is_valid": bool,     # matches PLATE_REGEX or SPECIAL_PLATE_REGEX after correction
             "raw": str,           # original input, unmodified
         }
     """
     cleaned = canonicalize(raw_text)
     corrected = _correct_positional(cleaned)
 
-    is_valid = bool(PLATE_REGEX.match(corrected))
+    is_valid = is_valid_plate(corrected)
     canonical = corrected if is_valid else cleaned
 
     return {
@@ -136,4 +161,6 @@ def normalize_plate(raw_text: str) -> dict:
 
 
 def is_valid_plate(canonical_text: str) -> bool:
-    return bool(PLATE_REGEX.match(canonical_text))
+    if not canonical_text:
+        return False
+    return bool(PLATE_REGEX.match(canonical_text) or SPECIAL_PLATE_REGEX.match(canonical_text))

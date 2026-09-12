@@ -98,22 +98,44 @@ end-to-end on any machine with no extra downloads.
 
 ## Level 4: Python Operator Terminal User Interface (TUI)
 
-* `[x]` **Modular Textual TUI Dashboard** (`core/tui/app.py`, `tables.py`, `handlers.py`, `actions.py`, `inspectors.py`).
-* `[x]` **Interactive Closest Photo Picker Modal** (`core/tui/dialogs.py`): Press `[L]` to browse, preview with BBox (`[V]`), and link (`[Enter]` / `[1-9]`).
+* `[x]` **Modular Textual TUI Architecture**:
+  - Modularized into `core/tui/app.py`, `tables.py`, `handlers.py`, `actions.py`, `inspectors.py`, `commands.py`, `auth_screens.py`, `dialogs.py`.
+* `[x]` **Centralized Command Palette (`Ctrl+P` / `^P`)**:
+  - Categorized execution: Pipeline, Review, ITMS Submission, Ingestion, Navigation, Filter, Storage, and System.
+  - Dedicated closing mechanisms: `[✕ Close [Esc]]` header button, click backdrop outside dismiss, `Esc` key priority, and `Ctrl+P` toggle.
+* `[x]` **Fast-Path Plate Typing & Order Autocomplete (`[T]`)**:
+  - `PlateQuickEntryModal` dialog with live Tab autocomplete, prefix filtering, and arrow-key row selection sync.
+  - Prefix matching resolution (e.g. `UMA94` -> `UMA946DQ`) with fallback database scan.
+  - Automatic hardware sync (`front_plate_serial`, `gps_tracker_id`) from ITMS if missing locally.
+* `[x]` **Isolated Operator Authentication Portal (`LandingAuthScreen`)**:
+  - PBKDF2 SHA-256 operator account creation & authentication.
+  - Streamlined account creation form: strictly Username, Password, and Confirm Password.
+  - Keybinding isolation: filtered `_binding_chain` preventing operator shortcuts (`1-4`, `P`, `M`, `U`, `^P`) from leaking or triggering on login/register screens.
 * `[x]` **Side-by-Side Visual Evidence Viewer** (`core/services/viewer.py`).
-* `[x]` **Single-Key Actions**: `[V]`iew, `[A]`pprove, `[S]`wap, `[L]`ink/Pick, `[R]`efresh, `[Q]`uit.
+* `[x]` **Interactive Closest Photo Picker Modal** (`core/tui/dialogs.py`): Press `[L]` to browse, preview with BBox (`[V]`), and link (`[Enter]` / `[1-9]`).
+* `[x]` **Single-Key Actions**: `[T]`ype/Match, `[V]`iew, `[A]`pprove, `[S]`wap, `[L]`ink/Pick, `[U]` Submit Single, `[B]` Batch Submit All, `[Y]` Sync Orders, `[R]`efresh, `[Q]`uit.
 * `[x]` **TUI Command**: `python manage.py run_tui`.
 
-## Level 5: Simulated ITMS Automation Worker & Fallback Engine
+## Level 5: Production ITMS Automation Worker & Live WebApp Integration
 
-* `[x]` **Simulated ITMS Service** (`core/services/itms_mock.py`): 4-step workflow with
-  configurable latency and failure injection.
-* `[x]` **Automated Submission Worker** (`core/services/submission_worker.py`).
-* `[x]` **Resilience & Fallback Handler**: any failure -> `FAILED` + `FALLBACK` audit entry.
-* `[x]` **Submission Command**: `python manage.py submit_itms [--auto-approve]`.
+* `[x]` **Live ITMS Web Connector** (`core/services/itms_web.py`):
+  - Authenticated session management against `stock.itms.ug`.
+  - Step 1: `/installation-orders/index` and `vehicle-installations/create` lookup & validation.
+  - Step 2: Multipart photo upload (`media-files/upload-file`) replacing existing or uploading new front & rear evidence.
+  - Step 3: `/vehicle-installations/approve` and final confirmation submission.
+* `[x]` **Production Verification Milestone**:
+  - Order `PO-UMA835DS-030926` (Pair 173) successfully submitted, validated live, and archived on `stock.itms.ug` with status `Installed`, date `10.09.2026 - 23:01`, officer `Name`, and replacement front/rear photos verified.
+* `[x]` **Automated Order Synchronization Service** (`core/services/order_sync.py`):
+  - Ingests active orders, serial numbers, and tracker IDs into local PostgreSQL cache.
+  - Intelligent rate limiting and cache-time checks to prevent redundant network overhead.
+* `[x]` **Simulated ITMS Mock Service** (`core/services/itms_mock.py`): 4-step workflow sandbox with configurable latency and failure injection.
+* `[x]` **Submission Worker** (`core/services/submission_worker.py`): Unified interface for both `mock` and `web` backends with dry-run safety modes.
+* `[x]` **Submission Commands**:
+  - `python manage.py submit_itms [--backend=web|mock] [--dry-run]`
+  - `python manage.py sync_itms_orders`
 
 ## Level 6: Benchmarking, Validation & Documentation
 
 * `[x]` **Benchmarking Command** (`core/management/commands/benchmark_pipeline.py`).
-* `[x]` **Test Suite**: `core/tests.py`, `core/tests_vision.py`, `core/tests_association.py`.
-* `[x]` **Documentation**: `docs/propsal.md`, `docs/ROADMAP.md`, `README.md`.
+* `[x]` **Comprehensive Test Suite**: `core/tests.py`, `core/tests_vision.py`, `core/tests_association.py`, `core/tests_auth.py`.
+* `[x]` **Documentation**: `docs/propsal.md`, `docs/ROADMAP.md`, `docs/ITMS_WEBAPP_CONNECTION_AND_SESSION_ARCHITECTURE.md`, `README.md`.

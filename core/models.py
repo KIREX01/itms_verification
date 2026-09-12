@@ -48,9 +48,28 @@ class InstallationOrder(models.Model):
     registration_status = models.CharField(max_length=64, blank=True, default="", help_text="e.g. Active")
     installation_officer = models.CharField(max_length=128, blank=True, default="")
     installation_date = models.CharField(max_length=64, blank=True, default="")
+    account_email = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="ITMS account email that fetched/owns this order.",
+    )
+    account_uuid = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="ITMS account UUID that fetched/owns this order.",
+    )
     itms_order_uuid = models.CharField(max_length=64, blank=True, default="", db_index=True)
     itms_action_url = models.CharField(max_length=255, blank=True, default="")
     is_archived = models.BooleanField(default=False, db_index=True, help_text="True if order is in /installation-orders/archive")
+    is_active_on_itms = models.BooleanField(default=True, db_index=True, help_text="True if order is currently active on ITMS /installation-orders/index")
+    last_synced_at = models.DateTimeField(null=True, blank=True, db_index=True, help_text="Timestamp when order was last verified or synced with ITMS")
+    itms_stage = models.CharField(max_length=32, blank=True, default="", db_index=True, help_text="Current stage on ITMS (STAGE_1_INSTALLATION, STAGE_2_APPROVE, STAGE_3_CONFIRMATION, ARCHIVED)")
+    has_front_photo = models.BooleanField(default=False, help_text="True if front photo is confirmed present on ITMS")
+    has_rear_photo = models.BooleanField(default=False, help_text="True if rear photo is confirmed present on ITMS")
 
     # ITMS Detailed Order & Hardware Inventory
     front_plate_serial = models.CharField(max_length=64, blank=True, default="")
@@ -100,6 +119,13 @@ class IngestionBatch(models.Model):
         max_length=255,
         blank=True,
         help_text="Folder name, operator name, or upload note for this batch.",
+    )
+    account_email = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Active ITMS account email at time of ingestion.",
     )
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     total_files = models.PositiveIntegerField(default=0)
@@ -158,6 +184,14 @@ class EvidenceImage(models.Model):
     file_size_bytes = models.BigIntegerField(default=0)
 
     detected_plate = models.CharField(max_length=32, blank=True, db_index=True)
+    raw_ocr_text = models.CharField(
+        max_length=64, blank=True, default="",
+        help_text="Raw unnormalized OCR character string from engine before normalizer or order guidance.",
+    )
+    order_guided_plate = models.CharField(
+        max_length=32, blank=True, default="",
+        help_text="Plate candidate resolved via active ITMS order prior matching.",
+    )
     ocr_confidence = models.FloatField(null=True, blank=True)
     detector_confidence = models.FloatField(null=True, blank=True)
     bbox = models.JSONField(
@@ -227,6 +261,7 @@ class VehicleInstallationPair(models.Model):
         UNREGISTERED = "UNREGISTERED", "Unregistered Vehicle"
         SUBMITTED = "SUBMITTED", "Submitted"
         FAILED = "FAILED", "Submission Failed"
+        OFFLINE_OUTBOX = "OFFLINE_OUTBOX", "Offline Outbox"
 
     class MatchType(models.TextChoices):
         EXACT = "EXACT", "Exact Match"
@@ -256,6 +291,28 @@ class VehicleInstallationPair(models.Model):
     )
     match_type = models.CharField(max_length=8, choices=MatchType.choices, default=MatchType.NONE)
     match_score = models.FloatField(null=True, blank=True)
+    class MatchedVia(models.TextChoices):
+        VISION = "VISION", "Vision OCR"
+        ORDER_PRIOR = "ORDER_PRIOR", "Order Prior Guided"
+        MANUAL = "MANUAL", "Manual Operator Entry"
+        REPAIR = "REPAIR", "Manual Re-Pair"
+
+    matched_via = models.CharField(
+        max_length=16, choices=MatchedVia.choices, default=MatchedVia.VISION,
+        help_text="Pipeline stage that determined the pair grouping and plate identity.",
+    )
+    is_manual_override = models.BooleanField(
+        default=False, db_index=True,
+        help_text="True if operator manually typed or confirmed the plate / order identity.",
+    )
+    manual_plate_override = models.CharField(max_length=32, blank=True, default="")
+    account_email = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="ITMS account email associated with this pair.",
+    )
     is_complete = models.BooleanField(default=False)
 
     operator_note = models.TextField(blank=True)
@@ -297,6 +354,11 @@ class SubmissionAuditLog(models.Model):
         ARCHIVE_VERIFY = "ARCHIVE_VERIFY", "Archive Installation Verification"
         ORDER_INFO_FETCH = "ORDER_INFO_FETCH", "Order Info Inspection"
         PHOTO_DOWNLOAD = "PHOTO_DOWNLOAD", "ITMS Photo Download"
+        ORDER_SYNC = "ORDER_SYNC", "Order Registry Sync"
+        MANUAL_PLATE_ASSIGN = "MANUAL_PLATE_ASSIGN", "Manual Plate Assignment"
+        ORDER_PRIOR_CORRECT = "ORDER_PRIOR_CORRECT", "Order Prior Hypothesis Correction"
+        OUTBOX_QUEUE = "OUTBOX_QUEUE", "Offline Outbox Queued"
+        OUTBOX_DRAIN = "OUTBOX_DRAIN", "Offline Outbox Auto-Synced"
         FALLBACK = "FALLBACK", "Manual Fallback Triggered"
 
     class ResultStatus(models.TextChoices):
@@ -307,7 +369,7 @@ class SubmissionAuditLog(models.Model):
     pair = models.ForeignKey(
         VehicleInstallationPair, on_delete=models.CASCADE, related_name="audit_logs"
     )
-    action = models.CharField(max_length=24, choices=Action.choices)
+    action = models.CharField(max_length=32, choices=Action.choices)
     result = models.CharField(max_length=8, choices=ResultStatus.choices)
     message = models.TextField(blank=True)
     simulated_token = models.CharField(max_length=64, blank=True)

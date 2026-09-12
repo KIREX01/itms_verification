@@ -136,22 +136,23 @@ To ensure zero data loss, prevent re-processing identical files, and guarantee f
 * **Fuzzy Order Matcher**: When OCR yields minor character ambiguities (e.g., `UMA1238A` vs. order `UMA123BA`), fuzzy matching calculates Levenshtein distance and character substitution weights, flagging the entry for operator confirmation rather than rejecting it.
 * **Completeness Assessment**: Vehicles missing either the front or rear image are flagged as `INCOMPLETE` with visual alerts in the TUI.
 
-### Step 7: Human-in-the-Loop TUI Verification
-* The operator utilizes a high-efficiency **Python TUI (Terminal User Interface)**.
+### Step 7: Human-in-the-Loop TUI Verification & Ergonomics
+* The operator utilizes a high-efficiency **Python TUI (Terminal User Interface)** built with Textual:
 * **Key TUI Capabilities**:
-  * Real-time summary of batch health (Matched, Incomplete, Ambiguous).
-  * High-speed keyboard navigation (Arrow keys, hotkeys for `[A]ccept`, `[R]eview`, `[E]dit`, `[S]ubmit All`).
-  * Image inspection trigger (opening image previews in native viewers or terminal graphic protocols).
-  * Clear confidence indicators (color-coded green/yellow/red).
+  * **Centralized Command Palette (`Ctrl+P` / `^P`)**: Instant search and execution across Pipeline, Review, ITMS Submission, Ingestion, Navigation, Filter, Storage, and System commands, with a dedicated `[✕ Close [Esc]]` button and background-click dismissal.
+  * **Fast-Path Plate Typing & Order Autocomplete (`[T]`)**: Interactive dialog allowing operators to type plates with Tab completion, resolve prefix discrepancies (e.g. `UMA94` matching `UMA946DQ`), and automatically pull hardware serials (tracker IDs and plate serials) from ITMS records.
+  * **Secure Operator Authentication Portal**: Multi-tabbed landing screen with PBKDF2 SHA-256 operator login and streamlined account creation (strictly Username, Password, and Confirm Password), with complete keybinding isolation preventing shortcuts from leaking during credentials entry.
+  * **Interactive Evidence Inspector & Viewer (`[V]`)**: Side-by-side high-resolution photographic comparison with plate crops, bounding boxes, and orientation tags.
+  * **Closest Photo Picker Modal (`[L]`)**: Spatial and temporal proximity candidate list for manual pair linking and swapping (`[S]`).
 
-### Step 8: ITMS Submission Automation & Fallback Safety
-* Once an operator approves a record (or high-confidence batches are cleared), an automation worker simulates the ITMS multi-step submission:
-  1. Locates the vehicle order record.
-  2. Verifies tracker and plate identifiers.
-  3. Uploads the front photograph into the front evidence field.
-  4. Uploads the rear photograph into the rear evidence field.
-  5. Validates submission success and logs audit metadata.
-* **Fail-Safe Guarantee**: Automation will never block operations. Any failure (network timeout, format rejection, missing payload) triggers an immediate failure alert and enables standard manual fallback.
+### Step 8: ITMS Submission Automation & Production Sync
+* The system supports dual submission pathways: a local simulation sandbox (`itms_mock.py`) for regression testing, and a production web connector (`itms_web.py`) for live ITMS installations:
+  1. **Order Synchronization & Lookup**: Pulls active installation orders from `stock.itms.ug` with rate-limiting cache protection.
+  2. **Hardware Serial Verification**: Validates Tracker ID, Front Plate Serial, and Rear Plate Serial against ITMS registry values.
+  3. **Multipart Evidence Upload (Step 2)**: Transmits front and rear evidence photos to `media-files/upload-file`, seamlessly handling both new installations and image replacements.
+  4. **Approval & Confirmation (Step 3)**: Dispatches `/vehicle-installations/approve` and verifies archiving. Successfully proven in production with live order `PO-UMA835DS-030926` (Pair 173) transitioned to `Installed` status.
+  5. **Audit Trail**: Every submission attempt, dry run, and manual override is forensically recorded in `SubmissionAuditLog`.
+* **Fail-Safe Guarantee**: Automation will never block operations. Any network timeout or validation discrepancy triggers immediate failure alerts and preserves records for operator review.
 
 ---
 
@@ -159,7 +160,7 @@ To ensure zero data loss, prevent re-processing identical files, and guarantee f
 
 The project delivers a cohesive solution across four primary dimensions:
 
-1. **Accurate Recognition**: High-precision localization and character extraction on vehicle plates in natural, non-studio lighting.
-2. **Intelligent Association**: Automated grouping of corresponding front and rear photographs into verified vehicle evidence pairs.
-3. **Ergonomic Operator Interface**: A streamlined, lightweight Python TUI replacing tedious multi-click web workflows.
-4. **Reliable Simulated Automation**: A resilient Django-backed automation layer capable of processing complete batches while preserving comprehensive audit trails.
+1. **Accurate Recognition**: High-precision localization and character extraction on vehicle plates in natural, non-studio lighting with Ugandan syntax normalizers.
+2. **Intelligent Association**: Automated grouping of corresponding front and rear photographs into verified vehicle evidence pairs using walk session temporal clustering.
+3. **Ergonomic Operator Interface**: A streamlined, keyboard-driven Python TUI with a centralized Command Palette, quick plate autocomplete, and isolated authentication.
+4. **Reliable Live & Simulated Automation**: Resilient submission workers supporting both live production `stock.itms.ug` workflows and local simulated mock environments while preserving comprehensive audit trails.

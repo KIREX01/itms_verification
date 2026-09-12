@@ -317,6 +317,133 @@ def show_pair_evidence(pair, window_title: Optional[str] = None, block: bool = F
     return None
 
 
+def show_evidence_pair(
+    front_path: Optional[str] = None,
+    rear_path: Optional[str] = None,
+    pair_id: Optional[str] = None,
+    order_number: Optional[str] = None,
+    plate: Optional[str] = None,
+    status: Optional[str] = None,
+    front_bbox: Optional[list] = None,
+    rear_bbox: Optional[list] = None,
+    block: bool = False,
+    **kwargs,
+) -> Optional[str]:
+    """Universal side-by-side or single evidence viewer handler called by modals and dialogues.
+
+    Accepts explicit file paths or falls back to single image if only one side is present.
+    """
+    has_front = bool(front_path and os.path.isfile(front_path))
+    has_rear = bool(rear_path and os.path.isfile(rear_path))
+
+    order_tag = f" (Order #{order_number})" if order_number and order_number != "—" else ""
+    title_plate = plate or "ITMS Evidence"
+    window_title = f"{title_plate}{order_tag} - Evidence Inspection"
+
+    if has_front and has_rear:
+        return show_side_by_side(front_path, rear_path, window_title=window_title, block=block)
+    elif has_front:
+        return show_single_image(
+            front_path,
+            bbox=front_bbox,
+            window_title=f"{window_title} - Front Evidence",
+            plate_label=plate or "",
+            orient_label="FRONT",
+            block=block,
+        )
+    elif has_rear:
+        return show_single_image(
+            rear_path,
+            bbox=rear_bbox,
+            window_title=f"{window_title} - Rear Evidence",
+            plate_label=plate or "",
+            orient_label="REAR",
+            block=block,
+        )
+    return None
+
+
+def show_order_confirmation_photos(
+    order_data: Any,
+    window_title: Optional[str] = None,
+    block: bool = False,
+) -> Optional[str]:
+    """
+    Displays evidence photos for an ITMS order confirmation or order info.
+    Accepts:
+      - Dictionary from fetch_confirmation_step3 or fetch_order_info
+      - Or a list of photo dicts (each having 'local_path', 'orientation', or 'filename')
+    If both front and rear photos exist on disk: opens side-by-side comparison.
+    If only one photo exists: opens single image viewer.
+    """
+    from django.conf import settings
+
+    order_num = ""
+    reg_num = ""
+    photos_list = []
+
+    if isinstance(order_data, dict):
+        order_num = order_data.get("order_number", "")
+        reg_num = order_data.get("registration_number", "")
+        photos_list = order_data.get("photo_cards") or order_data.get("photos") or []
+    elif isinstance(order_data, list):
+        photos_list = order_data
+
+    vault_root = getattr(settings, "VAULT_ROOT", "media/vault") if settings.configured else "media/vault"
+    vault_path = Path(vault_root)
+
+    front_path = ""
+    rear_path = ""
+
+    for p in photos_list:
+        if not isinstance(p, dict):
+            continue
+        label = str(p.get("label", "")).lower()
+        orient = str(p.get("orientation", "")).upper()
+        local_p = p.get("local_path", "")
+        filename = p.get("filename", "")
+
+        resolved = ""
+        if local_p and os.path.isfile(local_p):
+            resolved = local_p
+        elif filename and order_num:
+            cand = vault_path / "itms_photos" / order_num / filename
+            if cand.is_file():
+                resolved = str(cand)
+
+        if not resolved:
+            continue
+
+        if "front" in label or orient == "FRONT":
+            if not front_path:
+                front_path = resolved
+        elif "rear" in label or orient == "REAR":
+            if not rear_path:
+                rear_path = resolved
+
+    title = window_title or f"ITMS Confirmation Photos: {order_num} ({reg_num})" if order_num else "ITMS Confirmation Photos"
+
+    if front_path and rear_path:
+        return show_side_by_side(front_path, rear_path, window_title=f"{title} (Front | Rear)", block=block)
+    elif front_path:
+        return show_single_image(
+            front_path,
+            window_title=f"{title} - Front Evidence",
+            plate_label=reg_num,
+            orient_label="FRONT",
+            block=block,
+        )
+    elif rear_path:
+        return show_single_image(
+            rear_path,
+            window_title=f"{title} - Rear Evidence",
+            plate_label=reg_num,
+            orient_label="REAR",
+            block=block,
+        )
+    return None
+
+
 def show_single_image(
     image_path: str,
     bbox: Optional[list] = None,

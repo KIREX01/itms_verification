@@ -32,6 +32,7 @@ from textual.widgets import (
 
 from core.services.itms_web_client import ITMSWebClient, get_web_client
 from core.services import viewer
+from core.services.config_service import get_config_service
 from core.tui.inspectors import InspectorPane
 
 ITMS_SUBVIEWS = ["CONNECT", "ORDERS", "ARCHIVE"]
@@ -58,13 +59,8 @@ class ITMSConnectionPane(Vertical):
         self._is_archive_mode: bool = False
 
     def compose(self) -> ComposeResult:
-        # Top Banner (Compact single-line with read-only audit badge)
-        yield Static(
-            "🌐 [bold cyan]ITMS Hub[/bold cyan] [dim](https://stock.itms.ug)[/dim]  │  "
-            "[bold white on dark_green] 🔒 READ-ONLY AUDIT [/bold white on dark_green]  "
-            "[dim]Reverse-engineered session & safe photographic evidence inspection[/dim]",
-            id="itms-top-bar",
-        )
+        # Top Banner (Dynamic mode badge based on loaded config)
+        yield Static(self._render_top_bar(), id="itms-top-bar")
 
         # Subview Filter Navigation Bar (Press [F] to cycle)
         yield Static(self._render_filter_bar(), id="itms-subview-filter-bar")
@@ -76,14 +72,11 @@ class ITMSConnectionPane(Vertical):
             # Left Column: Live Status & Safety Guarantees
             with Vertical(id="itms-status-column"):
                 yield Static(self._render_status_card(), id="itms-status-card")
+                show_safety = get_config_service().get_setting("system.show_safety_guarantee", False)
                 yield Static(
-                    "[bold green]🔒 SAFE AUDIT GUARANTEE[/bold green]\n"
-                    "[dim]• Verification mode is STRICTLY READ-ONLY (GET requests only).\n"
-                    "• ZERO vehicle registration or fitment updates are sent.\n"
-                    "• Cookies cached in vault (.itms_web_session.json).\n"
-                    "• Rate-limit cooldown active to protect web server limits.\n"
-                    "• Downloaded evidence photos stored in protected vault.[/dim]",
+                    self._render_safety_card(),
                     id="itms-safety-card",
+                    classes="" if show_safety else "hidden",
                 )
 
             # Right Column: Authentication & Server Controls
@@ -95,7 +88,7 @@ class ITMSConnectionPane(Vertical):
                     id="input-itms-url",
                 )
                 yield Input(
-                    placeholder="ITMS Username / Email (e.g. k.jeremiah@itms-ug.com)",
+                    placeholder="ITMS Username / Email",
                     id="input-itms-email",
                 )
                 yield Input(
@@ -244,17 +237,59 @@ class ITMSConnectionPane(Vertical):
         elif subview == "ORDERS":
             self._set_feedback("Sub-view: Active Fitment Orders (↑/↓ select row │ [V] view photos)", "cyan")
             table = self.query_one("#table-itms-orders", DataTable)
-            if table.row_count == 0 and self.client.session_store.session.is_cookie_valid():
+            if table.row_count == 0 and self.client.session_store.session.is_cookie_valid() and not getattr(self, "_is_fetching_orders", False):
                 self.action_fetch_orders(archive=False)
         elif subview == "ARCHIVE":
             self._set_feedback("Sub-view: Completed Orders Archive (↑/↓ select row │ [V] view photos)", "cyan")
             table = self.query_one("#table-itms-archive", DataTable)
-            if table.row_count == 0 and self.client.session_store.session.is_cookie_valid():
+            if table.row_count == 0 and self.client.session_store.session.is_cookie_valid() and not getattr(self, "_is_fetching_orders", False):
                 self.action_fetch_orders(archive=True)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Status & Feedback Helpers
     # ──────────────────────────────────────────────────────────────────────────
+
+    def _render_top_bar(self) -> str:
+        cfg = get_config_service()
+        dry_run = cfg.get_setting("submission.dry_run_mode", True)
+        base_url = cfg.get_setting("network.itms_base_url", "https://stock.itms.ug")
+        if dry_run:
+            badge = "[bold white on dark_green] 🔒 READ-ONLY AUDIT (DRY-RUN) [/bold white on dark_green]"
+            desc = "[dim]Safe inspection mode │ Submissions simulated[/dim]"
+        else:
+            badge = "[bold white on dark_red] ⚡ LIVE SUBMISSION MODE [/bold white on dark_red]"
+            desc = "[dim]Mutating fitment & evidence upload enabled[/dim]"
+        return f"🌐 [bold cyan]ITMS Hub[/bold cyan] [dim]({base_url})[/dim]  │  {badge}  {desc}"
+
+    def _render_safety_card(self) -> str:
+        cfg = get_config_service()
+        dry_run = cfg.get_setting("submission.dry_run_mode", True)
+        step3 = cfg.get_setting("submission.submit_step3", True)
+        timeout = cfg.get_setting("submission.request_timeout_seconds", 30)
+        cb = cfg.get_setting("submission.circuit_breaker_threshold", 3)
+        retention = cfg.get_setting("storage.vault_retention_days", 7)
+        db_conf = cfg.get_database_config()
+        db_engine = db_conf.get("ENGINE", "").split(".")[-1].upper() or "SQLITE"
+
+        if dry_run:
+            return (
+                "[bold green]🔒 SAFE AUDIT GUARANTEE (CONFIG LOADED)[/bold green]\n"
+                "[dim]• Verification mode is STRICTLY READ-ONLY (Simulated GET requests only).\n"
+                "• ZERO vehicle registration or fitment updates are transmitted.\n"
+                f"• Active Storage: {db_engine} Database │ Vault retention: {retention}d.\n"
+                f"• Rate-Limit & Protection: {timeout}s timeout │ Circuit Breaker: {cb} errors.\n"
+                "• Cookies cached in secure vault (.itms_web_session.json).[/dim]"
+            )
+        else:
+            step3_status = "Auto-Finalize Enabled" if step3 else "Manual Confirmation Required"
+            return (
+                "[bold red]⚡ LIVE SUBMISSION ACTIVE (CONFIG LOADED)[/bold red]\n"
+                "[dim]• Live Mode: POST requests & remote mutations ACTIVE.\n"
+                "• Vehicle registration updates WILL be sent to remote ITMS.\n"
+                f"• Step 3 Installation Finalization: {step3_status}.\n"
+                f"• Safeguards: {timeout}s timeout │ Circuit Breaker trips after {cb} failures.\n"
+                f"• Vault Retention: {retention} days for evidence archives.[/dim]"
+            )
 
     def _render_status_card(self) -> str:
         status = self.client.get_status()
@@ -290,8 +325,32 @@ class ITMSConnectionPane(Vertical):
         )
 
     def _refresh_status_card(self) -> None:
-        card = self.query_one("#itms-status-card", Static)
-        card.update(self._render_status_card())
+        try:
+            card = self.query_one("#itms-status-card", Static)
+            card.update(self._render_status_card())
+        except Exception:
+            pass
+
+        try:
+            top_bar = self.query_one("#itms-top-bar", Static)
+            top_bar.update(self._render_top_bar())
+        except Exception:
+            pass
+
+        try:
+            safety_card = self.query_one("#itms-safety-card", Static)
+            cfg = get_config_service()
+            show_card = cfg.get_setting("system.show_safety_guarantee", False)
+            dry_run = cfg.get_setting("submission.dry_run_mode", True)
+            safety_card.display = show_card
+            if show_card:
+                safety_card.update(self._render_safety_card())
+                if dry_run:
+                    safety_card.remove_class("live-mode")
+                else:
+                    safety_card.add_class("live-mode")
+        except Exception:
+            pass
 
     def _log_preview(self, msg: Any) -> None:
         try:
@@ -561,21 +620,69 @@ class ITMSConnectionPane(Vertical):
         client = ITMSWebClient(base_url=url, session_store=self.client.session_store)
         res = client.login(email, password, remember_me=remember)
 
-        if res.get("success"):
-            self.app.call_from_thread(self._set_feedback, "✓ Authenticated successfully", "bold green")
+        # client.login returns a 3-tuple: (success: bool, message: str, session_data: dict)
+        if isinstance(res, tuple):
+            success = bool(res[0])
+            msg = res[1] if len(res) > 1 else ""
+            session_data = res[2] if len(res) > 2 and isinstance(res[2], dict) else {}
+        elif isinstance(res, dict):
+            success = bool(res.get("success", False))
+            msg = res.get("message") or res.get("error", "")
+            session_data = res
+        else:
+            success = bool(res)
+            msg = str(res)
+            session_data = {}
+
+        if success:
+            self.client = client
+            user_uuid = session_data.get("user_uuid") or client.session_store.session.user_uuid or "Active"
+
+            # Clear any leftover cached orders from the previous account before loading new account data
+            self._last_fetched_orders = []
+            self._last_active_orders = []
+            self._last_archive_orders = []
+            self._active_orders_map.clear()
+            self._archive_orders_map.clear()
+            self._highlighted_order = None
+
+            def on_login_success():
+                self._set_feedback(f"✓ Authenticated as {email}", "bold green")
+                try:
+                    pw_input = self.query_one("#input-itms-password", Input)
+                    pw_input.value = ""
+                except Exception:
+                    pass
+                try:
+                    self.query_one("#table-itms-orders", DataTable).clear()
+                    self.query_one("#table-itms-archive", DataTable).clear()
+                    self.query_one("#inspector-itms-orders", InspectorPane).show_itms_order(None, is_archive=False)
+                    self.query_one("#inspector-itms-archive", InspectorPane).show_itms_order(None, is_archive=True)
+                except Exception:
+                    pass
+
+            self.app.call_from_thread(on_login_success)
             self.app.call_from_thread(
                 self._log_preview,
-                f"[bold green]✓ Login Successful:[/bold green] Authenticated as [white]{email}[/white] (UUID: {res.get('user_uuid')})\n"
+                f"[bold green]✓ Login Successful:[/bold green] Authenticated as [white]{email}[/white] (UUID: {user_uuid})\n"
                 f"Session cookies saved to media/vault/.itms_web_session.json (Expires in ~30 days).",
             )
             self.app.call_from_thread(self._refresh_status_card)
+            self.app.call_from_thread(self.app.reload_data)
             self.app.call_from_thread(
                 self.app.log_message,
                 f"ITMS WebApp authenticated successfully: {email}",
                 level="ITMS",
             )
+            self.app.call_from_thread(
+                self.app.notify,
+                f"Connected to ITMS as {email}",
+                severity="information",
+            )
+            if self.current_subview in ("ORDERS", "ARCHIVE"):
+                self.action_fetch_orders(archive=(self.current_subview == "ARCHIVE"))
         else:
-            err = res.get("error", "Authentication failed.")
+            err = msg or "Authentication failed."
             self.app.call_from_thread(self._set_feedback, f"✗ {err}", "bold red")
             self.app.call_from_thread(self._log_preview, f"[bold red]✗ Login Failed:[/bold red] {err}")
             self.app.call_from_thread(
@@ -583,6 +690,56 @@ class ITMSConnectionPane(Vertical):
                 f"ITMS login error: {err}",
                 level="ERROR",
             )
+            self.app.call_from_thread(
+                self.app.notify,
+                f"ITMS login failed: {err}",
+                severity="error",
+            )
+
+    @work(thread=True)
+    def action_itms_logout(self) -> None:
+        """Logs out from the active ITMS session, deletes cached cookies, and clears views."""
+        old_user = self.client.session_store.session.user_email or "Active Account"
+        self.app.call_from_thread(self._set_feedback, f"Signing out {old_user}...", "yellow")
+
+        self.client.logout()
+
+        self._last_fetched_orders = []
+        self._last_active_orders = []
+        self._last_archive_orders = []
+        self._active_orders_map.clear()
+        self._archive_orders_map.clear()
+        self._highlighted_order = None
+
+        def on_logout_done():
+            try:
+                table_orders = self.query_one("#table-itms-orders", DataTable)
+                table_orders.clear()
+            except Exception:
+                pass
+            try:
+                table_archive = self.query_one("#table-itms-archive", DataTable)
+                table_archive.clear()
+            except Exception:
+                pass
+            try:
+                self.query_one("#inspector-itms-orders", InspectorPane).show_itms_order(None, is_archive=False)
+                self.query_one("#inspector-itms-archive", InspectorPane).show_itms_order(None, is_archive=True)
+            except Exception:
+                pass
+            try:
+                pw_input = self.query_one("#input-itms-password", Input)
+                pw_input.value = ""
+            except Exception:
+                pass
+
+            self._set_feedback(f"✓ Successfully signed out from {old_user}", "bold yellow")
+            self._refresh_status_card()
+            self.app.reload_data()
+            self.app.notify(f"Signed out from {old_user}", severity="information")
+            self.app.log_message(f"Signed out from ITMS account: {old_user}", level="ITMS")
+
+        self.app.call_from_thread(on_logout_done)
 
     @work(thread=True)
     def action_verify(self) -> None:
@@ -633,100 +790,113 @@ class ITMSConnectionPane(Vertical):
     @work(thread=True)
     def action_fetch_orders(self, archive: Optional[bool] = None) -> None:
         """Fetches installation orders for the specified page and plate filter (active or archive)."""
-        if archive is None:
-            archive = (self.current_subview == "ARCHIVE")
-
-        page_input_id = "#input-itms-archive-page" if archive else "#input-itms-page"
-        filter_input_id = "#input-itms-archive-filter" if archive else "#input-itms-search-plate"
-        table_id = "#table-itms-archive" if archive else "#table-itms-orders"
-
+        if getattr(self, "_is_fetching_orders", False):
+            self.app.call_from_thread(self._set_feedback, "Fetch already in progress...", "yellow")
+            return
+        self._is_fetching_orders = True
         try:
-            page_input = self.query_one(page_input_id, Input)
-            page_str = page_input.value.strip() or "1"
-            page = max(1, int(page_str))
-        except Exception:
-            page = 1
+            if archive is None:
+                archive = (self.current_subview == "ARCHIVE")
 
-        try:
-            plate_filter = self.query_one(filter_input_id, Input).value.strip()
-        except Exception:
-            plate_filter = ""
+            page_input_id = "#input-itms-archive-page" if archive else "#input-itms-page"
+            filter_input_id = "#input-itms-archive-filter" if archive else "#input-itms-search-plate"
+            table_id = "#table-itms-archive" if archive else "#table-itms-orders"
 
-        search_params = plate_filter if plate_filter else None
-        mode_name = "Archive (Installed)" if archive else "Active Orders"
-        endpoint = "/installation-orders/archive" if archive else "/installation-orders/index"
+            try:
+                page_input = self.query_one(page_input_id, Input)
+                page_str = page_input.value.strip() or "1"
+                page = max(1, int(page_str))
+            except Exception:
+                page = 1
 
-        self.app.call_from_thread(self._set_feedback, f"Fetching {mode_name} (Page {page})...", "yellow")
-        filter_tag = f" (filter: {plate_filter})" if plate_filter else ""
-        self.app.call_from_thread(
-            self._log_preview,
-            f"[dim]Requesting {endpoint}?page={page}{filter_tag}...[/dim]",
-        )
+            try:
+                plate_filter = self.query_one(filter_input_id, Input).value.strip()
+            except Exception:
+                plate_filter = ""
 
-        res = self.client.fetch_installation_orders(page=page, search_params=search_params, archive=archive)
+            search_params = plate_filter if plate_filter else None
+            mode_name = "Archive (Installed)" if archive else "Active Orders"
+            endpoint = "/installation-orders/archive" if archive else "/installation-orders/index"
 
-        if res.get("success"):
-            orders = res.get("orders", [])
-            self._last_fetched_orders = orders
-            if archive:
-                self._last_archive_orders = orders
-                self._archive_orders_map = {str(i): o for i, o in enumerate(orders)}
-            else:
-                self._last_active_orders = orders
-                self._active_orders_map = {str(i): o for i, o in enumerate(orders)}
-
-            def update_table():
-                table = self.query_one(table_id, DataTable)
-                table.clear()
-                if archive:
-                    for i, o in enumerate(orders):
-                        st_text = "[bold green]Installed[/bold green]" if o.get("order_status", "").lower() == "installed" else o.get("order_status", "")
-                        table.add_row(
-                            o.get("order_number", ""),
-                            o.get("registration_number", ""),
-                            o.get("vin", ""),
-                            st_text,
-                            o.get("registration_status", ""),
-                            o.get("officer", ""),
-                            o.get("installation_date", ""),
-                            key=str(i),
-                        )
-                else:
-                    for i, o in enumerate(orders):
-                        table.add_row(
-                            o.get("order_number", ""),
-                            o.get("registration_number", ""),
-                            o.get("vin", ""),
-                            o.get("status", ""),
-                            o.get("sales_order", ""),
-                            o.get("warehouse", "")[:30],
-                            key=str(i),
-                        )
-                if orders:
-                    self._highlighted_order = orders[0]
-                    try:
-                        insp_id = "#inspector-itms-archive" if archive else "#inspector-itms-orders"
-                        self.query_one(insp_id, InspectorPane).show_itms_order(orders[0], is_archive=archive)
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        insp_id = "#inspector-itms-archive" if archive else "#inspector-itms-orders"
-                        self.query_one(insp_id, InspectorPane).show_itms_order(None, is_archive=archive)
-                    except Exception:
-                        pass
-
-            self.app.call_from_thread(update_table)
-            self.app.call_from_thread(self._set_feedback, f"✓ Retrieved {len(orders)} {mode_name} order(s) on Page {page}", "bold green")
+            self.app.call_from_thread(self._set_feedback, f"Fetching {mode_name} (Page {page})...", "yellow")
+            filter_tag = f" (filter: {plate_filter})" if plate_filter else ""
             self.app.call_from_thread(
-                self.app.log_message,
-                f"Retrieved {len(orders)} ITMS {mode_name} orders on page {page}{filter_tag}",
-                level="ITMS",
+                self._log_preview,
+                f"[dim]Requesting {endpoint}?page={page}{filter_tag}...[/dim]",
             )
-        else:
-            err = res.get("error", "Failed to fetch orders.")
-            self.app.call_from_thread(self._set_feedback, f"✗ {err}", "bold red")
-            self.app.call_from_thread(self._log_preview, f"[bold red]✗ Fetch Orders Failed:[/bold red] {err}")
+
+            res = self.client.fetch_installation_orders(page=page, search_params=search_params, archive=archive)
+
+            if res.get("success"):
+                orders = res.get("orders", [])
+                self._last_fetched_orders = orders
+                if archive:
+                    self._last_archive_orders = orders
+                    self._archive_orders_map = {str(i): o for i, o in enumerate(orders)}
+                else:
+                    self._last_active_orders = orders
+                    self._active_orders_map = {str(i): o for i, o in enumerate(orders)}
+
+                def update_table():
+                    table = self.query_one(table_id, DataTable)
+                    table.clear()
+                    if archive:
+                        for i, o in enumerate(orders):
+                            st_text = "[bold green]Installed[/bold green]" if o.get("order_status", "").lower() == "installed" else o.get("order_status", "")
+                            table.add_row(
+                                o.get("order_number", ""),
+                                o.get("registration_number", ""),
+                                o.get("vin", ""),
+                                st_text,
+                                o.get("registration_status", ""),
+                                o.get("officer", ""),
+                                o.get("installation_date", ""),
+                                key=str(i),
+                            )
+                    else:
+                        for i, o in enumerate(orders):
+                            table.add_row(
+                                o.get("order_number", ""),
+                                o.get("registration_number", ""),
+                                o.get("vin", ""),
+                                o.get("status", ""),
+                                o.get("sales_order", ""),
+                                o.get("warehouse", "")[:30],
+                                key=str(i),
+                            )
+                    if orders:
+                        self._highlighted_order = orders[0]
+                        try:
+                            insp_id = "#inspector-itms-archive" if archive else "#inspector-itms-orders"
+                            self.query_one(insp_id, InspectorPane).show_itms_order(orders[0], is_archive=archive)
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            insp_id = "#inspector-itms-archive" if archive else "#inspector-itms-orders"
+                            self.query_one(insp_id, InspectorPane).show_itms_order(None, is_archive=archive)
+                        except Exception:
+                            pass
+
+                self.app.call_from_thread(update_table)
+
+                # Synchronize fetched orders into local database and update dashboard counts
+                sync_res = self.client.sync_orders_to_local_db(orders)
+                self.app.call_from_thread(self.app.reload_data)
+
+                sync_info = f" [dim]({sync_res.get('created', 0)} new, {sync_res.get('updated', 0)} updated)[/dim]"
+                self.app.call_from_thread(self._set_feedback, f"✓ Retrieved {len(orders)} {mode_name} order(s) on Page {page}{sync_info}", "bold green")
+                self.app.call_from_thread(
+                    self.app.log_message,
+                    f"Retrieved {len(orders)} ITMS {mode_name} orders on page {page}{filter_tag} (Synced {sync_res.get('created', 0)} new, {sync_res.get('updated', 0)} updated)",
+                    level="ITMS",
+                )
+            else:
+                err = res.get("error", "Failed to fetch orders.")
+                self.app.call_from_thread(self._set_feedback, f"✗ {err}", "bold red")
+                self.app.call_from_thread(self._log_preview, f"[bold red]✗ Fetch Orders Failed:[/bold red] {err}")
+        finally:
+            self._is_fetching_orders = False
 
     @work(thread=True)
     def action_fetch_order_info(self, download_photos: bool = False) -> None:

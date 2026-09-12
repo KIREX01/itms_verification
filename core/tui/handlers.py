@@ -24,11 +24,57 @@ class NavigationHandlersMixin:
         if event.data_table.id in ("table-batch-images", "table-queue", "table-history"):
             self.action_view_evidence()
 
-    def _get_active_pair(self, table_id: str) -> Optional[VehicleInstallationPair]:
-        table = self.query_one(f"#{table_id}", DataTable)
-        if table.cursor_row is None or table.row_count == 0:
-            return None
+    def on_tabbed_content_tab_activated(self, event: "TabbedContent.TabActivated") -> None:
         try:
+            activity = self.query_one("#activity-container")
+            pane_id = getattr(event.pane, "id", "")
+            if pane_id == "tab-settings":
+                activity.display = False
+                try:
+                    self.set_focus(None)
+                except Exception:
+                    pass
+            else:
+                activity.display = True
+                target_focus_map = {
+                    "tab-queue": "#table-queue",
+                    "tab-history": "#table-history",
+                    "tab-batches": "#table-batches",
+                    "tab-itms": "#itms-connection-pane",
+                }
+                target_id = target_focus_map.get(pane_id)
+                if target_id:
+                    try:
+                        self.query_one(target_id).focus()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    def _get_active_pair(self, table_id: Optional[str] = None) -> Optional[VehicleInstallationPair]:
+        if not table_id:
+            try:
+                from textual.widgets import TabbedContent
+                tabs = self.query_one("#tabs-content", TabbedContent)
+                if tabs.active == "tab-history":
+                    table_id = "table-history"
+                else:
+                    table_id = "table-queue"
+            except Exception:
+                table_id = "table-queue"
+
+        try:
+            table = self.query_one(f"#{table_id}", DataTable)
+            if table.cursor_row is None or table.row_count == 0:
+                # Fallback to other table if requested table has no selection
+                if table_id == "table-history":
+                    other_table = self.query_one("#table-queue", DataTable)
+                    if other_table.cursor_row is not None and other_table.row_count > 0:
+                        row_key = other_table.coordinate_to_cell_key(other_table.cursor_coordinate).row_key
+                        return VehicleInstallationPair.objects.filter(id=row_key.value).select_related(
+                            "order", "front_image", "rear_image"
+                        ).first()
+                return None
             row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
             pair_id = row_key.value
             return VehicleInstallationPair.objects.filter(id=pair_id).select_related(

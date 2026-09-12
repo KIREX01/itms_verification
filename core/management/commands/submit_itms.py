@@ -19,13 +19,21 @@ class Command(BaseCommand):
             ),
         )
         parser.add_argument(
-            "--backend", choices=["mock", "live"], default=None,
-            help="Submission backend: 'mock' (simulated sandbox) or 'live' (stock.itms.ug API). Default: settings.ITMS_SUBMISSION_BACKEND.",
+            "--retry-failed", action="store_true",
+            help="Reset complete FAILED pairs to APPROVED before running submission.",
+        )
+        parser.add_argument(
+            "--backend", choices=["mock", "live", "live_web"], default=None,
+            help="Submission backend: 'mock' (simulated sandbox), 'live' (REST API), or 'live_web' (live stock.itms.ug web wizard). Default: settings.ITMS_SUBMISSION_BACKEND.",
         )
 
     def handle(self, *args, **options):
         backend = options.get("backend")
-        outcomes = submit_approved_pairs(auto_approve=options["auto_approve"], backend=backend)
+        outcomes = submit_approved_pairs(
+            auto_approve=options["auto_approve"],
+            retry_failed=options["retry_failed"],
+            backend=backend,
+        )
 
         if not outcomes:
             self.stdout.write(self.style.WARNING("No approved pairs were ready for submission."))

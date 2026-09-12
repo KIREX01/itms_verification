@@ -236,9 +236,8 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Processing {total} image(s) (max_retries={max_retries})...\n")
 
-        processed, plate_found, failed, skipped = 0, 0, 0, 0
-
-        for image in qs:
+        image_stream = qs.iterator(chunk_size=50) if hasattr(qs, "iterator") else qs
+        for image in image_stream:
             # ── Guard: double-check retry budget (race-safe) ───────────
             if image.retry_count >= max_retries:
                 skipped += 1

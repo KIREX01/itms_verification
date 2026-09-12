@@ -80,8 +80,8 @@ class TokenStore:
             if default_path:
                 self.storage_path = Path(default_path)
             else:
-                vault_dir = getattr(settings, "VAULT_ROOT", Path("media/vault"))
-                self.storage_path = Path(vault_dir) / ".itms_tokens.json"
+                from core.services.secure_storage import get_secure_auth_path
+                self.storage_path = get_secure_auth_path("itms_tokens.json", legacy_vault_file=".itms_tokens.json")
 
         self._tokens: TokenData = TokenData()
         self.load()

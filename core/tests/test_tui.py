@@ -65,8 +65,10 @@ class TUIAppTests(TransactionTestCase):
         async def run_pilot():
             app = ITMSOperatorApp()
             async with app.run_test() as pilot:
-                # 1. Check initial Queue tab
+                # 1. Check initial Dashboard tab and navigate to Queue via '4'
                 tabs = app.query_one("#tabs-content")
+                self.assertEqual(tabs.active, "tab-dashboard")
+                await pilot.press("4")
                 self.assertEqual(tabs.active, "tab-queue")
 
                 # Check queue table has rows
@@ -84,8 +86,8 @@ class TUIAppTests(TransactionTestCase):
                 self.assertEqual(self.pair.front_image, self.rear_img)
                 self.assertEqual(self.pair.rear_image, self.front_img)
 
-                # 4. Test Tab Navigation to History
-                await pilot.press("2")
+                # 4. Test Tab Navigation to History via '5'
+                await pilot.press("5")
                 self.assertEqual(tabs.active, "tab-history")
 
                 # Test Cycle Filter in History
@@ -93,7 +95,7 @@ class TUIAppTests(TransactionTestCase):
                 await pilot.press("f")
                 self.assertNotEqual(app.current_history_filter, initial_filter)
 
-                # 5. Test Tab Navigation to Ingestion Batches
+                # 5. Test Tab Navigation to Ingestion Batches via '3'
                 await pilot.press("3")
                 self.assertEqual(tabs.active, "tab-batches")
                 batches_table = app.query_one("#table-batches")

@@ -60,15 +60,12 @@ TEMPLATES = [
 WSGI_APPLICATION = "itms_project.wsgi.application"
 ASGI_APPLICATION = "itms_project.asgi.application"
 
+# --- System Configuration & Database Provider ---
+from core.services.config_service import get_database_config, get_setting
+
+# Database: defaults to SQLite (db.sqlite3) for portable zero-setup operation on other machines
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": env("POSTGRES_DB", default="itms"),
-        "USER": env("POSTGRES_USER", default="postgres"),
-        "PASSWORD": env("POSTGRES_PASSWORD", default=""),
-        "HOST": env("POSTGRES_HOST", default="localhost"),
-        "PORT": env("POSTGRES_PORT", default="5432"),
-    }
+    "default": get_database_config(BASE_DIR)
 }
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -93,13 +90,20 @@ VAULT_ROOT = MEDIA_ROOT / VAULT_SUBDIR
 CROPS_SUBDIR = env("CROPS_SUBDIR", default="crops")
 CROPS_ROOT = MEDIA_ROOT / CROPS_SUBDIR
 
+# --- Secure Storage (Configuration & Credentials) ---
+SECURE_ROOT = BASE_DIR / env("SECURE_ROOT", default="secure")
+SECURE_AUTH_ROOT = SECURE_ROOT / "auth"
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# --- Operator vs Developer Permissions ---
+DEVELOPER_MODE = env.bool("DEVELOPER_MODE", default=get_setting("system.developer_mode", False))
 
 # --- Vision pipeline config (read by core/vision modules) ---
 PLATE_YOLO_WEIGHTS = env("PLATE_YOLO_WEIGHTS", default="models/license-plate-finetune-v1n.pt")
-PLATE_DETECTOR_CONF_THRESHOLD = env.float("PLATE_DETECTOR_CONF_THRESHOLD", default=0.35)
-OCR_MIN_CONFIDENCE = env.float("OCR_MIN_CONFIDENCE", default=0.55)
-USE_PADDLEOCR = env.bool("USE_PADDLEOCR", default=True)
+PLATE_DETECTOR_CONF_THRESHOLD = env.float("PLATE_DETECTOR_CONF_THRESHOLD", default=get_setting("vision.detector_conf_threshold", 0.35))
+OCR_MIN_CONFIDENCE = env.float("OCR_MIN_CONFIDENCE", default=get_setting("vision.min_ocr_confidence", 0.55))
+USE_PADDLEOCR = env.bool("USE_PADDLEOCR", default=get_setting("vision.use_paddleocr", True))
 
 # --- Fuzzy matcher thresholds ---
 FUZZY_EXACT_THRESHOLD = env.int("FUZZY_EXACT_THRESHOLD", default=100)
@@ -111,9 +115,11 @@ ITMS_SIMULATED_LATENCY_MS = env.int("ITMS_SIMULATED_LATENCY_MS", default=150)
 ITMS_FAILURE_INJECTION_RATE = env.float("ITMS_FAILURE_INJECTION_RATE", default=0.0)
 
 # --- ITMS Web App Live Integration (stock.itms.ug) ---
-ITMS_SUBMISSION_BACKEND = env("ITMS_SUBMISSION_BACKEND", default="mock")  # "mock" or "live"
-ITMS_API_BASE_URL = env("ITMS_API_BASE_URL", default="https://stock.itms.ug").rstrip("/")
-ITMS_LOGIN_ENDPOINT = env("ITMS_LOGIN_ENDPOINT", default="/site/login")
+ITMS_SUBMISSION_BACKEND = env("ITMS_SUBMISSION_BACKEND", default="web")  # "web" or "mock"
+ITMS_WEB_DRY_RUN = env.bool("ITMS_WEB_DRY_RUN", default=get_setting("submission.dry_run_mode", True))
+ITMS_SUBMIT_STEP3 = env.bool("ITMS_SUBMIT_STEP3", default=get_setting("submission.submit_step3", True))
+ITMS_API_BASE_URL = env("ITMS_API_BASE_URL", default=get_setting("network.itms_base_url", "https://stock.itms.ug")).rstrip("/")
+ITMS_LOGIN_ENDPOINT = env("ITMS_LOGIN_ENDPOINT", default=get_setting("network.login_endpoint", "/site/login"))
 ITMS_REFRESH_ENDPOINT = env("ITMS_REFRESH_ENDPOINT", default="/api/auth/refresh")
 ITMS_ORDER_LOOKUP_ENDPOINT = env("ITMS_ORDER_LOOKUP_ENDPOINT", default="/api/orders/lookup")
 ITMS_SERIAL_VERIFY_ENDPOINT = env("ITMS_SERIAL_VERIFY_ENDPOINT", default="/api/orders/verify-serial")
@@ -122,9 +128,12 @@ ITMS_UPLOAD_REAR_ENDPOINT = env("ITMS_UPLOAD_REAR_ENDPOINT", default="/api/order
 ITMS_FINALIZE_ENDPOINT = env("ITMS_FINALIZE_ENDPOINT", default="/api/orders/finalize")
 ITMS_USERNAME = env("ITMS_USERNAME", default="")
 ITMS_PASSWORD = env("ITMS_PASSWORD", default="")
-ITMS_REQUEST_TIMEOUT_SECONDS = env.int("ITMS_REQUEST_TIMEOUT_SECONDS", default=30)
-ITMS_TOKEN_STORAGE_FILE = env("ITMS_TOKEN_STORAGE_FILE", default=str(VAULT_ROOT / ".itms_tokens.json"))
+ITMS_REQUEST_TIMEOUT_SECONDS = env.int("ITMS_REQUEST_TIMEOUT_SECONDS", default=get_setting("submission.request_timeout_seconds", 30))
+ITMS_TOKEN_STORAGE_FILE = env("ITMS_TOKEN_STORAGE_FILE", default=str(SECURE_AUTH_ROOT / "itms_tokens.json"))
+CIRCUIT_BREAKER_THRESHOLD = env.int("CIRCUIT_BREAKER_THRESHOLD", default=get_setting("submission.circuit_breaker_threshold", 3))
 
 # Evidence vault retention lifecycle (prunes submitted photos older than N days)
-VAULT_RETENTION_DAYS = env.int("VAULT_RETENTION_DAYS", default=7)
+VAULT_RETENTION_DAYS = env.int("VAULT_RETENTION_DAYS", default=get_setting("storage.vault_retention_days", 7))
+EXPORT_RETENTION_DAYS = env.int("EXPORT_RETENTION_DAYS", default=get_setting("storage.export_retention_days", 30))
+CROPS_RETENTION_DAYS = env.int("CROPS_RETENTION_DAYS", default=get_setting("storage.crops_retention_days", 7))
 

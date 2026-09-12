@@ -90,9 +90,21 @@ class Command(BaseCommand):
             itms_photos_preserved = 0
             itms_session_preserved = False
 
+            if clear_itms_session:
+                try:
+                    from core.services.secure_storage import get_secure_auth_path
+                    web_sess = get_secure_auth_path("itms_web_session.json")
+                    if web_sess.is_file():
+                        web_sess.unlink()
+                    tokens_file = get_secure_auth_path("itms_tokens.json")
+                    if tokens_file.is_file():
+                        tokens_file.unlink()
+                except Exception:
+                    pass
+
             if vault_root.exists():
                 for item in vault_root.iterdir():
-                    # Check ITMS session files
+                    # Legacy check for old vault session files if any remain
                     if item.name.startswith(".itms"):
                         if clear_itms_session:
                             item.unlink()

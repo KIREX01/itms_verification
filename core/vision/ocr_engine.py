@@ -251,6 +251,68 @@ def _ocr_with_tesseract(plate_crop: np.ndarray) -> Optional[OCRResult]:
     return None
 
 
+def _run_ensemble_voting(plate_crop: np.ndarray, existing_candidates: list) -> Optional[OCRResult]:
+    """Multi-variant adaptive contrast ensemble voting.
+
+    When baseline OCR passes fail to reach a syntactically valid plate,
+    we test diverse adaptive binarization, CLAHE, and inverted variants across engines,
+    and perform character-by-character majority voting over candidate strings.
+    """
+    from collections import Counter
+    from core.vision.normalizer import normalize_plate, is_valid_plate
+    import cv2
+
+    variants = []
+    try:
+        from core.vision.plate_enhancer import prepare_ocr_variants
+        variants = prepare_ocr_variants(plate_crop)
+    except Exception:
+        pass
+
+    collected = []
+    for cand in existing_candidates:
+        if cand and cand.text:
+            collected.append(cand.text)
+
+    # 1. Test variants with PaddleOCR if available
+    for var in variants:
+        var_bgr = cv2.cvtColor(var, cv2.COLOR_GRAY2BGR) if var.ndim == 2 else var
+        res = _ocr_with_paddle(var_bgr)
+        if res and res.text:
+            norm = normalize_plate(res.text)
+            if norm["is_valid"]:
+                return OCRResult(text=norm["canonical"], confidence=0.94, backend="ensemble_variant")
+            collected.append(norm["canonical"] if norm["canonical"] else res.text)
+
+    # 2. Position-wise character voting if we have candidates of similar length
+    # Filter candidates to common Ugandan plate length (7 or 8 alphanumeric chars)
+    canonical_candidates = []
+    for txt in collected:
+        norm = normalize_plate(txt)
+        cleaned = norm["canonical"]
+        if len(cleaned) in (7, 8):
+            canonical_candidates.append(cleaned)
+
+    if len(canonical_candidates) >= 2:
+        # Determine dominant target length
+        lengths = [len(c) for c in canonical_candidates]
+        target_len = Counter(lengths).most_common(1)[0][0]
+        matching_len_cands = [c for c in canonical_candidates if len(c) == target_len]
+
+        voted_chars = []
+        for i in range(target_len):
+            col_chars = [c[i] for c in matching_len_cands]
+            best_char = Counter(col_chars).most_common(1)[0][0]
+            voted_chars.append(best_char)
+
+        voted_text = "".join(voted_chars)
+        norm_voted = normalize_plate(voted_text)
+        if norm_voted["is_valid"]:
+            return OCRResult(text=norm_voted["canonical"], confidence=0.88, backend="ensemble_voting")
+
+    return None
+
+
 def read_plate_text(plate_crop: np.ndarray) -> Optional[OCRResult]:
     """Run OCR on an already-localized plate crop with multi-stage enhancement.
 
@@ -260,7 +322,8 @@ def read_plate_text(plate_crop: np.ndarray) -> Optional[OCRResult]:
          If PaddleOCR on enhanced crop yields valid syntax, return immediately.
       3. Fallback: Tesseract with motorcycle 2-line splitting and adaptive binarization.
          If valid syntax, return immediately.
-      4. If none produce valid syntax, return the best partial candidate.
+      4. Ensemble: Adaptive contrast ensemble voting for shadowed/dusty plates.
+      5. Return best candidate available if no strict match.
     """
     if plate_crop is None or plate_crop.size == 0:
         return None
@@ -288,8 +351,15 @@ def read_plate_text(plate_crop: np.ndarray) -> Optional[OCRResult]:
     if tess_result is not None and is_valid_plate(tess_result.text):
         return tess_result
 
-    # 4. Return best candidate available if no strict match
+    # 4. Adaptive contrast ensemble voting
     candidates = [r for r in (res_raw, res_enh, tess_result) if r and r.text]
+    ensemble_result = _run_ensemble_voting(plate_crop, candidates)
+    if ensemble_result is not None and is_valid_plate(ensemble_result.text):
+        return ensemble_result
+
+    # 5. Return best candidate available if no strict match
+    if ensemble_result and ensemble_result.text:
+        candidates.append(ensemble_result)
     if candidates:
         candidates.sort(key=lambda r: (r.confidence, len(r.text)), reverse=True)
         return candidates[0]

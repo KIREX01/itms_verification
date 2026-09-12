@@ -38,6 +38,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -51,19 +53,178 @@ def get_itms_base_url() -> str:
     return "https://stock.itms.ug"
 
 def get_default_session_file() -> Path:
+    from core.services.secure_storage import get_secure_auth_path
+    return get_secure_auth_path("itms_web_session.json", legacy_vault_file=".itms_web_session.json")
+
+def resolve_dry_run(explicit_dry_run: Optional[bool] = None) -> bool:
+    """
+    Returns explicit dry_run if supplied, else dynamically queries config_service
+    (or Django settings fallback).
+    """
+    if explicit_dry_run is not None:
+        return bool(explicit_dry_run)
     try:
-        if settings.configured:
-            vault_root = getattr(settings, "VAULT_ROOT", "media/vault")
-            return Path(vault_root) / ".itms_web_session.json"
+        from core.services import config_service
+        return config_service.get_setting("submission.dry_run_mode", True)
     except Exception:
-        pass
-    return Path("media/vault") / ".itms_web_session.json"
+        try:
+            return getattr(settings, "ITMS_WEB_DRY_RUN", True)
+        except Exception:
+            return True
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/120.0.0.0 Safari/537.36"
 )
+
+
+def prepare_multipart_image_bytes(
+    file_path: Any,
+    max_dimension: Optional[int] = None,
+    jpeg_quality: Optional[int] = None,
+    enabled: Optional[bool] = None,
+) -> Tuple[bytes, Dict[str, Any]]:
+    """
+    Downsamples photos on-the-fly ONLY when preparing the HTTP multipart stream.
+    
+    SAFETY GUARANTEE:
+      The master photos stored on disk in the vault (media/vault) are
+      IMMUTABLE and NEVER modified or overwritten. Compression is performed
+      strictly in-memory (io.BytesIO) and streamed directly to requests.
+    """
+    import io
+    from pathlib import Path
+    from core.services import config_service
+
+    if enabled is None:
+        enabled = bool(config_service.get_setting("compression.enabled", True))
+    if max_dimension is None:
+        try:
+            max_dimension = int(config_service.get_setting("compression.max_dimension", 1920))
+        except (ValueError, TypeError):
+            max_dimension = 1920
+    if jpeg_quality is None:
+        try:
+            jpeg_quality = int(config_service.get_setting("compression.jpeg_quality", 88))
+        except (ValueError, TypeError):
+            jpeg_quality = 88
+
+    p = Path(file_path)
+    if not p.is_file():
+        return b"", {
+            "compressed": False,
+            "error": f"File not found: {file_path}",
+            "original_size": 0,
+            "compressed_size": 0,
+            "saved_bytes": 0,
+            "ratio_pct": 0.0,
+            "display_str": "File not found",
+        }
+
+    try:
+        orig_bytes = p.read_bytes()
+    except Exception as exc:
+        return b"", {
+            "compressed": False,
+            "error": str(exc),
+            "original_size": 0,
+            "compressed_size": 0,
+            "saved_bytes": 0,
+            "ratio_pct": 0.0,
+            "display_str": f"Read error: {exc}",
+        }
+
+    orig_size = len(orig_bytes)
+    orig_mb = orig_size / (1024 * 1024)
+
+    # If disabled or non-image file, return raw original bytes
+    ext = p.suffix.lower()
+    if not enabled or ext not in (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"):
+        return orig_bytes, {
+            "compressed": False,
+            "original_size": orig_size,
+            "compressed_size": orig_size,
+            "saved_bytes": 0,
+            "ratio_pct": 0.0,
+            "display_str": f"{orig_mb:.2f}MB (Uncompressed)",
+        }
+
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(io.BytesIO(orig_bytes)) as img:
+            # Respect EXIF orientation tag from camera
+            try:
+                img = ImageOps.exif_transpose(img) or img
+            except Exception:
+                pass
+
+            orig_w, orig_h = img.size
+            final_w, final_h = orig_w, orig_h
+            needs_resize = (orig_w > max_dimension or orig_h > max_dimension)
+
+            if needs_resize:
+                scale = min(max_dimension / float(orig_w), max_dimension / float(orig_h))
+                final_w = max(1, int(round(orig_w * scale)))
+                final_h = max(1, int(round(orig_h * scale)))
+                resample_filter = getattr(Image, "Resampling", Image).LANCZOS
+                img = img.resize((final_w, final_h), resample=resample_filter)
+
+            # Convert RGBA/P palette modes to RGB for JPEG multipart stream
+            if img.mode in ("RGBA", "LA", "P"):
+                rgb_img = Image.new("RGB", img.size, (255, 255, 255))
+                if img.mode == "P":
+                    img = img.convert("RGBA")
+                rgb_img.paste(img, mask=img.split()[-1] if "A" in img.mode else None)
+                img = rgb_img
+            elif img.mode != "RGB":
+                img = img.convert("RGB")
+
+            out_buf = io.BytesIO()
+            img.save(out_buf, format="JPEG", quality=jpeg_quality, optimize=True)
+            comp_bytes = out_buf.getvalue()
+            comp_size = len(comp_bytes)
+
+            # Use compressed bytes if space saved or dimensions reduced
+            if comp_size < orig_size or needs_resize:
+                saved = max(0, orig_size - comp_size)
+                ratio = round((saved / orig_size) * 100.0, 1) if orig_size > 0 else 0.0
+                comp_kb = comp_size / 1024
+                comp_mb = comp_size / (1024 * 1024)
+                comp_size_str = f"{comp_kb:.0f}KB" if comp_mb < 1.0 else f"{comp_mb:.2f}MB"
+                disp = f"{orig_mb:.1f}MB -> {comp_size_str} (-{ratio}%) [{final_w}x{final_h} Q{jpeg_quality}]"
+                return comp_bytes, {
+                    "compressed": True,
+                    "original_size": orig_size,
+                    "compressed_size": comp_size,
+                    "saved_bytes": saved,
+                    "ratio_pct": ratio,
+                    "original_dims": (orig_w, orig_h),
+                    "final_dims": (final_w, final_h),
+                    "quality": jpeg_quality,
+                    "display_str": disp,
+                }
+            else:
+                return orig_bytes, {
+                    "compressed": False,
+                    "original_size": orig_size,
+                    "compressed_size": orig_size,
+                    "saved_bytes": 0,
+                    "ratio_pct": 0.0,
+                    "display_str": f"{orig_mb:.2f}MB (Original retained)",
+                }
+    except Exception as exc:
+        logger.warning("Compression fallback for %s: %s", p.name, exc)
+        return orig_bytes, {
+            "compressed": False,
+            "error": str(exc),
+            "original_size": orig_size,
+            "compressed_size": orig_size,
+            "saved_bytes": 0,
+            "ratio_pct": 0.0,
+            "display_str": f"{orig_mb:.2f}MB (Fallback)",
+        }
+
 
 
 @dataclass
@@ -175,12 +336,70 @@ class ITMSWebClient:
             "User-Agent": USER_AGENT,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
+            "Connection": "keep-alive",
         })
+
+        # Configure robust connection pooling & automatic retry for TCP resets (e.g. WinError 10054)
+        retry_strategy = Retry(
+            total=3,
+            connect=3,
+            read=3,
+            backoff_factor=0.8,
+            status_forcelist=[500, 502, 503, 504],
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(
+            max_retries=retry_strategy,
+            pool_connections=10,
+            pool_maxsize=20,
+        )
+        s.mount("https://", adapter)
+        s.mount("http://", adapter)
+
         # Inject stored cookies if available
         stored_cookies = self.session_store.session.cookies
         for name, val in stored_cookies.items():
             s.cookies.set(name, val, domain=urllib.parse.urlparse(self.base_url).hostname)
         return s
+
+    def _request_with_retry(
+        self,
+        method: str,
+        url: str,
+        max_attempts: int = 3,
+        **kwargs
+    ) -> requests.Response:
+        """
+        Executes an HTTP request with automatic recovery against TCP resets
+        (such as ConnectionResetError / WinError 10054) and transient network drops.
+        """
+        last_exc = None
+        for attempt in range(1, max_attempts + 1):
+            s = self._create_requests_session()
+            try:
+                if "timeout" not in kwargs:
+                    kwargs["timeout"] = self.timeout
+                verb = method.lower()
+                caller = getattr(s, verb, None)
+                if caller is not None:
+                    resp = caller(url, **kwargs)
+                else:
+                    resp = s.request(method, url, **kwargs)
+                return resp
+            except (requests.exceptions.ConnectionError, ConnectionResetError, requests.exceptions.ChunkedEncodingError) as exc:
+                last_exc = exc
+                logger.warning(
+                    "ITMS WebApp connection reset (attempt %d/%d) on %s: %s",
+                    attempt, max_attempts, url, exc
+                )
+                if attempt < max_attempts:
+                    time.sleep(0.6 * attempt)
+                    continue
+                raise
+            except requests.exceptions.RequestException:
+                raise
+        if last_exc:
+            raise last_exc
 
     # ──────────────────────────────────────────────────────────────────────────
     # Diagnostic / Connectivity (Rate-Limit Friendly)
@@ -616,7 +835,7 @@ class ITMSWebClient:
                     query_params[k] = v_str
 
         try:
-            resp = s.get(url, params=query_params, timeout=self.timeout)
+            resp = self._request_with_retry("GET", url, params=query_params, timeout=self.timeout)
             if resp.status_code != 200:
                 return {
                     "success": False,
@@ -709,6 +928,15 @@ class ITMSWebClient:
                 "status_message": f"Successfully retrieved {len(orders)} {archive_label} order(s) on Page {page}.",
             }
 
+        except (requests.exceptions.ConnectionError, ConnectionResetError) as exc:
+            logger.warning("Connection reset while fetching orders from %s: %s", url, exc)
+            return {
+                "success": False,
+                "error": "Remote host temporarily closed connection (WinError 10054). Please retry.",
+                "orders": [],
+                "page": page,
+                "is_archive": archive,
+            }
         except requests.exceptions.RequestException as exc:
             return {"success": False, "error": f"Connection error: {exc}", "orders": [], "page": page, "is_archive": archive}
 
@@ -725,6 +953,7 @@ class ITMSWebClient:
         Saves or updates fetched ITMS installation orders (active or archive) into the local Django database.
         Allows fuzzy order matcher and verification review queue to correlate evidence photos with live ITMS records.
         """
+        from django.utils import timezone
         from django.db import models
         from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
         from core.vision import normalizer
@@ -740,16 +969,35 @@ class ITMSWebClient:
                 continue
 
             canonical_reg = normalizer.canonicalize(reg_num) or reg_num.replace(" ", "").upper()
-            is_archived = o.get("is_archived", False)
+            is_archived = bool(o.get("is_archived", False))
             order_status = o.get("order_status") or o.get("status", "")
+            action_url = o.get("action_url", "")
 
-            # Determine local system status
-            if is_archived and "installed" in order_status.lower():
+            # Determine local system status & active/archive flags
+            is_installed = "installed" in order_status.lower()
+            if is_archived or is_installed:
                 local_status = InstallationOrder.Status.INSTALLED
-            elif "installed" in order_status.lower() or "approve" in order_status.lower():
+                is_archived = True
+                is_active = False
+                if not order_status:
+                    order_status = "Installed"
+            elif "approve" in order_status.lower():
                 local_status = InstallationOrder.Status.SUBMITTED
+                is_active = True
             else:
                 local_status = InstallationOrder.Status.PENDING
+                is_active = not is_archived
+
+            if is_archived:
+                stage = "ARCHIVED"
+            elif "/confirmation" in action_url:
+                stage = "STAGE_3_CONFIRMATION"
+            elif "/approve" in action_url:
+                stage = "STAGE_2_APPROVE"
+            elif "/installation" in action_url:
+                stage = "STAGE_1_INSTALLATION"
+            else:
+                stage = "STAGE_UNKNOWN"
 
             defaults = {
                 "registration_number": canonical_reg,
@@ -764,10 +1012,23 @@ class ITMSWebClient:
                 "installation_officer": o.get("officer", ""),
                 "installation_date": o.get("installation_date", ""),
                 "itms_order_uuid": o.get("order_key", ""),
-                "itms_action_url": o.get("action_url", ""),
+                "itms_action_url": action_url,
                 "is_archived": is_archived,
+                "is_active_on_itms": is_active,
+                "itms_stage": stage,
                 "status": local_status,
+                "last_synced_at": timezone.now(),
             }
+
+            session_obj = getattr(self.session_store, "session", None)
+            email_val = getattr(session_obj, "user_email", "")
+            uuid_val = getattr(session_obj, "user_uuid", "")
+            curr_email = email_val.strip().lower() if isinstance(email_val, str) else ""
+            curr_uuid = str(uuid_val) if isinstance(uuid_val, str) else ""
+            if curr_email:
+                defaults["account_email"] = curr_email
+            if curr_uuid:
+                defaults["account_uuid"] = curr_uuid
 
             obj, was_created = InstallationOrder.objects.update_or_create(
                 order_number=order_num,
@@ -1002,11 +1263,10 @@ class ITMSWebClient:
             }
 
         url = f"{self.base_url}/installation-orders/info?id={target_uuid}"
-        s = self._create_requests_session()
-        s.headers["Referer"] = f"{self.base_url}/installation-orders/archive"
+        headers = {"Referer": f"{self.base_url}/installation-orders/archive"}
 
         try:
-            resp = s.get(url, timeout=self.timeout)
+            resp = self._request_with_retry("GET", url, headers=headers, timeout=self.timeout)
             if resp.status_code != 200:
                 return {
                     "success": False,
@@ -1111,11 +1371,10 @@ class ITMSWebClient:
         save_path = Path(save_path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
 
-        s = self._create_requests_session()
-        s.headers["Referer"] = f"{self.base_url}/installation-orders/archive"
+        headers = {"Referer": f"{self.base_url}/installation-orders/archive"}
 
         try:
-            resp = s.get(full_url, timeout=self.timeout, stream=True)
+            resp = self._request_with_retry("GET", full_url, headers=headers, timeout=self.timeout, stream=True)
             if resp.status_code != 200:
                 return {
                     "success": False,
@@ -1203,6 +1462,16 @@ class ITMSWebClient:
         if gps_t.get("device_id"):
             defaults["tracker_id"] = gps_t["device_id"]
 
+        session_obj = getattr(self.session_store, "session", None)
+        email_val = getattr(session_obj, "user_email", "")
+        uuid_val = getattr(session_obj, "user_uuid", "")
+        curr_email = email_val.strip().lower() if isinstance(email_val, str) else ""
+        curr_uuid = str(uuid_val) if isinstance(uuid_val, str) else ""
+        if curr_email:
+            defaults["account_email"] = curr_email
+        if curr_uuid:
+            defaults["account_uuid"] = curr_uuid
+
         order_obj, created = InstallationOrder.objects.update_or_create(
             order_number=order_num,
             defaults=defaults,
@@ -1233,6 +1502,1827 @@ class ITMSWebClient:
             "order_number": order_num,
             "order_id": order_obj.id,
             "pairs_updated": pairs.count(),
+        }
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Step 1: Installation Form, AJAX ActiveForm Validation & Step 2 Transition
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def parse_installation_page_html(self, html: str) -> Dict[str, Any]:
+        """
+        Parses Step 1 installation page HTML:
+          GET https://stock.itms.ug/installation-orders/installation?id=<uuid>
+        
+        Extracts:
+          - CSRF token (_csrf-frontend / meta tag)
+          - Form action and order UUID
+          - Breadcrumb order number (e.g. PO-UMA560PJ-100926)
+          - Vehicle details: VIN, Old plate, Registration Number
+          - Hardware select dropdown options and selected values:
+              * front_license_plate_id (selected_id, selected_text, options)
+              * back_license_plate_id (selected_id, selected_text, options)
+              * tracker_id (selected_id, selected_text, options)
+          - Front & Rear Beacon IDs (stubs)
+          - Kit ID
+          - AJAX validation URL (e.g. /installation-orders/validate-installation?id=<uuid>)
+          - Form action URL
+        """
+        # 1. CSRF Token
+        csrf_token = self._extract_csrf_from_html(html)
+
+        # 2. Form action & Order UUID
+        form_m = re.search(r'<form[^>]*id=["\']installationOrderCreateForm["\'][^>]*action=["\']([^"\']+)["\']', html)
+        form_action = form_m.group(1) if form_m else ""
+        uuid_m = re.search(r'id=([0-9a-fA-F-]+)', form_action)
+        order_uuid = uuid_m.group(1) if uuid_m else ""
+
+        # Validation URL from yiiActiveForm config
+        val_m = re.search(r'["\']validationUrl["\']\s*:\s*["\']([^"\']+)["\']', html)
+        if val_m:
+            raw_val_url = val_m.group(1).replace(r"\/", "/")
+            validation_url = raw_val_url
+        else:
+            validation_url = f"/installation-orders/validate-installation?id={order_uuid}" if order_uuid else ""
+
+        # 3. Breadcrumb Order Number
+        order_num_m = re.search(r'<li[^>]*class=["\']breadcrumb-item active["\'][^>]*>(PO-[A-Za-z0-9\-]+)</li>', html)
+        order_number = order_num_m.group(1) if order_num_m else ""
+
+        # 4. Vehicle Details
+        def get_dd_val(dt_label: str) -> str:
+            m = re.search(rf'<dt>{re.escape(dt_label)}</dt>\s*<dd>(.*?)</dd>', html, re.DOTALL | re.IGNORECASE)
+            if m:
+                clean = re.sub(r'<[^>]+>', '', m.group(1)).strip()
+                return clean
+            return ""
+
+        vin = get_dd_val("Vehicle VIN/Chassis No.")
+        old_plate = get_dd_val("Old plate number")
+        registration_number = get_dd_val("Registration Number")
+
+        # 5. Dropdown Select Elements
+        def parse_select(select_id: str) -> Dict[str, Any]:
+            m = re.search(rf'<select[^>]*id=["\']{select_id}["\'][^>]*>(.*?)</select>', html, re.DOTALL | re.IGNORECASE)
+            if not m:
+                return {"selected_id": "", "selected_text": "", "options": []}
+            inner = m.group(1)
+            options = []
+            selected_id = ""
+            selected_text = ""
+            for opt_m in re.finditer(r'<option[^>]*value=["\']([^"\']*)["\']([^>]*)>(.*?)</option>', inner, re.DOTALL | re.IGNORECASE):
+                val = opt_m.group(1).strip()
+                attrs = opt_m.group(2)
+                txt = opt_m.group(3).strip()
+                is_sel = "selected" in attrs.lower()
+                if val:
+                    options.append({"value": val, "text": txt, "selected": is_sel})
+                if is_sel and val:
+                    selected_id = val
+                    selected_text = txt
+            # If nothing was explicitly marked selected, default to the first non-empty option
+            if not selected_id and options:
+                selected_id = options[0]["value"]
+                selected_text = options[0]["text"]
+            return {
+                "selected_id": selected_id,
+                "selected_text": selected_text,
+                "options": options,
+            }
+
+        front_plate = parse_select("installationorderform-front_license_plate_id")
+        rear_plate = parse_select("installationorderform-back_license_plate_id")
+        tracker = parse_select("installationorderform-tracker_id")
+
+        # 6. Beacon IDs
+        front_beacon_m = re.search(r'<span[^>]*id=["\']frontBeaconIdStub["\'][^>]*>(.*?)</span>', html, re.DOTALL | re.IGNORECASE)
+        front_beacon = front_beacon_m.group(1).strip() if front_beacon_m else ""
+
+        rear_beacon_m = re.search(r'<span[^>]*id=["\']backBeaconIdStub["\'][^>]*>(.*?)</span>', html, re.DOTALL | re.IGNORECASE)
+        rear_beacon = rear_beacon_m.group(1).strip() if rear_beacon_m else ""
+
+        # 7. Kit ID
+        kit_m = re.search(r'kit_id=([0-9a-fA-F-]+)', html)
+        kit_id = kit_m.group(1) if kit_m else ""
+
+        return {
+            "order_uuid": order_uuid,
+            "order_number": order_number,
+            "csrf_token": csrf_token,
+            "vin": vin,
+            "old_plate": old_plate,
+            "registration_number": registration_number,
+            "front_plate": front_plate,
+            "rear_plate": rear_plate,
+            "tracker": tracker,
+            "front_beacon": front_beacon,
+            "rear_beacon": rear_beacon,
+            "kit_id": kit_id,
+            "validation_url": validation_url,
+            "form_action": form_action,
+        }
+
+    def fetch_installation_step1(self, order_identifier: str) -> Dict[str, Any]:
+        """
+        Fetches Step 1 installation page for an order or plate number:
+          GET https://stock.itms.ug/installation-orders/installation?id=<uuid>
+        """
+        from django.db import models
+
+        session_data = self.session_store.session
+        if not session_data.is_cookie_valid():
+            return {
+                "success": False,
+                "error": "Session cookies invalid or missing. Please sign in first.",
+            }
+
+        target_uuid = ""
+        ident = (order_identifier or "").strip()
+        if not ident:
+            return {"success": False, "error": "Order identifier cannot be empty."}
+
+        # Check if ident is or contains UUID
+        uuid_pattern = r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+        uuid_match = re.search(uuid_pattern, ident)
+        if uuid_match:
+            target_uuid = uuid_match.group(1)
+
+        # Check local database
+        if not target_uuid:
+            try:
+                from core.models import InstallationOrder
+                from core.vision import normalizer
+                canonical = normalizer.canonicalize(ident) or ident.replace(" ", "").upper()
+                order_rec = InstallationOrder.objects.filter(
+                    models.Q(order_number__iexact=ident) |
+                    models.Q(registration_number__iexact=canonical) |
+                    models.Q(vin__iexact=ident)
+                ).exclude(itms_order_uuid="").first()
+                if order_rec and order_rec.itms_order_uuid:
+                    target_uuid = order_rec.itms_order_uuid
+            except Exception:
+                pass
+
+        # Check live ITMS active orders table
+        if not target_uuid:
+            active_res = self.fetch_installation_orders(page=1, search_params=ident, archive=False)
+            active_orders = active_res.get("orders", [])
+            for o in active_orders:
+                if o.get("order_key"):
+                    target_uuid = o["order_key"]
+                    break
+
+        if not target_uuid:
+            return {
+                "success": False,
+                "error": f"Could not resolve active ITMS installation UUID for '{ident}'.",
+            }
+
+        url = f"{self.base_url}/installation-orders/installation?id={target_uuid}"
+        headers = {"Referer": f"{self.base_url}/installation-orders/index"}
+
+        try:
+            resp = self._request_with_retry("GET", url, headers=headers, timeout=self.timeout)
+            if resp.status_code != 200:
+                return {
+                    "success": False,
+                    "error": f"Installation page returned HTTP {resp.status_code}",
+                    "url": url,
+                    "order_uuid": target_uuid,
+                }
+
+            parsed = self.parse_installation_page_html(resp.text)
+            parsed["success"] = True
+            parsed["order_uuid"] = target_uuid
+            parsed["url"] = url
+            return parsed
+        except requests.exceptions.RequestException as exc:
+            return {
+                "success": False,
+                "error": f"Connection error fetching installation page: {exc}",
+                "url": url,
+                "order_uuid": target_uuid,
+            }
+
+    def validate_installation_step1(
+        self,
+        order_uuid: str,
+        front_plate_id: str,
+        back_plate_id: str,
+        tracker_id: str,
+        csrf_token: Optional[str] = None,
+        validation_url: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Executes AJAX validation against Yii2 ActiveForm endpoint:
+          POST /installation-orders/validate-installation?id=<uuid>
+        
+        Headers:
+          X-Requested-With: XMLHttpRequest
+          X-CSRF-Token: <csrf_token>
+          Referer: .../installation-orders/installation?id=<uuid>
+        
+        Body:
+          _csrf-frontend: <csrf_token>
+          ajax: installationOrderCreateForm
+          InstallationOrderForm[front_license_plate_id]: <uuid>
+          InstallationOrderForm[back_license_plate_id]: <uuid>
+          InstallationOrderForm[tracker_id]: <uuid>
+
+        Returns:
+          {"success": True, "valid": True, "errors": {}} if response is empty [] or {}
+          {"success": True, "valid": False, "errors": {...}, "error": "..."} if field validation errors
+        """
+        session_data = self.session_store.session
+        if not session_data.is_cookie_valid():
+            return {
+                "success": False,
+                "valid": False,
+                "error": "Session cookies invalid or missing. Please sign in first.",
+            }
+
+        target_csrf = csrf_token or session_data.csrf_token
+        val_url = validation_url or f"{self.base_url}/installation-orders/validate-installation?id={order_uuid}"
+        if val_url.startswith("/"):
+            val_url = f"{self.base_url}{val_url}"
+
+        s = self._create_requests_session()
+        headers = {
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer": f"{self.base_url}/installation-orders/installation?id={order_uuid}",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+        }
+        if target_csrf:
+            headers["X-CSRF-Token"] = target_csrf
+
+        payload = {
+            "ajax": "installationOrderCreateForm",
+            "InstallationOrderForm[front_license_plate_id]": front_plate_id,
+            "InstallationOrderForm[back_license_plate_id]": back_plate_id,
+            "InstallationOrderForm[tracker_id]": tracker_id,
+        }
+        if target_csrf:
+            payload["_csrf-frontend"] = target_csrf
+
+        try:
+            resp = s.post(val_url, data=payload, headers=headers, timeout=self.timeout)
+            if resp.status_code != 200:
+                return {
+                    "success": False,
+                    "valid": False,
+                    "status_code": resp.status_code,
+                    "error": f"Validation endpoint returned HTTP {resp.status_code}: {resp.text[:200]}",
+                    "order_uuid": order_uuid,
+                    "validation_url": val_url,
+                }
+
+            try:
+                val_data = resp.json()
+            except Exception:
+                val_data = resp.text
+
+            # In Yii2 ActiveForm, an empty array [] or empty dict {} means form passed validation!
+            if isinstance(val_data, (list, dict)) and len(val_data) == 0:
+                return {
+                    "success": True,
+                    "valid": True,
+                    "errors": {},
+                    "order_uuid": order_uuid,
+                    "validation_url": val_url,
+                }
+            
+            # If there are validation errors, Yii returns a dict of field_id -> [error messages]
+            return {
+                "success": True,
+                "valid": False,
+                "errors": val_data if isinstance(val_data, dict) else {"general": [str(val_data)]},
+                "error": f"Form validation rejected by ITMS: {val_data}",
+                "order_uuid": order_uuid,
+                "validation_url": val_url,
+            }
+        except requests.exceptions.RequestException as exc:
+            return {
+                "success": False,
+                "valid": False,
+                "error": f"Connection error during ActiveForm validation: {exc}",
+                "order_uuid": order_uuid,
+                "validation_url": val_url,
+            }
+
+    def submit_installation_step1(
+        self,
+        order_uuid: str,
+        front_plate_id: str,
+        back_plate_id: str,
+        tracker_id: str,
+        csrf_token: Optional[str] = None,
+        just_save: bool = False,
+        run_validation_first: bool = True,
+        dry_run: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """
+        Submits Step 1 installation form:
+          POST /installation-orders/installation?id=<uuid>
+        
+        CRITICAL SAFETY RULE:
+          dry_run defaults to None (resolving to config setting submission.dry_run_mode).
+          In dry_run mode, no mutating POST request is transmitted to the live ITMS server.
+          Live submission occurs ONLY when dry_run=False.
+
+        If just_save is False (default: "Save and continue"), the ITMS server
+        processes hardware fitment and redirects with HTTP 302 Found to:
+          https://stock.itms.ug/installation-orders/approve?id=<uuid> (Step 2: Photos)
+        """
+        dry_run = resolve_dry_run(dry_run)
+        session_data = self.session_store.session
+        if not session_data.is_cookie_valid():
+            return {
+                "success": False,
+                "error": "Session cookies invalid or missing. Please sign in first.",
+            }
+
+        # Step 1a: Pre-validate form inputs using AJAX ActiveForm if requested
+        if run_validation_first:
+            val_res = self.validate_installation_step1(
+                order_uuid=order_uuid,
+                front_plate_id=front_plate_id,
+                back_plate_id=back_plate_id,
+                tracker_id=tracker_id,
+                csrf_token=csrf_token,
+            )
+            if not val_res.get("success") or not val_res.get("valid"):
+                return {
+                    "success": False,
+                    "step": 1,
+                    "error": val_res.get("error", "Validation failed"),
+                    "validation_errors": val_res.get("errors", {}),
+                    "order_uuid": order_uuid,
+                }
+
+        # Dry Run Protection Guard
+        if dry_run:
+            simulated_redirect = f"{self.base_url}/installation-orders/approve?id={order_uuid}"
+            try:
+                from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
+                order_obj = InstallationOrder.objects.filter(itms_order_uuid=order_uuid).first()
+                if order_obj:
+                    pairs = VehicleInstallationPair.objects.filter(order=order_obj)
+                    for p in pairs:
+                        SubmissionAuditLog.objects.create(
+                            pair=p,
+                            action=SubmissionAuditLog.Action.SERIAL_VERIFY,
+                            result=SubmissionAuditLog.ResultStatus.SUCCESS,
+                            message=f"[DRY RUN] Step 1 simulated: Front={front_plate_id}, Back={back_plate_id}, Tracker={tracker_id}. Live POST skipped.",
+                        )
+            except Exception:
+                pass
+
+            return {
+                "success": True,
+                "dry_run": True,
+                "step": 1,
+                "status_code": 302,
+                "redirect_url": simulated_redirect,
+                "relative_redirect": f"/installation-orders/approve?id={order_uuid}",
+                "step2_ready": True,
+                "order_uuid": order_uuid,
+                "message": f"[DRY RUN] Step 1 hardware fitment verified. Simulated advance to Step 2: {simulated_redirect}",
+            }
+
+        target_csrf = csrf_token or session_data.csrf_token
+        url = f"{self.base_url}/installation-orders/installation?id={order_uuid}"
+
+        s = self._create_requests_session()
+        headers = {
+            "Origin": self.base_url,
+            "Referer": url,
+            "Cache-Control": "max-age=0",
+        }
+
+        payload = {
+            "InstallationOrderForm[front_license_plate_id]": front_plate_id,
+            "InstallationOrderForm[back_license_plate_id]": back_plate_id,
+            "InstallationOrderForm[tracker_id]": tracker_id,
+        }
+        if target_csrf:
+            payload["_csrf-frontend"] = target_csrf
+        if just_save:
+            payload["justSave"] = ""
+
+        try:
+            # We must set allow_redirects=False to intercept the 302 redirect location
+            resp = self._request_with_retry("POST", url, data=payload, headers=headers, timeout=self.timeout, allow_redirects=False)
+
+            if resp.status_code == 302:
+                redirect_url = resp.headers.get("Location", "")
+                full_redirect_url = urllib.parse.urljoin(self.base_url, redirect_url)
+                is_step2 = "/installation-orders/approve" in redirect_url
+
+                # Audit log if pair exists
+                try:
+                    from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
+                    order_obj = InstallationOrder.objects.filter(itms_order_uuid=order_uuid).first()
+                    if order_obj:
+                        pairs = VehicleInstallationPair.objects.filter(order=order_obj)
+                        for p in pairs:
+                            SubmissionAuditLog.objects.create(
+                                pair=p,
+                                action=SubmissionAuditLog.Action.SERIAL_VERIFY,
+                                result=SubmissionAuditLog.ResultStatus.SUCCESS,
+                                message=f"Step 1 submitted to ITMS: Redirected to {redirect_url}",
+                            )
+                except Exception:
+                    pass
+
+                return {
+                    "success": True,
+                    "step": 1,
+                    "status_code": 302,
+                    "redirect_url": full_redirect_url,
+                    "relative_redirect": redirect_url,
+                    "step2_ready": is_step2,
+                    "order_uuid": order_uuid,
+                    "message": f"Step 1 submitted successfully. Advanced to Step 2: {full_redirect_url}",
+                }
+            elif resp.status_code == 200:
+                # Returned 200 OK means form re-rendered, likely because of a server validation error
+                err_m = re.findall(r'<div[^>]*class=["\'][^"\']*invalid-feedback[^"\']*["\'][^>]*>(.*?)</div>', resp.text, re.DOTALL)
+                clean_errs = [re.sub(r'<[^>]+>', '', e).strip() for e in err_m if re.sub(r'<[^>]+>', '', e).strip()]
+                return {
+                    "success": False,
+                    "step": 1,
+                    "status_code": 200,
+                    "error": "Form submission re-rendered page without redirecting. Validation errors encountered.",
+                    "form_errors": clean_errs,
+                    "order_uuid": order_uuid,
+                }
+            else:
+                return {
+                    "success": False,
+                    "step": 1,
+                    "status_code": resp.status_code,
+                    "error": f"Submission returned unexpected HTTP {resp.status_code}",
+                    "order_uuid": order_uuid,
+                }
+        except requests.exceptions.RequestException as exc:
+            return {
+                "success": False,
+                "step": 1,
+                "error": f"Connection error submitting Step 1: {exc}",
+                "order_uuid": order_uuid,
+            }
+
+    def sync_installation_step1_to_local_db(
+        self,
+        step1_data: Dict[str, Any],
+        order_uuid: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Synchronizes Step 1 hardware inventory into local InstallationOrder record.
+        """
+        from django.db import models
+        from django.utils import timezone
+        from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
+        from core.vision import normalizer
+
+        order_num = step1_data.get("order_number", "").strip()
+        reg_num = step1_data.get("registration_number", "").strip()
+        target_uuid = order_uuid or step1_data.get("order_uuid", "")
+
+        if not order_num and not target_uuid:
+            return {"success": False, "error": "Order identifier missing"}
+
+        canonical_reg = normalizer.canonicalize(reg_num) or reg_num.replace(" ", "").upper()
+        front_p = step1_data.get("front_plate", {})
+        rear_p = step1_data.get("rear_plate", {})
+        tracker = step1_data.get("tracker", {})
+
+        defaults = {
+            "registration_number": canonical_reg,
+            "vin": step1_data.get("vin", ""),
+            "front_plate_serial": front_p.get("selected_text", ""),
+            "rear_plate_serial": rear_p.get("selected_text", ""),
+            "gps_tracker_id": tracker.get("selected_text", ""),
+            "front_beacon_id": step1_data.get("front_beacon", ""),
+            "rear_beacon_id": step1_data.get("rear_beacon", ""),
+            "plate_serial": front_p.get("selected_text", "") or rear_p.get("selected_text", ""),
+            "tracker_id": tracker.get("selected_text", ""),
+            "itms_order_uuid": target_uuid,
+            "itms_action_url": f"/installation-orders/installation?id={target_uuid}",
+            "order_status": "Under installation",
+            "details_json": step1_data,
+            "info_fetched_at": timezone.now(),
+        }
+
+        # Look up by order_number or itms_order_uuid
+        order_obj = None
+        if order_num:
+            order_obj = InstallationOrder.objects.filter(order_number=order_num).first()
+        if not order_obj and target_uuid:
+            order_obj = InstallationOrder.objects.filter(itms_order_uuid=target_uuid).first()
+
+        created = False
+        if order_obj:
+            for k, v in defaults.items():
+                setattr(order_obj, k, v)
+            order_obj.save()
+        else:
+            if not order_num:
+                order_num = f"ORD-{target_uuid[:8]}"
+            order_obj = InstallationOrder.objects.create(order_number=order_num, **defaults)
+            created = True
+
+        # Associate with pairs if applicable
+        pairs = VehicleInstallationPair.objects.filter(
+            models.Q(order=order_obj) | models.Q(registration_number_detected=canonical_reg)
+        )
+        for pair in pairs:
+            if not pair.order_id:
+                pair.order = order_obj
+                pair.save(update_fields=["order"])
+            SubmissionAuditLog.objects.create(
+                pair=pair,
+                action=SubmissionAuditLog.Action.VALIDATE,
+                result=SubmissionAuditLog.ResultStatus.SUCCESS,
+                message=(
+                    f"ITMS Step 1 verified: {order_num} "
+                    f"(Front Plate: {front_p.get('selected_text')}, Rear Plate: {rear_p.get('selected_text')}, "
+                    f"Tracker: {tracker.get('selected_text')})"
+                ),
+            )
+
+        return {
+            "success": True,
+            "created": created,
+            "order_number": order_num,
+            "order_id": order_obj.id,
+            "pairs_updated": pairs.count(),
+        }
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Step 2: Photo Upload (/installation-orders/approve?id=<uuid>) & Step 3 Redirection
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def parse_approve_page_html(self, html: str) -> Dict[str, Any]:
+        """
+        Parses Step 2 photo approval / evidence upload page:
+          GET https://stock.itms.ug/installation-orders/approve?id=<uuid>
+        
+        Extracts:
+          - CSRF token (_csrf-frontend / meta tag)
+          - Form action and order UUID
+          - Breadcrumb order number (e.g. PO-UMA560PJ-100926)
+          - Vehicle type (e.g. 'M' for Motorcycle)
+          - Alert message from Step 1 (e.g. 'Installation order created successfully')
+          - Checklist requirement status (False for 'M' / first installation)
+        """
+        csrf_token = self._extract_csrf_from_html(html)
+
+        form_m = re.search(r'<form[^>]*action=["\']([^"\']+)["\']', html)
+        form_action = form_m.group(1) if form_m else ""
+        uuid_m = re.search(r'id=([0-9a-fA-F-]+)', form_action)
+        order_uuid = uuid_m.group(1) if uuid_m else ""
+
+        order_num_m = re.search(r'<li[^>]*class=["\']breadcrumb-item active["\'][^>]*>(PO-[A-Za-z0-9\-]+)</li>', html)
+        order_number = order_num_m.group(1) if order_num_m else ""
+
+        vtype_m = re.search(r'name=["\']vehicle_type["\']\s+value=["\']([^"\']+)["\']', html)
+        vehicle_type = vtype_m.group(1) if vtype_m else "M"
+
+        alert_m = re.search(r'class=["\'][^"\']*alert-success[^"\']*["\'][^>]*>(.*?)</div>', html, re.DOTALL)
+        alert_msg = re.sub(r'<[^>]+>', '', alert_m.group(1)).replace("&ensp;", " ").strip() if alert_m else ""
+
+        # In Yii2 activeForm for this view, checklist is optional when vehicle_type == 'M'
+        requires_checklist = (vehicle_type != "M")
+
+        return {
+            "order_uuid": order_uuid,
+            "order_number": order_number,
+            "csrf_token": csrf_token,
+            "vehicle_type": vehicle_type,
+            "form_action": form_action,
+            "alert_message": alert_msg,
+            "requires_checklist": requires_checklist,
+        }
+
+    def fetch_approve_step2(self, order_identifier: str) -> Dict[str, Any]:
+        """
+        Fetches Step 2 photo approval page:
+          GET https://stock.itms.ug/installation-orders/approve?id=<uuid>
+        """
+        from django.db import models
+
+        session_data = self.session_store.session
+        if not session_data.is_cookie_valid():
+            return {
+                "success": False,
+                "error": "Session cookies invalid or missing. Please sign in first.",
+            }
+
+        target_uuid = ""
+        ident = (order_identifier or "").strip()
+        if not ident:
+            return {"success": False, "error": "Order identifier cannot be empty."}
+
+        # Check UUID
+        uuid_pattern = r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+        uuid_match = re.search(uuid_pattern, ident)
+        if uuid_match:
+            target_uuid = uuid_match.group(1)
+
+        # Check local DB
+        if not target_uuid:
+            try:
+                from core.models import InstallationOrder
+                from core.vision import normalizer
+                canonical = normalizer.canonicalize(ident) or ident.replace(" ", "").upper()
+                order_rec = InstallationOrder.objects.filter(
+                    models.Q(order_number__iexact=ident) |
+                    models.Q(registration_number__iexact=canonical) |
+                    models.Q(vin__iexact=ident)
+                ).exclude(itms_order_uuid="").first()
+                if order_rec and order_rec.itms_order_uuid:
+                    target_uuid = order_rec.itms_order_uuid
+            except Exception:
+                pass
+
+        # Check live ITMS active orders table
+        if not target_uuid:
+            active_res = self.fetch_installation_orders(page=1, search_params=ident, archive=False)
+            active_orders = active_res.get("orders", [])
+            for o in active_orders:
+                if o.get("order_key"):
+                    target_uuid = o["order_key"]
+                    break
+
+        if not target_uuid:
+            return {
+                "success": False,
+                "error": f"Could not resolve ITMS UUID for '{ident}'.",
+            }
+
+        url = f"{self.base_url}/installation-orders/approve?id={target_uuid}"
+        headers = {"Referer": f"{self.base_url}/installation-orders/installation?id={target_uuid}"}
+
+        try:
+            resp = self._request_with_retry("GET", url, headers=headers, timeout=self.timeout)
+            if resp.status_code != 200:
+                return {
+                    "success": False,
+                    "error": f"Approve page returned HTTP {resp.status_code}",
+                    "url": url,
+                    "order_uuid": target_uuid,
+                }
+
+            parsed = self.parse_approve_page_html(resp.text)
+            parsed["success"] = True
+            parsed["order_uuid"] = target_uuid
+            parsed["url"] = url
+            return parsed
+        except requests.exceptions.RequestException as exc:
+            return {
+                "success": False,
+                "error": f"Connection error fetching approve page: {exc}",
+                "url": url,
+                "order_uuid": target_uuid,
+            }
+
+    @staticmethod
+    def prepare_multipart_image_bytes(
+        file_path: Any,
+        max_dimension: Optional[int] = None,
+        jpeg_quality: Optional[int] = None,
+        enabled: Optional[bool] = None,
+    ) -> Tuple[bytes, Dict[str, Any]]:
+        return prepare_multipart_image_bytes(file_path, max_dimension, jpeg_quality, enabled)
+
+    def upload_installation_step2_photos(
+        self,
+        order_uuid: str,
+        front_photo_path: Any,
+        rear_photo_path: Any,
+        checklist_path: Optional[Any] = None,
+        csrf_token: Optional[str] = None,
+        vehicle_type: str = "M",
+        dry_run: Optional[bool] = None,
+        log_callback: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Uploads front and rear motorcycle installation photos (and optional checklist)
+        to ITMS Step 2:
+          POST /installation-orders/approve?id=<uuid> (multipart/form-data)
+        
+        SMART ON-THE-FLY COMPRESSION:
+          Downsamples photos on-the-fly ONLY when preparing the HTTP multipart stream
+          (max 1920px, JPEG quality 88%). Master photos in vault are 100% untouched.
+        
+        CRITICAL SAFETY RULE:
+          dry_run defaults to None (resolving to config setting submission.dry_run_mode).
+          In dry_run mode, no mutating POST request is transmitted to the live ITMS server.
+          Live submission occurs ONLY when dry_run=False.
+
+        Upon success, the server responds with HTTP 302 Found and Location redirecting to:
+          https://stock.itms.ug/installation-orders/confirmation?id=<uuid> (Step 3: Confirmation)
+        """
+        dry_run = resolve_dry_run(dry_run)
+        import mimetypes
+        from django.conf import settings
+
+        session_data = self.session_store.session
+        if not session_data.is_cookie_valid():
+            return {
+                "success": False,
+                "error": "Session cookies invalid or missing. Please sign in first.",
+            }
+
+        # Resolve photo paths on disk
+        def resolve_file_path(p: Any) -> Optional[Path]:
+            if not p:
+                return None
+            path_obj = Path(p)
+            if not path_obj.is_absolute() and settings.configured:
+                cand = Path(settings.MEDIA_ROOT) / path_obj
+                if cand.is_file():
+                    return cand
+            if path_obj.is_file():
+                return path_obj
+            return None
+
+        front_file = resolve_file_path(front_photo_path)
+        rear_file = resolve_file_path(rear_photo_path)
+        checklist_file = resolve_file_path(checklist_path) if checklist_path else None
+
+        if not front_file:
+            return {
+                "success": False,
+                "error": f"Front photo file not found on disk: {front_photo_path}",
+                "order_uuid": order_uuid,
+            }
+        if not rear_file:
+            return {
+                "success": False,
+                "error": f"Rear photo file not found on disk: {rear_photo_path}",
+                "order_uuid": order_uuid,
+            }
+
+        # Prepare Smart On-The-Fly Multipart Compression (Vault master images untouched!)
+        front_bytes, front_stats = prepare_multipart_image_bytes(front_file)
+        rear_bytes, rear_stats = prepare_multipart_image_bytes(rear_file)
+
+        if log_callback:
+            try:
+                log_callback(f"📸 [bold cyan][COMPRESS][/bold cyan] Front: {front_file.name} ({front_stats.get('display_str')})")
+                log_callback(f"📸 [bold cyan][COMPRESS][/bold cyan] Rear:  {rear_file.name} ({rear_stats.get('display_str')})")
+            except Exception:
+                pass
+
+        # Dry Run Protection Guard
+        if dry_run:
+            simulated_redirect = f"{self.base_url}/installation-orders/confirmation?id={order_uuid}"
+            try:
+                from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
+                order_obj = InstallationOrder.objects.filter(itms_order_uuid=order_uuid).first()
+                if order_obj:
+                    pairs = VehicleInstallationPair.objects.filter(order=order_obj)
+                    for p in pairs:
+                        SubmissionAuditLog.objects.create(
+                            pair=p,
+                            action=SubmissionAuditLog.Action.VALIDATE,
+                            result=SubmissionAuditLog.ResultStatus.SUCCESS,
+                            message=f"[DRY RUN] Step 2 simulated photo upload: Front={front_file.name} ({front_stats.get('display_str')}), Rear={rear_file.name} ({rear_stats.get('display_str')}). Live multipart upload skipped.",
+                        )
+            except Exception as audit_exc:
+                logger.warning("Audit log error on Step 2 dry run: %s", audit_exc)
+
+            return {
+                "success": True,
+                "dry_run": True,
+                "step": 2,
+                "status_code": 302,
+                "redirect_url": simulated_redirect,
+                "relative_redirect": f"/installation-orders/confirmation?id={order_uuid}",
+                "step3_ready": True,
+                "order_uuid": order_uuid,
+                "front_photo": str(front_file),
+                "rear_photo": str(rear_file),
+                "checklist": str(checklist_file) if checklist_file else None,
+                "front_stats": front_stats,
+                "rear_stats": rear_stats,
+                "message": f"[DRY RUN] Step 2 photos verified with on-the-fly compression (Front: {front_stats.get('display_str')}, Rear: {rear_stats.get('display_str')}). Simulated advance to Step 3: {simulated_redirect}",
+            }
+
+        front_mime = mimetypes.guess_type(front_file.name)[0] or "image/jpeg"
+        rear_mime = mimetypes.guess_type(rear_file.name)[0] or "image/jpeg"
+
+        target_csrf = csrf_token or session_data.csrf_token
+        url = f"{self.base_url}/installation-orders/approve?id={order_uuid}"
+
+        headers = {
+            "Origin": self.base_url,
+            "Referer": url,
+            "Cache-Control": "max-age=0",
+        }
+
+        try:
+            files = [
+                ("InstallationOrderApproveForm[front_plate]", (front_file.name, front_bytes, front_mime)),
+                ("InstallationOrderApproveForm[rear_plate]", (rear_file.name, rear_bytes, rear_mime)),
+            ]
+
+            if checklist_file and checklist_file.is_file():
+                check_mime = mimetypes.guess_type(checklist_file.name)[0] or "application/pdf"
+                with open(checklist_file, "rb") as cf:
+                    checklist_bytes = cf.read()
+                files.append(("InstallationOrderApproveForm[checklist]", (checklist_file.name, checklist_bytes, check_mime)))
+            else:
+                # Send empty file field matching browser multipart format
+                files.append(("InstallationOrderApproveForm[checklist]", ("", b"", "application/octet-stream")))
+
+            data = {
+                "vehicle_type": vehicle_type,
+            }
+            if target_csrf:
+                data["_csrf-frontend"] = target_csrf
+
+            resp = self._request_with_retry("POST", url, data=data, files=files, headers=headers, timeout=self.timeout, allow_redirects=False)
+
+            if resp.status_code == 302:
+                redirect_url = resp.headers.get("Location", "")
+                full_redirect_url = urllib.parse.urljoin(self.base_url, redirect_url)
+                is_step3 = "/installation-orders/confirmation" in redirect_url
+
+                # Audit log in database
+                try:
+                    from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
+                    order_obj = InstallationOrder.objects.filter(itms_order_uuid=order_uuid).first()
+                    if order_obj:
+                        order_obj.status = InstallationOrder.Status.SUBMITTED
+                        order_obj.save(update_fields=["status"])
+                        pairs = VehicleInstallationPair.objects.filter(order=order_obj)
+                        for p in pairs:
+                            SubmissionAuditLog.objects.create(
+                                pair=p,
+                                action=SubmissionAuditLog.Action.UPLOAD_FRONT,
+                                result=SubmissionAuditLog.ResultStatus.SUCCESS,
+                                message=f"Uploaded front photo: {front_file.name} ({front_stats.get('display_str')})",
+                            )
+                            SubmissionAuditLog.objects.create(
+                                pair=p,
+                                action=SubmissionAuditLog.Action.UPLOAD_REAR,
+                                result=SubmissionAuditLog.ResultStatus.SUCCESS,
+                                message=f"Uploaded rear photo: {rear_file.name} ({rear_stats.get('display_str')})",
+                            )
+                            SubmissionAuditLog.objects.create(
+                                pair=p,
+                                action=SubmissionAuditLog.Action.VALIDATE,
+                                result=SubmissionAuditLog.ResultStatus.SUCCESS,
+                                message=f"Step 2 photos uploaded successfully: Redirected to {redirect_url}",
+                            )
+                except Exception as audit_exc:
+                    logger.warning("Audit log error on Step 2 upload: %s", audit_exc)
+
+                return {
+                    "success": True,
+                    "step": 2,
+                    "status_code": 302,
+                    "redirect_url": full_redirect_url,
+                    "relative_redirect": redirect_url,
+                    "step3_ready": is_step3,
+                    "order_uuid": order_uuid,
+                    "front_photo": str(front_file),
+                    "rear_photo": str(rear_file),
+                    "front_stats": front_stats,
+                    "rear_stats": rear_stats,
+                    "message": f"Step 2 photos uploaded successfully ({front_stats.get('display_str')}, {rear_stats.get('display_str')}). Advanced to Step 3: {full_redirect_url}",
+                }
+            elif resp.status_code == 200:
+                err_m = re.findall(r'<div[^>]*class=["\'][^"\']*invalid-feedback[^"\']*["\'][^>]*>(.*?)</div>', resp.text, re.DOTALL)
+                clean_errs = [re.sub(r'<[^>]+>', '', e).strip() for e in err_m if re.sub(r'<[^>]+>', '', e).strip()]
+                return {
+                    "success": False,
+                    "step": 2,
+                    "status_code": 200,
+                    "error": "Step 2 photo upload re-rendered page without redirecting. Validation errors encountered.",
+                    "form_errors": clean_errs,
+                    "order_uuid": order_uuid,
+                }
+            else:
+                return {
+                    "success": False,
+                    "step": 2,
+                    "status_code": resp.status_code,
+                    "error": f"Photo upload returned unexpected HTTP {resp.status_code}",
+                    "order_uuid": order_uuid,
+                }
+        except requests.exceptions.RequestException as exc:
+            return {
+                "success": False,
+                "step": 2,
+                "error": f"Connection error uploading Step 2 photos: {exc}",
+                "order_uuid": order_uuid,
+            }
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Step 3: Confirmation / Summary (/installation-orders/confirmation?id=<uuid>) & Completion
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def parse_confirmation_page_html(self, html: str) -> Dict[str, Any]:
+        """
+        Parses Step 3 order confirmation / final summary page:
+          GET https://stock.itms.ug/installation-orders/confirmation?id=<uuid>
+        
+        Extracts:
+          - CSRF token (_csrf-frontend / meta tag)
+          - Form action and order UUID
+          - Order number from breadcrumb
+          - Service type, VIN, Old plate, Registration number
+          - Front plate serial, Rear plate serial, GPS Tracker, Front Beacon, Rear Beacon
+          - Evidence photo cards (Front Plate, Rear Plate, Checklist)
+        """
+        csrf_token = self._extract_csrf_from_html(html)
+
+        form_m = re.search(r'<form[^>]*action=["\']([^"\']+)["\']', html)
+        form_action = form_m.group(1) if form_m else ""
+        uuid_m = re.search(r'id=([0-9a-fA-F-]+)', form_action)
+        order_uuid = uuid_m.group(1) if uuid_m else ""
+
+        order_num_m = re.search(r'<li[^>]*class=["\']breadcrumb-item active["\'][^>]*>(PO-[A-Za-z0-9\-]+)</li>', html)
+        order_number = order_num_m.group(1) if order_num_m else ""
+
+        def get_field_val(label: str) -> str:
+            m = re.search(
+                rf'<div[^>]*class=["\']fw-semibold["\'][^>]*>{re.escape(label)}:?</div>\s*<div[^>]*class=["\']text-muted small["\'][^>]*>(.*?)</div>',
+                html,
+                re.DOTALL | re.IGNORECASE,
+            )
+            if m:
+                val = re.sub(r'<[^>]+>', '', m.group(1)).strip()
+                return "" if val in ("—", "-", "") else val
+            return ""
+
+        service_type = get_field_val("Service Type")
+        vin = get_field_val("Vehicle VIN/Chassis No.")
+        old_plate = get_field_val("Old plate number")
+        registration_number = get_field_val("Registration Number")
+        front_plate = get_field_val("Front Plate")
+        rear_plate = get_field_val("Rear Plate")
+        tracker = get_field_val("GPS Tracker")
+        front_beacon = get_field_val("Front Beacon")
+        rear_beacon = get_field_val("Rear Beacon")
+
+        # Photo cards extraction
+        photo_cards = []
+        for p_block in re.finditer(
+            r'<p[^>]*class=["\'][^"\']*fw-semibold[^"\']*["\'][^>]*>\s*(Front Plate|Rear Plate|Installation checklist)(.*?)(?=<p[^>]*class=["\'][^"\']*fw-semibold[^"\']*["\']|<div class="d-flex justify-content-between align-items-center mt-4"|</form>)',
+            html,
+            re.DOTALL | re.IGNORECASE,
+        ):
+            label = p_block.group(1).strip()
+            content = p_block.group(2)
+            img_m = re.search(r'<img[^>]*src=["\']([^"\']+)["\']', content)
+            file_m = re.search(r'<span[^>]*class=["\']text-dark small["\'][^>]*>(.*?)</span>', content)
+            filename = file_m.group(1).strip() if file_m else ""
+            img_src = img_m.group(1).strip() if img_m else ""
+            if filename == "No file":
+                filename = ""
+            photo_cards.append({
+                "label": label,
+                "filename": filename,
+                "img_src": img_src,
+            })
+
+        return {
+            "order_uuid": order_uuid,
+            "order_number": order_number,
+            "csrf_token": csrf_token,
+            "form_action": form_action,
+            "service_type": service_type,
+            "vin": vin,
+            "old_plate": old_plate,
+            "registration_number": registration_number,
+            "front_plate": front_plate,
+            "rear_plate": rear_plate,
+            "tracker": tracker,
+            "front_beacon": front_beacon,
+            "rear_beacon": rear_beacon,
+            "photo_cards": photo_cards,
+        }
+
+    def fetch_confirmation_step3(
+        self,
+        order_identifier: str,
+        download_photos: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Fetches Step 3 order confirmation / final summary page (read-only GET):
+          GET https://stock.itms.ug/installation-orders/confirmation?id=<uuid>
+        
+        Robust Fallback Principle:
+          If GET /confirmation returns HTTP 302 redirect (as Yii2 does when accessed directly
+          outside an active wizard session or while status is 'Under installation'), or if the page
+          re-renders without confirmation fields, this method gracefully falls back to `fetch_order_info`
+          to synthesize the complete Step 3 summary, hardware inventory, and uploaded photo cards.
+        """
+        from django.db import models
+        from django.conf import settings
+
+        session_data = self.session_store.session
+        if not session_data.is_cookie_valid():
+            return {
+                "success": False,
+                "error": "Session cookies invalid or missing. Please sign in first.",
+            }
+
+        target_uuid = ""
+        ident = (order_identifier or "").strip()
+        if not ident:
+            return {"success": False, "error": "Order identifier cannot be empty."}
+
+        # Check UUID
+        uuid_pattern = r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+        uuid_match = re.search(uuid_pattern, ident)
+        if uuid_match:
+            target_uuid = uuid_match.group(1)
+
+        # Check local DB
+        if not target_uuid:
+            try:
+                from core.models import InstallationOrder
+                from core.vision import normalizer
+                canonical = normalizer.canonicalize(ident) or ident.replace(" ", "").upper()
+                order_rec = InstallationOrder.objects.filter(
+                    models.Q(order_number__iexact=ident) |
+                    models.Q(registration_number__iexact=canonical) |
+                    models.Q(vin__iexact=ident)
+                ).exclude(itms_order_uuid="").first()
+                if order_rec and order_rec.itms_order_uuid:
+                    target_uuid = order_rec.itms_order_uuid
+            except Exception:
+                pass
+
+        # Check live ITMS active orders table
+        if not target_uuid:
+            active_res = self.fetch_installation_orders(page=1, search_params=ident, archive=False)
+            active_orders = active_res.get("orders", [])
+            for o in active_orders:
+                if o.get("order_key"):
+                    target_uuid = o["order_key"]
+                    break
+
+        if not target_uuid:
+            return {
+                "success": False,
+                "error": f"Could not resolve ITMS UUID for '{ident}'.",
+            }
+
+        url = f"{self.base_url}/installation-orders/confirmation?id={target_uuid}"
+        headers = {"Referer": f"{self.base_url}/installation-orders/approve?id={target_uuid}"}
+
+        needs_fallback = False
+        parsed = {}
+
+        try:
+            resp = self._request_with_retry("GET", url, headers=headers, timeout=self.timeout, allow_redirects=False)
+            if resp.status_code == 302:
+                needs_fallback = True
+            elif resp.status_code == 200:
+                if "/installation-orders/index" in resp.url or "data-url=" in resp.text:
+                    needs_fallback = True
+                else:
+                    parsed = self.parse_confirmation_page_html(resp.text)
+                    if not parsed.get("order_number") and not parsed.get("photo_cards"):
+                        needs_fallback = True
+            else:
+                needs_fallback = True
+        except requests.exceptions.RequestException:
+            needs_fallback = True
+
+        if needs_fallback:
+            # Synthesize Step 3 confirmation from existing uploaded photos via fetch_order_info
+            order_info = self.fetch_order_info(target_uuid, download_photos=download_photos)
+            if not order_info.get("success"):
+                return {
+                    "success": False,
+                    "error": f"Could not fetch confirmation page or order info for '{ident}': {order_info.get('error')}",
+                    "url": url,
+                    "order_uuid": target_uuid,
+                }
+
+            photo_cards = []
+            for p in order_info.get("photos", []):
+                orient = p.get("orientation", "")
+                lbl = "Front Plate" if orient == "FRONT" else ("Rear Plate" if orient == "REAR" else p.get("label", "Plate photo"))
+                photo_cards.append({
+                    "label": lbl,
+                    "filename": p.get("filename", ""),
+                    "img_src": p.get("relative_url") or p.get("url", ""),
+                    "local_path": p.get("local_path", ""),
+                    "orientation": orient,
+                })
+
+            if not any("checklist" in str(pc.get("label", "")).lower() for pc in photo_cards):
+                photo_cards.append({
+                    "label": "Installation checklist",
+                    "filename": "",
+                    "img_src": "",
+                    "local_path": "",
+                    "orientation": "CHECKLIST",
+                })
+
+            parsed = {
+                "order_uuid": target_uuid,
+                "order_number": order_info.get("order_number", ""),
+                "csrf_token": session_data.csrf_token,
+                "form_action": f"/installation-orders/confirmation?id={target_uuid}",
+                "service_type": order_info.get("raw_details", {}).get("Service Type") or "First Time Registration",
+                "vin": order_info.get("vin", ""),
+                "old_plate": order_info.get("raw_details", {}).get("Old plate number", ""),
+                "registration_number": order_info.get("registration_number", ""),
+                "front_plate": order_info.get("front_plate", {}).get("serial", ""),
+                "rear_plate": order_info.get("rear_plate", {}).get("serial", ""),
+                "tracker": order_info.get("gps_tracker", {}).get("device_id", ""),
+                "front_beacon": order_info.get("front_beacon", {}).get("device_id", ""),
+                "rear_beacon": order_info.get("rear_beacon", {}).get("device_id", ""),
+                "photo_cards": photo_cards,
+                "synthesized_from_info": True,
+            }
+
+        # If download_photos requested and not yet resolved:
+        if download_photos and not parsed.get("synthesized_from_info"):
+            vault_root = getattr(settings, "VAULT_ROOT", "media/vault") if settings.configured else "media/vault"
+            order_num = parsed.get("order_number") or target_uuid
+            order_dir = Path(vault_root) / "itms_photos" / order_num
+            for pc in parsed.get("photo_cards", []):
+                src = pc.get("img_src", "")
+                if src and not pc.get("local_path"):
+                    dl = self.download_photo(src, save_dir=order_dir, order_number=order_num)
+                    if dl.get("success"):
+                        pc["local_path"] = dl["path"]
+
+        parsed["success"] = True
+        parsed["order_uuid"] = target_uuid or parsed.get("order_uuid", "")
+        parsed["url"] = url
+        return parsed
+
+    def submit_confirmation_step3(
+        self,
+        order_uuid: str,
+        front_photo_path: Optional[Any] = None,
+        rear_photo_path: Optional[Any] = None,
+        checklist_path: Optional[Any] = None,
+        csrf_token: Optional[str] = None,
+        dry_run: Optional[bool] = None,
+        log_callback: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Submits Step 3 confirmation to finalize and complete the installation order:
+          POST /installation-orders/confirmation?id=<uuid> (multipart/form-data)
+        
+        Photo Replacement Architecture:
+          Operators may optionally attach replacement photos if existing uploaded photos
+          were blurred, mistaken, or misaligned:
+            - If front_photo_path provided: attaches file & sets front_plate_touched="1"
+            - If front_photo_path omitted: sets front_plate_touched="0" & empty file attachment
+            - Same behavior for rear_photo_path and checklist_path
+        
+        CRITICAL SAFETY RULE:
+          dry_run defaults to None (resolving to config setting submission.dry_run_mode).
+          In dry_run mode, no POST network request is transmitted to the live ITMS server.
+          Live submission occurs ONLY when dry_run=False.
+        
+        Upon live success, the server responds with HTTP 302 Found redirecting to:
+          https://stock.itms.ug/installation-orders/index
+        """
+        dry_run = resolve_dry_run(dry_run)
+        import mimetypes
+        from django.conf import settings
+
+        session_data = self.session_store.session
+        if not session_data.is_cookie_valid():
+            return {
+                "success": False,
+                "error": "Session cookies invalid or missing. Please sign in first.",
+            }
+
+        # Helper to resolve replacement photo paths on disk
+        def resolve_file_path(p: Any) -> Optional[Path]:
+            if not p:
+                return None
+            path_obj = Path(p)
+            if not path_obj.is_absolute() and settings.configured:
+                cand = Path(settings.MEDIA_ROOT) / path_obj
+                if cand.is_file():
+                    return cand
+            if path_obj.is_file():
+                return path_obj
+            return None
+
+        front_file = resolve_file_path(front_photo_path)
+        rear_file = resolve_file_path(rear_photo_path)
+        checklist_file = resolve_file_path(checklist_path)
+
+        has_replacements = bool(front_file or rear_file or checklist_file)
+        replaced_info = []
+        if front_file:
+            replaced_info.append(f"Front: {front_file.name}")
+        if rear_file:
+            replaced_info.append(f"Rear: {rear_file.name}")
+        if checklist_file:
+            replaced_info.append(f"Checklist: {checklist_file.name}")
+
+        target_csrf = csrf_token or session_data.csrf_token
+        url = f"{self.base_url}/installation-orders/confirmation?id={order_uuid}"
+        redirect_target = f"{self.base_url}/installation-orders/index"
+
+        if dry_run:
+            replace_desc = f" with replacement photos ({', '.join(replaced_info)})" if replaced_info else ""
+            try:
+                from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
+                order_obj = InstallationOrder.objects.filter(itms_order_uuid=order_uuid).first()
+                if order_obj:
+                    pairs = VehicleInstallationPair.objects.filter(order=order_obj)
+                    for p in pairs:
+                        SubmissionAuditLog.objects.create(
+                            pair=p,
+                            action=SubmissionAuditLog.Action.SUBMIT,
+                            result=SubmissionAuditLog.ResultStatus.SUCCESS,
+                            message=f"[DRY RUN] Step 3 confirmation simulated: Order #{order_uuid} ready for completion{replace_desc}. Live POST skipped.",
+                        )
+            except Exception as exc:
+                logger.warning("Audit log error on Step 3 dry run: %s", exc)
+
+            return {
+                "success": True,
+                "dry_run": True,
+                "step": 3,
+                "status_code": 302,
+                "order_uuid": order_uuid,
+                "redirect_url": redirect_target,
+                "relative_redirect": "/installation-orders/index",
+                "is_finalized": True,
+                "has_replacements": has_replacements,
+                "replacements": replaced_info,
+                "message": f"[DRY RUN] Step 3 confirmation simulated for #{order_uuid}{replace_desc}. Order marked ready for completion. (No changes written to stock.itms.ug).",
+            }
+
+        s = self._create_requests_session()
+        headers = {
+            "Origin": self.base_url,
+            "Referer": url,
+            "Cache-Control": "max-age=0",
+        }
+
+        front_bytes, front_stats = (b"", {})
+        rear_bytes, rear_stats = (b"", {})
+        check_bytes, check_stats = (b"", {})
+        data: Dict[str, str] = {}
+        files = []
+
+        if front_file:
+            front_bytes, front_stats = prepare_multipart_image_bytes(front_file)
+            front_mime = mimetypes.guess_type(front_file.name)[0] or "image/jpeg"
+            files.append(("front_plate", (front_file.name, front_bytes, front_mime)))
+            data["front_plate_touched"] = "1"
+            if log_callback:
+                try:
+                    log_callback(f"📸 [bold cyan][COMPRESS][/bold cyan] Step 3 Front: {front_file.name} ({front_stats.get('display_str')})")
+                except Exception:
+                    pass
+        else:
+            files.append(("front_plate", ("", b"", "application/octet-stream")))
+            data["front_plate_touched"] = "0"
+
+        if rear_file:
+            rear_bytes, rear_stats = prepare_multipart_image_bytes(rear_file)
+            rear_mime = mimetypes.guess_type(rear_file.name)[0] or "image/jpeg"
+            files.append(("rear_plate", (rear_file.name, rear_bytes, rear_mime)))
+            data["rear_plate_touched"] = "1"
+            if log_callback:
+                try:
+                    log_callback(f"📸 [bold cyan][COMPRESS][/bold cyan] Step 3 Rear: {rear_file.name} ({rear_stats.get('display_str')})")
+                except Exception:
+                    pass
+        else:
+            files.append(("rear_plate", ("", b"", "application/octet-stream")))
+            data["rear_plate_touched"] = "0"
+
+        if checklist_file:
+            check_bytes, check_stats = prepare_multipart_image_bytes(checklist_file)
+            check_mime = mimetypes.guess_type(checklist_file.name)[0] or "image/jpeg"
+            files.append(("checklist_photo", (checklist_file.name, check_bytes, check_mime)))
+            data["checklist_photo_touched"] = "1"
+        else:
+            files.append(("checklist_photo", ("", b"", "application/octet-stream")))
+            data["checklist_photo_touched"] = "0"
+
+        if target_csrf:
+            data["_csrf-frontend"] = target_csrf
+
+        try:
+            resp = self._request_with_retry("POST", url, data=data, files=files, headers=headers, timeout=self.timeout, allow_redirects=False)
+
+            if resp.status_code == 302:
+                redirect_url = resp.headers.get("Location", "")
+                full_redirect_url = urllib.parse.urljoin(self.base_url, redirect_url)
+                is_index = "/installation-orders/index" in redirect_url
+
+                try:
+                    from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
+                    from django.utils import timezone
+                    order_obj = InstallationOrder.objects.filter(itms_order_uuid=order_uuid).first()
+                    if order_obj:
+                        order_obj.status = InstallationOrder.Status.SUBMITTED
+                        order_obj.order_status = "Installed"
+                        order_obj.save(update_fields=["status", "order_status"])
+                        pairs = VehicleInstallationPair.objects.filter(order=order_obj)
+                        for p in pairs:
+                            p.verification_status = VehicleInstallationPair.VerificationStatus.SUBMITTED
+                            p.submitted_at = timezone.now()
+                            p.save(update_fields=["verification_status", "submitted_at"])
+                            SubmissionAuditLog.objects.create(
+                                pair=p,
+                                action=SubmissionAuditLog.Action.SUBMIT,
+                                result=SubmissionAuditLog.ResultStatus.SUCCESS,
+                                message=f"Step 3 confirmed and finalized: Redirected to {redirect_url}",
+                            )
+                except Exception as audit_exc:
+                    logger.warning("Audit log error on Step 3 submit: %s", audit_exc)
+
+                return {
+                    "success": True,
+                    "dry_run": False,
+                    "step": 3,
+                    "status_code": 302,
+                    "redirect_url": full_redirect_url,
+                    "relative_redirect": redirect_url,
+                    "is_finalized": is_index,
+                    "order_uuid": order_uuid,
+                    "has_replacements": has_replacements,
+                    "replacements": replaced_info,
+                    "message": f"Step 3 confirmed successfully. Order finalized: {full_redirect_url}",
+                }
+            elif resp.status_code == 200:
+                err_m = re.findall(r'<div[^>]*class=["\'][^"\']*invalid-feedback[^"\']*["\'][^>]*>(.*?)</div>', resp.text, re.DOTALL)
+                clean_errs = [re.sub(r'<[^>]+>', '', e).strip() for e in err_m if re.sub(r'<[^>]+>', '', e).strip()]
+                return {
+                    "success": False,
+                    "dry_run": False,
+                    "step": 3,
+                    "status_code": 200,
+                    "error": "Step 3 confirmation re-rendered page without redirecting.",
+                    "form_errors": clean_errs,
+                    "order_uuid": order_uuid,
+                }
+            else:
+                return {
+                    "success": False,
+                    "dry_run": False,
+                    "step": 3,
+                    "status_code": resp.status_code,
+                    "error": f"Step 3 returned unexpected HTTP {resp.status_code}",
+                    "order_uuid": order_uuid,
+                }
+        except requests.exceptions.RequestException as exc:
+            return {
+                "success": False,
+                "dry_run": False,
+                "step": 3,
+                "error": f"Connection error submitting Step 3: {exc}",
+                "order_uuid": order_uuid,
+            }
+
+    def sync_confirmation_step3_to_local_db(
+        self,
+        step3_data: Dict[str, Any],
+        order_uuid: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Synchronizes Step 3 confirmation data into local InstallationOrder record.
+        """
+        from django.db import models
+        from django.utils import timezone
+        from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
+        from core.vision import normalizer
+
+        order_num = step3_data.get("order_number", "").strip()
+        reg_num = step3_data.get("registration_number", "").strip()
+        target_uuid = order_uuid or step3_data.get("order_uuid", "")
+
+        if not order_num and not target_uuid:
+            return {"success": False, "error": "Order identifier missing"}
+
+        canonical_reg = normalizer.canonicalize(reg_num) or reg_num.replace(" ", "").upper()
+
+        defaults = {
+            "registration_number": canonical_reg,
+            "vin": step3_data.get("vin", ""),
+            "front_plate_serial": step3_data.get("front_plate", ""),
+            "rear_plate_serial": step3_data.get("rear_plate", ""),
+            "gps_tracker_id": step3_data.get("tracker", ""),
+            "front_beacon_id": step3_data.get("front_beacon", ""),
+            "rear_beacon_id": step3_data.get("rear_beacon", ""),
+            "plate_serial": step3_data.get("front_plate", "") or step3_data.get("rear_plate", ""),
+            "tracker_id": step3_data.get("tracker", ""),
+            "itms_order_uuid": target_uuid,
+            "itms_action_url": f"/installation-orders/confirmation?id={target_uuid}",
+            "order_status": "Ready for approve",
+            "details_json": step3_data,
+            "info_fetched_at": timezone.now(),
+        }
+
+        order_obj = None
+        if order_num:
+            order_obj = InstallationOrder.objects.filter(order_number=order_num).first()
+        if not order_obj and target_uuid:
+            order_obj = InstallationOrder.objects.filter(itms_order_uuid=target_uuid).first()
+
+        created = False
+        if order_obj:
+            for k, v in defaults.items():
+                setattr(order_obj, k, v)
+            order_obj.save()
+        else:
+            if not order_num:
+                order_num = f"ORD-{target_uuid[:8]}"
+            order_obj = InstallationOrder.objects.create(order_number=order_num, **defaults)
+            created = True
+
+        # Link pairs
+        pairs = VehicleInstallationPair.objects.filter(
+            models.Q(order=order_obj) | models.Q(registration_number_detected=canonical_reg)
+        )
+        for pair in pairs:
+            if not pair.order_id:
+                pair.order = order_obj
+                pair.save(update_fields=["order"])
+            SubmissionAuditLog.objects.create(
+                pair=pair,
+                action=SubmissionAuditLog.Action.VALIDATE,
+                result=SubmissionAuditLog.ResultStatus.SUCCESS,
+                message=(
+                    f"ITMS Step 3 confirmed: {order_num} "
+                    f"(Front Plate: {step3_data.get('front_plate')}, Rear Plate: {step3_data.get('rear_plate')}, "
+                    f"Tracker: {step3_data.get('tracker')}, Photos: {len(step3_data.get('photo_cards', []))})"
+                ),
+            )
+
+        return {
+            "success": True,
+            "created": created,
+            "order_number": order_num,
+            "order_id": order_obj.id,
+            "pairs_updated": pairs.count(),
+        }
+
+    def detect_order_stage(self, order_identifier: str) -> Dict[str, Any]:
+        """
+        Intelligently classifies the current workflow lifecycle stage of an ITMS order:
+          - STAGE_ARCHIVED (Step 4 / Completed / Installed): present in archive
+          - STAGE_3_CONFIRMATION (Step 3 / Confirmation): photos already uploaded in Step 2, pending final submit
+          - STAGE_2_APPROVE (Step 2 / Photos): hardware fitment assigned, pending photo upload
+          - STAGE_1_INSTALLATION (Step 1 / Installation): initial hardware selection & activeForm validation
+        """
+        from django.db import models
+
+        ident = (order_identifier or "").strip()
+        if not ident:
+            return {"success": False, "error": "Order identifier cannot be empty."}
+
+        # 1. First check if archived (Installed)
+        arch_res = self.fetch_archive_orders(page=1, search_params=ident)
+        for o in arch_res.get("orders", []):
+            order_uuid = o.get("order_key", "")
+            return {
+                "success": True,
+                "stage": "STAGE_ARCHIVED",
+                "step": 4,
+                "stage_name": "Completed / Archived (Installed)",
+                "order_uuid": order_uuid,
+                "order_number": o.get("order_number", ""),
+                "registration_number": o.get("registration_number", ""),
+                "vin": o.get("vin", ""),
+                "order_status": o.get("order_status", ""),
+                "is_archived": True,
+                "photos_count": 0,
+                "action_url": o.get("action_url", ""),
+                "message": f"Order #{o.get('order_number')} is fully completed and archived (Status: {o.get('order_status')}).",
+            }
+
+        # 2. Check active orders table
+        active_res = self.fetch_installation_orders(page=1, search_params=ident, archive=False)
+        active_order = None
+        for o in active_res.get("orders", []):
+            active_order = o
+            break
+
+        target_uuid = active_order.get("order_key", "") if active_order else ""
+        if not target_uuid:
+            # Check UUID directly in ident or local DB
+            uuid_pattern = r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+            m = re.search(uuid_pattern, ident)
+            if m:
+                target_uuid = m.group(1)
+            else:
+                try:
+                    from core.models import InstallationOrder
+                    from core.vision import normalizer
+                    canonical = normalizer.canonicalize(ident) or ident.replace(" ", "").upper()
+                    rec = InstallationOrder.objects.filter(
+                        models.Q(order_number__iexact=ident) |
+                        models.Q(registration_number__iexact=canonical) |
+                        models.Q(vin__iexact=ident)
+                    ).exclude(itms_order_uuid="").first()
+                    if rec and rec.itms_order_uuid:
+                        target_uuid = rec.itms_order_uuid
+                except Exception:
+                    pass
+
+        if not target_uuid:
+            return {
+                "success": False,
+                "error": f"Could not find or resolve order '{ident}' on ITMS.",
+            }
+
+        # 3. Query detailed order info to check existing photos and hardware
+        info = self.fetch_order_info(target_uuid, download_photos=False)
+        photos = info.get("photos", [])
+        order_num = info.get("order_number") or (active_order.get("order_number") if active_order else "")
+        reg_num = info.get("registration_number") or (active_order.get("registration_number") if active_order else "")
+        vin_str = info.get("vin") or (active_order.get("vin") if active_order else "")
+        action_url = active_order.get("action_url") if active_order else f"/installation-orders/info?id={target_uuid}"
+
+        # If photos already exist on ITMS (e.g. UMA 835DS has 2 photos), order is in Step 3!
+        if len(photos) >= 2:
+            return {
+                "success": True,
+                "stage": "STAGE_3_CONFIRMATION",
+                "step": 3,
+                "stage_name": "Step 3: Confirmation / Summary (Photos Uploaded, Pending Final Submission)",
+                "order_uuid": target_uuid,
+                "order_number": order_num,
+                "registration_number": reg_num,
+                "vin": vin_str,
+                "photos_count": len(photos),
+                "photos": photos,
+                "action_url": f"/installation-orders/confirmation?id={target_uuid}",
+                "order_status": active_order.get("order_status") if active_order else "Under installation",
+                "is_archived": False,
+                "message": f"Order #{order_num} has {len(photos)} evidence photos uploaded. It is ready for Step 3 confirmation/summary review.",
+            }
+
+        # If action_url points to /approve or front_plate serial is assigned, order is in Step 2
+        front_p = info.get("front_plate", {})
+        has_hw = bool(front_p.get("serial") or front_p.get("plate"))
+        if "/approve" in action_url or has_hw:
+            return {
+                "success": True,
+                "stage": "STAGE_2_APPROVE",
+                "step": 2,
+                "stage_name": "Step 2: Photo Upload (Hardware Assigned, Pending Evidence Photos)",
+                "order_uuid": target_uuid,
+                "order_number": order_num,
+                "registration_number": reg_num,
+                "vin": vin_str,
+                "photos_count": len(photos),
+                "photos": photos,
+                "action_url": f"/installation-orders/approve?id={target_uuid}",
+                "order_status": active_order.get("order_status") if active_order else "Under installation",
+                "is_archived": False,
+                "message": f"Order #{order_num} has hardware assigned. Waiting for Step 2 evidence photo upload.",
+            }
+
+        # Otherwise Step 1
+        return {
+            "success": True,
+            "stage": "STAGE_1_INSTALLATION",
+            "step": 1,
+            "stage_name": "Step 1: Installation (Hardware Selection & Serial Verification)",
+            "order_uuid": target_uuid,
+            "order_number": order_num,
+            "registration_number": reg_num,
+            "vin": vin_str,
+            "photos_count": 0,
+            "photos": [],
+            "action_url": f"/installation-orders/installation?id={target_uuid}",
+            "order_status": active_order.get("order_status") if active_order else "Ready",
+            "is_archived": False,
+            "message": f"Order #{order_num} requires Step 1 hardware selection.",
+        }
+
+    def execute_installation_order_workflow(
+        self,
+        order_identifier: str,
+        front_photo_path: Optional[Any] = None,
+        rear_photo_path: Optional[Any] = None,
+        checklist_path: Optional[Any] = None,
+        pair_id: Optional[int] = None,
+        dry_run: Optional[bool] = None,
+        submit_step3: Optional[bool] = None,
+        log_callback: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        End-to-End Orchestrator:
+        Intelligently inspects the order's active stage, then drives it through Step 1 (Hardware fitment),
+        Step 2 (Evidence photo upload), and optionally Step 3 (Confirmation & Finalization).
+        Resumes seamlessly at Step 3 if photos were already uploaded!
+
+        CRITICAL SAFETY RULE:
+          dry_run defaults to None (resolving to config setting submission.dry_run_mode).
+          In dry_run mode, no mutating POST request is transmitted to the live ITMS server.
+        """
+        dry_run = resolve_dry_run(dry_run)
+        if submit_step3 is None:
+            try:
+                from core.services import config_service
+                submit_step3 = config_service.get_setting("submission.submit_step3", True)
+            except Exception:
+                submit_step3 = True
+        from core.models import VehicleInstallationPair, InstallationOrder
+
+        pair = None
+        if pair_id:
+            pair = VehicleInstallationPair.objects.filter(id=pair_id).first()
+
+        # Step 0: Intelligent Stage Detection
+        stage_info = self.detect_order_stage(order_identifier)
+        if not stage_info.get("success"):
+            return {
+                "success": False,
+                "error": stage_info.get("error", "Could not locate order on ITMS."),
+            }
+
+        order_uuid = stage_info["order_uuid"]
+        current_stage = stage_info.get("stage")
+
+        if current_stage == "STAGE_ARCHIVED":
+            return {
+                "success": True,
+                "already_archived": True,
+                "is_finalized": True,
+                "order_uuid": order_uuid,
+                "stage": current_stage,
+                "message": stage_info.get("message", "Order is already completed and archived."),
+            }
+
+        if current_stage == "STAGE_3_CONFIRMATION":
+            step3_info = self.fetch_confirmation_step3(order_uuid, download_photos=True)
+            # If the confirmation form is genuinely open (not synthesized due to a 302 redirect), submit/view Step 3 directly:
+            if not step3_info.get("synthesized_from_info"):
+                if submit_step3:
+                    step3_res = self.submit_confirmation_step3(
+                        order_uuid=order_uuid,
+                        front_photo_path=front_photo_path,
+                        rear_photo_path=rear_photo_path,
+                        checklist_path=checklist_path,
+                        csrf_token=step3_info.get("csrf_token"),
+                        dry_run=dry_run,
+                        log_callback=log_callback,
+                    )
+                    return {
+                        "success": step3_res.get("success", False),
+                        "already_in_step3": True,
+                        "order_uuid": order_uuid,
+                        "step3": step3_res,
+                        "is_finalized": step3_res.get("is_finalized", False),
+                        "redirect_url": step3_res.get("redirect_url", ""),
+                        "message": step3_res.get("message", ""),
+                    }
+                return {
+                    "success": True,
+                    "already_in_step3": True,
+                    "step3_ready": True,
+                    "order_uuid": order_uuid,
+                    "confirmation": step3_info,
+                    "message": f"Order is already in Step 3 (Confirmation/Summary). Evidence photos are uploaded ({stage_info.get('photos_count')} photos). (Pass --submit-step3 to finalize).",
+                }
+            # If synthesized_from_info is True, GET /confirmation 302-redirected because Step 2 was not submitted;
+            # fall through to Step 2 photo upload to advance and finalize the order.
+
+        step1_res = {}
+        step2_res = {}
+        step3_res = {}
+
+        if current_stage == "STAGE_1_INSTALLATION":
+            step1_info = self.fetch_installation_step1(order_uuid)
+            if not step1_info.get("success"):
+                return {
+                    "success": False,
+                    "step": 1,
+                    "error": f"Failed fetching Step 1 installation form: {step1_info.get('error')}",
+                }
+            front_p = step1_info.get("front_plate", {})
+            rear_p = step1_info.get("rear_plate", {})
+            tracker = step1_info.get("tracker", {})
+
+            # Sync Step 1 to local DB
+            self.sync_installation_step1_to_local_db(step1_info, order_uuid=order_uuid)
+
+            # Submit Step 1 ("Save and continue") with ActiveForm validation
+            step1_res = self.submit_installation_step1(
+                order_uuid=order_uuid,
+                front_plate_id=front_p.get("selected_id", ""),
+                back_plate_id=rear_p.get("selected_id", ""),
+                tracker_id=tracker.get("selected_id", ""),
+                csrf_token=step1_info.get("csrf_token"),
+                just_save=False,
+                run_validation_first=True,
+                dry_run=dry_run,
+            )
+            if not step1_res.get("success"):
+                return {
+                    "success": False,
+                    "step": 1,
+                    "error": f"Step 1 failed: {step1_res.get('error')}",
+                    "details": step1_res,
+                }
+        else:
+            step1_res = {
+                "success": True,
+                "already_advanced": True,
+                "order_uuid": order_uuid,
+                "message": "Order already completed Step 1.",
+            }
+
+        # Step 2: Resolve photo files
+        actual_front = front_photo_path
+        actual_rear = rear_photo_path
+
+        if not actual_front or not actual_rear:
+            if not pair and order_uuid:
+                order_obj = InstallationOrder.objects.filter(itms_order_uuid=order_uuid).first()
+                if order_obj:
+                    pair = VehicleInstallationPair.objects.filter(order=order_obj).first()
+            if pair:
+                if not actual_front and pair.front_image:
+                    actual_front = pair.front_image.vault_file
+                if not actual_rear and pair.rear_image:
+                    actual_rear = pair.rear_image.vault_file
+
+        if not actual_front or not actual_rear:
+            return {
+                "success": True,
+                "step1_complete": True,
+                "step2_ready": True,
+                "order_uuid": order_uuid,
+                "message": "Step 1 completed successfully. Order is in Step 2, but evidence photos were not provided.",
+            }
+
+        # Fetch fresh CSRF token from Step 2 page
+        step2_info = self.fetch_approve_step2(order_uuid)
+        csrf_step2 = step2_info.get("csrf_token") if step2_info.get("success") else None
+
+        # Execute Step 2 photo upload
+        step2_res = self.upload_installation_step2_photos(
+            order_uuid=order_uuid,
+            front_photo_path=actual_front,
+            rear_photo_path=actual_rear,
+            checklist_path=checklist_path,
+            csrf_token=csrf_step2,
+            vehicle_type="M",
+            dry_run=dry_run,
+            log_callback=log_callback,
+        )
+
+        if not step2_res.get("success"):
+            return {
+                "success": False,
+                "step1": step1_res,
+                "step2": step2_res,
+                "order_uuid": order_uuid,
+                "error": f"Step 2 failed: {step2_res.get('error')}",
+            }
+
+        # Optional Step 3 Finalization
+        if submit_step3:
+            step3_info = self.fetch_confirmation_step3(order_uuid)
+            csrf_step3 = step3_info.get("csrf_token") if step3_info.get("success") else None
+            step3_res = self.submit_confirmation_step3(
+                order_uuid=order_uuid,
+                front_photo_path=front_photo_path,
+                rear_photo_path=rear_photo_path,
+                checklist_path=checklist_path,
+                csrf_token=csrf_step3,
+                dry_run=dry_run,
+                log_callback=log_callback,
+            )
+            return {
+                "success": step3_res.get("success", False),
+                "step1": step1_res,
+                "step2": step2_res,
+                "step3": step3_res,
+                "order_uuid": order_uuid,
+                "is_finalized": step3_res.get("is_finalized", False),
+                "redirect_url": step3_res.get("redirect_url", ""),
+                "message": step3_res.get("message", ""),
+            }
+
+        return {
+            "success": step2_res.get("success", False),
+            "step1": step1_res,
+            "step2": step2_res,
+            "order_uuid": order_uuid,
+            "step3_ready": step2_res.get("step3_ready", False),
+            "redirect_url": step2_res.get("redirect_url", ""),
+            "message": step2_res.get("message", ""),
         }
 
     def get_status(self) -> Dict[str, Any]:
@@ -1292,3 +3382,17 @@ def get_web_client() -> ITMSWebClient:
     if _default_web_client is None:
         _default_web_client = ITMSWebClient()
     return _default_web_client
+
+
+def get_current_itms_account() -> str:
+    """Returns the normalized email of the currently authenticated ITMS account, or empty string if offline."""
+    try:
+        client = get_web_client()
+        session = getattr(getattr(client, "session_store", None), "session", None)
+        if getattr(session, "is_authenticated", False) or (hasattr(session, "is_cookie_valid") and session.is_cookie_valid()):
+            email = getattr(session, "user_email", "")
+            if isinstance(email, str):
+                return email.strip().lower()
+    except Exception:
+        pass
+    return ""

@@ -12,5 +12,14 @@ media/crops/
 .DS_Store
 staticfiles/
 tools/tesseract/
+# Secure configuration, credentials and sessions
+secure/
+config.json
+*.session.json
+*.tokens.json
+.operator_session.json
+.operator_prefs.json
+.itms_web_session.json
+.itms_tokens.json
 stock.itms.ug
-
+exports

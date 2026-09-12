@@ -24,8 +24,16 @@ from rich.text import Text
 
 logger = logging.getLogger(__name__)
 
-SESSION_FILE = Path(getattr(settings, "VAULT_ROOT", "media/vault")) / ".operator_session.json"
-PREFS_FILE = Path(getattr(settings, "VAULT_ROOT", "media/vault")) / ".operator_prefs.json"
+from core.services.secure_storage import get_secure_auth_path
+
+def get_session_file_path() -> Path:
+    return get_secure_auth_path("operator_session.json", legacy_vault_file=".operator_session.json")
+
+def get_prefs_file_path() -> Path:
+    return get_secure_auth_path("operator_prefs.json", legacy_vault_file=".operator_prefs.json")
+
+SESSION_FILE = get_session_file_path()
+PREFS_FILE = get_prefs_file_path()
 DEFAULT_BANNER_ANS = Path("assets/landing_banner.ans")
 SOURCE_BANNER_PNG = Path("assets/ascii-magic-1.png")
 SHIELD_BANNER_ANS = Path("assets/shield_banner.ans")
@@ -39,9 +47,20 @@ def authenticate_operator(username: str, password: str) -> Tuple[Optional[User],
 
     user = authenticate(username=username, password=password)
     if user is None:
+        # Before failing, if the user is missing in this database, attempt auto-sync from SQLite
+        if not User.objects.filter(username=username).exists():
+            try:
+                from core.services.config_service import ensure_operator_accounts_synced
+                if ensure_operator_accounts_synced() > 0:
+                    user = authenticate(username=username, password=password)
+                    if user is not None and user.is_active:
+                        return user, ""
+            except Exception:
+                pass
+
         # Check if username even exists to give a helpful message
         if not User.objects.filter(username=username).exists():
-            return None, f"User '{username}' does not exist. Did you mean to create an account?"
+            return None, f"User '{username}' does not exist in active database. Did you mean to create an account or switch database?"
         return None, "Invalid password. Please check your credentials."
 
     if not user.is_active:
@@ -114,26 +133,47 @@ def save_remembered_session(user: User, remember: bool = True) -> None:
         return
 
     token = _compute_session_token(user)
+    from core.services.config_service import get_active_database_info
+    db_info = get_active_database_info()
     data = {
         "username": user.username,
         "token": token,
         "saved_at": time.time(),
+        "database_vendor": db_info.get("vendor", ""),
+        "database_name": db_info.get("name", ""),
     }
+    session_file = get_session_file_path()
     try:
-        with open(SESSION_FILE, "w", encoding="utf-8") as f:
+        session_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(session_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        save_operator_preferences({"last_username": user.username})
+        try:
+            os.chmod(session_file, 0o600)
+        except Exception:
+            pass
+        save_operator_preferences({
+            "last_username": user.username,
+            "last_database_vendor": db_info.get("vendor", ""),
+            "last_database_name": db_info.get("name", ""),
+        })
     except Exception as exc:
         logger.warning("Could not save operator session: %s", exc)
 
 
 def get_remembered_session() -> Optional[User]:
     """Validates and retrieves the currently remembered operator user, if valid."""
-    if not SESSION_FILE.is_file():
+    session_file = get_session_file_path()
+    if not session_file.is_file():
         return None
 
     try:
-        with open(SESSION_FILE, "r", encoding="utf-8") as f:
+        from core.services.config_service import ensure_operator_accounts_synced
+        ensure_operator_accounts_synced()
+    except Exception:
+        pass
+
+    try:
+        with open(session_file, "r", encoding="utf-8") as f:
             data = json.load(f)
         username = data.get("username", "")
         token = data.get("token", "")
@@ -154,19 +194,21 @@ def get_remembered_session() -> Optional[User]:
 
 def clear_remembered_session() -> None:
     """Deletes the stored session file."""
-    if SESSION_FILE.is_file():
+    session_file = get_session_file_path()
+    if session_file.is_file():
         try:
-            SESSION_FILE.unlink()
+            session_file.unlink()
         except OSError:
             pass
 
 
 def get_operator_preferences() -> Dict[str, Any]:
     """Retrieves UI/UX preferences (e.g. last used username, theme, ITMS mode)."""
-    if not PREFS_FILE.is_file():
+    prefs_file = get_prefs_file_path()
+    if not prefs_file.is_file():
         return {}
     try:
-        with open(PREFS_FILE, "r", encoding="utf-8") as f:
+        with open(prefs_file, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return {}
@@ -176,10 +218,15 @@ def save_operator_preferences(updates: Dict[str, Any]) -> None:
     """Updates and saves UI/UX preferences to disk."""
     prefs = get_operator_preferences()
     prefs.update(updates)
-    PREFS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    prefs_file = get_prefs_file_path()
+    prefs_file.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with open(PREFS_FILE, "w", encoding="utf-8") as f:
+        with open(prefs_file, "w", encoding="utf-8") as f:
             json.dump(prefs, f, indent=2)
+        try:
+            os.chmod(prefs_file, 0o600)
+        except Exception:
+            pass
     except Exception as exc:
         logger.warning("Could not save operator preferences: %s", exc)
 

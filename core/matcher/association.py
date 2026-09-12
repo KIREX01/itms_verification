@@ -58,10 +58,18 @@ def _resolve_group(plate: str, images: List[EvidenceImage]) -> VehicleInstallati
     fronts = [img for img in images if img.orientation == EvidenceImage.Orientation.FRONT]
     rears = [img for img in images if img.orientation == EvidenceImage.Orientation.REAR]
 
+    from core.services.itms_web_client import get_current_itms_account
+    curr_acc = get_current_itms_account()
+
     pair, _created = VehicleInstallationPair.objects.get_or_create(
         registration_number_detected=plate,
-        defaults={"verification_status": VehicleInstallationPair.VerificationStatus.INCOMPLETE},
+        defaults={
+            "verification_status": VehicleInstallationPair.VerificationStatus.INCOMPLETE,
+            "account_email": curr_acc,
+        },
     )
+    if curr_acc and not pair.account_email:
+        pair.account_email = curr_acc
 
     if len(fronts) == 1 and len(rears) == 1:
         pair.front_image = fronts[0]
@@ -560,6 +568,15 @@ def get_closest_candidates(target_image: EvidenceImage, top_n: int = 10) -> List
     orient_candidates = qs.filter(orientation__in=[desired_orient, EvidenceImage.Orientation.UNKNOWN])
     if orient_candidates.exists():
         qs = orient_candidates
+
+    if target_image.batch_id:
+        same_batch_qs = qs.filter(batch_id=target_image.batch_id)
+        if same_batch_qs.count() >= top_n:
+            qs = same_batch_qs
+        else:
+            qs = qs.order_by("-ingested_at")[:200]
+    else:
+        qs = qs.order_by("-ingested_at")[:200]
 
     target_sig = parse_camera_filename(target_image.original_source_path or target_image.vault_file)
     candidates = []

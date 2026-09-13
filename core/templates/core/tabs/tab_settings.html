@@ -1,0 +1,83 @@
+<!-- TAB 6: SETTINGS & SYSTEM CONFIGURATION -->
+<div class="tab-pane" id="pane-settings">
+    <div class="settings-scroll-container">
+        <!-- Safety & Execution Mode -->
+        <div class="settings-card">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <span>🛡️ Submission Safety & Operating Mode</span>
+                </div>
+                <span class="badge {% if dry_run %}badge-yellow{% else %}badge-red{% endif %}" id="settings-dryrun-badge">
+                    {% if dry_run %}● Simulation Mode (Safe){% else %}● LIVE ITMS SERVER{% endif %}
+                </span>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label-group">
+                    <span class="settings-label-title">Dry-Run Simulation Mode</span>
+                    <span class="settings-label-desc">When enabled, submissions are validated locally without sending HTTP writes to stock.itms.ug.</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="settings-dryrun-toggle" {% if dry_run %}checked{% endif %} onchange="toggleDryRun()">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label-group">
+                    <span class="settings-label-title">Active Database Backend</span>
+                    <span class="settings-label-desc">Configured SQL database for installation orders, evidence vault, and audit trails.</span>
+                </div>
+                <span class="badge badge-green">{{ database_display }}</span>
+            </div>
+        </div>
+
+        <!-- Evidence Vault & Media Telemetry -->
+        <div class="settings-card">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <span>💾 Storage & Evidence Vault Retention</span>
+                </div>
+                <span class="badge badge-cyan">Retention Enforced</span>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label-group">
+                    <span class="settings-label-title">Vault Root Directory</span>
+                    <span class="settings-label-desc">Local directory where incoming photographic evidence is safely persisted.</span>
+                </div>
+                <span style="font-family:var(--font-mono); font-size:0.8rem; color:var(--ug-text-muted);">media/vault/</span>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label-group">
+                    <span class="settings-label-title">Photo Compression on Ingestion</span>
+                    <span class="settings-label-desc">Automatically downsizes high-res camera photos in-memory during ITMS submission.</span>
+                </div>
+                <span class="badge badge-yellow">Enabled (1920px Max)</span>
+            </div>
+        </div>
+
+        <!-- Connected ITMS Account -->
+        <div class="settings-card">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <span>🌐 Connected ITMS WebApp Identity</span>
+                </div>
+                <button class="btn btn-secondary" onclick="switchNavTab(2)" style="padding:4px 10px; font-size:0.75rem;">
+                    Manage in ITMS Tab
+                </button>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label-group">
+                    <span class="settings-label-title">Connected Operator Account</span>
+                    <span class="settings-label-desc" id="settings-itms-email">Loading identity...</span>
+                </div>
+                <button class="btn btn-primary" onclick="openItmsModal()">
+                    Configure Credentials
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

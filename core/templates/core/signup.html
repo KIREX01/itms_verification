@@ -1,0 +1,122 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Operator Account - ITMS Verification Copilot</title>
+    <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/auth.css' %}">
+</head>
+<body>
+
+    <!-- Uganda National Flag Ribbon -->
+    <div class="uganda-flag-ribbon"></div>
+
+    <div class="auth-page-wrapper">
+        <div class="auth-card-box auth-card-wide">
+            <div class="auth-card-head">
+                <div style="font-size:2.2rem; margin-bottom:6px;">👤</div>
+                <h1 style="font-size:1.35rem; font-weight:800; color:#ffffff; letter-spacing:0.5px;">
+                    CREATE <span style="color:var(--ug-yellow);">OPERATOR</span> ACCOUNT
+                </h1>
+                <p style="font-size:0.75rem; color:var(--ug-text-muted); margin-top:2px;">
+                    Set up your local credentials and connect your official ITMS account
+                </p>
+            </div>
+
+            <div class="auth-card-body">
+                {% if error %}
+                    <div class="alert-banner error">
+                        <span>⚠️ {{ error }}</span>
+                    </div>
+                {% endif %}
+
+                <form method="POST" action="{% url 'core:signup' %}" style="display:flex; flex-direction:column; gap:14px;">
+                    {% csrf_token %}
+
+                    <div class="form-field">
+                        <label for="username">Operator Username *</label>
+                        <input type="text" id="username" name="username" value="{{ form_data.username|default:'' }}" required autofocus placeholder="e.g. jdoe or operator_ug">
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-field">
+                            <label for="full_name">Full Name</label>
+                            <input type="text" id="full_name" name="full_name" value="{{ form_data.full_name|default:'' }}" placeholder="e.g. John Doe">
+                        </div>
+                        <div class="form-field">
+                            <label for="email">Work Email</label>
+                            <input type="email" id="email" name="email" value="{{ form_data.email|default:'' }}" placeholder="e.g. john@works.go.ug">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-field">
+                            <label for="password">Password *</label>
+                            <input type="password" id="password" name="password" required placeholder="At least 6 characters">
+                        </div>
+                        <div class="form-field">
+                            <label for="password_confirm">Confirm Password *</label>
+                            <input type="password" id="password_confirm" name="password_confirm" required placeholder="Re-type password">
+                        </div>
+                    </div>
+
+                    <!-- Optional ITMS WebApp Connection Section -->
+                    <div class="itms-connect-card">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="connect_itms" name="connect_itms" value="1" onchange="toggleItmsFields()" {% if form_data.connect_itms %}checked{% endif %}>
+                            <span>🌐 Connect Official ITMS Account (stock.itms.ug)</span>
+                        </label>
+
+                        <div class="itms-fields" id="itms-fields-container" style="display: none;">
+                            <div class="form-field">
+                                <label for="itms_email">ITMS Account Email / Username</label>
+                                <input type="text" id="itms_email" name="itms_email" value="{{ form_data.itms_email|default:'' }}" placeholder="e.g. operator@itms.ug">
+                            </div>
+
+                            <div class="form-field">
+                                <label for="itms_password">ITMS Password</label>
+                                <input type="password" id="itms_password" name="itms_password" placeholder="ITMS web portal password">
+                            </div>
+
+                            <div class="itms-signup-hint">
+                                💡 Connecting your ITMS account enables 1-click live order synchronisation and photo submissions.<br>
+                                Don't have an ITMS account yet? <a href="https://stock.itms.ug/site/signup" target="_blank" rel="noopener noreferrer">Sign up or request access on stock.itms.ug</a>.
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; padding:11px; margin-top:6px;">
+                        Create Account & Enter Console
+                    </button>
+                </form>
+            </div>
+
+            <div class="auth-card-footer">
+                <div>
+                    Already have an operator account? <a href="{% url 'core:login' %}">Sign In</a>
+                </div>
+                <div style="font-size:0.72rem; color:var(--ug-text-dim); margin-top:6px;">
+                    Need official ITMS access? Register on the <a href="https://stock.itms.ug/site/signup" target="_blank" rel="noopener noreferrer">ITMS WebApp Portal</a>.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleItmsFields() {
+            const checkbox = document.getElementById("connect_itms");
+            const container = document.getElementById("itms-fields-container");
+            if (checkbox && container) {
+                container.style.display = checkbox.checked ? "flex" : "none";
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            toggleItmsFields();
+        });
+    </script>
+</body>
+</html>

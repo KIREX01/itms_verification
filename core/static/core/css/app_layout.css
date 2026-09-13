@@ -1,0 +1,208 @@
+/* ============================================================================
+   ITMS CLOSING SYSTEM - APPLICATION SHELL & LAYOUT
+   Features: Uganda Tri-Color Ribbon, TUI-mirrored 6 Navigation Tabs,
+             Metrics Ribbon, Bottom Activity Terminal, and Keyboard Footer
+   ============================================================================ */
+
+/* Top National Pride Accent Ribbon */
+.uganda-flag-ribbon {
+    height: 4px;
+    width: 100%;
+    background: linear-gradient(
+        90deg,
+        #000000 0%,
+        #000000 33.33%,
+        #FCDC04 33.33%,
+        #FCDC04 66.66%,
+        #D90000 66.66%,
+        #D90000 100%
+    );
+    flex-shrink: 0;
+    z-index: 100;
+}
+
+/* Header */
+header.app-header {
+    background-color: var(--ug-black-card);
+    border-bottom: 1px solid var(--ug-border);
+    padding: 8px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 56px;
+    flex-shrink: 0;
+    z-index: 20;
+}
+
+.brand-section {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.brand-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.brand-icon {
+    font-size: 1.4rem;
+    line-height: 1;
+}
+
+.brand-titles {
+    display: flex;
+    flex-direction: column;
+}
+
+.brand-name {
+    font-size: 1.05rem;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.brand-name span.accent {
+    color: var(--ug-yellow);
+}
+
+.brand-sub {
+    font-size: 0.68rem;
+    color: var(--ug-text-muted);
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+/* Header Pills */
+.header-badges {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 10px;
+}
+
+/* Primary Navigation Tabs (Mirroring TUI: 1 to 6) */
+nav.main-nav-tabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background-color: var(--ug-black-surface);
+    padding: 3px 4px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--ug-border);
+}
+
+.nav-tab-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--ug-text-muted);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: none;
+    background: transparent;
+    user-select: none;
+}
+
+.nav-tab-item:hover {
+    color: #ffffff;
+    background-color: var(--ug-black-card-hover);
+}
+
+.nav-tab-item.active {
+    background-color: var(--ug-yellow);
+    color: #000000;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.nav-tab-item.active .hotkey {
+    background-color: rgba(0, 0, 0, 0.18);
+    color: #000000;
+    border-color: rgba(0, 0, 0, 0.25);
+}
+
+.nav-tab-item .tab-badge {
+    padding: 1px 6px;
+    border-radius: 9999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    background-color: rgba(0, 0, 0, 0.25);
+    color: inherit;
+}
+
+/* Header Right Actions */
+.header-user-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Main Content Workspace */
+main.app-workspace {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    height: calc(100vh - 56px - 32px);
+    min-height: 0;
+}
+
+.tab-pane {
+    display: none;
+    flex: 1;
+    height: 100%;
+    overflow: hidden;
+    min-height: 0;
+}
+
+.tab-pane.active {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+/* Keyboard Shortcuts Footer (TUI Style) */
+footer.app-footer {
+    height: 26px;
+    background-color: var(--ug-black);
+    border-top: 1px solid var(--ug-border);
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.72rem;
+    color: var(--ug-text-muted);
+    flex-shrink: 0;
+}
+
+.footer-hotkeys {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    overflow-x: auto;
+    white-space: nowrap;
+}
+
+.footer-hotkey-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.footer-key {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    background-color: var(--ug-border);
+    color: var(--ug-yellow);
+    padding: 0 4px;
+    border-radius: 2px;
+}

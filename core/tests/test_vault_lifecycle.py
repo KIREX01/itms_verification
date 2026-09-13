@@ -9,6 +9,7 @@ from django.core.management import call_command
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
+from django.contrib.auth.models import User
 from core.models import EvidenceImage, IngestionBatch
 from core.services import vault_service
 
@@ -189,6 +190,10 @@ class VaultLifecycleTests(TestCase):
 
     def test_web_upload_and_api(self):
         with override_settings(MEDIA_ROOT=self.media_root, VAULT_ROOT=self.vault_root):
+            # Authenticate operator
+            User.objects.create_user(username="vault_test_op", password="password123")
+            self.client.login(username="vault_test_op", password="password123")
+
             # Test GET /upload/
             resp_get = self.client.get("/upload/")
             self.assertEqual(resp_get.status_code, 200)

@@ -1,0 +1,54 @@
+<!-- TAB 5: HISTORY & AUDIT LOGS -->
+<div class="tab-pane" id="pane-history">
+    <div class="history-pane-container">
+        <!-- Toolbar Card -->
+        <div class="history-toolbar-card">
+            <div style="display:flex; align-items:center; gap:12px;">
+                <span style="font-size:0.85rem; font-weight:800; color:#fff;">📜 Historical Verification Events</span>
+                <span style="font-size:0.72rem; color:var(--ug-text-dim);">(Click any event row to inspect full audit details)</span>
+                <!-- Filter Chips (TUI Cycle Filter) -->
+                <div class="history-filter-chips">
+                    <button class="history-chip active" data-hfilter="ALL" onclick="setHistoryFilter('ALL')">All</button>
+                    <button class="history-chip" data-hfilter="SUBMITTED" onclick="setHistoryFilter('SUBMITTED')">Submitted</button>
+                    <button class="history-chip" data-hfilter="FAILED" onclick="setHistoryFilter('FAILED')">Failed</button>
+                    <button class="history-chip" data-hfilter="ISSUES" onclick="setHistoryFilter('ISSUES')">Issues / Conflicts</button>
+                </div>
+            </div>
+
+            <div style="display:flex; align-items:center; gap:8px;">
+                <button class="btn btn-secondary" onclick="fetchHistoryEvents()">
+                    🔄 Refresh
+                </button>
+                <a href="/api/export/report/" class="btn btn-secondary" style="text-decoration:none;">
+                    📊 Download CSV Report
+                </a>
+            </div>
+        </div>
+
+        <!-- History Table Card -->
+        <div class="history-table-card">
+            <div class="history-table-scroll">
+                <table class="itms-grid-table">
+                    <thead>
+                        <tr>
+                            <th style="width:160px;">Timestamp</th>
+                            <th style="width:130px;">Vehicle Plate</th>
+                            <th style="width:160px;">Matched Order #</th>
+                            <th style="width:140px;">Action</th>
+                            <th style="width:110px;">Status</th>
+                            <th style="width:120px;">Operator</th>
+                            <th>Audit Message</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-table-tbody">
+                        <tr>
+                            <td colspan="7" style="text-align:center; padding:40px; color:var(--ug-text-muted);">
+                                Loading historical verification audit events...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>

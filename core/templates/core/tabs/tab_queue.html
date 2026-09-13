@@ -1,0 +1,160 @@
+<!-- TAB 4: REVIEW QUEUE & OPERATOR DECISION STUDIO -->
+<div class="tab-pane" id="pane-queue">
+    <div class="queue-workspace-split">
+        <!-- Left Column: Work Queue Pane -->
+        <div class="queue-column-pane">
+            <div class="queue-controls-top">
+                <div style="position:relative;">
+                    <span style="position:absolute; left:10px; top:50%; transform:translateY(-50%); font-size:0.8rem; color:var(--ug-text-dim);">🔍</span>
+                    <input type="text" class="queue-search-input" id="queue-search-input" placeholder="Search Plate, Order, VIN... (Esc)" oninput="filterWorkQueue()">
+                </div>
+                <div class="queue-filter-pills">
+                    <div class="queue-filter-pill active" data-filter="ALL" onclick="setWorkQueueFilter('ALL')">All</div>
+                    <div class="queue-filter-pill" data-filter="PENDING" onclick="setWorkQueueFilter('PENDING')">Review</div>
+                    <div class="queue-filter-pill" data-filter="APPROVED" onclick="setWorkQueueFilter('APPROVED')">Approved</div>
+                    <div class="queue-filter-pill" data-filter="ISSUES" onclick="setWorkQueueFilter('ISSUES')">Issues</div>
+                    <div class="queue-filter-pill" data-filter="SUBMITTED" onclick="setWorkQueueFilter('SUBMITTED')">Done</div>
+                </div>
+            </div>
+
+            <div class="queue-cards-list" id="queue-cards-container">
+                <div style="text-align:center; padding:30px; color:var(--ug-text-dim);">
+                    Loading work queue...
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Inspection & Action Studio -->
+        <div class="inspection-studio-pane" id="queue-inspection-pane">
+            <div class="studio-empty-state" id="queue-studio-empty">
+                <span style="font-size:3rem;">🔍</span>
+                <h3 style="color:#fff; font-size:1.1rem; font-weight:800;">No vehicle pair selected</h3>
+                <p style="font-size:0.85rem; max-width:380px;">Select a pair from the queue on the left to inspect evidence photos, match plates, and submit.</p>
+            </div>
+
+            <!-- Active Inspection Detail Container -->
+            <div id="queue-studio-content" style="display:none; flex-direction:column; gap:14px;">
+                <!-- Header Banner -->
+                <div class="detail-banner-card">
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <span class="detail-plate-hero-text" id="qdetail-plate">---</span>
+                        <span class="badge badge-yellow" id="qdetail-status">PENDING</span>
+                        <span id="qdetail-delta" style="font-size:0.8rem; color:var(--ug-text-muted);">Δt: --</span>
+                    </div>
+                    <div style="text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+                        <div style="font-size:0.7rem; color:var(--ug-text-dim); text-transform:uppercase;">Matched Installation Order</div>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span style="font-family:var(--font-mono); font-size:0.95rem; font-weight:800; color:#fff;" id="qdetail-order-no">No matched order</span>
+                            <button class="btn btn-secondary" id="btn-quick-link-order" onclick="openLinkOrderModal()" style="padding:3px 8px; font-size:0.72rem;" title="Link or change ITMS order">
+                                🔗 Link Order
+                            </button>
+                            <button class="btn btn-danger" id="btn-quick-unlink-order" onclick="unlinkOrderFromSelectedPair()" style="padding:3px 8px; font-size:0.72rem; display:none;" title="Unlink current order">
+                                ✕ Unlink
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Side-by-Side Photographic Evidence Grid -->
+                <div class="evidence-side-by-side">
+                    <!-- Front Vehicle Photo Card -->
+                    <div class="evidence-box">
+                        <div class="evidence-box-header">
+                            <span class="tag-front-evidence">🚘 FRONT VEHICLE EVIDENCE</span>
+                            <span id="qfront-timestamp" style="color:var(--ug-text-dim); font-size:0.75rem;">--:--:--</span>
+                        </div>
+                        <div class="evidence-viewport" onclick="openPhotoModal('front')">
+                            <img id="qimg-front" src="" alt="Front Photo" onerror="this.style.opacity='0.2';">
+                            <div class="viewport-placeholder" id="qfront-placeholder" style="display:none;">
+                                <span>🚘</span>
+                                <span>No front photo available</span>
+                            </div>
+                        </div>
+                        <div class="evidence-crop-bar">
+                            <div>Detected: <span class="crop-ocr-text" id="qfront-ocr-text">---</span></div>
+                            <div style="font-size:0.75rem; color:var(--ug-text-muted);">Confidence: <span id="qfront-ocr-conf">--%</span></div>
+                        </div>
+                    </div>
+
+                    <!-- Rear Vehicle Photo Card -->
+                    <div class="evidence-box">
+                        <div class="evidence-box-header">
+                            <span class="tag-rear-evidence">🏍️ REAR VEHICLE EVIDENCE</span>
+                            <span id="qrear-timestamp" style="color:var(--ug-text-dim); font-size:0.75rem;">--:--:--</span>
+                        </div>
+                        <div class="evidence-viewport" onclick="openPhotoModal('rear')">
+                            <img id="qimg-rear" src="" alt="Rear Photo" onerror="this.style.opacity='0.2';">
+                            <div class="viewport-placeholder" id="qrear-placeholder" style="display:none;">
+                                <span>🏍️</span>
+                                <span>No rear photo available</span>
+                            </div>
+                        </div>
+                        <div class="evidence-crop-bar">
+                            <div>Detected: <span class="crop-ocr-text" id="qrear-ocr-text">---</span></div>
+                            <div style="font-size:0.75rem; color:var(--ug-text-muted);">Confidence: <span id="qrear-ocr-conf">--%</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Comparison Grid Card -->
+                <div class="comparison-grid-card">
+                    <div class="comp-box-item">
+                        <span class="comp-box-label">Detected Plate</span>
+                        <span class="comp-box-val" id="qcomp-detected" style="color:var(--ug-yellow);">---</span>
+                    </div>
+                    <div class="comp-box-item">
+                        <span class="comp-box-label">Registry Order Plate</span>
+                        <span class="comp-box-val" id="qcomp-order-plate">---</span>
+                    </div>
+                    <div class="comp-box-item">
+                        <span class="comp-box-label">Match Score & Strategy</span>
+                        <span class="comp-box-val" id="qcomp-score" style="color:var(--ug-green);">---</span>
+                    </div>
+                    <div class="comp-box-item">
+                        <span class="comp-box-label">Vehicle VIN / Chassis</span>
+                        <span class="comp-box-val" id="qcomp-vin">---</span>
+                    </div>
+                    <div class="comp-box-item">
+                        <span class="comp-box-label">Warehouse Station</span>
+                        <span class="comp-box-val" id="qcomp-warehouse">---</span>
+                    </div>
+                    <div class="comp-box-item">
+                        <span class="comp-box-label">Installation Officer</span>
+                        <span class="comp-box-val" id="qcomp-officer">---</span>
+                    </div>
+                    <div class="comp-box-item">
+                        <span class="comp-box-label">Photo Ratio</span>
+                        <span class="comp-box-val" id="qcomp-complete">1:1 Symmetric</span>
+                    </div>
+                    <div class="comp-box-item">
+                        <span class="comp-box-label">Pairing Reason</span>
+                        <span class="comp-box-val" id="qcomp-strategy" style="font-size:0.8rem;">Vision OCR</span>
+                    </div>
+                </div>
+
+                <!-- Operator Decision Bar (TUI Bindings) -->
+                <div class="operator-decision-bar">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <button class="btn-decision btn-success" onclick="executePairAction('approve')">
+                            ✓ Approve Pair <span class="hotkey">A</span>
+                        </button>
+                        <button class="btn-decision btn-gold" onclick="executePairAction('swap')">
+                            ⇄ Swap Front / Rear <span class="hotkey">S</span>
+                        </button>
+                        <button class="btn-decision btn-secondary" onclick="openEditPlateModal()">
+                            ✏️ Edit & Override <span class="hotkey">E</span>
+                        </button>
+                        <button class="btn-decision btn-secondary" onclick="openLinkOrderModal()">
+                            🔗 Link Order <span class="hotkey">L</span>
+                        </button>
+                    </div>
+                    <div>
+                        <button class="btn-decision btn-primary" onclick="executePairAction('submit')">
+                            🚀 Submit to ITMS <span class="hotkey">Enter</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

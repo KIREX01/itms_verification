@@ -1,0 +1,240 @@
+/* ============================================================================
+   TAB 1: EXECUTIVE DASHBOARD
+   Features: 5-Stage Pipeline Flow Visualizer, System Telemetry,
+             Status Distribution, and Quick Action Workflow Launchpad
+   ============================================================================ */
+
+.dashboard-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* Operational Metrics Grid */
+.dash-metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+}
+
+.dash-metric-card {
+    background-color: var(--ug-black-card);
+    border: 1px solid var(--ug-border);
+    border-radius: var(--radius-lg);
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.dash-metric-card:hover {
+    transform: translateY(-2px);
+    background-color: var(--ug-black-card-hover);
+}
+.dash-metric-card.border-review:hover { border-color: var(--ug-yellow); }
+.dash-metric-card.border-approved:hover { border-color: var(--ug-green); }
+.dash-metric-card.border-submitted:hover { border-color: var(--ug-purple); }
+.dash-metric-card.border-issues:hover { border-color: var(--ug-red-vivid); }
+.dash-metric-card.border-orders:hover { border-color: var(--ug-cyan); }
+
+.dash-metric-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.dash-metric-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--ug-text-muted);
+    text-transform: uppercase;
+}
+.dash-metric-icon {
+    font-size: 0.9rem;
+    opacity: 0.8;
+}
+.dash-metric-val {
+    font-family: var(--font-mono);
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: #ffffff;
+    line-height: 1.1;
+    margin-top: 2px;
+}
+.dash-metric-sub {
+    font-size: 0.7rem;
+    color: var(--ug-text-dim);
+    margin-top: 2px;
+}
+
+.metric-val-review { color: var(--ug-yellow); }
+.metric-val-approved { color: var(--ug-green); }
+.metric-val-submitted { color: var(--ug-purple); }
+.metric-val-issues { color: var(--ug-red-vivid); }
+.metric-val-orders { color: var(--ug-cyan); }
+
+/* Pipeline Flow Card */
+.pipeline-flow-container {
+    background-color: var(--ug-black-card);
+    border: 1px solid var(--ug-border);
+    border-radius: var(--radius-lg);
+    padding: 16px 20px;
+}
+
+.flow-title {
+    font-size: 0.85rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+
+.flow-stages-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    overflow-x: auto;
+}
+
+.stage-card {
+    flex: 1;
+    min-width: 150px;
+    background-color: var(--ug-black-surface);
+    border: 1px solid var(--ug-border);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    position: relative;
+}
+
+.stage-card:hover {
+    border-color: var(--ug-yellow);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.stage-card-num {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--ug-text-dim);
+    text-transform: uppercase;
+}
+
+.stage-card-title {
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.stage-card-count {
+    font-family: var(--font-mono);
+    font-size: 1.3rem;
+    font-weight: 800;
+    color: var(--ug-yellow);
+    margin-top: 4px;
+}
+
+.stage-connector {
+    color: var(--ug-text-dim);
+    font-size: 1.1rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+/* Dashboard 2-Column Grid */
+.dashboard-grid-2col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.dash-panel {
+    background-color: var(--ug-black-card);
+    border: 1px solid var(--ug-border);
+    border-radius: var(--radius-lg);
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.dash-panel-title {
+    font-size: 0.82rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: var(--ug-text-muted);
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* Quick Action Launchpad Grid */
+.launchpad-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+}
+
+.launchpad-btn {
+    background-color: var(--ug-black-surface);
+    border: 1px solid var(--ug-border);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-align: left;
+}
+
+.launchpad-btn:hover {
+    border-color: var(--ug-yellow);
+    background-color: var(--ug-black-card-hover);
+    transform: translateY(-1px);
+}
+
+.launchpad-icon {
+    font-size: 1.3rem;
+    margin-bottom: 2px;
+}
+
+.launchpad-label {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.launchpad-sub {
+    font-size: 0.72rem;
+    color: var(--ug-text-dim);
+}
+
+/* Telemetry & Outbox stats */
+.telemetry-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background-color: var(--ug-black-surface);
+    border-radius: var(--radius-md);
+    font-size: 0.85rem;
+}
+.telemetry-key { color: var(--ug-text-muted); }
+.telemetry-val { font-family: var(--font-mono); font-weight: 700; color: #ffffff; }

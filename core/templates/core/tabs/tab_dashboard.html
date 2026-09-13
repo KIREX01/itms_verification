@@ -1,0 +1,180 @@
+<!-- TAB 1: EXECUTIVE DASHBOARD -->
+<div class="tab-pane active" id="pane-dashboard">
+    <div class="dashboard-scroll">
+        <!-- Operational KPI Metrics Cards Row (Moved from Navbar to Dashboard) -->
+        <div class="dash-metrics-grid">
+            <div class="dash-metric-card border-review" onclick="switchNavTab(4); setWorkQueueFilter('PENDING');" title="Click to view Review Queue">
+                <div class="dash-metric-header">
+                    <span class="dash-metric-label">Pending Review</span>
+                    <span class="dash-metric-icon">🔍</span>
+                </div>
+                <div class="dash-metric-val metric-val-review" id="kpi-review">0</div>
+                <span class="dash-metric-sub">Pairs awaiting inspection</span>
+            </div>
+
+            <div class="dash-metric-card border-approved" onclick="switchNavTab(4); setWorkQueueFilter('APPROVED');" title="Click to view Approved Pairs">
+                <div class="dash-metric-header">
+                    <span class="dash-metric-label">Approved</span>
+                    <span class="dash-metric-icon">✓</span>
+                </div>
+                <div class="dash-metric-val metric-val-approved" id="kpi-approved">0</div>
+                <span class="dash-metric-sub">Ready for ITMS batching</span>
+            </div>
+
+            <div class="dash-metric-card border-submitted" onclick="switchNavTab(4); setWorkQueueFilter('SUBMITTED');" title="Click to view Submitted Pairs">
+                <div class="dash-metric-header">
+                    <span class="dash-metric-label">Submitted</span>
+                    <span class="dash-metric-icon">🚀</span>
+                </div>
+                <div class="dash-metric-val metric-val-submitted" id="kpi-submitted">0</div>
+                <span class="dash-metric-sub">Finalized on stock.itms.ug</span>
+            </div>
+
+            <div class="dash-metric-card border-issues" onclick="switchNavTab(4); setWorkQueueFilter('ISSUES');" title="Click to view Issues">
+                <div class="dash-metric-header">
+                    <span class="dash-metric-label">Issues / Incomplete</span>
+                    <span class="dash-metric-icon">⚠️</span>
+                </div>
+                <div class="dash-metric-val metric-val-issues" id="kpi-issues">0</div>
+                <span class="dash-metric-sub">Missing angles or OCR conflicts</span>
+            </div>
+
+            <div class="dash-metric-card border-orders" onclick="switchNavTab(2); switchItmsSubview('ORDERS');" title="Click to view Registry Orders">
+                <div class="dash-metric-header">
+                    <span class="dash-metric-label">Registry Orders</span>
+                    <span class="dash-metric-icon">📋</span>
+                </div>
+                <div class="dash-metric-val metric-val-orders" id="kpi-orders">0</div>
+                <span class="dash-metric-sub">Active installation orders</span>
+            </div>
+        </div>
+
+        <!-- 5-Stage Pipeline Flow Visualizer (TUI Mirror) -->
+        <div class="pipeline-flow-container">
+            <div class="flow-title">
+                <span>🚀 End-to-End Ingestion & Verification Pipeline</span>
+                <span style="font-size:0.75rem; color:var(--ug-text-dim); font-weight:normal;">Click any stage or press hotkey to execute</span>
+            </div>
+            <div class="flow-stages-row">
+                <!-- Stage 1: Ingestion -->
+                <div class="stage-card" onclick="switchNavTab(3)" title="Click to view batches or upload photos">
+                    <span class="stage-card-num">Stage 1 <span class="hotkey">I</span></span>
+                    <span class="stage-card-title">📥 Ingestion</span>
+                    <span class="stage-card-count" id="flow-count-ingest">0</span>
+                    <span style="font-size:0.7rem; color:var(--ug-text-dim);">Evidence Photos</span>
+                </div>
+                <span class="stage-connector">➜</span>
+
+                <!-- Stage 2: Association -->
+                <div class="stage-card" onclick="triggerMatching()" title="Click to run physical pair matching">
+                    <span class="stage-card-num">Stage 2 <span class="hotkey">M</span></span>
+                    <span class="stage-card-title">🔗 Association</span>
+                    <span class="stage-card-count" id="flow-count-pairs">0</span>
+                    <span style="font-size:0.7rem; color:var(--ug-text-dim);">Vehicle Pairs</span>
+                </div>
+                <span class="stage-connector">➜</span>
+
+                <!-- Stage 3: Vision Engine -->
+                <div class="stage-card" onclick="triggerPipeline('vision')" title="Click to run YOLOv8 Plate Detection & OCR">
+                    <span class="stage-card-num">Stage 3 <span class="hotkey">P</span></span>
+                    <span class="stage-card-title">🧠 Joint Vision</span>
+                    <span class="stage-card-count" id="flow-count-vision">0</span>
+                    <span style="font-size:0.7rem; color:var(--ug-text-dim);">Detected Plates</span>
+                </div>
+                <span class="stage-connector">➜</span>
+
+                <!-- Stage 4: Review Queue -->
+                <div class="stage-card" onclick="switchNavTab(4)" title="Click to review and approve pairs">
+                    <span class="stage-card-num">Stage 4 <span class="hotkey">4</span></span>
+                    <span class="stage-card-title">📋 Operator Review</span>
+                    <span class="stage-card-count" id="flow-count-review">0</span>
+                    <span style="font-size:0.7rem; color:var(--ug-text-dim);">Pending Approvals</span>
+                </div>
+                <span class="stage-connector">➜</span>
+
+                <!-- Stage 5: Finalized -->
+                <div class="stage-card" onclick="triggerBatchSubmit()" title="Click to submit approved batch to ITMS">
+                    <span class="stage-card-num">Stage 5 <span class="hotkey">B</span></span>
+                    <span class="stage-card-title">🚀 ITMS Finalized</span>
+                    <span class="stage-card-count" id="flow-count-submitted" style="color:var(--ug-green);">0</span>
+                    <span style="font-size:0.7rem; color:var(--ug-text-dim);">Submitted Orders</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2-Column Command Center Grid -->
+        <div class="dashboard-grid-2col">
+            <!-- Left: Quick-Action Launchpad -->
+            <div class="dash-panel">
+                <div class="dash-panel-title">
+                    <span>⚡ Quick Workflow Launchpad</span>
+                    <span class="badge badge-yellow">Operator Hotkeys</span>
+                </div>
+                <div class="launchpad-grid">
+                    <div class="launchpad-btn" onclick="triggerPipeline('full_pipeline')">
+                        <span class="launchpad-icon">🧠</span>
+                        <span class="launchpad-label">Run Vision <span class="hotkey">P</span></span>
+                        <span class="launchpad-sub">YOLOv8 + OCR</span>
+                    </div>
+                    <div class="launchpad-btn" onclick="triggerMatching()">
+                        <span class="launchpad-icon">🔗</span>
+                        <span class="launchpad-label">Match Pairs <span class="hotkey">M</span></span>
+                        <span class="launchpad-sub">Fuzzy correlation</span>
+                    </div>
+                    <div class="launchpad-btn" onclick="triggerSyncOrders()">
+                        <span class="launchpad-icon">📥</span>
+                        <span class="launchpad-label">Sync Orders <span class="hotkey">Y</span></span>
+                        <span class="launchpad-sub">stock.itms.ug</span>
+                    </div>
+                    <div class="launchpad-btn" onclick="triggerBatchSubmit()">
+                        <span class="launchpad-icon">🚀</span>
+                        <span class="launchpad-label">Batch Submit <span class="hotkey">B</span></span>
+                        <span class="launchpad-sub">Push all approved</span>
+                    </div>
+                    <div class="launchpad-btn" onclick="switchNavTab(3); openBatchUploadModal();">
+                        <span class="launchpad-icon">📷</span>
+                        <span class="launchpad-label">Add Photos <span class="hotkey">I</span></span>
+                        <span class="launchpad-sub">Batch Ingest</span>
+                    </div>
+                    <a href="/api/export/report/" class="launchpad-btn" style="text-decoration:none;">
+                        <span class="launchpad-icon">📊</span>
+                        <span class="launchpad-label">Export CSV <span class="hotkey">E</span></span>
+                        <span class="launchpad-sub">Shift report</span>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Right: System Status & Telemetry -->
+            <div class="dash-panel">
+                <div class="dash-panel-title">
+                    <span>🛡️ System Telemetry & Environment</span>
+                    <span class="badge badge-green" id="dash-db-badge">{{ database_badge }}</span>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                    <div class="telemetry-row">
+                        <span class="telemetry-key">Operating Mode</span>
+                        <span class="badge {% if dry_run %}badge-yellow{% else %}badge-red{% endif %}" id="dash-mode-badge" onclick="toggleDryRun()" style="cursor:pointer;">
+                            {% if dry_run %}● Simulation Mode (Safe){% else %}● LIVE ITMS SERVER{% endif %}
+                        </span>
+                    </div>
+                    <div class="telemetry-row">
+                        <span class="telemetry-key">ITMS Connection</span>
+                        <span class="telemetry-val" id="dash-itms-status">Checking...</span>
+                    </div>
+                    <div class="telemetry-row">
+                        <span class="telemetry-key">Active Operator</span>
+                        <span class="telemetry-val" style="color:var(--ug-yellow);">👤 {{ current_user.username|default:"Operator" }}</span>
+                    </div>
+                    <div class="telemetry-row">
+                        <span class="telemetry-key">Total Registry Orders</span>
+                        <span class="telemetry-val" id="dash-total-orders">{{ total_orders }}</span>
+                    </div>
+                    <div class="telemetry-row">
+                        <span class="telemetry-key">Evidence Vault</span>
+                        <span class="telemetry-val" id="dash-vault-status">Active (media/vault)</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

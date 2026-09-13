@@ -1,0 +1,110 @@
+/* ============================================================================
+   TAB 6: SETTINGS & SYSTEM CONFIGURATION
+   Features: Safety Controls (Simulation vs Live Mode), Compression Options,
+             Database Backend Display, Storage Retention Policies
+   ============================================================================ */
+
+.settings-scroll-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    max-width: 900px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.settings-card {
+    background-color: var(--ug-black-card);
+    border: 1px solid var(--ug-border);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.settings-card-header {
+    border-bottom: 1px solid var(--ug-border);
+    padding-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.settings-card-title {
+    font-size: 1rem;
+    font-weight: 800;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.settings-row:last-child {
+    border-bottom: none;
+}
+
+.settings-label-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.settings-label-title {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #ffffff;
+}
+.settings-label-desc {
+    font-size: 0.75rem;
+    color: var(--ug-text-dim);
+}
+
+/* Switch Toggle Component */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+}
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background-color: var(--ug-black-surface);
+    border: 1px solid var(--ug-border);
+    transition: 0.2s;
+    border-radius: 9999px;
+}
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    bottom: 3px;
+    background-color: #ffffff;
+    transition: 0.2s;
+    border-radius: 50%;
+}
+input:checked + .slider {
+    background-color: var(--ug-yellow);
+}
+input:checked + .slider:before {
+    transform: translateX(20px);
+    background-color: #000000;
+}

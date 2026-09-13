@@ -1,0 +1,40 @@
+<!-- TAB 3: INGESTION & BATCHES (Full-Scale Stream & Expandable Headers) -->
+<div class="tab-pane" id="pane-batches">
+    <div class="batches-pane-container">
+        <!-- Top Toolbar -->
+        <div class="batches-header-bar">
+            <div>
+                <h3 style="font-size:1.05rem; font-weight:800; color:#fff; display:flex; align-items:center; gap:8px;">
+                    <span>📦 Photo Ingestion Batches &amp; Evidence Stream</span>
+                    <span class="badge badge-yellow" id="batches-count-badge">0 Batches</span>
+                </h3>
+                <p style="font-size:0.75rem; color:var(--ug-text-muted); margin-top:3px;">
+                    Expand any batch header to inspect evidence photos at full scale, or collapse/minimize to scroll through other sessions.
+                </p>
+            </div>
+            <div class="batches-toolbar-controls">
+                <input type="text" id="batch-search-input" class="batch-search-field" placeholder="🔍 Filter batches (ID, shift, plate)..." oninput="filterBatchesStream()">
+                <button class="btn btn-secondary" onclick="expandAllBatches()" title="Expand all batch photos">
+                    ▼ Expand All
+                </button>
+                <button class="btn btn-secondary" onclick="collapseAllBatches()" title="Collapse all batch photos">
+                    ▲ Collapse All
+                </button>
+                <button class="btn btn-secondary" onclick="fetchBatchesList()" title="Refresh batch list">
+                    🔄 Refresh
+                </button>
+                <button class="btn btn-primary" onclick="openBatchUploadModal()" id="btn-open-upload-modal">
+                    📷 + New Upload Batch
+                </button>
+            </div>
+        </div>
+
+        <!-- Full-Width Batches Accordion Stream -->
+        <div class="batches-stream-scroll" id="batches-stream-container">
+            <div class="batches-loading-state" id="batches-loading-state">
+                <span style="font-size:2rem;">⏳</span>
+                <span style="margin-top:8px;">Loading ingestion batches and evidence photos...</span>
+            </div>
+        </div>
+    </div>
+</div>

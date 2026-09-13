@@ -1,0 +1,117 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ITMS Closing System - Verification Copilot</title>
+    
+    <!-- Dedicated Modular Stylesheets (Uganda National Flag Design System) -->
+    <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/tab_dashboard.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/tab_itms.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/tab_batches.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/tab_queue.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/tab_history.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/tab_settings.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/modals.css' %}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+
+    <!-- Uganda National Flag Tri-Color Ribbon (Black - Yellow - Red) -->
+    <div class="uganda-flag-ribbon" title="Republic of Uganda - Intelligent Transport Management System"></div>
+
+    <!-- Application Top Header -->
+    <header class="app-header">
+        <div class="brand-section">
+            <div class="brand-logo">
+                <span class="brand-icon">🚘</span>
+                <div class="brand-titles">
+                    <span class="brand-name">ITMS <span class="accent">CLOSING</span> SYSTEM</span>
+                    <span class="brand-sub">ITMS VERIFICATION COPILOT • UGANDA</span>
+                </div>
+            </div>
+
+            <div class="header-badges">
+                <span class="badge badge-yellow" id="header-itms-badge" onclick="switchNavTab(2)" style="cursor:pointer;" title="Click to open ITMS Hub">
+                    ● Disconnected
+                </span>
+                <span class="badge {% if dry_run %}badge-yellow{% else %}badge-red{% endif %}" id="header-dryrun-badge" onclick="toggleDryRun()" style="cursor:pointer;" title="Click to toggle simulation mode">
+                    {% if dry_run %}● Dry Run{% else %}● Live{% endif %}
+                </span>
+            </div>
+        </div>
+
+        <!-- Primary Navigation Tabs (TUI-Mirrored: 1 to 6) -->
+        <nav class="main-nav-tabs">
+            <button class="nav-tab-item active" id="nav-tab-1" onclick="switchNavTab(1)" title="Executive Dashboard">
+                <span>📊 Dashboard</span>
+                <span class="hotkey">1</span>
+            </button>
+            <button class="nav-tab-item" id="nav-tab-2" onclick="switchNavTab(2)" title="ITMS WebApp Connect & Orders">
+                <span>🌐 ITMS</span>
+                <span class="hotkey">2</span>
+            </button>
+            <button class="nav-tab-item" id="nav-tab-3" onclick="switchNavTab(3)" title="Ingestion & Photo Batches">
+                <span>📦 Batches</span>
+                <span class="hotkey">3</span>
+            </button>
+            <button class="nav-tab-item" id="nav-tab-4" onclick="switchNavTab(4)" title="Review Queue & Action Studio">
+                <span>🔍 Queue</span>
+                <span class="tab-badge" id="badge-nav-queue">0</span>
+                <span class="hotkey">4</span>
+            </button>
+            <button class="nav-tab-item" id="nav-tab-5" onclick="switchNavTab(5)" title="History & Verification Audit Logs">
+                <span>📜 History</span>
+                <span class="hotkey">5</span>
+            </button>
+            <button class="nav-tab-item" id="nav-tab-6" onclick="switchNavTab(6)" title="Settings & Safety Config">
+                <span>⚙️ Settings</span>
+                <span class="hotkey">6</span>
+            </button>
+        </nav>
+
+        <!-- User Profile & Sign Out -->
+        <div class="header-user-controls">
+            <span style="font-size:0.8rem; color:var(--ug-text-muted); display:flex; align-items:center; gap:5px;">
+                👤 <strong style="color:#ffffff;">{{ current_user.username|default:"Operator" }}</strong>
+            </span>
+            <a href="{% url 'core:logout' %}" class="btn btn-secondary" style="padding:4px 10px; font-size:0.75rem;" title="Sign out of operator session">
+                Sign Out <span class="hotkey">Q</span>
+            </a>
+        </div>
+    </header>
+
+    <!-- Main Workspace Block (Full Height) -->
+    <main class="app-workspace">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Keyboard Shortcuts Footer Bar -->
+    <footer class="app-footer">
+        <div class="footer-hotkeys">
+            <span class="footer-hotkey-item"><span class="footer-key">1-6</span> Switch Tabs</span>
+            <span class="footer-hotkey-item"><span class="footer-key">P</span> Run Vision</span>
+            <span class="footer-hotkey-item"><span class="footer-key">M</span> Match Pairs</span>
+            <span class="footer-hotkey-item"><span class="footer-key">Y</span> Sync Orders</span>
+            <span class="footer-hotkey-item"><span class="footer-key">B</span> Batch Submit</span>
+            <span class="footer-hotkey-item"><span class="footer-key">A</span> Approve</span>
+            <span class="footer-hotkey-item"><span class="footer-key">S</span> Swap</span>
+            <span class="footer-hotkey-item"><span class="footer-key">E</span> Edit Plate</span>
+            <span class="footer-hotkey-item"><span class="footer-key">L</span> Link Order</span>
+        </div>
+        <div>
+            <span>Uganda National ITMS Verification Copilot • v2.6</span>
+        </div>
+    </footer>
+
+    <!-- Global Modals & Dialogs -->
+    {% include "core/modals.html" %}
+
+    <!-- Client Master Script -->
+    <script src="{% static 'core/js/app.js' %}"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

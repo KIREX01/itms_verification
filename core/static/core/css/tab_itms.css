@@ -1,0 +1,347 @@
+/* ============================================================================
+   TAB 2: ITMS CONNECT & ORDERS/ARCHIVE HUB
+   Features: Subviews [CONNECT], [ORDERS], [ARCHIVE]
+             TUI-styled 65% Table Panel + 35% Inspector Panel
+             Direct evidence photo links (Zero forced download)
+   ============================================================================ */
+
+.itms-pane-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* ITMS Subview Switcher Bar */
+.itms-subview-bar {
+    background-color: var(--ug-black-card);
+    border-bottom: 1px solid var(--ug-border);
+    padding: 8px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-shrink: 0;
+}
+
+.itms-subview-tabs {
+    display: flex;
+    gap: 4px;
+    background-color: var(--ug-black-surface);
+    padding: 3px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--ug-border);
+}
+
+.itms-subview-btn {
+    padding: 5px 14px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--ug-text-muted);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.itms-subview-btn:hover {
+    color: #ffffff;
+    background-color: var(--ug-black-card-hover);
+}
+
+.itms-subview-btn.active {
+    background-color: var(--ug-black-card);
+    color: var(--ug-yellow);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--ug-border-light);
+}
+
+/* Subview 1: Connect to Account */
+.itms-connect-view {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+}
+.itms-connect-view.active {
+    display: grid;
+    grid-template-columns: 1fr 1.2fr;
+    gap: 24px;
+    max-width: 1000px;
+    margin: 0 auto;
+}
+
+.itms-card {
+    background-color: var(--ug-black-card);
+    border: 1px solid var(--ug-border);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.itms-card-title {
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid var(--ug-border);
+    padding-bottom: 10px;
+}
+
+/* Form inputs */
+.form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+.form-field label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--ug-text-muted);
+}
+.form-field input {
+    background-color: var(--ug-black-surface);
+    border: 1px solid var(--ug-border);
+    color: #ffffff;
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    font-size: 0.88rem;
+    outline: none;
+}
+.form-field input:focus {
+    border-color: var(--ug-yellow);
+}
+
+/* Subview 2 & 3: Orders & Archive (65% Table / 35% Inspector) */
+.itms-split-view {
+    display: none;
+    flex: 1;
+    height: 100%;
+    overflow: hidden;
+}
+.itms-split-view.active {
+    display: flex;
+}
+
+.itms-table-panel {
+    width: 65%;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--ug-border);
+    background-color: var(--ug-black-surface);
+    height: 100%;
+}
+
+.itms-table-toolbar {
+    padding: 8px 14px;
+    background-color: var(--ug-black-card);
+    border-bottom: 1px solid var(--ug-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.itms-search-input {
+    background-color: var(--ug-black-surface);
+    border: 1px solid var(--ug-border);
+    color: #ffffff;
+    padding: 6px 12px;
+    border-radius: var(--radius-md);
+    font-size: 0.82rem;
+    width: 280px;
+    outline: none;
+}
+.itms-search-input:focus {
+    border-color: var(--ug-yellow);
+}
+
+.itms-table-scroll {
+    flex: 1;
+    overflow: auto;
+}
+
+table.itms-grid-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+    text-align: left;
+}
+
+table.itms-grid-table th {
+    position: sticky;
+    top: 0;
+    background-color: var(--ug-black-card);
+    color: var(--ug-text-muted);
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    padding: 9px 12px;
+    border-bottom: 2px solid var(--ug-border);
+    z-index: 2;
+    white-space: nowrap;
+}
+
+table.itms-grid-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--ug-border);
+    color: var(--ug-text-main);
+    vertical-align: middle;
+}
+
+table.itms-grid-table tbody tr {
+    cursor: pointer;
+    transition: background-color 0.12s;
+}
+
+table.itms-grid-table tbody tr:hover {
+    background-color: rgba(252, 220, 4, 0.06);
+}
+
+table.itms-grid-table tbody tr.selected {
+    background-color: rgba(252, 220, 4, 0.14);
+    border-left: 3px solid var(--ug-yellow);
+}
+
+.table-pagination-bar {
+    padding: 6px 14px;
+    background-color: var(--ug-black-card);
+    border-top: 1px solid var(--ug-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+}
+
+/* 35% Inspector Panel */
+.itms-inspector-panel {
+    width: 35%;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--ug-black-card);
+    height: 100%;
+    overflow-y: auto;
+    padding: 16px;
+    gap: 14px;
+}
+
+.inspector-header {
+    border-bottom: 1px solid var(--ug-border);
+    padding-bottom: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.inspector-plate-hero {
+    font-family: var(--font-mono);
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: var(--ug-yellow);
+}
+
+.inspector-order-num {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--ug-text-muted);
+}
+
+.inspector-section-title {
+    font-size: 0.75rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: var(--ug-text-muted);
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* Hardware Box */
+.hardware-box {
+    background-color: var(--ug-black-surface);
+    border: 1px solid var(--ug-border);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.hw-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    font-size: 0.8rem;
+}
+.hw-label { color: var(--ug-text-dim); }
+.hw-val { font-family: var(--font-mono); font-weight: 700; color: #ffffff; }
+
+/* Photo Links Gallery (Pure Links - Zero forced download!) */
+.inspector-photos-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.photo-link-card {
+    background-color: var(--ug-black-surface);
+    border: 1px solid var(--ug-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.photo-link-label {
+    padding: 4px 8px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--ug-text-muted);
+    background-color: rgba(0, 0, 0, 0.2);
+    display: flex;
+    justify-content: space-between;
+}
+
+.photo-link-thumb {
+    height: 110px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #000000;
+    position: relative;
+    cursor: pointer;
+}
+
+.photo-link-thumb img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.photo-link-footer {
+    padding: 4px 8px;
+    background-color: var(--ug-black-card);
+    text-align: right;
+    font-size: 0.72rem;
+}
+.photo-link-footer a {
+    color: var(--ug-yellow);
+    text-decoration: none;
+    font-weight: 700;
+}
+.photo-link-footer a:hover {
+    text-decoration: underline;
+}

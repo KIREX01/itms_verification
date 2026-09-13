@@ -1,0 +1,76 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Operator Sign In - ITMS Closing System</title>
+    <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/auth.css' %}">
+</head>
+<body>
+
+    <!-- Uganda National Flag Ribbon -->
+    <div class="uganda-flag-ribbon"></div>
+
+    <div class="auth-page-wrapper">
+        <div class="auth-card-box">
+            <div class="auth-card-head">
+                <div style="font-size:2.4rem; margin-bottom:6px;">🛡️</div>
+                <h1 style="font-size:1.35rem; font-weight:800; color:#ffffff; letter-spacing:0.5px;">
+                    ITMS <span style="color:var(--ug-yellow);">CLOSING</span> SYSTEM
+                </h1>
+                <p style="font-size:0.75rem; color:var(--ug-text-muted); margin-top:2px;">
+                    Uganda National Fitment Verification • Operator Authentication
+                </p>
+            </div>
+
+            <div class="auth-card-body">
+                {% if error %}
+                    <div class="alert-banner error">
+                        <span>⚠️ {{ error }}</span>
+                    </div>
+                {% endif %}
+
+                {% if info %}
+                    <div class="alert-banner warning">
+                        <span>ℹ️ {{ info }}</span>
+                    </div>
+                {% endif %}
+
+                <form method="POST" action="{% url 'core:login' %}" style="display:flex; flex-direction:column; gap:14px;">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ next_url }}">
+
+                    <div class="form-field">
+                        <label for="username">Operator Username</label>
+                        <input type="text" id="username" name="username" value="{{ last_username }}" required autofocus placeholder="e.g. admin or operator_john">
+                    </div>
+
+                    <div class="form-field">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" name="password" required placeholder="Enter password">
+                    </div>
+
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <input type="checkbox" id="remember" name="remember" value="1" checked style="accent-color:var(--ug-yellow);">
+                        <label for="remember" style="font-size:0.8rem; color:var(--ug-text-muted); cursor:pointer;">Remember on this terminal</label>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; padding:11px; margin-top:4px;">
+                        Sign In to Console
+                    </button>
+                </form>
+            </div>
+
+            <div class="auth-card-footer">
+                <div>
+                    New operator on this terminal? <a href="{% url 'core:signup' %}">Create Account</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>

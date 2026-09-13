@@ -1,0 +1,193 @@
+<!-- TAB 2: ITMS CONNECT & ORDERS/ARCHIVE HUB -->
+<div class="tab-pane" id="pane-itms">
+    <div class="itms-pane-container">
+        <!-- Subview Navigation Bar -->
+        <div class="itms-subview-bar">
+            <div class="itms-subview-tabs">
+                <button class="itms-subview-btn active" id="btn-sub-connect" onclick="switchItmsSubview('CONNECT')">
+                    <span>🔑 Connect Account</span>
+                </button>
+                <button class="itms-subview-btn" id="btn-sub-orders" onclick="switchItmsSubview('ORDERS')">
+                    <span>📥 Active Orders</span>
+                    <span style="font-size:0.68rem; color:var(--ug-text-dim);">(/index)</span>
+                </button>
+                <button class="itms-subview-btn" id="btn-sub-archive" onclick="switchItmsSubview('ARCHIVE')">
+                    <span>🏛️ Completed Archive</span>
+                    <span style="font-size:0.68rem; color:var(--ug-text-dim);">(/archive)</span>
+                </button>
+            </div>
+
+            <!-- Controls & Source Toggle (shown when in ORDERS or ARCHIVE) -->
+            <div id="itms-subview-controls" style="display:none; align-items:center; gap:8px;">
+                <div class="itms-source-toggle" style="display:flex; border:1px solid var(--ug-border); border-radius:var(--radius-md); overflow:hidden;">
+                    <button class="btn btn-secondary active" id="itms-src-live-btn" onclick="setItmsExplorerSource('live')" style="padding:4px 10px; font-size:0.75rem; border-radius:0; border:none;">⚡ Live ITMS</button>
+                    <button class="btn btn-secondary" id="itms-src-local-btn" onclick="setItmsExplorerSource('local')" style="padding:4px 10px; font-size:0.75rem; border-radius:0; border:none;">💾 Local DB</button>
+                </div>
+                <button class="btn btn-primary" onclick="syncCurrentItmsPage()" style="padding:5px 12px; font-size:0.78rem;" title="Sync current page into local database">
+                    📥 Sync Page to DB
+                </button>
+                <button class="btn btn-secondary" onclick="fetchItmsExplorerOrders()" style="padding:5px 12px; font-size:0.78rem;" title="Refresh orders">
+                    🔄 Refresh
+                </button>
+            </div>
+        </div>
+
+        <!-- SUBVIEW 1: Connect to Account -->
+        <div class="itms-connect-view active" id="itms-view-connect">
+            <!-- Left: Status & Telematics -->
+            <div class="itms-card">
+                <div class="itms-card-title">
+                    <span>🛡️ ITMS Connection Status</span>
+                    <span class="badge badge-yellow" id="itms-session-badge">Checking...</span>
+                </div>
+                <div style="font-size:0.95rem; font-weight:700; color:#fff;" id="itms-account-email">No Account Connected</div>
+                <div style="font-size:0.8rem; color:var(--ug-text-muted); line-height:1.5;" id="itms-account-details">
+                    Connect your stock.itms.ug credentials to enable live installation order lookup and evidence verification.
+                </div>
+                <div style="background-color:rgba(252,220,4,0.08); border:1px solid rgba(252,220,4,0.25); border-radius:var(--radius-md); padding:12px; font-size:0.8rem; color:var(--ug-yellow); line-height:1.4;">
+                    🇺🇬 <strong>Official Ugandan Fitment Portal:</strong> All session tokens are encrypted locally and communication adheres to the reverse-engineered Yii2 authentication protocol.
+                </div>
+                <div style="margin-top:auto;">
+                    <button class="btn btn-danger" id="btn-disconnect-itms-view" onclick="disconnectItms()" style="display:none; width:100%; justify-content:center;">
+                        Disconnect Account
+                    </button>
+                </div>
+            </div>
+
+            <!-- Right: Credentials Input Form -->
+            <div class="itms-card">
+                <div class="itms-card-title">
+                    <span>🔑 ITMS WebApp Session Credentials</span>
+                </div>
+                <div class="form-field">
+                    <label>ITMS WebApp Base URL</label>
+                    <input type="text" id="itms-input-base-url" value="https://stock.itms.ug" readonly style="opacity:0.8;">
+                </div>
+                <div class="form-field">
+                    <label>Operator Username / Email</label>
+                    <input type="text" id="itms-input-email" placeholder="e.g. operator@itms.ug">
+                </div>
+                <div class="form-field">
+                    <label>Password</label>
+                    <input type="password" id="itms-input-password" placeholder="Enter password for stock.itms.ug">
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <input type="checkbox" id="itms-remember-chk" checked style="accent-color:var(--ug-yellow);">
+                    <label for="itms-remember-chk" style="font-size:0.8rem; color:var(--ug-text-muted);">Remember Session (30 Days Cookie)</label>
+                </div>
+                <div style="display:flex; gap:10px; margin-top:8px;">
+                    <button class="btn btn-primary" id="btn-submit-itms-connect" onclick="submitItmsCredentials()" style="flex:1; justify-content:center;">
+                        Connect & Sign In
+                    </button>
+                    <button class="btn btn-secondary" onclick="fetchItmsStatus()">
+                        Verify Session
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- SUBVIEW 2 & 3: Orders / Archive (65% Table / 35% Inspector) -->
+        <div class="itms-split-view" id="itms-view-orders">
+            <!-- 65% Table Panel -->
+            <div class="itms-table-panel">
+                <div class="itms-table-toolbar">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <input type="text" class="itms-search-input" id="itms-explorer-search" placeholder="Search Plate (e.g. UMA 835DS), VIN..." onkeydown="if(event.key==='Enter') doItmsExplorerSearch()">
+                        <button class="btn btn-secondary" onclick="doItmsExplorerSearch()" style="padding:6px 12px; font-size:0.8rem;">
+                            Search
+                        </button>
+                        <button class="btn btn-secondary" onclick="clearItmsExplorerSearch()" style="padding:6px 10px; font-size:0.8rem;">
+                            ✕
+                        </button>
+                    </div>
+                    <span id="itms-explorer-summary" style="font-size:0.75rem; color:var(--ug-text-dim);">Loading...</span>
+                </div>
+
+                <div class="itms-table-scroll">
+                    <table class="itms-grid-table">
+                        <thead>
+                            <tr>
+                                <th style="width:160px;">Order #</th>
+                                <th style="width:120px;">Plate</th>
+                                <th style="width:160px;">VIN / Chassis</th>
+                                <th style="width:110px;">Status</th>
+                                <th style="width:140px;">Warehouse</th>
+                                <th style="width:130px;">Officer</th>
+                                <th style="width:130px;">Date</th>
+                            </tr>
+                        </thead>
+                        <tbody id="itms-explorer-tbody">
+                            <tr>
+                                <td colspan="7" style="text-align:center; padding:40px; color:var(--ug-text-muted);">
+                                    Select Active Orders or Completed Archive above to load registry data.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="table-pagination-bar">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <button class="btn btn-secondary" id="btn-explorer-prev" onclick="changeItmsExplorerPage(-1)" style="padding:4px 10px; font-size:0.75rem;" disabled>◀ Prev</button>
+                        <span id="itms-explorer-page-label" style="font-size:0.8rem; font-weight:700; color:#fff;">Page 1</span>
+                        <button class="btn btn-secondary" id="btn-explorer-next" onclick="changeItmsExplorerPage(1)" style="padding:4px 10px; font-size:0.75rem;">Next ▶</button>
+                    </div>
+                    <span id="itms-explorer-source-tag" class="badge badge-yellow" style="font-size:0.7rem;">Live ITMS</span>
+                </div>
+            </div>
+
+            <!-- 35% Live Inspector Panel (Hardware & Photo Links - Zero forced download!) -->
+            <div class="itms-inspector-panel" id="itms-inspector-panel">
+                <div class="inspector-header">
+                    <div class="inspector-plate-hero" id="itms-insp-plate">SELECT AN ORDER</div>
+                    <div class="inspector-order-num" id="itms-insp-order">Click an order on the left to inspect telematics & photo links</div>
+                </div>
+
+                <!-- Hardware & Telematics Inventory -->
+                <div>
+                    <div class="inspector-section-title">🛰️ Hardware & Telematics</div>
+                    <div class="hardware-box">
+                        <div class="hw-row">
+                            <span class="hw-label">GPS Tracker:</span>
+                            <span class="hw-val" id="itms-insp-gps">---</span>
+                        </div>
+                        <div class="hw-row">
+                            <span class="hw-label">Front Beacon:</span>
+                            <span class="hw-val" id="itms-insp-fbeacon">---</span>
+                        </div>
+                        <div class="hw-row">
+                            <span class="hw-label">Rear Beacon:</span>
+                            <span class="hw-val" id="itms-insp-rbeacon">---</span>
+                        </div>
+                        <div class="hw-row">
+                            <span class="hw-label">Front Plate Serial:</span>
+                            <span class="hw-val" id="itms-insp-fserial">---</span>
+                        </div>
+                        <div class="hw-row">
+                            <span class="hw-label">Rear Plate Serial:</span>
+                            <span class="hw-val" id="itms-insp-rserial">---</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Evidence Photo Links (Pure Links - Direct Web Viewing) -->
+                <div>
+                    <div class="inspector-section-title">📷 Evidence Photos (Direct ITMS Links)</div>
+                    <div class="inspector-photos-grid" id="itms-insp-photos-grid">
+                        <div style="grid-column:1/-1; padding:20px; text-align:center; color:var(--ug-text-dim); font-size:0.8rem; background:var(--ug-black-surface); border-radius:var(--radius-md);">
+                            No photos to preview. Select an order from the table.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Jump to Verification Queue Button (if matched) -->
+                <div id="itms-insp-queue-banner" style="display:none; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); border-radius:var(--radius-md); padding:10px 12px; align-items:center; justify-content:space-between; margin-top:auto;">
+                    <div style="font-size:0.75rem; color:#34d399; font-weight:700;">Matched in Review Queue</div>
+                    <button class="btn btn-success" id="btn-itms-jump-queue" style="padding:4px 10px; font-size:0.75rem;">
+                        👉 Open in Queue
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

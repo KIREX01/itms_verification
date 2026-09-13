@@ -1,0 +1,200 @@
+/* ============================================================================
+   ITMS CLOSING SYSTEM - UGANDA NATIONAL FLAG THEME & DESIGN SYSTEM
+   Colors: Uganda Black (#0d0e12, #000000), Uganda Yellow (#FCDC04, #F59E0B),
+           Uganda Red (#D90000, #EF4444), Crisp White (#FFFFFF)
+   ============================================================================ */
+
+:root {
+    /* Uganda Flag Primary Colors */
+    --ug-black: #000000;
+    --ug-black-surface: #0d0f14;
+    --ug-black-card: #141720;
+    --ug-black-card-hover: #1e2230;
+    --ug-black-muted: #262c3d;
+    --ug-border: #283042;
+    --ug-border-light: #374259;
+
+    --ug-yellow: #FCDC04;
+    --ug-yellow-hover: #e5c603;
+    --ug-yellow-glow: rgba(252, 220, 4, 0.25);
+    --ug-gold: #f59e0b;
+    --ug-gold-hover: #d97706;
+
+    --ug-red: #D90000;
+    --ug-red-hover: #b80000;
+    --ug-red-glow: rgba(217, 0, 0, 0.25);
+    --ug-red-vivid: #ef4444;
+
+    /* Functional Accents */
+    --ug-text-main: #f9fafb;
+    --ug-text-muted: #9ca3af;
+    --ug-text-dim: #6b7280;
+    --ug-cyan: #38bdf8;
+    --ug-green: #10b981;
+    --ug-green-glow: rgba(16, 185, 129, 0.2);
+    --ug-purple: #a855f7;
+
+    /* Typography & Radius */
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --radius-xl: 12px;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: var(--font-sans);
+    background-color: var(--ug-black-surface);
+    color: var(--ug-text-main);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    user-select: none;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: var(--ug-black-surface);
+}
+::-webkit-scrollbar-thumb {
+    background: var(--ug-border);
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--ug-gold);
+}
+
+/* Buttons */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border-radius: var(--radius-md);
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    text-decoration: none;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-primary {
+    background-color: var(--ug-yellow);
+    color: #000000;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.btn-primary:hover:not(:disabled) {
+    background-color: var(--ug-yellow-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px var(--ug-yellow-glow);
+}
+
+.btn-secondary {
+    background-color: var(--ug-black-card);
+    color: var(--ug-text-main);
+    border: 1px solid var(--ug-border);
+}
+.btn-secondary:hover:not(:disabled) {
+    background-color: var(--ug-black-card-hover);
+    border-color: var(--ug-border-light);
+}
+
+.btn-success {
+    background-color: var(--ug-green);
+    color: #ffffff;
+}
+.btn-success:hover:not(:disabled) {
+    background-color: #059669;
+}
+
+.btn-danger {
+    background-color: var(--ug-red);
+    color: #ffffff;
+}
+.btn-danger:hover:not(:disabled) {
+    background-color: var(--ug-red-hover);
+    box-shadow: 0 2px 6px var(--ug-red-glow);
+}
+
+.btn-gold {
+    background-color: var(--ug-gold);
+    color: #000000;
+}
+.btn-gold:hover:not(:disabled) {
+    background-color: var(--ug-gold-hover);
+}
+
+/* Status Badges */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.badge-yellow {
+    background-color: rgba(252, 220, 4, 0.15);
+    color: var(--ug-yellow);
+    border: 1px solid rgba(252, 220, 4, 0.4);
+}
+
+.badge-red {
+    background-color: rgba(217, 0, 0, 0.18);
+    color: #f87171;
+    border: 1px solid rgba(217, 0, 0, 0.4);
+}
+
+.badge-green {
+    background-color: rgba(16, 185, 129, 0.15);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.badge-cyan {
+    background-color: rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+}
+
+.badge-muted {
+    background-color: var(--ug-black-card);
+    color: var(--ug-text-muted);
+    border: 1px solid var(--ug-border);
+}
+
+/* Hotkey hint tags */
+.hotkey {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background-color: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: var(--ug-yellow);
+    margin-left: 4px;
+}

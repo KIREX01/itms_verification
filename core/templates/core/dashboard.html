@@ -1,0 +1,21 @@
+{% extends "core/base.html" %}
+
+{% block content %}
+    <!-- Tab 1: Executive Dashboard -->
+    {% include "core/tabs/tab_dashboard.html" %}
+
+    <!-- Tab 2: ITMS Connect & Orders / Archive Hub -->
+    {% include "core/tabs/tab_itms.html" %}
+
+    <!-- Tab 3: Evidence Photo Ingestion & Batches -->
+    {% include "core/tabs/tab_batches.html" %}
+
+    <!-- Tab 4: Review Queue & Operator Action Studio -->
+    {% include "core/tabs/tab_queue.html" %}
+
+    <!-- Tab 5: History & Verification Audit Trail -->
+    {% include "core/tabs/tab_history.html" %}
+
+    <!-- Tab 6: System Configuration & Settings -->
+    {% include "core/tabs/tab_settings.html" %}
+{% endblock %}

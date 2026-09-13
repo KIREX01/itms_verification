@@ -1,0 +1,250 @@
+<!-- MODALS & DIALOG OVERLAYS -->
+
+<!-- 1. Edit Plate & Manual Pair Override Modal -->
+<div class="modal-overlay" id="modal-edit-plate">
+    <div class="modal-box" style="width: 520px;">
+        <div class="modal-header">
+            <span class="modal-title">✏️ Manual Pair Override & Plate Correction</span>
+            <button class="modal-close" onclick="closeModal('modal-edit-plate')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-field">
+                <label>Plate Number (Ugandan Standard, e.g. UMA 835DS)</label>
+                <input type="text" id="input-edit-plate" style="font-family:var(--font-mono); font-size:1.1rem; font-weight:800; text-transform:uppercase; color:var(--ug-yellow);" onkeydown="if(event.key==='Enter') submitEditPlate()">
+                <div style="font-size:0.72rem; color:var(--ug-text-dim);">
+                    Input will be automatically normalized into standard Ugandan vehicle plate syntax.
+                </div>
+            </div>
+
+            <div class="form-field">
+                <label>Verification Status Override</label>
+                <select id="select-edit-status" style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); color:#fff; padding:8px 12px; border-radius:var(--radius-md); font-size:0.88rem; outline:none;">
+                    <option value="">-- Keep Current Status --</option>
+                    <option value="APPROVED">✓ APPROVED (Ready for ITMS Submission)</option>
+                    <option value="NEEDS_REVIEW">🔍 NEEDS_REVIEW (Flagged for Review)</option>
+                    <option value="INCOMPLETE">⚠️ INCOMPLETE (Missing Front or Rear Angle)</option>
+                    <option value="UNREGISTERED">❓ UNREGISTERED (Vehicle Not in ITMS Registry)</option>
+                    <option value="FAILED">✕ FAILED (Rejected or Resubmission Needed)</option>
+                </select>
+            </div>
+
+            <div class="form-field">
+                <label>Operator Override Note</label>
+                <input type="text" id="input-edit-note" placeholder="e.g. Verified visually from rear fender stamp...">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeModal('modal-edit-plate')">Cancel</button>
+            <button class="btn btn-primary" onclick="submitEditPlate()">Save & Apply Override</button>
+        </div>
+    </div>
+</div>
+
+<!-- 2. Manual Order Linker Modal (TUI Mirrored) -->
+<div class="modal-overlay" id="modal-link-order">
+    <div class="modal-box" style="width: 720px;">
+        <div class="modal-header">
+            <span class="modal-title">🔗 Manual Installation Order Linker</span>
+            <button class="modal-close" onclick="closeModal('modal-link-order')">&times;</button>
+        </div>
+        <div class="modal-body" style="gap:12px;">
+            <!-- Current Linked Order Info -->
+            <div id="linker-current-order-banner" style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 14px; display:flex; align-items:center; justify-content:space-between;">
+                <div>
+                    <span style="font-size:0.75rem; color:var(--ug-text-dim); text-transform:uppercase;">Currently Linked Order:</span>
+                    <div style="font-family:var(--font-mono); font-size:0.95rem; font-weight:800; color:#fff;" id="linker-current-order-text">No order linked</div>
+                </div>
+                <button class="btn btn-danger" id="btn-modal-unlink" onclick="unlinkOrderFromSelectedPair()" style="padding:4px 10px; font-size:0.75rem;">
+                    ✕ Unlink Current Order
+                </button>
+            </div>
+
+            <!-- Search Field -->
+            <div class="form-field">
+                <label>Search Active Orders (Order #, Plate, VIN, Warehouse)</label>
+                <input type="text" id="input-search-order" placeholder="Type to filter active ITMS orders..." oninput="searchOrdersForLinking(this.value)">
+            </div>
+
+            <!-- Orders Table -->
+            <div style="max-height:300px; overflow-y:auto; border:1px solid var(--ug-border); border-radius:var(--radius-md);" id="linker-orders-list">
+                <div style="padding:24px; text-align:center; color:var(--ug-text-dim);">Loading active orders...</div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeModal('modal-link-order')">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- 3. Historical Activity Log Detail Modal -->
+<div class="modal-overlay" id="modal-history-detail">
+    <div class="modal-box" style="width: 620px;">
+        <div class="modal-header">
+            <span class="modal-title" id="hist-modal-title">📜 Verification Activity Log Detail</span>
+            <button class="modal-close" onclick="closeModal('modal-history-detail')">&times;</button>
+        </div>
+        <div class="modal-body" style="gap:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 14px;">
+                <div>
+                    <div style="font-size:0.72rem; color:var(--ug-text-dim);">TIMESTAMP</div>
+                    <div style="font-family:var(--font-mono); font-weight:700; color:#fff;" id="hist-modal-time">--</div>
+                </div>
+                <div>
+                    <div style="font-size:0.72rem; color:var(--ug-text-dim);">OPERATOR</div>
+                    <div style="font-weight:700; color:var(--ug-yellow);" id="hist-modal-operator">--</div>
+                </div>
+                <div>
+                    <div style="font-size:0.72rem; color:var(--ug-text-dim);">RESULT</div>
+                    <span class="badge badge-green" id="hist-modal-result">SUCCESS</span>
+                </div>
+            </div>
+
+            <div class="hardware-box">
+                <div class="hw-row">
+                    <span class="hw-label">Action:</span>
+                    <span class="hw-val" id="hist-modal-action" style="font-weight:700;">--</span>
+                </div>
+                <div class="hw-row">
+                    <span class="hw-label">Vehicle Plate:</span>
+                    <span class="hw-val" id="hist-modal-plate" style="color:var(--ug-yellow); font-weight:800;">--</span>
+                </div>
+                <div class="hw-row">
+                    <span class="hw-label">Matched Order #:</span>
+                    <span class="hw-val" id="hist-modal-order">--</span>
+                </div>
+                <div class="hw-row">
+                    <span class="hw-label">Pair ID:</span>
+                    <span class="hw-val" id="hist-modal-pair">--</span>
+                </div>
+                <div class="hw-row">
+                    <span class="hw-label">Submission Token / Receipt:</span>
+                    <span class="hw-val" id="hist-modal-token" style="font-family:var(--font-mono); font-size:0.75rem;">None</span>
+                </div>
+            </div>
+
+            <div class="form-field">
+                <label>Audit Message / Execution Trace</label>
+                <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:12px; font-family:var(--font-mono); font-size:0.8rem; color:#fff; line-height:1.4; word-break:break-word; max-height:140px; overflow-y:auto;" id="hist-modal-message">
+                    --
+                </div>
+            </div>
+
+            <!-- Evidence Photo Previews (if linked pair exists) -->
+            <div id="hist-modal-photos-container" style="display:none; flex-direction:column; gap:6px;">
+                <label style="font-size:0.75rem; font-weight:700; color:var(--ug-text-muted);">ASSOCIATED EVIDENCE PHOTOS</label>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:6px; text-align:center;">
+                        <span style="font-size:0.7rem; color:var(--ug-text-dim);">FRONT ANGLE</span>
+                        <img id="hist-img-front" src="" alt="Front" style="width:100%; height:110px; object-fit:cover; border-radius:4px; margin-top:4px; cursor:pointer;" onclick="openLightbox(this.src)">
+                    </div>
+                    <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:6px; text-align:center;">
+                        <span style="font-size:0.7rem; color:var(--ug-text-dim);">REAR ANGLE</span>
+                        <img id="hist-img-rear" src="" alt="Rear" style="width:100%; height:110px; object-fit:cover; border-radius:4px; margin-top:4px; cursor:pointer;" onclick="openLightbox(this.src)">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-success" id="btn-hist-jump-queue" style="margin-right:auto; display:none;" onclick="jumpFromHistoryToQueue()">
+                🔍 Open in Review Queue
+            </button>
+            <button class="btn btn-secondary" onclick="closeModal('modal-history-detail')">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- 4. ITMS Account Connect Modal -->
+<div class="modal-overlay" id="modal-itms">
+    <div class="modal-box" style="width: 520px;">
+        <div class="modal-header">
+            <span class="modal-title">🌐 Connect ITMS WebApp Account</span>
+            <button class="modal-close" onclick="closeModal('modal-itms')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:12px; display:flex; flex-direction:column; gap:4px;">
+                <div style="display:flex; align-items:center; justify-content:space-between;">
+                    <span style="font-size:0.75rem; font-weight:700; color:var(--ug-text-muted);">Session Status</span>
+                    <span class="badge badge-yellow" id="itms-modal-badge">● Disconnected</span>
+                </div>
+                <div style="font-size:0.95rem; font-weight:700; color:#fff;" id="itms-modal-user">No Account Connected</div>
+                <div style="font-size:0.78rem; color:var(--ug-text-dim);" id="itms-modal-detail">Connect your stock.itms.ug credentials.</div>
+            </div>
+
+            <div class="form-field">
+                <label>ITMS Account Email / Username</label>
+                <input type="text" id="itms-connect-email" placeholder="e.g. operator@itms.ug">
+            </div>
+            <div class="form-field">
+                <label>Password</label>
+                <input type="password" id="itms-connect-password" placeholder="Enter password for stock.itms.ug" onkeydown="if(event.key==='Enter') submitItmsConnect()">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-danger" id="btn-itms-disconnect" onclick="disconnectItms()" style="display:none; margin-right:auto;">
+                Disconnect
+            </button>
+            <button class="btn btn-secondary" onclick="closeModal('modal-itms')">Close</button>
+            <button class="btn btn-primary" id="btn-itms-connect" onclick="submitItmsConnect()">Connect Account</button>
+        </div>
+    </div>
+</div>
+
+<!-- 5. Dual-Dropzone Upload Batch Modal -->
+<div class="modal-overlay" id="modal-batch-upload">
+    <div class="modal-box" style="width: 660px;">
+        <div class="modal-header">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span class="modal-title">📷 Upload New Photo Batch</span>
+                <span class="badge badge-yellow" style="font-size:0.7rem;">Front &amp; Rear 1:1</span>
+            </div>
+            <button class="modal-close" onclick="closeModal('modal-batch-upload')">&times;</button>
+        </div>
+        <div class="modal-body" style="gap:14px;">
+            <div class="form-field">
+                <label>Batch / Shift Label</label>
+                <input type="text" id="batch-upload-label" placeholder="e.g. Entebbe Station Shift 1">
+            </div>
+
+            <div class="dropzone-grid">
+                <!-- Front Dropzone -->
+                <div class="dropzone-box" id="dropzone-tab-front" onclick="document.getElementById('input-tab-front').click()">
+                    <div class="dropzone-box-icon">🚘</div>
+                    <div class="dropzone-box-title">Front Photos</div>
+                    <div class="dropzone-box-desc">Drop or browse front angle photos</div>
+                    <div class="dropzone-box-count" id="count-tab-front">0 files selected</div>
+                    <input type="file" id="input-tab-front" multiple accept="image/*" style="display:none;" onchange="handleTabFileSelect('front')">
+                </div>
+
+                <!-- Rear Dropzone -->
+                <div class="dropzone-box" id="dropzone-tab-rear" onclick="document.getElementById('input-tab-rear').click()">
+                    <div class="dropzone-box-icon">🏍️</div>
+                    <div class="dropzone-box-title">Rear Photos</div>
+                    <div class="dropzone-box-desc">Drop or browse rear angle photos</div>
+                    <div class="dropzone-box-count" id="count-tab-rear">0 files selected</div>
+                    <input type="file" id="input-tab-rear" multiple accept="image/*" style="display:none;" onchange="handleTabFileSelect('rear')">
+                </div>
+            </div>
+
+            <div class="symmetry-indicator" id="tab-symmetry-warning">
+                <!-- Updated dynamically -->
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeModal('modal-batch-upload')">Cancel</button>
+            <button class="btn btn-primary" id="btn-submit-tab-upload" onclick="submitTabBatchUpload()" style="padding:8px 18px;">
+                Upload &amp; Ingest to Vault
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 6. Photo Lightbox Modal -->
+<div class="modal-overlay" id="modal-photo-lightbox" onclick="closeModal('modal-photo-lightbox')">
+    <div style="max-width:90vw; max-height:90vh; display:flex; align-items:center; justify-content:center; position:relative;" onclick="event.stopPropagation()">
+        <img id="lightbox-img" src="" alt="Full View" style="max-width:90vw; max-height:85vh; object-fit:contain; border-radius:var(--radius-lg); border:2px solid var(--ug-border);">
+        <button class="modal-close" style="position:absolute; top:-36px; right:0; color:#fff; font-size:2rem;" onclick="closeModal('modal-photo-lightbox')">&times;</button>
+    </div>
+</div>
+
+<!-- Toast Notifications Container -->
+<div class="toast-container" id="toast-container"></div>

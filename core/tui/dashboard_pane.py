@@ -38,8 +38,8 @@ class PipelineStageCard(Static):
 
     TOOLTIPS = {
         "ingest": "📥 Photo Ingestion: Click or press [I] to import evidence photos",
-        "vision": "🧠 Vision Engine: Click or press [P] to run YOLO plate detection & OCR",
-        "association": "🔗 Pair Association: Click or press [M] to match front & rear pairs",
+        "association": "🔗 Physical Pairing: Click or press [M] to pair via U-Turn walk & filename sequence",
+        "vision": "🧠 Joint Vision Engine: Click or press [P] to run dual-stream YOLOv8 plate recognition on pairs",
         "review": "📋 Operator Review: Click or press [4] to open verification queue",
         "finalized": "🚀 ITMS Finalized: Click or press [B] to submit verified batch to ITMS",
     }
@@ -60,10 +60,10 @@ class PipelineStageCard(Static):
 
         if self.stage_id == "ingest":
             app.action_native_ingest()
-        elif self.stage_id == "vision":
-            app.action_process_vision()
         elif self.stage_id == "association":
             app.action_match_pairs()
+        elif self.stage_id == "vision":
+            app.action_process_vision()
         elif self.stage_id == "review":
             app.action_tab_queue()
         elif self.stage_id == "finalized":
@@ -92,9 +92,9 @@ class DashboardPane(VerticalScroll):
                 with Horizontal(id="pipeline-cards-container"):
                     yield PipelineStageCard("ingest", id="pipe-card-1", classes="pipeline-stage-card card-ingest")
                     yield Static(" ➜ ", classes="pipeline-connector")
-                    yield PipelineStageCard("vision", id="pipe-card-2", classes="pipeline-stage-card card-vision")
+                    yield PipelineStageCard("association", id="pipe-card-2", classes="pipeline-stage-card card-association")
                     yield Static(" ➜ ", classes="pipeline-connector")
-                    yield PipelineStageCard("association", id="pipe-card-3", classes="pipeline-stage-card card-association")
+                    yield PipelineStageCard("vision", id="pipe-card-3", classes="pipeline-stage-card card-vision")
                     yield Static(" ➜ ", classes="pipeline-connector")
                     yield PipelineStageCard("review", id="pipe-card-4", classes="pipeline-stage-card card-review")
                     yield Static(" ➜ ", classes="pipeline-connector")
@@ -122,8 +122,8 @@ class DashboardPane(VerticalScroll):
                 yield Static("[bold white]⚡ Quick Action Workflow Launchpad[/bold white] [dim](Click or press keyboard hotkey)[/dim]", classes="card-title")
                 with Horizontal(classes="action-button-row"):
                     yield Button("📥 Add Photos [I]", variant="primary", id="btn-dash-ingest")
-                    yield Button("🧠 Run Vision [P]", variant="default", id="btn-dash-vision")
                     yield Button("🔗 Match Pairs [M]", variant="default", id="btn-dash-match")
+                    yield Button("🧠 Run Vision [P]", variant="default", id="btn-dash-vision")
                     yield Button("📋 Review Queue [4]", variant="warning", id="btn-dash-queue")
                 with Horizontal(classes="action-button-row"):
                     yield Button("🚀 Batch Submit [B]", variant="success", id="btn-dash-batch")
@@ -222,24 +222,24 @@ class DashboardPane(VerticalScroll):
             f"[dim]Click or [I][/dim]"
         )
 
-        # Stage 2: Vision OCR & Det
-        c2_status = f"[bold yellow]● {unprocessed_images} Queued[/bold yellow]" if unprocessed_images > 0 else "[bold green]● 100% Analyzed[/bold green]"
+        # Stage 2: Physical Pairing (U-Turn Walk & Filenames)
+        c2_status = f"[bold yellow]● {incomplete} Missing Partner[/bold yellow]" if incomplete > 0 else "[bold green]● Pairs Formed[/bold green]"
         c2_text = (
-            f"[bold magenta]2. Vision OCR & Det[/bold magenta]\n"
-            f"Processed:   [b]{processed_images:4d}[/b]\n"
-            f"Unprocessed: [dim]{unprocessed_images:4d}[/dim]\n"
-            f"{c2_status}\n"
-            f"[dim]Click or [P][/dim]"
-        )
-
-        # Stage 3: Pair Association
-        c3_status = f"[bold yellow]● {incomplete} Missing Rear[/bold yellow]" if incomplete > 0 else "[bold green]● Pairs Grouped[/bold green]"
-        c3_text = (
-            f"[bold yellow]3. Pair Association[/bold yellow]\n"
+            f"[bold yellow]2. Physical Pairing[/bold yellow]\n"
             f"Pairs:      [b]{total_pairs:4d}[/b] grouped\n"
             f"Incomplete: [dim]{incomplete:4d}[/dim]\n"
-            f"{c3_status}\n"
+            f"{c2_status}\n"
             f"[dim]Click or [M][/dim]"
+        )
+
+        # Stage 3: Joint Vision Engine (Dual-Stream YOLOv8 + Consensus)
+        c3_status = f"[bold yellow]● {unprocessed_images} Queued[/bold yellow]" if unprocessed_images > 0 else "[bold green]● 100% Verified[/bold green]"
+        c3_text = (
+            f"[bold magenta]3. Joint Vision Engine[/bold magenta]\n"
+            f"Processed:   [b]{processed_images:4d}[/b]\n"
+            f"Queued:      [dim]{unprocessed_images:4d}[/dim]\n"
+            f"{c3_status}\n"
+            f"[dim]Click or [P][/dim]"
         )
 
         # Stage 4: Operator Review

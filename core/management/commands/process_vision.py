@@ -98,11 +98,39 @@ class Command(BaseCommand):
             "--joint-pairs", action="store_true",
             help="Process candidate pairs using the Dual-Stream Joint Vision Pipeline (cross-validation, PSV/PMO color check, syntax resolution).",
         )
+        parser.add_argument(
+            "--single-only", action="store_true",
+            help="Bypass pair-first processing and only run isolated single-image vision.",
+        )
+        parser.add_argument(
+            "--no-auto-pair", action="store_true",
+            help="Skip pre-vision physical pair association (U-Turn / Filename matching).",
+        )
 
     def handle(self, *args, **options):
-        # ── Joint Pair Vision Mode ─────────────────────────────────────
-        if options.get("joint_pairs"):
-            self.stdout.write("Running Dual-Stream Joint Vision Pipeline on vehicle pairs...\n")
+        batch_arg = options.get("batch")
+        batch_obj = None
+        if batch_arg:
+            try:
+                batch_obj = IngestionBatch.objects.get(batch_id=batch_arg)
+                self.stdout.write(f"Scoped to IngestionBatch: {batch_obj.batch_id}")
+            except IngestionBatch.DoesNotExist:
+                raise CommandError(f"IngestionBatch with id '{batch_arg}' does not exist.")
+
+        # ── Phase 1: Physical Pre-Pairing (U-Turn Walk & Filename Sequence) ──
+        if not options.get("single_only") and not options.get("no_auto_pair"):
+            from core.matcher import association
+            self.stdout.write("Phase 1: Establishing physical pairs via U-Turn trajectory & Filename stems...")
+            assoc_summary = association.run_association(batch_id=batch_arg)
+            if assoc_summary.complete_pairs > 0:
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f"  ✓ {assoc_summary.complete_pairs} physical pair(s) aligned (U-Turn / Filenames).\n"
+                    )
+                )
+
+        # ── Phase 2: Dual-Stream Joint Vision on Formed Pairs ─────────────
+        if not options.get("single_only"):
             from core.vision.joint_pipeline import DualStreamVisionEngine
             from core.models import VehicleInstallationPair
 
@@ -111,49 +139,61 @@ class Command(BaseCommand):
             ).exclude(
                 verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED
             )
-            if options.get("batch"):
+            if batch_arg:
                 pair_qs = pair_qs.filter(
-                    Q(front_image__batch__batch_id=options["batch"]) |
-                    Q(rear_image__batch__batch_id=options["batch"])
+                    Q(front_image__batch__batch_id=batch_arg) |
+                    Q(rear_image__batch__batch_id=batch_arg)
+                )
+
+            # Process pairs that need vision (e.g. placeholder PAIR-, unanalyzed, or force reprocess)
+            if not options.get("reprocess_all") and not options.get("joint_pairs"):
+                pair_qs = pair_qs.filter(
+                    Q(registration_number_detected__startswith="PAIR-") |
+                    Q(front_image__status__in=[EvidenceImage.Status.NEW, EvidenceImage.Status.PROCESSING, EvidenceImage.Status.MATCHED]) |
+                    Q(rear_image__status__in=[EvidenceImage.Status.NEW, EvidenceImage.Status.PROCESSING, EvidenceImage.Status.MATCHED]) |
+                    Q(verification_status=VehicleInstallationPair.VerificationStatus.INCOMPLETE) |
+                    Q(verification_status=VehicleInstallationPair.VerificationStatus.CONFLICT)
                 )
 
             total_pairs = pair_qs.count()
-            if total_pairs == 0:
-                self.stdout.write(self.style.WARNING("No candidate pairs found to process with joint vision."))
-                return
+            if total_pairs > 0:
+                self.stdout.write(f"Phase 2: Processing {total_pairs} pair(s) with Dual-Stream Joint Vision (YOLOv8 + Consensus)...")
+                engine = DualStreamVisionEngine(save_crops=options.get("save_crops", False))
+                reconciled, conflicts, errors = 0, 0, 0
 
-            self.stdout.write(f"Processing {total_pairs} candidate pair(s) with Dual-Stream Vision Engine...\n")
-            engine = DualStreamVisionEngine(save_crops=options.get("save_crops", False))
-            reconciled, conflicts, errors = 0, 0, 0
+                for pair in pair_qs:
+                    try:
+                        res = engine.process_pair(pair)
+                        if res.success:
+                            reconciled += 1
+                            status_style = self.style.SUCCESS
+                        elif res.reconciliation_status in ("COLOR_CONFLICT", "PLATE_MISMATCH"):
+                            conflicts += 1
+                            status_style = self.style.ERROR
+                        else:
+                            errors += 1
+                            status_style = self.style.WARNING
 
-            for pair in pair_qs:
-                res = engine.process_pair(pair)
-                if res.success:
-                    reconciled += 1
-                    status_style = self.style.SUCCESS
-                elif res.reconciliation_status in ("COLOR_CONFLICT", "PLATE_MISMATCH"):
-                    conflicts += 1
-                    status_style = self.style.ERROR
-                else:
-                    errors += 1
-                    status_style = self.style.WARNING
+                        self.stdout.write(
+                            status_style(
+                                f"  Pair #{pair.id:<4} [{res.reconciliation_status:<18}] Plate={res.plate_number or '???'} "
+                                f"Cat={res.vehicle_category} Conf={res.consensus_conf:.2f} "
+                                f"(Front={res.front_plate_raw or '—'} [{res.front_color}] ↔ Rear={res.rear_plate_raw or '—'} [{res.rear_color}])"
+                            )
+                        )
+                    except Exception as exc:
+                        errors += 1
+                        self.stderr.write(self.style.ERROR(f"  Pair #{pair.id:<4} [ERROR] Joint vision failed: {exc}"))
 
                 self.stdout.write(
-                    status_style(
-                        f"Pair #{pair.id:<4} [{res.reconciliation_status:<18}] Plate={res.plate_number or '???'} "
-                        f"Cat={res.vehicle_category} Conf={res.consensus_conf:.2f} "
-                        f"(Front={res.front_plate_raw} [{res.front_color}] ↔ Rear={res.rear_plate_raw} [{res.rear_color}])"
+                    self.style.SUCCESS(
+                        f"\nDual-Stream Vision Complete: {reconciled} reconciled & verified, "
+                        f"{conflicts} conflicts flagged, {errors} issues.\n"
                     )
                 )
 
-            self.stdout.write("")
-            self.stdout.write(
-                self.style.SUCCESS(
-                    f"Dual-Stream Vision Complete: {reconciled} reconciled & verified, "
-                    f"{conflicts} conflicts flagged, {errors} issues."
-                )
-            )
-            return
+            if options.get("joint_pairs"):
+                return
 
         max_retries = options["max_retries"]
 
@@ -188,6 +228,22 @@ class Command(BaseCommand):
                 self.style.WARNING(f"Recovered {stale_count} orphaned PROCESSING image(s).")
             )
 
+        # ── 1b. Recover images that failed solely due to 'processed' variable error ──
+        unbound_err_qs = EvidenceImage.objects.filter(
+            status=EvidenceImage.Status.FAILED,
+            error_message__icontains="cannot access local variable 'processed'",
+        )
+        for img in unbound_err_qs:
+            if img.detected_plate:
+                img.status = EvidenceImage.Status.PLATE_DETECTED
+                img.error_message = ""
+                img.save(update_fields=["status", "error_message"])
+            else:
+                img.status = EvidenceImage.Status.NEW
+                img.error_message = ""
+                img.retry_count = 0
+                img.save(update_fields=["status", "error_message", "retry_count"])
+
         # ── 2. Build the processable queryset ──────────────────────────
         # Pending images:
         # 1. NEW (freshly ingested)
@@ -201,6 +257,7 @@ class Command(BaseCommand):
             base_filter = (
                 Q(status=EvidenceImage.Status.NEW) |
                 Q(status=EvidenceImage.Status.FAILED) |
+                Q(status=EvidenceImage.Status.INCOMPLETE, detected_plate="") |
                 Q(status=EvidenceImage.Status.NEEDS_REVIEW, detected_plate="")
             )
             if options["include_needs_review"]:
@@ -235,6 +292,11 @@ class Command(BaseCommand):
             return
 
         self.stdout.write(f"Processing {total} image(s) (max_retries={max_retries})...\n")
+
+        processed = 0
+        plate_found = 0
+        failed = 0
+        skipped = 0
 
         image_stream = qs.iterator(chunk_size=50) if hasattr(qs, "iterator") else qs
         for image in image_stream:
@@ -276,6 +338,17 @@ class Command(BaseCommand):
             )
         )
         self._print_stuck_summary(max_retries)
+
+        # ── Phase 4: Order Matching & Registry Reconciliation ───────────
+        try:
+            from core.matcher import order_matcher
+            matched_orders = order_matcher.match_all_pending_pairs()
+            if matched_orders > 0:
+                self.stdout.write(
+                    self.style.SUCCESS(f"Phase 4: Reconciled {matched_orders} pair(s) against active ITMS installation orders.")
+                )
+        except Exception as err:
+            self.stderr.write(f"Warning: Order matching reconciliation error: {err}")
 
         if options.get("cleanup_crops"):
             self.stdout.write("\nCleaning up temporary crops as requested...")
@@ -340,6 +413,15 @@ class Command(BaseCommand):
         if plate_text and is_valid and (ocr_conf is None or ocr_conf >= min_conf):
             image.status = EvidenceImage.Status.PLATE_DETECTED
             image.error_message = ""
+            # Propagate newly detected plate to placeholder/incomplete pair if applicable
+            from core.models import VehicleInstallationPair
+            pair = VehicleInstallationPair.objects.filter(
+                Q(front_image=image) | Q(rear_image=image),
+                registration_number_detected__startswith="UNPAIRED-",
+            ).first()
+            if pair:
+                pair.registration_number_detected = plate_text
+                pair.save(update_fields=["registration_number_detected"])
         else:
             image.status = EvidenceImage.Status.NEEDS_REVIEW
             if not ocr_result:

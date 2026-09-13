@@ -235,7 +235,7 @@ def get_database_config(base_dir: Path) -> Dict[str, Any]:
                     "ENGINE": "django.db.backends.sqlite3",
                     "NAME": sqlite_path,
                     "OPTIONS": {
-                        "timeout": 30,
+                        "timeout": 60,
                     },
                 }
 
@@ -254,7 +254,7 @@ def get_database_config(base_dir: Path) -> Dict[str, Any]:
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": sqlite_path,
             "OPTIONS": {
-                "timeout": 30,
+                "timeout": 60,
             },
         }
 
@@ -444,7 +444,7 @@ def switch_database(
         new_dict = {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": sqlite_path,
-            "OPTIONS": {"timeout": 30},
+            "OPTIONS": {"timeout": 60},
             "CONN_MAX_AGE": 0,
         }
 

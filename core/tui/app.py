@@ -89,6 +89,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         ("i", "native_ingest", "Add Photos (Dialog)"),
         ("w", "open_upload_ui", "Web Upload"),
         ("p", "process_vision", "Run Vision"),
+        ("j", "joint_rescan", "Joint Re-Scan"),
         ("m", "match_pairs", "Match Pairs"),
         ("t", "quick_type_plate", "Type Plate"),
         ("y", "sync_itms_orders", "Sync Orders"),

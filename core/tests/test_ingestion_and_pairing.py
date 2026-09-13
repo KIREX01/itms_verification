@@ -157,6 +157,26 @@ class PairingSynergyTests(TestCase):
         self.assertIn("U-Turn Walk", pair_bike1.operator_note)
         self.assertIn("U-Turn Walk", pair_bike2.operator_note)
 
+    def test_uturn_walk_with_intermediate_pause_does_not_split(self):
+        # Technician shoots Front 1, pauses 12 minutes (720s), shoots Front 2, turns around (9s), shoots Rear 2, Rear 1
+        base_t = datetime(2026, 9, 10, 10, 0, 0, tzinfo=timezone.utc)
+        f1 = self._create_img("PAUSE_F1.jpg", EvidenceImage.Orientation.FRONT, plate="", dt=base_t)
+        # 12 minutes pause during front walk
+        f2 = self._create_img("PAUSE_F2.jpg", EvidenceImage.Orientation.FRONT, plate="", dt=base_t + timedelta(seconds=720))
+        # Turnaround in 9s
+        r2 = self._create_img("PAUSE_R2.jpg", EvidenceImage.Orientation.REAR, plate="", dt=base_t + timedelta(seconds=729))
+        r1 = self._create_img("PAUSE_R1.jpg", EvidenceImage.Orientation.REAR, plate="", dt=base_t + timedelta(seconds=745))
+
+        summary = association.run_association(batch_id=self.batch.batch_id)
+        self.assertEqual(summary.complete_pairs, 2)
+        self.assertEqual(summary.incomplete, 0)
+        self.assertEqual(len(summary.discrepancies), 0)
+
+        pair_bike1 = VehicleInstallationPair.objects.get(front_image=f1, rear_image=r1)
+        pair_bike2 = VehicleInstallationPair.objects.get(front_image=f2, rear_image=r2)
+        self.assertTrue(pair_bike1.is_complete)
+        self.assertTrue(pair_bike2.is_complete)
+
     def test_asymmetric_count_surplus_handling(self):
         now = datetime.now(timezone.utc)
         f1 = self._create_img("front_01.jpg", EvidenceImage.Orientation.FRONT, plate="UMA100A", dt=now)

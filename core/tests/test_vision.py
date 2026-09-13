@@ -177,3 +177,41 @@ class CleanCropsCommandTests(TestCase):
             self.assertTrue(crop_file.exists())
             self.assertIn("[DRY RUN]", out.getvalue())
 
+    def test_process_vision_command_increments_counters_cleanly(self):
+        """Verifies process_vision management command processes images without UnboundLocalError."""
+        import io
+        from django.core.management import call_command
+        from unittest.mock import patch, MagicMock
+        from core.models import EvidenceImage, IngestionBatch
+        from core.vision.detector import Detection
+
+        batch = IngestionBatch.objects.create(batch_id="BATCH-TEST-CMD-01")
+        img = EvidenceImage.objects.create(
+            batch=batch,
+            file_hash="test" * 16,
+            original_source_path="fake.jpg",
+            vault_file="vault/fake.jpg",
+            status=EvidenceImage.Status.NEW,
+        )
+
+        dummy_raw = np.zeros((100, 100, 3), dtype=np.uint8)
+        dummy_det = Detection(bbox=[10, 10, 50, 50], confidence=0.9, backend="yolo")
+        mock_ocr = MagicMock()
+        mock_ocr.text = "UMA291PK"
+        mock_ocr.confidence = 0.95
+
+        with patch("core.vision.preprocess.load_image", return_value=dummy_raw), \
+             patch("core.vision.detector.detect_plate", return_value=dummy_det), \
+             patch("core.vision.detector.crop_detection", return_value=dummy_raw), \
+             patch("core.vision.ocr_engine.read_plate_text", return_value=mock_ocr):
+            out = io.StringIO()
+            call_command("process_vision", stdout=out)
+            output = out.getvalue()
+            self.assertIn("1 processed", output)
+            self.assertIn("1 plates found", output)
+
+            img.refresh_from_db()
+            self.assertEqual(img.status, EvidenceImage.Status.PLATE_DETECTED)
+            self.assertEqual(img.detected_plate, "UMA291PK")
+            self.assertEqual(img.error_message, "")
+

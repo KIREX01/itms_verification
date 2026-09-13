@@ -265,17 +265,39 @@ class OperatorActionsMixin:
                     severity="warning",
                 )
             else:
+                front_total = batch.images.filter(orientation=EvidenceImage.Orientation.FRONT).count()
+                rear_total = batch.images.filter(orientation=EvidenceImage.Orientation.REAR).count()
+                unknown_total = batch.images.filter(orientation=EvidenceImage.Orientation.UNKNOWN).count()
+                if front_total == 0 and rear_total == 0 and (front_sel > 0 or rear_sel > 0):
+                    front_total = front_sel
+                    rear_total = rear_sel
+                breakdown = f"{front_total} Front, {rear_total} Rear"
+                if unknown_total > 0:
+                    breakdown += f", {unknown_total} Unknown"
+                # Automatically run physical pre-pairing on the newly ingested batch
+                try:
+                    from core.matcher import association
+                    assoc_res = association.run_association(batch_id=batch.batch_id)
+                    if assoc_res.complete_pairs > 0:
+                        self.call_from_thread(
+                            self.log_message,
+                            f"Auto-paired [bold green]{assoc_res.complete_pairs} complete pair(s)[/bold green] via physical signals (U-Turn walk & filename sequence).",
+                            level="SUCCESS",
+                        )
+                except Exception as assoc_err:
+                    self.call_from_thread(self.log_message, f"Auto-pairing note: {assoc_err}", level="WARNING")
+
                 self.call_from_thread(
                     self.log_message,
-                    f"Batch {batch.batch_id} complete: {ingested} ingested ({front_total} Front, {rear_total} Rear), {skipped} duplicates skipped, {failed} failed.",
+                    f"Batch {batch.batch_id} complete: {ingested} ingested ({breakdown}), {skipped} duplicates skipped, {failed} failed.",
                     level="SUCCESS",
                 )
                 self.call_from_thread(
                     self.log_message,
-                    "Tip: Press [b yellow]P[/b yellow] to run vision recognition on newly added photos.",
+                    "Tip: Press [b yellow]P[/b yellow] to run Dual-Stream Joint Vision on newly formed pairs.",
                     level="INFO",
                 )
-                self.call_from_thread(self.notify, f"Batch {batch.batch_id}: {ingested} photos ({front_total}F / {rear_total}R) ingested!")
+                self.call_from_thread(self.notify, f"Batch {batch.batch_id}: {ingested} photos ({front_total}F / {rear_total}R) ingested & paired!")
             self.call_from_thread(self.reload_data)
         finally:
             self._native_ingest_running = False
@@ -329,9 +351,29 @@ class OperatorActionsMixin:
         if not pair:
             self.notify("No pair selected to approve.", severity="warning")
             return
+
+        # Attempt auto-linking if order is missing
+        if pair.is_complete and not pair.order:
+            from core.matcher.order_matcher import match_pair_to_order
+            match_pair_to_order(pair)
+            if not pair.order:
+                from core.models import InstallationOrder
+                clean_reg = "".join(c for c in pair.registration_number_detected.upper() if c.isalnum())
+                found_order = (
+                    InstallationOrder.objects.filter(registration_number__iexact=clean_reg)
+                    .exclude(status=InstallationOrder.Status.SUBMITTED)
+                    .first()
+                )
+                if found_order:
+                    pair.order = found_order
+                    pair.save(update_fields=["order"])
+
         if not pair.is_complete or not pair.order:
-            self.notify("Cannot approve: pair is incomplete or has no matched order.", severity="error")
-            self.log_message(f"Cannot approve {pair.registration_number_detected}: missing order or incomplete evidence.", level="WARNING")
+            self.notify(f"Cannot approve {pair.registration_number_detected}: Order not found in ITMS.", severity="error")
+            self.log_message(
+                f"Cannot approve {pair.registration_number_detected}: Order not found in registry (not yet created on ITMS). Sync via [S] or type plate [T].",
+                level="WARNING",
+            )
             return
 
         from core.models import InstallationOrder
@@ -518,38 +560,42 @@ class OperatorActionsMixin:
             self.log_message(f"Failed to launch viewer: {exc}", level="ERROR")
 
     @work(thread=True)
+    def action_joint_rescan(self) -> None:
+        """Runs Dual-Stream Joint Vision on the currently selected pair."""
+        pair = self._get_active_pair("table-queue") or self._get_active_pair("table-history")
+        if not pair:
+            self.call_from_thread(self.notify, "Select a pair in the table to re-scan with Joint Vision.", severity="warning")
+            return
+        if not (pair.front_image and pair.rear_image):
+            self.call_from_thread(self.notify, f"Pair {pair.registration_number_detected} requires both front and rear photos for joint vision.", severity="warning")
+            return
+
+        self.call_from_thread(
+            self.log_message,
+            f"Running Dual-Stream Joint Vision on Pair #{pair.id} ({pair.registration_number_detected})...",
+            level="VISION",
+        )
+        from core.vision.joint_pipeline import DualStreamVisionEngine
+        engine = DualStreamVisionEngine()
+        res = engine.process_pair(pair)
+        lvl = "SUCCESS" if res.success else "WARNING"
+        self.call_from_thread(
+            self.log_message,
+            f"Joint Vision [{res.reconciliation_status}]: Plate={res.plate_number} Cat={res.vehicle_category} (Conf: {res.consensus_conf:.2f})",
+            level=lvl,
+        )
+        for detail in res.details:
+            self.call_from_thread(self.log_message, f"  → {detail}", level="INFO")
+        self.call_from_thread(self.notify, f"Joint Vision complete for {res.plate_number or pair.registration_number_detected} [{res.reconciliation_status}]")
+        self.call_from_thread(self.reload_data)
+
+    @work(thread=True)
     def action_process_vision(self) -> None:
         """Runs the vision pipeline in a background thread and streams progress to the bottom log."""
         if getattr(self, "_vision_running", False):
             self.call_from_thread(self.notify, "Vision pipeline is already running in background.", severity="warning")
             return
         self._vision_running = True
-        try:
-            tabs = self.query_one("#tabs-content", TabbedContent)
-            if tabs.active == "tab-queue":
-                pair = self._get_active_pair("table-queue")
-                if pair and pair.front_image and pair.rear_image:
-                    self.call_from_thread(
-                        self.log_message,
-                        f"Running Dual-Stream Joint Vision on Pair #{pair.id} ({pair.registration_number_detected})...",
-                        level="VISION",
-                    )
-                    from core.vision.joint_pipeline import DualStreamVisionEngine
-                    engine = DualStreamVisionEngine()
-                    res = engine.process_pair(pair)
-                    lvl = "SUCCESS" if res.success else "WARNING"
-                    self.call_from_thread(
-                        self.log_message,
-                        f"Joint Vision [{res.reconciliation_status}]: Plate={res.plate_number} Cat={res.vehicle_category} (Conf: {res.consensus_conf:.2f})",
-                        level=lvl,
-                    )
-                    for detail in res.details:
-                        self.call_from_thread(self.log_message, f"  → {detail}", level="INFO")
-                    self.call_from_thread(self.reload_data)
-                    return
-        except Exception:
-            pass
-
         batch_filter = self._selected_batch_id
 
         def stream_cb(msg, tag):
@@ -606,7 +652,7 @@ class OperatorActionsMixin:
             call_command("associate_pairs", stdout=out_stream, stderr=err_stream)
             out_stream.flush()
             err_stream.flush()
-            self.call_from_thread(self.log_message, "Pair matching completed.", level="SUCCESS")
+            self.call_from_thread(self.log_message, "Physical pair matching completed. Press [P] to run Joint Dual-Stream Vision on formed pairs.", level="SUCCESS")
         except Exception as exc:
             self.call_from_thread(self.log_message, f"Pair matching failed: {exc}", level="ERROR")
         finally:

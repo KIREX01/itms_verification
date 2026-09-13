@@ -752,7 +752,10 @@ class MultiAccountDataIntegrityTests(TestCase):
         from core.services.itms_web_client import ITMSWebClient, ITMSWebSessionStore
         from core.tui.itms_pane import ITMSConnectionPane
 
-        store = ITMSWebSessionStore()
+        import tempfile
+        from pathlib import Path
+        temp_store_file = Path(tempfile.mktemp(suffix=".json"))
+        store = ITMSWebSessionStore(storage_path=temp_store_file)
         client = ITMSWebClient(session_store=store)
         client.session_store.session.user_email = "test@itms-ug.com"
         client.session_store.session.is_authenticated = True
@@ -762,6 +765,7 @@ class MultiAccountDataIntegrityTests(TestCase):
         self.assertEqual(client.session_store.session.user_email, "")
 
         pane = ITMSConnectionPane()
+        pane.client = client
         mock_app = MagicMock()
         with patch.object(ITMSConnectionPane, "app", new_callable=PropertyMock, return_value=mock_app):
             if hasattr(pane.action_itms_logout, "__wrapped__"):

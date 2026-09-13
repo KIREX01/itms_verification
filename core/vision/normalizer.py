@@ -11,7 +11,7 @@ an `O` in a digit slot is almost always a `0`).
 """
 import re
 
-PLATE_REGEX = re.compile(r"^([A-Z]{3})\s*(\d{3})([A-Z]{1,2})$")
+PLATE_REGEX = re.compile(r"^(U[A-Z]{2})\s*(\d{3})([A-Z]{1,2})$")
 SPECIAL_PLATE_REGEX = re.compile(r"^(UG|UPF|UPS|CD)\s*(\d{3,4})([A-Z]?)$")
 
 # letter-slot confusions: OCR digit -> intended letter

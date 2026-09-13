@@ -106,6 +106,7 @@ class InspectorPane(Static):
             " [b green]A[/b green]: Approve / Retry   [b green]T[/b green]: Type Plate / Match",
             " [b yellow]S[/b yellow]: Swap Front/Rear       [b magenta]L[/b magenta]: Link / Pick Photo",
             " [b cyan]V[/b cyan]: View Evidence         [b blue]U[/b blue]: Submit to ITMS",
+            " [b green]J[/b green]: Joint Re-Scan       [b green]P[/b green]: Batch Vision",
         ])
         self.update("\n".join(lines))
 

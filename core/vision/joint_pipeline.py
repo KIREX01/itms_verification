@@ -216,25 +216,41 @@ def _character_level_consensus(
         norm = normalizer.normalize_plate(clean_f)
         return norm["canonical"], boosted_conf, "EXACT_MATCH", [f"Front and Rear match exactly: {norm['canonical']}"]
 
-    # 2. Check open InstallationOrder records (Bayesian Prior)
-    order_matches = []
-    # Look for matching active orders ignoring whitespace differences
-    for o in InstallationOrder.objects.filter(status=InstallationOrder.Status.PENDING)[:500]:
-        o_clean = "".join(ch for ch in o.registration_number.upper() if ch.isalnum())
-        if o_clean in (clean_f, clean_r):
-            order_matches.append(o.registration_number)
+    # 2. Check open InstallationOrder records (Bayesian Prior & Disambiguation)
+    try:
+        from core.matcher.prior_guided import disambiguate_plate_with_orders, get_active_orders_cache
+        active_orders = get_active_orders_cache()
+        if active_orders:
+            # Check rear reading first (stamped metal reflective plates in Uganda)
+            res_r = disambiguate_plate_with_orders(clean_r, clean_r, active_orders=active_orders) if clean_r else None
+            res_f = disambiguate_plate_with_orders(clean_f, clean_f, active_orders=active_orders) if clean_f else None
 
-    if len(order_matches) == 1:
-        matched_order_plate = order_matches[0]
-        norm = normalizer.normalize_plate(matched_order_plate)
-        details.append(f"Triangulated against active InstallationOrder prior: {matched_order_plate}")
-        return norm["canonical"], 0.98, "ORDER_PRIOR_MATCH", details
+            if res_r and res_r["score"] >= 85 and res_r["resolved_plate"]:
+                norm = normalizer.normalize_plate(res_r["resolved_plate"])
+                details.append(
+                    f"Triangulated Rear reading against active InstallationOrder #{res_r['order_number']}: {res_r['resolved_plate']} ({res_r['reason']})"
+                )
+                return norm["canonical"], max(0.95, conf_rear), "ORDER_PRIOR_MATCH", details
+
+            if res_f and res_f["score"] >= 85 and res_f["resolved_plate"]:
+                norm = normalizer.normalize_plate(res_f["resolved_plate"])
+                details.append(
+                    f"Triangulated Front reading against active InstallationOrder #{res_f['order_number']}: {res_f['resolved_plate']} ({res_f['reason']})"
+                )
+                return norm["canonical"], max(0.95, conf_front), "ORDER_PRIOR_MATCH", details
+    except Exception as prior_err:
+        logger.debug("Active order prior check note: %s", prior_err)
 
     # 3. Handle Single-Character Mismatch via Uganda Syntax Slot Rules
-    if len(clean_f) == len(clean_r) and len(clean_f) == 7:
-        # Standard format: U [Letter] [Letter] [Digit] [Digit] [Digit] [Letter]
-        # e.g. U E B 1 2 3 A
-        mismatches = [i for i in range(7) if clean_f[i] != clean_r[i]]
+    if len(clean_f) == len(clean_r) and len(clean_f) in (7, 8):
+        # Standard Uganda format:
+        # 7-char: U [Letter] [Letter] [Digit] [Digit] [Digit] [Letter] (e.g. UBD 123A)
+        # 8-char: U [Letter] [Letter] [Digit] [Digit] [Digit] [Letter] [Letter] (e.g. UMA 291PK)
+        plate_len = len(clean_f)
+        letter_slots = {0, 1, 2, 6} if plate_len == 7 else {0, 1, 2, 6, 7}
+        digit_slots = {3, 4, 5}
+
+        mismatches = [i for i in range(plate_len) if clean_f[i] != clean_r[i]]
         if len(mismatches) == 1:
             idx = mismatches[0]
             cf, cr = clean_f[idx], clean_r[idx]
@@ -243,12 +259,7 @@ def _character_level_consensus(
             # Check if this mismatch is a known confusion pair
             is_confusion = CONFUSION_PAIRS.get(cf) == cr or CONFUSION_PAIRS.get(cr) == cf
 
-            # Slot expectations:
-            # idx 0: 'U'
-            # idx 1, 2: Letter [A-Z]
-            # idx 3, 4, 5: Digit [0-9]
-            # idx 6: Letter [A-Z]
-            if idx in (1, 2, 6):
+            if idx in letter_slots:
                 # Must be a LETTER
                 if cf.isalpha() and not cr.isalpha():
                     resolved_char = cf
@@ -257,7 +268,7 @@ def _character_level_consensus(
                 elif is_confusion:
                     # Pick letter form
                     resolved_char = cf if cf.isalpha() else cr
-            elif idx in (3, 4, 5):
+            elif idx in digit_slots:
                 # Must be a DIGIT
                 if cf.isdigit() and not cr.isdigit():
                     resolved_char = cf
@@ -277,15 +288,25 @@ def _character_level_consensus(
                 )
                 return norm["canonical"], max(0.85, max(conf_front, conf_rear)), "SYNTAX_RESOLVED", details
 
-    # 4. Asymmetric confidence resolution
-    if conf_rear >= 0.85 and conf_front < 0.60:
-        norm = normalizer.normalize_plate(clean_r)
-        details.append(f"Adopted high-confidence Rear reading '{clean_r}' over noisy Front '{clean_f}'.")
-        return norm["canonical"], conf_rear, "ASYMMETRIC_RECOVERED", details
-    elif conf_front >= 0.85 and conf_rear < 0.60:
-        norm = normalizer.normalize_plate(clean_f)
-        details.append(f"Adopted high-confidence Front reading '{clean_f}' over noisy Rear '{clean_r}'.")
-        return norm["canonical"], conf_front, "ASYMMETRIC_RECOVERED", details
+    # 4. Asymmetric confidence resolution & single-side valid plate recovery
+    # Front motorcycle plates in Uganda are frequently curved, stenciled, or mud-spattered,
+    # whereas rear plates are stamped reflective metal. If one side is valid, rescue the pair!
+    norm_r = normalizer.normalize_plate(clean_r) if clean_r else {"canonical": "", "is_valid": False}
+    norm_f = normalizer.normalize_plate(clean_f) if clean_f else {"canonical": "", "is_valid": False}
+
+    if norm_r.get("is_valid") and (not clean_f or not norm_f.get("is_valid")):
+        details.append(f"Adopted valid Rear plate '{norm_r['canonical']}' (Front reading '{clean_f or 'empty'}' noisy/unreadable).")
+        return norm_r["canonical"], max(0.85, conf_rear), "ASYMMETRIC_RECOVERED", details
+    elif norm_f.get("is_valid") and (not clean_r or not norm_r.get("is_valid")):
+        details.append(f"Adopted valid Front plate '{norm_f['canonical']}' (Rear reading '{clean_r or 'empty'}' noisy/unreadable).")
+        return norm_f["canonical"], max(0.85, conf_front), "ASYMMETRIC_RECOVERED", details
+
+    if conf_rear >= 0.85 and conf_front < 0.60 and norm_r.get("canonical"):
+        details.append(f"Adopted high-confidence Rear reading '{norm_r['canonical']}' over noisy Front '{clean_f}'.")
+        return norm_r["canonical"], conf_rear, "ASYMMETRIC_RECOVERED", details
+    elif conf_front >= 0.85 and conf_rear < 0.60 and norm_f.get("canonical"):
+        details.append(f"Adopted high-confidence Front reading '{norm_f['canonical']}' over noisy Rear '{clean_r}'.")
+        return norm_f["canonical"], conf_front, "ASYMMETRIC_RECOVERED", details
 
     # 5. Irreconcilable mismatch
     higher = clean_r if conf_rear >= conf_front else clean_f
@@ -378,8 +399,21 @@ class DualStreamVisionEngine:
             return res
 
         # ── 3. Differential Orientation Consensus (Geometry / Taillight) ─
-        f_idx, r_idx, orient_conf, orient_msg = resolve_orientation_consensus(raw_a, raw_b)
-        details.append(orient_msg)
+        # Respect classified folder ground truth if established at ingestion
+        folder_a = img_a.folder_orientation or (img_a.orientation if img_a.orientation != EvidenceImage.Orientation.UNKNOWN else "")
+        folder_b = img_b.folder_orientation or (img_b.orientation if img_b.orientation != EvidenceImage.Orientation.UNKNOWN else "")
+
+        if folder_a == EvidenceImage.Orientation.FRONT and folder_b == EvidenceImage.Orientation.REAR:
+            f_idx, r_idx, orient_conf = 0, 1, 1.0
+            orient_msg = "Orientation established from technician classified subfolders (Front=A, Rear=B)."
+            details.append(orient_msg)
+        elif folder_a == EvidenceImage.Orientation.REAR and folder_b == EvidenceImage.Orientation.FRONT:
+            f_idx, r_idx, orient_conf = 1, 0, 1.0
+            orient_msg = "Orientation established from technician classified subfolders (Rear=A, Front=B)."
+            details.append(orient_msg)
+        else:
+            f_idx, r_idx, orient_conf, orient_msg = resolve_orientation_consensus(raw_a, raw_b)
+            details.append(orient_msg)
 
         if f_idx == 0:
             front_img, rear_img = img_a, img_b
@@ -440,16 +474,29 @@ class DualStreamVisionEngine:
 
         pair.front_image = front_img
         pair.rear_image = rear_img
-        pair.registration_number_detected = consensus_plate
+        if consensus_plate:
+            pair.registration_number_detected = consensus_plate
         pair.match_score = consensus_conf
         pair.is_complete = True
 
-        if success:
-            # Check if matching installation order exists
-            order = InstallationOrder.objects.filter(registration_number=consensus_plate).first()
-            if order:
-                pair.order = order
-                details.append(f"Linked to InstallationOrder: {order.order_number}")
+        if success and consensus_plate:
+            # Propagate consensus plate to partner images if one side was unreadable/occluded
+            if not front_img.detected_plate:
+                front_img.detected_plate = consensus_plate
+                front_img.order_guided_plate = consensus_plate
+                front_img.status = EvidenceImage.Status.PLATE_DETECTED
+                front_img.save(update_fields=["detected_plate", "order_guided_plate", "status"])
+            if not rear_img.detected_plate:
+                rear_img.detected_plate = consensus_plate
+                rear_img.order_guided_plate = consensus_plate
+                rear_img.status = EvidenceImage.Status.PLATE_DETECTED
+                rear_img.save(update_fields=["detected_plate", "order_guided_plate", "status"])
+
+            # Link to active InstallationOrder via full-featured order matcher
+            from core.matcher.order_matcher import match_pair_to_order
+            match_pair_to_order(pair)
+            if pair.order:
+                details.append(f"Linked to InstallationOrder: {pair.order.order_number}")
 
             pair.verification_status = VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
             audit_action = SubmissionAuditLog.Action.VALIDATE

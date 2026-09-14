@@ -206,19 +206,48 @@ itms_verification/
 
 ---
 
-## 8. Offline & Air-Gapped Workstations
+## 8. Zero-Configuration Provisioning: When Python, Tesseract, or winget Fail
 
-For inspection stations or remote checkpoints without continuous internet connectivity:
+In real-world field environments (e.g. fresh Windows workstations, restricted enterprise machines without Windows Package Manager / Microsoft Store, or machines without administrator privileges), the system executes an automated, self-healing provisioning ladder:
 
-1. **One-Time Preparation**: Run `run.bat` or `run.command` once on an internet-connected computer to download all models, weights, and dependencies.
-2. **Copying to Offline PC**: Copy the entire `itms_verification` directory (including `.venv`, `models/`, and `.env`) onto a USB drive and paste it onto the offline workstation.
-3. **Offline Resilience**:
-   * The application operates completely offline for image ingestion, YOLO detection, OCR extraction, plate normalization, and pairing.
-   * The update engine detects network offline state and displays a clean status notice without freezing or stalling the UI.
+### What Happens if Python is Not Installed and `winget` Fails?
+1. **Local & Standard Path Detection**: `run.bat` checks for existing virtual environments (`.venv`), local portable Python (`tools\python\python.exe`), and standard un-indexed locations (`%LocalAppData%\Programs\Python\Python311`, `C:\Python311`, etc.) in case Python was previously installed without adding to PATH.
+2. **Winget Attempt**: If not found, it attempts installation via `winget install Python.Python.3.11`.
+3. **Direct Fallback (When winget Fails)**: If `winget` is missing, blocked, or errors out, `run.bat` automatically:
+   * Downloads the official 64-bit Python installer (`python-3.11.9-amd64.exe`) directly from `python.org` using built-in Windows PowerShell.
+   * Runs a silent user-space installation (`/quiet InstallAllUsers=0 PrependPath=1 Include_pip=1`). Because it installs to user space, **no Administrator/UAC elevation is required**.
+   * Injects the new Python path into the current session and immediately continues initializing `.venv` and dependencies.
+
+### What Happens if Tesseract-OCR is Not Installed and `winget` Fails?
+1. **Local & System Detection**: `scripts/bootstrap.py` checks `tools/tesseract/tesseract.exe`, `C:\Program Files\Tesseract-OCR\tesseract.exe`, and PATH.
+2. **Winget Attempt**: If missing, it attempts `winget install UB-Mannheim.TesseractOCR`.
+3. **Direct Local Provisioning (When winget Fails)**: If `winget` fails or is absent, `bootstrap.py`:
+   * Downloads the official UB-Mannheim Tesseract 5.4 installer (`https://digi.bib.uni-mannheim.de/tesseract/...`) directly.
+   * Executes a silent local unpack directly into the project's `tools\tesseract\` folder:
+     ```cmd
+     tesseract-setup.exe /S /D=<PROJECT_DIR>\tools\tesseract
+     ```
+   * Because it installs into the project folder rather than `C:\Program Files\`, **no Administrator privileges are required**.
+   * `core/vision/ocr_engine.py` automatically detects `tools/tesseract/tesseract.exe` and configures `TESSDATA_PREFIX` for immediate character recognition.
 
 ---
 
-## 9. Troubleshooting & FAQ
+## 9. Offline & Air-Gapped Workstations
+
+For inspection stations or remote checkpoints without any internet connectivity:
+
+1. **One-Time USB Preparation**: Run `run.bat` once on any internet-connected computer. This downloads:
+   * Python virtual environment (`.venv/`)
+   * Fine-tuned plate detection models (`models/license-plate-finetune-v1n.pt` and `v1s.pt`)
+   * Tesseract OCR (`tools/tesseract/`)
+2. **Transfer to Offline Machine**: Copy the complete `itms_verification` directory to a USB thumb drive and paste it onto the offline PC.
+3. **Offline Execution**:
+   * Double-clicking `run.bat` will find `.venv`, `tools/tesseract`, and `models/` locally and launch the Web Console instantly with 0 network calls.
+   * Computer vision inference, plate cropping, OCR extraction, and local database operations run 100% offline.
+
+---
+
+## 10. Troubleshooting & FAQ
 
 ### Q1: The browser does not open automatically.
 If your browser does not launch automatically upon running `run.bat` or `run.command`, simply open Chrome, Edge, Safari, or Firefox and navigate to:
@@ -232,12 +261,13 @@ The automatic bootstrap seeds a default administrator account:
 * **Password**: `admin123`
 *(You can change this password or create new operators in the Django Admin at `http://127.0.0.1:8000/admin/` or via `python manage.py createsuperuser`).*
 
-### Q3: Tesseract OCR is not detected.
-* **Windows**: Install Tesseract OCR from UB-Mannheim: `https://github.com/UB-Mannheim/tesseract/wiki`. Ensure it installs to `C:\Program Files\Tesseract-OCR\tesseract.exe`.
-* **macOS**: Install via Homebrew: `brew install tesseract`
-* **Linux**: Install via apt: `sudo apt-get install tesseract-ocr`
+### Q3: How do I manually configure Tesseract OCR?
+If you prefer manual setup rather than automated provisioning:
+* **Windows**: Download and install from UB-Mannheim: `https://github.com/UB-Mannheim/tesseract/wiki` or copy files to `tools\tesseract\`.
+* **macOS**: `brew install tesseract`
+* **Linux**: `sudo apt install tesseract-ocr`
 
-### Q4: Model weights fail to download automatically.
-If your network blocks automated Hugging Face downloads, manually download the following files and place them in the `models/` directory:
-1. `models/license-plate-finetune-v1n.pt` from `https://huggingface.co/morsetechlab/yolov11-license-plate-detection/resolve/main/license-plate-finetune-v1n.pt`
-2. `models/license-plate-finetune-v1s.pt` from `https://huggingface.co/morsetechlab/yolov11-license-plate-detection/resolve/main/license-plate-finetune-v1s.pt`
+### Q4: Model weights manual download links.
+If your network blocks automated Hugging Face downloads, manually download these files to `models/`:
+1. `models/license-plate-finetune-v1n.pt`: `https://huggingface.co/morsetechlab/yolov11-license-plate-detection/resolve/main/license-plate-finetune-v1n.pt`
+2. `models/license-plate-finetune-v1s.pt`: `https://huggingface.co/morsetechlab/yolov11-license-plate-detection/resolve/main/license-plate-finetune-v1s.pt`

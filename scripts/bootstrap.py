@@ -19,8 +19,10 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.request
 from pathlib import Path
+from typing import Optional, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -30,6 +32,9 @@ MODEL_URLS = {
     "license-plate-finetune-v1n.pt": "https://huggingface.co/morsetechlab/yolov11-license-plate-detection/resolve/main/license-plate-finetune-v1n.pt",
     "license-plate-finetune-v1s.pt": "https://huggingface.co/morsetechlab/yolov11-license-plate-detection/resolve/main/license-plate-finetune-v1s.pt",
 }
+
+# Tesseract-OCR installer URL for Windows automated provisioning
+TESSERACT_WINDOWS_URL = "https://digi.bib.uni-mannheim.de/tesseract/tesseract-ocr-w64-setup-5.4.0.20240606.exe"
 
 # Required runtime directories
 REQUIRED_DIRS = [
@@ -172,20 +177,17 @@ def ensure_model_weights(download_missing: bool = True) -> bool:
     return v1n_path.is_file() or v1s_path.is_file()
 
 
-def detect_and_configure_ocr() -> dict:
-    """Detects available OCR engines and configures settings for the host OS."""
-    log_step("Diagnosing OCR engine and platform compatibility...")
-    host_os = platform.system().lower()
-    machine = platform.machine().lower()
-    py_ver = sys.version_info
+def ensure_tesseract_installed(download_missing: bool = True) -> Tuple[bool, Optional[str]]:
+    """
+    Checks for Tesseract-OCR binary.
+    If missing on Windows and download_missing=True:
+    1. Attempts silent install via winget.
+    2. If winget fails or is absent, downloads UB-Mannheim installer and runs silent install into tools/tesseract.
+    """
+    project_tools_tesseract = PROJECT_ROOT / "tools" / "tesseract" / "tesseract.exe"
 
-    # 1. Check Tesseract binary
-    tesseract_found = False
-    tesseract_path = None
-
-    # Known standard paths
     check_paths = [
-        PROJECT_ROOT / "tools" / "tesseract" / "tesseract.exe",
+        project_tools_tesseract,
         Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
         Path(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"),
         Path("/opt/homebrew/bin/tesseract"),
@@ -194,15 +196,90 @@ def detect_and_configure_ocr() -> dict:
     ]
     for p in check_paths:
         if p.is_file():
-            tesseract_found = True
-            tesseract_path = str(p)
-            break
+            try:
+                probe = subprocess.run([str(p), "--version"], capture_output=True, timeout=5)
+                if probe.returncode == 0:
+                    return True, str(p)
+            except Exception:
+                continue
 
-    if not tesseract_found:
-        shutil_which = shutil.which("tesseract")
-        if shutil_which:
-            tesseract_found = True
-            tesseract_path = shutil_which
+    shutil_which = shutil.which("tesseract")
+    if shutil_which:
+        try:
+            probe = subprocess.run([shutil_which, "--version"], capture_output=True, timeout=5)
+            if probe.returncode == 0:
+                return True, shutil_which
+        except Exception:
+            pass
+
+    if not download_missing or platform.system().lower() != "windows":
+        return False, None
+
+    log_warning("Tesseract-OCR was not detected. Initializing automated zero-configuration provisioning...")
+
+    # Strategy 1: Attempt winget if available
+    winget_bin = shutil.which("winget")
+    if winget_bin:
+        try:
+            log_step("Attempting Tesseract installation via Windows Package Manager (winget)...")
+            subprocess.run(
+                [winget_bin, "install", "UB-Mannheim.TesseractOCR", "--silent", "--accept-package-agreements", "--accept-source-agreements"],
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            standard_path = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+            if standard_path.is_file():
+                log_success(f"Tesseract installed successfully via winget ({standard_path}).")
+                return True, str(standard_path)
+        except Exception as exc:
+            log_warning(f"winget execution failed or unavailable: {exc}")
+
+    # Strategy 2: Direct download of UB-Mannheim installer and silent local installation into tools/tesseract
+    log_step("winget unavailable or failed. Downloading official UB-Mannheim Tesseract 5.4 installer...")
+    temp_dir = Path(tempfile.gettempdir())
+    installer_path = temp_dir / "tesseract-ocr-setup.exe"
+    dest_tools_dir = PROJECT_ROOT / "tools" / "tesseract"
+    dest_tools_dir.mkdir(parents=True, exist_ok=True)
+
+    downloaded = download_file_with_progress(TESSERACT_WINDOWS_URL, installer_path)
+    if downloaded and installer_path.is_file():
+        try:
+            log_step(f"Running silent local installation into {dest_tools_dir} (user-level, no admin required)...")
+            # NSIS installer /S runs silent, /D= specifies destination directory (without quotes)
+            install_cmd = f'"{installer_path}" /S /D={dest_tools_dir}'
+            subprocess.run(install_cmd, shell=True, timeout=120)
+
+            # Allow filesystem a moment to flush files
+            import time
+            time.sleep(3)
+
+            if project_tools_tesseract.is_file():
+                log_success(f"Tesseract successfully provisioned locally: {project_tools_tesseract}")
+                return True, str(project_tools_tesseract)
+            else:
+                log_warning(f"Installer completed but {project_tools_tesseract} was not found.")
+        except Exception as exc:
+            log_error(f"Failed running Tesseract installer: {exc}")
+        finally:
+            if installer_path.is_file():
+                try:
+                    installer_path.unlink()
+                except Exception:
+                    pass
+
+    return False, None
+
+
+def detect_and_configure_ocr(download_missing: bool = True) -> dict:
+    """Detects available OCR engines and configures settings for the host OS."""
+    log_step("Diagnosing OCR engine and platform compatibility...")
+    host_os = platform.system().lower()
+    machine = platform.machine().lower()
+    py_ver = sys.version_info
+
+    # 1. Check or automatically provision Tesseract
+    tesseract_found, tesseract_path = ensure_tesseract_installed(download_missing=download_missing)
 
     # 2. Check PaddleOCR capability
     paddle_usable = False
@@ -224,7 +301,7 @@ def detect_and_configure_ocr() -> dict:
         if host_os == "darwin":
             log_warning("Tesseract not found. On macOS, run: brew install tesseract")
         elif host_os == "windows":
-            log_warning("Tesseract not found. Install from https://github.com/UB-Mannheim/tesseract/wiki")
+            log_warning("Tesseract not found. To run offline, copy 'tesseract.exe' into 'tools\\tesseract\\'")
         else:
             log_warning("Tesseract not found. On Linux, run: sudo apt install tesseract-ocr")
 
@@ -279,7 +356,7 @@ def run_diagnostics_table() -> None:
     ensure_directories()
     ensure_env_file()
     ensure_model_weights(download_missing=False)
-    ocr_info = detect_and_configure_ocr()
+    ocr_info = detect_and_configure_ocr(download_missing=False)
     ensure_database_and_operator(verify_only=True)
 
     print("=" * 65)
@@ -313,7 +390,7 @@ def main() -> int:
     ensure_model_weights(download_missing=True)
 
     # 4. OCR
-    detect_and_configure_ocr()
+    detect_and_configure_ocr(download_missing=True)
 
     # 5. Database & Admin user
     ok = ensure_database_and_operator(verify_only=False)

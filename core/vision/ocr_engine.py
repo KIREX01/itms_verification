@@ -99,10 +99,10 @@ def _configure_tesseract() -> bool:
 
     candidates = [
         tesseract_setting,
+        local_tesseract,
         r"C:\Program Files\Tesseract-OCR\tesseract.exe",
         shutil.which("tesseract"),
         r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
-        local_tesseract,
     ]
     for c in candidates:
         if c and os.path.isfile(c):

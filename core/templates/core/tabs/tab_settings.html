@@ -79,5 +79,50 @@
                 </button>
             </div>
         </div>
+
+        <!-- Application Updates & Version Control (GitHub Releases) -->
+        <div class="settings-card">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <span>📦 Version Control &amp; System Updates</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span class="badge badge-yellow" id="settings-version-badge">v{{ app_version|default:"1.0.0" }}</span>
+                    <span class="badge badge-green" id="settings-update-badge">Up to date</span>
+                </div>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label-group">
+                    <span class="settings-label-title">Installed Application Version</span>
+                    <span class="settings-label-desc" id="settings-update-desc">
+                        Running ITMS Verification Copilot v{{ app_version|default:"1.0.0" }}. Updates are distributed via GitHub Releases.
+                    </span>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn btn-secondary" id="btn-check-updates" onclick="checkForUpdates(true)" style="padding:6px 14px; font-size:0.8rem;">
+                        🔄 Check for Updates
+                    </button>
+                    <button class="btn btn-primary" id="btn-apply-update" onclick="applySystemUpdate()" style="display:none; padding:6px 14px; font-size:0.8rem;">
+                        ⚡ Update to <span id="btn-new-version-tag">Latest</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Expandable Release Notes Box if an update is found -->
+            <div id="settings-release-notes-box" style="display:none; background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:14px; margin-top:6px;">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                    <strong style="color:var(--ug-yellow); font-size:0.85rem;" id="release-notes-title">Release Notes</strong>
+                    <a id="release-notes-link" href="https://github.com/KIREX01/itms_verification/releases" target="_blank" rel="noopener noreferrer" style="font-size:0.75rem; color:var(--ug-text-muted); text-decoration:underline;">
+                        View on GitHub ↗
+                    </a>
+                </div>
+                <div id="release-notes-content" style="font-family:var(--font-mono); font-size:0.75rem; color:#fff; max-height:160px; overflow-y:auto; line-height:1.4; white-space:pre-wrap;">
+                </div>
+                <div style="font-size:0.7rem; color:var(--ug-text-dim); margin-top:8px;">
+                    🛡️ Safe Update Guarantee: Your local database (db.sqlite3), evidence vault (media/), and configuration (.env) are never overwritten.
+                </div>
+            </div>
+        </div>
     </div>
 </div>

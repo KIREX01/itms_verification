@@ -40,6 +40,8 @@ from core.models import (
 from core.services import auth_service, config_service, submission_worker, vault_service
 from core.services.itms_web_client import get_web_client
 from core.services.pipeline_runner import runner as pipeline_runner
+from core.services.update_service import update_service
+from core.version import __version__
 from core.vision import normalizer
 
 logger = logging.getLogger(__name__)
@@ -223,6 +225,7 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         "itms_status": itms_status,
         "total_orders": InstallationOrder.objects.count(),
         "total_pairs": VehicleInstallationPair.objects.count(),
+        "app_version": __version__,
     }
     return render(request, "core/dashboard.html", context)
 
@@ -1133,6 +1136,8 @@ def api_settings(request: HttpRequest) -> JsonResponse:
         "submit_step3": cfg.get("submission", {}).get("submit_step3", True),
         "database": db_info.get("display", "SQLite"),
         "active_engine": db_info.get("vendor", "sqlite"),
+        "version": __version__,
+        "version_tag": f"v{__version__}",
     })
 
 
@@ -1149,6 +1154,23 @@ def api_toggle_dry_run(request: HttpRequest) -> JsonResponse:
         "dry_run_mode": new_val,
         "message": f"Simulation mode {'ENABLED' if new_val else 'DISABLED'}.",
     })
+
+
+@require_GET
+def api_check_updates(request: HttpRequest) -> JsonResponse:
+    """Checks GitHub Releases for updates."""
+    force = request.GET.get("force", "false").lower() in ("true", "1", "yes")
+    result = update_service.check_for_updates(force=force)
+    return JsonResponse(result)
+
+
+@csrf_exempt
+@require_POST
+def api_apply_update(request: HttpRequest) -> JsonResponse:
+    """Safely applies pending update from GitHub Releases."""
+    result = update_service.apply_update()
+    status_code = 200 if result.get("success") else 400
+    return JsonResponse(result, status=status_code)
 
 
 # ============================================================================

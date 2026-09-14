@@ -6,7 +6,15 @@
             <div class="queue-controls-top">
                 <div style="position:relative;">
                     <span style="position:absolute; left:10px; top:50%; transform:translateY(-50%); font-size:0.8rem; color:var(--ug-text-dim);">🔍</span>
-                    <input type="text" class="queue-search-input" id="queue-search-input" placeholder="Search Plate, Order, VIN... (Esc)" oninput="filterWorkQueue()">
+                    <input type="text" class="queue-search-input" id="queue-search-input" placeholder="Search Plate, Order, VIN, Batch... (Esc)" oninput="filterWorkQueue()">
+                </div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <span style="font-size:0.75rem; color:var(--ug-text-dim);">📦</span>
+                    <select id="queue-batch-select" onchange="setQueueBatchFilter(this.value)" style="flex:1; background:var(--ug-black-card); border:1px solid var(--ug-border); color:#ffffff; font-size:0.76rem; padding:4px 8px; border-radius:var(--radius-sm); outline:none; cursor:pointer;" title="Filter work queue by ingestion batch">
+                        <option value="ALL">All Batches (Mixed Queue)</option>
+                        <option value="LATEST">🔥 Latest Ingested Batch</option>
+                        <option value="CARRYOVER">⚠️ Carryover / Previous Batches</option>
+                    </select>
                 </div>
                 <div class="queue-filter-pills">
                     <div class="queue-filter-pill active" data-filter="ALL" onclick="setWorkQueueFilter('ALL')">All</div>
@@ -36,9 +44,10 @@
             <div id="queue-studio-content" style="display:none; flex-direction:column; gap:14px;">
                 <!-- Header Banner -->
                 <div class="detail-banner-card">
-                    <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                         <span class="detail-plate-hero-text" id="qdetail-plate">---</span>
                         <span class="badge badge-yellow" id="qdetail-status">PENDING</span>
+                        <span class="badge badge-muted" id="qdetail-batch-badge" style="font-size:0.72rem;">Batch: —</span>
                         <span id="qdetail-delta" style="font-size:0.8rem; color:var(--ug-text-muted);">Δt: --</span>
                     </div>
                     <div style="text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
@@ -64,7 +73,7 @@
                             <span id="qfront-timestamp" style="color:var(--ug-text-dim); font-size:0.75rem;">--:--:--</span>
                         </div>
                         <div class="evidence-viewport" onclick="openPhotoModal('front')">
-                            <img id="qimg-front" src="" alt="Front Photo" onerror="this.style.opacity='0.2';">
+                            <img id="qimg-front" src="" alt="Front Photo" onerror="handlePhotoError('front')" style="opacity: 1;">
                             <div class="viewport-placeholder" id="qfront-placeholder" style="display:none;">
                                 <span>🚘</span>
                                 <span>No front photo available</span>
@@ -83,7 +92,7 @@
                             <span id="qrear-timestamp" style="color:var(--ug-text-dim); font-size:0.75rem;">--:--:--</span>
                         </div>
                         <div class="evidence-viewport" onclick="openPhotoModal('rear')">
-                            <img id="qimg-rear" src="" alt="Rear Photo" onerror="this.style.opacity='0.2';">
+                            <img id="qimg-rear" src="" alt="Rear Photo" onerror="handlePhotoError('rear')" style="opacity: 1;">
                             <div class="viewport-placeholder" id="qrear-placeholder" style="display:none;">
                                 <span>🏍️</span>
                                 <span>No rear photo available</span>
@@ -127,8 +136,8 @@
                         <span class="comp-box-val" id="qcomp-complete">1:1 Symmetric</span>
                     </div>
                     <div class="comp-box-item">
-                        <span class="comp-box-label">Pairing Reason</span>
-                        <span class="comp-box-val" id="qcomp-strategy" style="font-size:0.8rem;">Vision OCR</span>
+                        <span class="comp-box-label">Ingestion Batch</span>
+                        <span class="comp-box-val" id="qcomp-batch" style="font-size:0.82rem; color:var(--ug-yellow);">---</span>
                     </div>
                 </div>
 
@@ -141,15 +150,12 @@
                         <button class="btn-decision btn-gold" onclick="executePairAction('swap')">
                             ⇄ Swap Front / Rear <span class="hotkey">S</span>
                         </button>
-                        <button class="btn-decision btn-secondary" onclick="openEditPlateModal()">
-                            ✏️ Edit & Override <span class="hotkey">E</span>
-                        </button>
-                        <button class="btn-decision btn-secondary" onclick="openLinkOrderModal()">
-                            🔗 Link Order <span class="hotkey">L</span>
+                        <button class="btn-decision btn-secondary" onclick="openEditPlateModal()" title="Edit plate, change verification status, or link ITMS order (Hotkeys: E or L)">
+                            ✏️ Edit Plate & Link Order <span class="hotkey">E / L</span>
                         </button>
                     </div>
                     <div>
-                        <button class="btn-decision btn-primary" onclick="executePairAction('submit')">
+                        <button class="btn-decision btn-primary" id="btn-submit-action" onclick="executePairAction('submit')" title="Submit verified motorcycle pair to ITMS (Hotkey: Enter)">
                             🚀 Submit to ITMS <span class="hotkey">Enter</span>
                         </button>
                     </div>

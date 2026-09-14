@@ -35,6 +35,9 @@
             </div>
 
             <div class="header-badges">
+                <span class="badge badge-green" id="header-submission-indicator" onclick="reopenSubmissionModal()" style="display:none; cursor:pointer; font-weight:800;" title="Submission in progress. Click to view full progress modal.">
+                    🚀 <span id="header-submission-text">Submitting...</span>
+                </span>
                 <span class="badge badge-yellow" id="header-itms-badge" onclick="switchNavTab(2)" style="cursor:pointer;" title="Click to open ITMS Hub">
                     ● Disconnected
                 </span>
@@ -110,7 +113,17 @@
     <!-- Global Modals & Dialogs -->
     {% include "core/modals.html" %}
 
-    <!-- Client Master Script -->
+    <!-- Client Application Modular JavaScript -->
+    <script src="{% static 'core/js/state.js' %}"></script>
+    <script src="{% static 'core/js/utils.js' %}"></script>
+    <script src="{% static 'core/js/navigation.js' %}"></script>
+    <script src="{% static 'core/js/tab_dashboard.js' %}"></script>
+    <script src="{% static 'core/js/tab_itms.js' %}"></script>
+    <script src="{% static 'core/js/tab_batches.js' %}"></script>
+    <script src="{% static 'core/js/tab_queue.js' %}"></script>
+    <script src="{% static 'core/js/tab_history.js' %}"></script>
+    <script src="{% static 'core/js/tab_settings.js' %}"></script>
+    <script src="{% static 'core/js/pipeline.js' %}"></script>
     <script src="{% static 'core/js/app.js' %}"></script>
     {% block extra_js %}{% endblock %}
 </body>

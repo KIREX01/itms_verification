@@ -195,7 +195,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
 
         # Setup Review Queue table
         queue_table = self.query_one("#table-queue", DataTable)
-        queue_table.add_columns("ID", "Plate", "Order", "Match", "Score", "Status", "Comp", "Front", "Rear")
+        queue_table.add_columns("ID", "Batch", "Plate", "Order", "Match", "Score", "Status", "Comp", "Front", "Rear")
         queue_table.cursor_type = "row"
 
         # Setup History table

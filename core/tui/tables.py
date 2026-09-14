@@ -24,9 +24,14 @@ class TableLoaderMixin:
         from core.services.itms_web_client import get_current_itms_account
         active_acc = get_current_itms_account()
 
+        latest_batch = IngestionBatch.objects.order_by("-created_at").first()
+        latest_batch_id = latest_batch.batch_id if latest_batch else None
+
         table = self.query_one("#table-queue", DataTable)
         table.clear()
-        qs = VehicleInstallationPair.objects.select_related("order", "front_image", "rear_image").filter(
+        qs = VehicleInstallationPair.objects.select_related(
+            "order", "front_image", "rear_image", "front_image__batch", "rear_image__batch"
+        ).filter(
             verification_status__in=[
                 VehicleInstallationPair.VerificationStatus.PENDING_REVIEW,
                 VehicleInstallationPair.VerificationStatus.APPROVED,
@@ -54,6 +59,18 @@ class TableLoaderMixin:
             front_conf = str(round(pair.front_image.ocr_confidence, 2)) if pair.front_image and pair.front_image.ocr_confidence else "—"
             rear_conf = str(round(pair.rear_image.ocr_confidence, 2)) if pair.rear_image and pair.rear_image.ocr_confidence else "—"
 
+            pair_batch = (
+                getattr(pair.front_image, "batch", None)
+                or getattr(pair.rear_image, "batch", None)
+            )
+            batch_id_str = pair_batch.batch_id if pair_batch else ""
+            if pair_batch and latest_batch_id and pair_batch.batch_id == latest_batch_id:
+                batch_display = f"[bold green]🔥 NEW[/bold green] [dim]({batch_id_str[:7]})[/dim]"
+            elif pair_batch:
+                batch_display = f"[yellow]⏳ PRIOR[/yellow] [dim]({batch_id_str[:7]})[/dim]"
+            else:
+                batch_display = "[dim]—[/dim]"
+
             match_display = pair.match_type
             if getattr(pair, "matched_via", None) == VehicleInstallationPair.MatchedVia.MANUAL:
                 match_display = "[cyan]MANUAL[/cyan]"
@@ -62,6 +79,7 @@ class TableLoaderMixin:
 
             table.add_row(
                 str(pair.id)[:8],
+                batch_display,
                 pair.registration_number_detected,
                 pair.order.order_number if pair.order else "—",
                 match_display,

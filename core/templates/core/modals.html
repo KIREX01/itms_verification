@@ -1,77 +1,172 @@
 <!-- MODALS & DIALOG OVERLAYS -->
 
-<!-- 1. Edit Plate & Manual Pair Override Modal -->
+<!-- 1. Unified Pair Override & Installation Order Linker Modal -->
 <div class="modal-overlay" id="modal-edit-plate">
-    <div class="modal-box" style="width: 520px;">
+    <div class="modal-box" style="width: 760px; max-width: 95vw; max-height: 90vh;">
         <div class="modal-header">
-            <span class="modal-title">✏️ Manual Pair Override & Plate Correction</span>
+            <span class="modal-title">✏️ Pair Override & Installation Order Linker</span>
             <button class="modal-close" onclick="closeModal('modal-edit-plate')">&times;</button>
         </div>
-        <div class="modal-body">
-            <div class="form-field">
-                <label>Plate Number (Ugandan Standard, e.g. UMA 835DS)</label>
-                <input type="text" id="input-edit-plate" style="font-family:var(--font-mono); font-size:1.1rem; font-weight:800; text-transform:uppercase; color:var(--ug-yellow);" onkeydown="if(event.key==='Enter') submitEditPlate()">
-                <div style="font-size:0.72rem; color:var(--ug-text-dim);">
-                    Input will be automatically normalized into standard Ugandan vehicle plate syntax.
+        <div class="modal-body" style="gap: 16px; overflow-y: auto;">
+            <!-- Section 1: Plate & Status Override -->
+            <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:14px; display:flex; flex-direction:column; gap:12px;">
+                <div style="font-size:0.78rem; font-weight:800; color:var(--ug-yellow); text-transform:uppercase; letter-spacing:0.5px;">
+                    1. License Plate & Verification Status Override
+                </div>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div class="form-field" style="margin:0;">
+                        <label>Plate Number (Uganda Syntax, e.g. UMA 835DS)</label>
+                        <input type="text" id="input-edit-plate" style="font-family:var(--font-mono); font-size:1.1rem; font-weight:800; text-transform:uppercase; color:var(--ug-yellow);" onkeydown="if(event.key==='Enter') submitEditPlate()">
+                        <div style="font-size:0.7rem; color:var(--ug-text-dim);">
+                            Input is automatically normalized into Ugandan vehicle plate syntax.
+                        </div>
+                    </div>
+
+                    <div class="form-field" style="margin:0;">
+                        <label>Verification Status Override</label>
+                        <select id="select-edit-status" style="background-color:var(--ug-black-card); border:1px solid var(--ug-border); color:#fff; padding:8px 12px; border-radius:var(--radius-md); font-size:0.88rem; outline:none; height:38px;">
+                            <option value="">-- Keep Current Status --</option>
+                            <option value="APPROVED">✓ APPROVED (Ready for ITMS Submission)</option>
+                            <option value="NEEDS_REVIEW">🔍 NEEDS_REVIEW (Flagged for Review)</option>
+                            <option value="INCOMPLETE">⚠️ INCOMPLETE (Missing Front or Rear Angle)</option>
+                            <option value="UNREGISTERED">❓ UNREGISTERED (Vehicle Not in ITMS Registry)</option>
+                            <option value="FAILED">✕ FAILED (Rejected or Resubmission Needed)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-field" style="margin:0;">
+                    <label>Operator Override Note / Reason</label>
+                    <input type="text" id="input-edit-note" placeholder="e.g. Verified visually from rear fender stamp; corrected OCR error...">
                 </div>
             </div>
 
-            <div class="form-field">
-                <label>Verification Status Override</label>
-                <select id="select-edit-status" style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); color:#fff; padding:8px 12px; border-radius:var(--radius-md); font-size:0.88rem; outline:none;">
-                    <option value="">-- Keep Current Status --</option>
-                    <option value="APPROVED">✓ APPROVED (Ready for ITMS Submission)</option>
-                    <option value="NEEDS_REVIEW">🔍 NEEDS_REVIEW (Flagged for Review)</option>
-                    <option value="INCOMPLETE">⚠️ INCOMPLETE (Missing Front or Rear Angle)</option>
-                    <option value="UNREGISTERED">❓ UNREGISTERED (Vehicle Not in ITMS Registry)</option>
-                    <option value="FAILED">✕ FAILED (Rejected or Resubmission Needed)</option>
-                </select>
-            </div>
+            <!-- Section 2: Installation Order Association -->
+            <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:14px; display:flex; flex-direction:column; gap:12px;">
+                <div style="font-size:0.78rem; font-weight:800; color:var(--ug-cyan); text-transform:uppercase; letter-spacing:0.5px;">
+                    2. Matched ITMS Installation Order
+                </div>
 
-            <div class="form-field">
-                <label>Operator Override Note</label>
-                <input type="text" id="input-edit-note" placeholder="e.g. Verified visually from rear fender stamp...">
+                <!-- Current Linked Order Banner -->
+                <div id="linker-current-order-banner" style="background-color:var(--ug-black-card); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 14px; display:flex; align-items:center; justify-content:space-between;">
+                    <div>
+                        <span style="font-size:0.72rem; color:var(--ug-text-dim); text-transform:uppercase;">Currently Linked Order:</span>
+                        <div style="font-family:var(--font-mono); font-size:0.95rem; font-weight:800; color:#fff;" id="linker-current-order-text">No order linked</div>
+                    </div>
+                    <button class="btn btn-danger" id="btn-modal-unlink" onclick="unlinkOrderFromSelectedPair()" style="padding:4px 10px; font-size:0.75rem; display:none;">
+                        ✕ Unlink Order
+                    </button>
+                </div>
+
+                <!-- Order Search Field -->
+                <div class="form-field" style="margin:0;">
+                    <label>Search Active Orders (Order #, Plate, VIN, Warehouse)</label>
+                    <input type="text" id="input-search-order" placeholder="Type plate, order number, or VIN to search..." oninput="searchOrdersForLinking(this.value)">
+                </div>
+
+                <!-- Orders Table -->
+                <div style="max-height:220px; overflow-y:auto; border:1px solid var(--ug-border); border-radius:var(--radius-md);" id="linker-orders-list">
+                    <div style="padding:20px; text-align:center; color:var(--ug-text-dim);">Loading active orders...</div>
+                </div>
             </div>
         </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-edit-plate')">Cancel</button>
-            <button class="btn btn-primary" onclick="submitEditPlate()">Save & Apply Override</button>
+        <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:0.75rem; color:var(--ug-text-dim);">
+                Hotkeys: <span class="hotkey">E</span> / <span class="hotkey">L</span> opens this dialog • <span class="hotkey">Esc</span> closes
+            </span>
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-secondary" onclick="closeModal('modal-edit-plate')">Close</button>
+                <button class="btn btn-primary" onclick="submitEditPlate()">Save Plate & Status</button>
+            </div>
         </div>
     </div>
 </div>
 
-<!-- 2. Manual Order Linker Modal (TUI Mirrored) -->
-<div class="modal-overlay" id="modal-link-order">
-    <div class="modal-box" style="width: 720px;">
+<!-- 2. Submission Progress & Verification Dispatch Modal -->
+<div class="modal-overlay" id="modal-submission-progress">
+    <div class="modal-box" style="width: 680px; max-width: 95vw;">
         <div class="modal-header">
-            <span class="modal-title">🔗 Manual Installation Order Linker</span>
-            <button class="modal-close" onclick="closeModal('modal-link-order')">&times;</button>
+            <span class="modal-title">
+                🚀 ITMS Submission Engine
+            </span>
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span class="badge badge-yellow" id="sub-modal-mode-badge">BATCH TRANSMISSION</span>
+                <button class="modal-close" id="btn-close-sub-modal" onclick="closeSubmissionModal()" style="display:none;">&times;</button>
+            </div>
         </div>
-        <div class="modal-body" style="gap:12px;">
-            <!-- Current Linked Order Info -->
-            <div id="linker-current-order-banner" style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 14px; display:flex; align-items:center; justify-content:space-between;">
-                <div>
-                    <span style="font-size:0.75rem; color:var(--ug-text-dim); text-transform:uppercase;">Currently Linked Order:</span>
-                    <div style="font-family:var(--font-mono); font-size:0.95rem; font-weight:800; color:#fff;" id="linker-current-order-text">No order linked</div>
+        <div class="modal-body" style="gap:16px;">
+            <!-- Current Item Banner -->
+            <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:14px; display:flex; flex-direction:column; gap:6px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:0.75rem; color:var(--ug-text-dim); text-transform:uppercase; font-weight:700;">CURRENT TRANSMISSION TARGET</span>
+                    <span class="badge badge-green" id="sub-item-index-badge">0 / 0</span>
                 </div>
-                <button class="btn btn-danger" id="btn-modal-unlink" onclick="unlinkOrderFromSelectedPair()" style="padding:4px 10px; font-size:0.75rem;">
-                    ✕ Unlink Current Order
+                <div style="display:flex; align-items:center; justify-content:space-between;">
+                    <div style="font-family:var(--font-mono); font-size:1.3rem; font-weight:900; color:var(--ug-yellow);" id="sub-active-plate">
+                        Preparing batch...
+                    </div>
+                    <div style="font-family:var(--font-mono); font-size:0.9rem; color:#ffffff;" id="sub-active-order">
+                        Order #—
+                    </div>
+                </div>
+                <div style="font-size:0.8rem; color:var(--ug-text-muted);" id="sub-status-desc">
+                    Initializing connection to stock.itms.ug...
+                </div>
+            </div>
+
+            <!-- Progress Bar -->
+            <div style="display:flex; flex-direction:column; gap:6px;">
+                <div style="display:flex; justify-content:space-between; font-size:0.78rem; font-weight:700;">
+                    <span style="color:var(--ug-text-muted);">Overall Progress</span>
+                    <span style="color:var(--ug-yellow); font-family:var(--font-mono);" id="sub-progress-percent">0%</span>
+                </div>
+                <div style="height:12px; background:rgba(255,255,255,0.08); border-radius:6px; overflow:hidden; border:1px solid var(--ug-border);">
+                    <div id="sub-progress-bar-fill" style="height:100%; width:0%; background:linear-gradient(90deg, var(--ug-yellow), var(--ug-green)); transition:width 0.25s ease; border-radius:6px;"></div>
+                </div>
+            </div>
+
+            <!-- Live Scoreboard Metrics -->
+            <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;">
+                <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px; text-align:center;">
+                    <div style="font-size:0.7rem; color:var(--ug-text-dim); text-transform:uppercase;">TOTAL PAIRS</div>
+                    <div style="font-size:1.2rem; font-weight:800; color:#fff;" id="sub-kpi-total">0</div>
+                </div>
+                <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px; text-align:center;">
+                    <div style="font-size:0.7rem; color:var(--ug-text-dim); text-transform:uppercase;">SUCCEEDED</div>
+                    <div style="font-size:1.2rem; font-weight:800; color:var(--ug-green);" id="sub-kpi-success">0</div>
+                </div>
+                <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px; text-align:center;">
+                    <div style="font-size:0.7rem; color:var(--ug-text-dim); text-transform:uppercase;">FAILED</div>
+                    <div style="font-size:1.2rem; font-weight:800; color:var(--ug-red);" id="sub-kpi-failed">0</div>
+                </div>
+                <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px; text-align:center;">
+                    <div style="font-size:0.7rem; color:var(--ug-text-dim); text-transform:uppercase;">REMAINING</div>
+                    <div style="font-size:1.2rem; font-weight:800; color:var(--ug-yellow);" id="sub-kpi-remaining">0</div>
+                </div>
+            </div>
+
+            <!-- Live Itemized Activity Stream -->
+            <div style="display:flex; flex-direction:column; gap:6px;">
+                <div style="font-size:0.75rem; font-weight:700; color:var(--ug-text-dim); text-transform:uppercase;">
+                    TRANSMISSION EVENT TRACE
+                </div>
+                <div id="sub-live-log-stream" style="max-height:180px; min-height:110px; overflow-y:auto; background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 12px; font-family:var(--font-mono); font-size:0.76rem; display:flex; flex-direction:column; gap:4px;">
+                    <div style="color:var(--ug-text-dim);">Waiting to begin transmission...</div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer" style="justify-content:space-between;">
+            <button class="btn btn-danger" id="btn-sub-abort" onclick="abortBatchSubmission()" style="padding:6px 14px; font-size:0.8rem;">
+                ⏹ Stop / Abort
+            </button>
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-secondary" id="btn-sub-minimize" onclick="minimizeSubmissionModal()" style="padding:6px 14px; font-size:0.8rem;">
+                    🗕 Run in Background
+                </button>
+                <button class="btn btn-primary" id="btn-sub-done" onclick="closeSubmissionModal()" style="padding:6px 14px; font-size:0.8rem; display:none;">
+                    ✓ Done / Close
                 </button>
             </div>
-
-            <!-- Search Field -->
-            <div class="form-field">
-                <label>Search Active Orders (Order #, Plate, VIN, Warehouse)</label>
-                <input type="text" id="input-search-order" placeholder="Type to filter active ITMS orders..." oninput="searchOrdersForLinking(this.value)">
-            </div>
-
-            <!-- Orders Table -->
-            <div style="max-height:300px; overflow-y:auto; border:1px solid var(--ug-border); border-radius:var(--radius-md);" id="linker-orders-list">
-                <div style="padding:24px; text-align:center; color:var(--ug-text-dim);">Loading active orders...</div>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-link-order')">Close</button>
         </div>
     </div>
 </div>
@@ -191,49 +286,163 @@
 
 <!-- 5. Dual-Dropzone Upload Batch Modal -->
 <div class="modal-overlay" id="modal-batch-upload">
-    <div class="modal-box" style="width: 660px;">
+    <div class="modal-box" style="width: 680px;">
         <div class="modal-header">
             <div style="display:flex; align-items:center; gap:8px;">
-                <span class="modal-title">📷 Upload New Photo Batch</span>
-                <span class="badge badge-yellow" style="font-size:0.7rem;">Front &amp; Rear 1:1</span>
+                <span class="modal-title" id="batch-upload-modal-title">📷 Upload New Photo Batch</span>
+                <span class="badge badge-yellow" id="batch-upload-status-badge" style="font-size:0.7rem;">Front &amp; Rear 1:1</span>
             </div>
-            <button class="modal-close" onclick="closeModal('modal-batch-upload')">&times;</button>
+            <button class="modal-close" id="btn-close-batch-modal" onclick="closeBatchUploadModal()">&times;</button>
         </div>
         <div class="modal-body" style="gap:14px;">
-            <div class="form-field">
-                <label>Batch / Shift Label</label>
-                <input type="text" id="batch-upload-label" placeholder="e.g. Entebbe Station Shift 1">
-            </div>
-
-            <div class="dropzone-grid">
-                <!-- Front Dropzone -->
-                <div class="dropzone-box" id="dropzone-tab-front" onclick="document.getElementById('input-tab-front').click()">
-                    <div class="dropzone-box-icon">🚘</div>
-                    <div class="dropzone-box-title">Front Photos</div>
-                    <div class="dropzone-box-desc">Drop or browse front angle photos</div>
-                    <div class="dropzone-box-count" id="count-tab-front">0 files selected</div>
-                    <input type="file" id="input-tab-front" multiple accept="image/*" style="display:none;" onchange="handleTabFileSelect('front')">
+            <!-- View A: Upload Form -->
+            <div id="batch-upload-form-view" style="display:flex; flex-direction:column; gap:14px;">
+                <div class="form-field">
+                    <label>Batch / Shift Label</label>
+                    <input type="text" id="batch-upload-label" placeholder="e.g. Entebbe Station Shift 1">
                 </div>
 
-                <!-- Rear Dropzone -->
-                <div class="dropzone-box" id="dropzone-tab-rear" onclick="document.getElementById('input-tab-rear').click()">
-                    <div class="dropzone-box-icon">🏍️</div>
-                    <div class="dropzone-box-title">Rear Photos</div>
-                    <div class="dropzone-box-desc">Drop or browse rear angle photos</div>
-                    <div class="dropzone-box-count" id="count-tab-rear">0 files selected</div>
-                    <input type="file" id="input-tab-rear" multiple accept="image/*" style="display:none;" onchange="handleTabFileSelect('rear')">
+                <div class="dropzone-grid">
+                    <!-- Front Dropzone -->
+                    <div class="dropzone-box" id="dropzone-tab-front" onclick="document.getElementById('input-tab-front').click()">
+                        <div class="dropzone-box-icon">🚘</div>
+                        <div class="dropzone-box-title">Front Photos</div>
+                        <div class="dropzone-box-desc">Drop or browse front angle photos</div>
+                        <div class="dropzone-box-count" id="count-tab-front">0 files selected</div>
+                        <input type="file" id="input-tab-front" multiple accept="image/*" style="display:none;" onchange="handleTabFileSelect('front')">
+                    </div>
+
+                    <!-- Rear Dropzone -->
+                    <div class="dropzone-box" id="dropzone-tab-rear" onclick="document.getElementById('input-tab-rear').click()">
+                        <div class="dropzone-box-icon">🏍️</div>
+                        <div class="dropzone-box-title">Rear Photos</div>
+                        <div class="dropzone-box-desc">Drop or browse rear angle photos</div>
+                        <div class="dropzone-box-count" id="count-tab-rear">0 files selected</div>
+                        <input type="file" id="input-tab-rear" multiple accept="image/*" style="display:none;" onchange="handleTabFileSelect('rear')">
+                    </div>
+                </div>
+
+                <div class="symmetry-indicator" id="tab-symmetry-warning">
+                    <!-- Updated dynamically -->
                 </div>
             </div>
 
-            <div class="symmetry-indicator" id="tab-symmetry-warning">
-                <!-- Updated dynamically -->
+            <!-- View B: Ingestion Progress Stepper -->
+            <div id="batch-upload-progress-view" style="display:none; flex-direction:column; gap:14px;">
+                <!-- Session Banner -->
+                <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:12px 16px; display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <div style="font-size:0.72rem; color:var(--ug-text-dim); text-transform:uppercase; font-weight:700;">ACTIVE INGESTION BATCH</div>
+                        <div style="font-family:var(--font-mono); font-size:1.1rem; font-weight:800; color:var(--ug-yellow);" id="ingest-batch-id">Preparing upload...</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:0.72rem; color:var(--ug-text-dim); text-transform:uppercase; font-weight:700;">TOTAL EVIDENCE PHOTOS</div>
+                        <div style="font-size:1.1rem; font-weight:800; color:#fff;" id="ingest-total-photos">0 photos</div>
+                    </div>
+                </div>
+
+                <!-- Progress Bar -->
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                    <div style="display:flex; justify-content:space-between; font-size:0.78rem; font-weight:700;">
+                        <span style="color:var(--ug-text-muted);" id="ingest-status-text">Uploading photos to server...</span>
+                        <span style="color:var(--ug-yellow); font-family:var(--font-mono);" id="ingest-progress-percent">0%</span>
+                    </div>
+                    <div style="height:10px; background:rgba(255,255,255,0.08); border-radius:5px; overflow:hidden; border:1px solid var(--ug-border);">
+                        <div id="ingest-progress-bar-fill" style="height:100%; width:0%; background:linear-gradient(90deg, var(--ug-yellow), var(--ug-green)); transition:width 0.25s ease; border-radius:5px;"></div>
+                    </div>
+                </div>
+
+                <!-- 4 Pipeline Stages Stepper Cards -->
+                <div class="ingest-steps-list" style="display:flex; flex-direction:column; gap:8px;">
+                    <!-- Step 1: Upload -->
+                    <div class="ingest-step-card active" id="ingest-step-1">
+                        <div class="ingest-step-icon" id="ingest-step-1-icon">⏳</div>
+                        <div class="ingest-step-info">
+                            <div class="ingest-step-title">1. Photo Transfer &amp; Network Upload</div>
+                            <div class="ingest-step-desc" id="ingest-step-1-desc">Transferring image binaries to backend endpoint...</div>
+                        </div>
+                        <span class="badge badge-yellow" id="ingest-step-1-badge">WAITING</span>
+                    </div>
+
+                    <!-- Step 2: Vault Cryptographic Storage & Deduplication -->
+                    <div class="ingest-step-card" id="ingest-step-2">
+                        <div class="ingest-step-icon" id="ingest-step-2-icon">⏳</div>
+                        <div class="ingest-step-info">
+                            <div class="ingest-step-title">2. Vault Storage &amp; Cryptographic Deduplication</div>
+                            <div class="ingest-step-desc" id="ingest-step-2-desc">SHA-256 fingerprinting, vault indexing &amp; duplicate detection...</div>
+                        </div>
+                        <span class="badge badge-secondary" id="ingest-step-2-badge">WAITING</span>
+                    </div>
+
+                    <!-- Step 3: YOLO Vision OCR & Plate Extraction -->
+                    <div class="ingest-step-card" id="ingest-step-3">
+                        <div class="ingest-step-icon" id="ingest-step-3-icon">⏳</div>
+                        <div class="ingest-step-info">
+                            <div class="ingest-step-title">3. YOLO Vision Plate Detection &amp; OCR</div>
+                            <div class="ingest-step-desc" id="ingest-step-3-desc">Detecting license plates and reading Ugandan vehicle registrations...</div>
+                        </div>
+                        <span class="badge badge-secondary" id="ingest-step-3-badge">WAITING</span>
+                    </div>
+
+                    <!-- Step 4: Front & Rear Pair Matching -->
+                    <div class="ingest-step-card" id="ingest-step-4">
+                        <div class="ingest-step-icon" id="ingest-step-4-icon">⏳</div>
+                        <div class="ingest-step-info">
+                            <div class="ingest-step-title">4. Pair Association &amp; Order Linking</div>
+                            <div class="ingest-step-desc" id="ingest-step-4-desc">Correlating front and rear angles and linking ITMS installation orders...</div>
+                        </div>
+                        <span class="badge badge-secondary" id="ingest-step-4-badge">WAITING</span>
+                    </div>
+                </div>
+
+                <!-- Completion Summary Card -->
+                <div id="ingest-summary-card" style="display:none; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.3); border-radius:var(--radius-md); padding:12px 14px; flex-direction:column; gap:8px;">
+                    <div style="display:flex; align-items:center; gap:8px; color:var(--ug-green); font-weight:800; font-size:0.9rem;">
+                        <span>✓</span> Ingestion &amp; Vision Processing Complete!
+                    </div>
+                    <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; text-align:center;">
+                        <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-sm); padding:8px;">
+                            <div style="font-size:0.68rem; color:var(--ug-text-dim);">INGESTED</div>
+                            <div style="font-weight:800; color:#fff; font-size:1.1rem;" id="ingest-sum-ingested">0</div>
+                        </div>
+                        <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-sm); padding:8px;">
+                            <div style="font-size:0.68rem; color:var(--ug-text-dim);">DUPLICATES</div>
+                            <div style="font-weight:800; color:var(--ug-yellow); font-size:1.1rem;" id="ingest-sum-duplicates">0</div>
+                        </div>
+                        <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-sm); padding:8px;">
+                            <div style="font-size:0.68rem; color:var(--ug-text-dim);">PAIRS FORMED</div>
+                            <div style="font-weight:800; color:var(--ug-green); font-size:1.1rem;" id="ingest-sum-pairs">0</div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-batch-upload')">Cancel</button>
-            <button class="btn btn-primary" id="btn-submit-tab-upload" onclick="submitTabBatchUpload()" style="padding:8px 18px;">
-                Upload &amp; Ingest to Vault
-            </button>
+        <div class="modal-footer" id="batch-upload-footer">
+            <!-- Form buttons -->
+            <div id="batch-footer-form-actions" style="display:flex; align-items:center; justify-content:flex-end; gap:8px; width:100%;">
+                <button class="btn btn-secondary" onclick="closeBatchUploadModal()">Cancel</button>
+                <button class="btn btn-primary" id="btn-submit-tab-upload" onclick="submitTabBatchUpload()" style="padding:8px 18px;">
+                    Upload &amp; Ingest to Vault
+                </button>
+            </div>
+
+            <!-- Ingestion in-progress buttons -->
+            <div id="batch-footer-progress-actions" style="display:none; align-items:center; justify-content:space-between; width:100%;">
+                <button class="btn btn-secondary" id="btn-ingest-background" onclick="minimizeBatchUploadModal()" style="font-size:0.8rem; padding:6px 14px;">
+                    🗕 Run in Background
+                </button>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn btn-secondary" id="btn-ingest-view-photos" onclick="jumpToBatchPhotos()" style="font-size:0.8rem; padding:6px 14px; display:none;">
+                        📁 View Photos
+                    </button>
+                    <button class="btn btn-primary" id="btn-ingest-open-queue" onclick="jumpToNewBatchInQueue()" style="font-size:0.8rem; padding:6px 14px; display:none; background:var(--ug-green); border-color:var(--ug-green); color:#ffffff;">
+                        🔍 Open Review Queue (View New Batch)
+                    </button>
+                    <button class="btn btn-secondary" id="btn-ingest-done" onclick="closeBatchUploadModal()" style="font-size:0.8rem; padding:6px 14px; display:none;">
+                        ✓ Done / Close
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 </div>

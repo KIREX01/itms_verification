@@ -76,10 +76,23 @@ class InspectorPane(Static):
 
         account_str = pair.account_email or (pair.order.account_email if pair.order else "") or "[dim]Unassigned[/dim]"
 
+        batch = (
+            getattr(front, "batch", None)
+            or getattr(rear, "batch", None)
+        )
+        latest_batch = IngestionBatch.objects.order_by("-created_at").first()
+        if batch:
+            is_latest = (latest_batch and batch.batch_id == latest_batch.batch_id)
+            tag = "[bold green]🔥 LATEST BATCH[/bold green]" if is_latest else "[yellow]⏳ CARRYOVER / PRIOR BATCH[/yellow]"
+            batch_line = f"{batch.batch_id} ({batch.source_label or 'Batch'}) — {tag}"
+        else:
+            batch_line = "[dim]No batch associated[/dim]"
+
         lines = [
             f"[b cyan]═══ Pair Inspector ═══[/b cyan]",
             f"[b]Detected Plate:[/b] [bold yellow]{pair.registration_number_detected}[/bold yellow]{override_tag}",
-            f"[b]ITMS Account:[/b]  [bold green]{account_str}[/bold green]",
+            f"[b]Batch Origin:[/b]   {batch_line}",
+            f"[b]ITMS Account:[/b]   [bold green]{account_str}[/bold green]",
             f"[b]Vehicle Class:[/b]  {category_badge}",
             f"[b]Status:[/b]         [{status_color}]{pair.verification_status}[/{status_color}]",
         ]

@@ -236,7 +236,7 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
 
 @require_GET
 def api_stats(request: HttpRequest) -> JsonResponse:
-    """Returns real-time operational summary metrics for the header ribbon."""
+    """Returns real-time operational summary metrics for the header ribbon and dashboard."""
     total_orders = InstallationOrder.objects.count()
     pending_orders = InstallationOrder.objects.filter(status=InstallationOrder.Status.PENDING).count()
     total_pairs = VehicleInstallationPair.objects.count()
@@ -258,12 +258,13 @@ def api_stats(request: HttpRequest) -> JsonResponse:
             VehicleInstallationPair.VerificationStatus.OFFLINE_OUTBOX,
         ]
     ).count()
+    total_photos = EvidenceImage.objects.count()
+    batches_count = IngestionBatch.objects.count()
 
     dry_run = config_service.get_setting("submission.dry_run_mode", True)
     db_info = config_service.get_active_database_info()
 
-    return JsonResponse({
-        "success": True,
+    stats_payload = {
         "total_orders": total_orders,
         "pending_orders": pending_orders,
         "total_pairs": total_pairs,
@@ -271,6 +272,14 @@ def api_stats(request: HttpRequest) -> JsonResponse:
         "approved": approved,
         "submitted": submitted,
         "issues": issues,
+        "total_photos": total_photos,
+        "batches_count": batches_count,
+    }
+
+    return JsonResponse({
+        "success": True,
+        "stats": stats_payload,
+        **stats_payload,
         "dry_run": dry_run,
         "database": db_info.get("name", "db.sqlite3"),
         "database_vendor": db_info.get("vendor", "sqlite"),
@@ -283,12 +292,17 @@ def api_stats(request: HttpRequest) -> JsonResponse:
 
 @require_GET
 def api_pairs_list(request: HttpRequest) -> JsonResponse:
-    """Returns filtered list of vehicle installation pairs for the work queue."""
+    """Returns filtered list of vehicle installation pairs for the work queue with batch clarity."""
     status_filter = request.GET.get("status", "ALL").upper().strip()
+    batch_filter = request.GET.get("batch", "ALL").strip()
     search = request.GET.get("search", "").strip()
-    limit = int(request.GET.get("limit", 150))
+    limit = int(request.GET.get("limit", 250))
 
-    qs = VehicleInstallationPair.objects.all().select_related("order", "front_image", "rear_image")
+    latest_batch = IngestionBatch.objects.order_by("-created_at").first()
+
+    qs = VehicleInstallationPair.objects.all().select_related(
+        "order", "front_image", "rear_image", "front_image__batch", "rear_image__batch"
+    )
 
     if status_filter == "PENDING":
         qs = qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW)
@@ -305,18 +319,35 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
             VehicleInstallationPair.VerificationStatus.OFFLINE_OUTBOX,
         ])
 
+    # Batch scoping
+    if batch_filter == "LATEST" and latest_batch:
+        qs = qs.filter(Q(front_image__batch=latest_batch) | Q(rear_image__batch=latest_batch))
+    elif batch_filter == "CARRYOVER" and latest_batch:
+        qs = qs.exclude(Q(front_image__batch=latest_batch) | Q(rear_image__batch=latest_batch))
+    elif batch_filter not in ("ALL", ""):
+        qs = qs.filter(Q(front_image__batch__batch_id=batch_filter) | Q(rear_image__batch__batch_id=batch_filter))
+
     if search:
         qs = qs.filter(
             Q(registration_number_detected__icontains=search) |
             Q(order__order_number__icontains=search) |
             Q(order__registration_number__icontains=search) |
-            Q(order__vin__icontains=search)
+            Q(order__vin__icontains=search) |
+            Q(front_image__batch__batch_id__icontains=search) |
+            Q(rear_image__batch__batch_id__icontains=search)
         )
 
     pairs_data = []
     for p in qs[:limit]:
         front_url = f"/media/{p.front_image.vault_file}" if p.front_image and p.front_image.vault_file else None
         rear_url = f"/media/{p.rear_image.vault_file}" if p.rear_image and p.rear_image.vault_file else None
+
+        batch_obj = (p.front_image.batch if p.front_image and p.front_image.batch else None) or (
+            p.rear_image.batch if p.rear_image and p.rear_image.batch else None
+        )
+        is_latest = bool(batch_obj and latest_batch and batch_obj.id == latest_batch.id)
+        is_carryover = bool(latest_batch and (not batch_obj or batch_obj.id != latest_batch.id))
+
         pairs_data.append({
             "id": p.id,
             "registration_number_detected": p.registration_number_detected,
@@ -330,6 +361,11 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
             "has_rear": bool(p.rear_image_id),
             "front_url": front_url,
             "rear_url": rear_url,
+            "batch_id": batch_obj.batch_id if batch_obj else "Carryover",
+            "batch_label": batch_obj.batch_id if batch_obj else "Carryover Batch",
+            "batch_created_at": batch_obj.created_at.strftime("%Y-%m-%d %H:%M") if (batch_obj and batch_obj.created_at) else "",
+            "is_latest_batch": is_latest,
+            "is_carryover": is_carryover,
             "order": {
                 "order_number": p.order.order_number,
                 "registration_number": p.order.registration_number,
@@ -339,10 +375,22 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
             "updated_at": p.updated_at.strftime("%H:%M:%S") if p.updated_at else "",
         })
 
+    batches_list = [
+        {
+            "batch_id": b.batch_id,
+            "source_label": b.source_label or b.batch_id,
+            "created_at": b.created_at.strftime("%Y-%m-%d %H:%M") if b.created_at else "",
+            "is_latest": bool(latest_batch and b.id == latest_batch.id),
+        }
+        for b in IngestionBatch.objects.order_by("-created_at")[:20]
+    ]
+
     return JsonResponse({
         "success": True,
         "count": len(pairs_data),
         "pairs": pairs_data,
+        "latest_batch_id": latest_batch.batch_id if latest_batch else None,
+        "batches": batches_list,
     })
 
 
@@ -350,8 +398,15 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
 def api_pair_detail(request: HttpRequest, pair_id: int) -> JsonResponse:
     """Returns complete details of a specific pair for high-resolution inspection."""
     pair = get_object_or_404(
-        VehicleInstallationPair.objects.select_related("order", "front_image", "rear_image"),
+        VehicleInstallationPair.objects.select_related(
+            "order", "front_image", "rear_image", "front_image__batch", "rear_image__batch"
+        ),
         id=pair_id,
+    )
+
+    latest_batch = IngestionBatch.objects.order_by("-created_at").first()
+    batch_obj = (pair.front_image.batch if pair.front_image and pair.front_image.batch else None) or (
+        pair.rear_image.batch if pair.rear_image and pair.rear_image.batch else None
     )
 
     front = None
@@ -363,11 +418,7 @@ def api_pair_detail(request: HttpRequest, pair_id: int) -> JsonResponse:
             "detected_plate": pair.front_image.detected_plate,
             "ocr_confidence": round(pair.front_image.ocr_confidence * 100, 1) if pair.front_image.ocr_confidence is not None else None,
             "detector_confidence": round(pair.front_image.detector_confidence * 100, 1) if pair.front_image.detector_confidence is not None else None,
-            "bbox": pair.front_image.bbox,
-            "orientation": pair.front_image.orientation,
-            "status": pair.front_image.status,
-            "captured_at": pair.front_image.captured_at.strftime("%Y-%m-%d %H:%M:%S") if pair.front_image.captured_at else None,
-            "file_name": Path(pair.front_image.original_source_path or pair.front_image.vault_file).name,
+            "captured_at": pair.front_image.captured_at.strftime("%H:%M:%S") if pair.front_image.captured_at else None,
         }
 
     rear = None
@@ -379,26 +430,8 @@ def api_pair_detail(request: HttpRequest, pair_id: int) -> JsonResponse:
             "detected_plate": pair.rear_image.detected_plate,
             "ocr_confidence": round(pair.rear_image.ocr_confidence * 100, 1) if pair.rear_image.ocr_confidence is not None else None,
             "detector_confidence": round(pair.rear_image.detector_confidence * 100, 1) if pair.rear_image.detector_confidence is not None else None,
-            "bbox": pair.rear_image.bbox,
-            "orientation": pair.rear_image.orientation,
-            "status": pair.rear_image.status,
-            "captured_at": pair.rear_image.captured_at.strftime("%Y-%m-%d %H:%M:%S") if pair.rear_image.captured_at else None,
-            "file_name": Path(pair.rear_image.original_source_path or pair.rear_image.vault_file).name,
+            "captured_at": pair.rear_image.captured_at.strftime("%H:%M:%S") if pair.rear_image.captured_at else None,
         }
-
-    time_delta_sec = None
-    if pair.front_image and pair.rear_image and pair.front_image.captured_at and pair.rear_image.captured_at:
-        time_delta_sec = round(abs((pair.front_image.captured_at - pair.rear_image.captured_at).total_seconds()), 1)
-
-    audit_logs = [
-        {
-            "action": log.action,
-            "result": log.result,
-            "message": log.message,
-            "created_at": log.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-        }
-        for log in pair.audit_logs.all().order_by("-timestamp")[:20]
-    ]
 
     return JsonResponse({
         "success": True,
@@ -411,27 +444,22 @@ def api_pair_detail(request: HttpRequest, pair_id: int) -> JsonResponse:
             "matched_via": pair.matched_via,
             "is_complete": pair.is_complete,
             "is_manual_override": pair.is_manual_override,
-            "manual_plate_override": pair.manual_plate_override,
             "operator_note": pair.operator_note,
-            "time_delta_sec": time_delta_sec,
-            "timestamp_delta_seconds": time_delta_sec,
             "front": front,
             "rear": rear,
-            "front_image": front,
-            "rear_image": rear,
+            "batch_id": batch_obj.batch_id if batch_obj else "Carryover",
+            "batch_created_at": batch_obj.created_at.strftime("%Y-%m-%d %H:%M") if (batch_obj and batch_obj.created_at) else "",
+            "is_latest_batch": bool(batch_obj and latest_batch and batch_obj.id == latest_batch.id),
+            "is_carryover": bool(latest_batch and (not batch_obj or batch_obj.id != latest_batch.id)),
             "order": {
                 "id": pair.order.id,
                 "order_number": pair.order.order_number,
                 "registration_number": pair.order.registration_number,
                 "vin": pair.order.vin,
-                "status": pair.order.status,
                 "warehouse_name": pair.order.warehouse_name,
                 "installation_officer": pair.order.installation_officer,
-                "installation_date": pair.order.installation_date,
-                "service_type": pair.order.service_type,
+                "status": pair.order.status,
             } if pair.order else None,
-            "audit_logs": audit_logs,
-            "submitted_at": pair.submitted_at.strftime("%Y-%m-%d %H:%M:%S") if pair.submitted_at else None,
         }
     })
 
@@ -1008,10 +1036,11 @@ def api_itms_sync_now(request: HttpRequest) -> JsonResponse:
 def api_run_pipeline(request: HttpRequest) -> JsonResponse:
     """Triggers background AI vision detection and pair matching."""
     task_type = request.POST.get("task_type", "full_pipeline").strip()
+    batch_id = request.POST.get("batch_id", "").strip() or None
     if task_type not in ("full_pipeline", "vision", "matcher"):
         task_type = "full_pipeline"
 
-    started = pipeline_runner.start_pipeline(task_type)
+    started = pipeline_runner.start_pipeline(task_type, batch_id=batch_id)
     if not started:
         return JsonResponse({
             "success": False,
@@ -1464,9 +1493,14 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
     """Returns historical verification events and audit logs for the History tab."""
     flt = request.GET.get("filter", "ALL").strip().upper()
 
-    logs_qs = SubmissionAuditLog.objects.select_related("pair", "pair__order", "pair__front_image", "pair__rear_image").order_by("-timestamp")[:100]
-
     history_items = []
+
+    # 1. Direct SubmissionAuditLog entries
+    logs_qs = (
+        SubmissionAuditLog.objects.select_related("pair", "pair__order", "pair__front_image", "pair__rear_image")
+        .order_by("-timestamp")[:150]
+    )
+
     for l in logs_qs:
         pair = l.pair
         plate = pair.registration_number_detected if pair else "N/A"
@@ -1476,16 +1510,14 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
         # Filter check
         if flt == "SUBMITTED" and l.action not in (SubmissionAuditLog.Action.SUBMIT,):
             continue
-        if flt == "FAILED" and l.result not in (SubmissionAuditLog.ResultStatus.FAILURE, "FAILED"):
-            continue
-        if flt == "ISSUES" and l.result not in (SubmissionAuditLog.ResultStatus.FAILURE, "FAILED"):
+        if flt in ("FAILED", "ISSUES") and l.result not in (SubmissionAuditLog.ResultStatus.FAILURE, "FAILED"):
             continue
 
         front_url = f"/media/{str(pair.front_image.vault_file).replace('\\', '/')}" if (pair and pair.front_image) else None
         rear_url = f"/media/{str(pair.rear_image.vault_file).replace('\\', '/')}" if (pair and pair.rear_image) else None
 
         history_items.append({
-            "id": l.id,
+            "id": f"log_{l.id}",
             "timestamp": l.timestamp.strftime("%Y-%m-%d %H:%M:%S") if l.timestamp else "",
             "plate": plate,
             "order_number": order_no,
@@ -1501,9 +1533,64 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
             "simulated_token": l.simulated_token or "",
         })
 
+    # 2. Historical actions from VehicleInstallationPair records (ensures history displays even before submissions)
+    pairs_qs = (
+        VehicleInstallationPair.objects.select_related("order", "front_image", "rear_image")
+        .order_by("-updated_at")[:150]
+    )
+    if flt == "SUBMITTED":
+        pairs_qs = pairs_qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED)
+    elif flt == "FAILED":
+        pairs_qs = pairs_qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.FAILED)
+    elif flt == "ISSUES":
+        pairs_qs = pairs_qs.filter(verification_status__in=[
+            VehicleInstallationPair.VerificationStatus.INCOMPLETE,
+            VehicleInstallationPair.VerificationStatus.CONFLICT,
+            VehicleInstallationPair.VerificationStatus.UNREGISTERED,
+            VehicleInstallationPair.VerificationStatus.FAILED,
+        ])
+
+    for p in pairs_qs:
+        sub_time = p.submitted_at or p.updated_at
+        front_url = f"/media/{str(p.front_image.vault_file).replace('\\', '/')}" if (p.front_image and p.front_image.vault_file) else None
+        rear_url = f"/media/{str(p.rear_image.vault_file).replace('\\', '/')}" if (p.rear_image and p.rear_image.vault_file) else None
+
+        action_name = "VERIFY_PAIR"
+        if p.verification_status == VehicleInstallationPair.VerificationStatus.SUBMITTED:
+            action_name = "ITMS_SUBMISSION"
+        elif p.is_manual_override:
+            action_name = "MANUAL_OVERRIDE"
+        elif p.verification_status == VehicleInstallationPair.VerificationStatus.APPROVED:
+            action_name = "PAIR_APPROVAL"
+
+        res_status = "SUCCESS" if p.verification_status in (
+            VehicleInstallationPair.VerificationStatus.APPROVED,
+            VehicleInstallationPair.VerificationStatus.SUBMITTED
+        ) else ("REVIEW" if p.verification_status == VehicleInstallationPair.VerificationStatus.PENDING_REVIEW else "FAILED")
+
+        history_items.append({
+            "id": f"pair_{p.id}",
+            "timestamp": sub_time.strftime("%Y-%m-%d %H:%M:%S") if sub_time else "",
+            "plate": p.registration_number_detected or "NO_PLATE",
+            "order_number": p.order.order_number if p.order else "Unlinked",
+            "order_plate": p.order.registration_number if p.order else "",
+            "action": action_name,
+            "result": res_status,
+            "message": f"Status: {p.verification_status} | Match: {p.match_type or 'None'} ({p.match_score or 0}%) | Strategy: {p.matched_via or 'Vision'}",
+            "operator": "Operator",
+            "pair_id": p.id,
+            "pair_status": p.verification_status,
+            "front_url": front_url,
+            "rear_url": rear_url,
+            "simulated_token": getattr(p, "submission_receipt_token", "") or "",
+        })
+
+    # Sort combined history items by timestamp descending
+    history_items.sort(key=lambda x: str(x.get("timestamp") or ""), reverse=True)
+
     return JsonResponse({
         "success": True,
         "filter": flt,
         "total": len(history_items),
-        "items": history_items,
+        "items": history_items[:150],
     })

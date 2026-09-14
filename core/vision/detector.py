@@ -50,10 +50,10 @@ def _resolve_weights_path(weights_name: str) -> str:
     if alt_local.exists():
         return str(alt_local)
 
-    # If specified as Hugging Face repo or YOLOv11 license plate model
-    if "yolov11" in weights_name.lower() or "morsetechlab" in weights_name.lower() or "/" in weights_name:
+    # If specified as Hugging Face repo or fine-tuned license plate model
+    if "yolov11" in weights_name.lower() or "morsetechlab" in weights_name.lower() or "/" in weights_name or "license-plate-finetune" in weights_name.lower():
         repo_id = "morsetechlab/yolov11-license-plate-detection"
-        fname = "license-plate-finetune-v1n.pt"
+        fname = "license-plate-finetune-v1s.pt" if "v1s" in weights_name.lower() else "license-plate-finetune-v1n.pt"
         models_dir = project_root / "models"
         models_dir.mkdir(parents=True, exist_ok=True)
         dest = models_dir / fname

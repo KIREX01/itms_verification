@@ -8,7 +8,7 @@ Welcome to the **ITMS Verification Copilot** distribution guide. This document p
 
 * **Zero-Configuration 1-Click Startup**: Launch the complete application stack with a single double-click. Environment setup, dependencies, AI weights, directory structures, and database migrations are self-healing and fully automated.
 * **Default Web Console Experience**: The application automatically starts the local HTTP server and opens your system's default web browser to the modern Uganda-themed Operator Console (`http://127.0.0.1:8000/`).
-* **Automated Resource Provisioning (`scripts/bootstrap.py`)**: Checks and provisions all required runtime dependencies, missing AI weights (`yolov8n.pt`, `license-plate-finetune-v1n.pt`), OCR engines, `.env` files with secure keys, and default operator credentials.
+* **Automated Resource Provisioning (`scripts/bootstrap.py`)**: Checks and provisions all required runtime dependencies, fine-tuned license plate detection weights (`license-plate-finetune-v1n.pt`, `license-plate-finetune-v1s.pt`), OCR engines, `.env` files with secure keys, and default operator credentials.
 * **In-Place Non-Destructive Updates**: Seamlessly pulls semantic updates from GitHub Releases (`https://github.com/KIREX01/itms_verification/releases`) with 100% data protection guarantees for SQLite databases, encrypted credentials, and evidence photo vaults.
 
 ---
@@ -80,8 +80,7 @@ When you run the 1-click launcher, `scripts/bootstrap.py` executes an automated 
 [OK] Directory verified: exports
 [OK] Directory verified: models
 [OK] Secure configuration file .env verified.
-[OK] Model weights verified: models\yolov8n.pt (6.2 MB)
-[OK] Model weights verified: models\license-plate-finetune-v1n.pt (6.3 MB)
+[OK] Fine-tuned plate models verified: models\license-plate-finetune-v1n.pt, models\license-plate-finetune-v1s.pt
 [OK] OCR Engine verified: Tesseract OCR (C:\Program Files\Tesseract-OCR\tesseract.exe)
 [OK] Database schema up to date.
 [OK] Default operator credentials verified.
@@ -190,9 +189,9 @@ itms_verification/
 ├── scripts/
 │   └── bootstrap.py          # Automated resource provisioning & diagnostic tool
 │
-├── models/                   # YOLO & OCR model weight files
-│   ├── yolov8n.pt            # Vehicle detector weights
-│   └── license-plate-finetune-v1n.pt # Plate detector weights
+├── models/                   # Fine-tuned YOLO plate detector weights
+│   ├── license-plate-finetune-v1n.pt # Nano plate detector weights (fastest)
+│   └── license-plate-finetune-v1s.pt # Small plate detector weights (high accuracy)
 │
 ├── media/                    # Operator evidence vault
 │   ├── vault/                # Timestamped immutable original images
@@ -239,6 +238,6 @@ The automatic bootstrap seeds a default administrator account:
 * **Linux**: Install via apt: `sudo apt-get install tesseract-ocr`
 
 ### Q4: Model weights fail to download automatically.
-If your network blocks automated GitHub asset downloads, manually download the following files and place them in the `models/` directory:
-1. `models/yolov8n.pt` from `https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.pt`
-2. `models/license-plate-finetune-v1n.pt` from your team's model repository or backup.
+If your network blocks automated Hugging Face downloads, manually download the following files and place them in the `models/` directory:
+1. `models/license-plate-finetune-v1n.pt` from `https://huggingface.co/morsetechlab/yolov11-license-plate-detection/resolve/main/license-plate-finetune-v1n.pt`
+2. `models/license-plate-finetune-v1s.pt` from `https://huggingface.co/morsetechlab/yolov11-license-plate-detection/resolve/main/license-plate-finetune-v1s.pt`

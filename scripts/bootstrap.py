@@ -6,7 +6,7 @@ Cross-platform provisioning for Windows, macOS (Intel & Apple Silicon), and Linu
 Tasks Performed:
 1. Validates and initializes `.env` with a secure random Django SECRET_KEY.
 2. Ensures all required runtime directories exist (`media/vault`, `media/crops`, `secure/auth`, `exports`, `models`).
-3. Verifies or automatically downloads missing AI model weights (`yolov8n.pt`, `license-plate-finetune-v1n.pt`).
+3. Verifies or automatically downloads fine-tuned plate detection weights (`license-plate-finetune-v1n.pt`, `license-plate-finetune-v1s.pt`).
 4. Detects and configures the optimal OCR engine for the host OS (Tesseract / PaddleOCR).
 5. Applies database schema migrations (`manage.py migrate`).
 6. Ensures default operator account credentials are created if no users exist.
@@ -27,8 +27,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 # Model weights URLs
 MODEL_URLS = {
-    "yolov8n.pt": "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.pt",
     "license-plate-finetune-v1n.pt": "https://huggingface.co/morsetechlab/yolov11-license-plate-detection/resolve/main/license-plate-finetune-v1n.pt",
+    "license-plate-finetune-v1s.pt": "https://huggingface.co/morsetechlab/yolov11-license-plate-detection/resolve/main/license-plate-finetune-v1s.pt",
 }
 
 # Required runtime directories
@@ -91,7 +91,7 @@ DJANGO_DEBUG=True
 DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost
 MEDIA_ROOT=media
 VAULT_SUBDIR=vault
-PLATE_YOLO_WEIGHTS=yolov8n.pt
+PLATE_YOLO_WEIGHTS=models/license-plate-finetune-v1n.pt
 PLATE_DETECTOR_CONF_THRESHOLD=0.35
 OCR_MIN_CONFIDENCE=0.55
 USE_PADDLEOCR=True
@@ -143,33 +143,33 @@ def download_file_with_progress(url: str, dest_path: Path) -> bool:
 
 
 def ensure_model_weights(download_missing: bool = True) -> bool:
-    """Checks for required YOLO and plate detection model weights."""
-    log_step("Verifying computer vision model weights...")
-    yolo_root = PROJECT_ROOT / "yolov8n.pt"
-    yolo_models = PROJECT_ROOT / "models" / "yolov8n.pt"
-    plate_finetune = PROJECT_ROOT / "models" / "license-plate-finetune-v1n.pt"
+    """Checks for required fine-tuned license plate detection weights (v1n and v1s)."""
+    log_step("Verifying fine-tuned plate detection model weights...")
+    models_dir = PROJECT_ROOT / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
 
-    has_yolo = yolo_root.is_file() or yolo_models.is_file()
-    has_plate = plate_finetune.is_file()
+    v1n_path = models_dir / "license-plate-finetune-v1n.pt"
+    v1s_path = models_dir / "license-plate-finetune-v1s.pt"
 
-    if has_yolo and has_plate:
-        log_success("Model weights found (yolov8n.pt, license-plate-finetune-v1n.pt).")
+    has_v1n = v1n_path.is_file()
+    has_v1s = v1s_path.is_file()
+
+    if has_v1n and has_v1s:
+        log_success("Fine-tuned plate models verified (license-plate-finetune-v1n.pt, license-plate-finetune-v1s.pt).")
         return True
 
     if not download_missing:
-        log_warning(f"Missing weights: yolov8n={has_yolo}, plate_finetune={has_plate}")
-        return False
+        log_warning(f"Missing fine-tuned plate weights: v1n={has_v1n}, v1s={has_v1s}")
+        return has_v1n or has_v1s
 
-    # Download missing weights
-    if not has_yolo:
-        target = yolo_root
-        download_file_with_progress(MODEL_URLS["yolov8n.pt"], target)
+    # Download missing fine-tuned plate weights
+    if not has_v1n:
+        download_file_with_progress(MODEL_URLS["license-plate-finetune-v1n.pt"], v1n_path)
 
-    if not has_plate:
-        target = plate_finetune
-        download_file_with_progress(MODEL_URLS["license-plate-finetune-v1n.pt"], target)
+    if not has_v1s:
+        download_file_with_progress(MODEL_URLS["license-plate-finetune-v1s.pt"], v1s_path)
 
-    return True
+    return v1n_path.is_file() or v1s_path.is_file()
 
 
 def detect_and_configure_ocr() -> dict:

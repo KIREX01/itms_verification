@@ -23,6 +23,14 @@
                     <div class="queue-filter-pill" data-filter="ISSUES" onclick="setWorkQueueFilter('ISSUES')">Issues</div>
                     <div class="queue-filter-pill" data-filter="SUBMITTED" onclick="setWorkQueueFilter('SUBMITTED')">Done</div>
                 </div>
+                <div style="display:flex; align-items:center; justify-content:space-between; padding-top:2px;">
+                    <span style="font-size:0.72rem; color:var(--ug-text-muted);" id="queue-approved-count-text">
+                        0 ready to submit
+                    </span>
+                    <button class="btn btn-primary" id="btn-queue-batch-submit" onclick="triggerBatchSubmit()" style="padding:4px 10px; font-size:0.75rem; background:var(--ug-green); border-color:var(--ug-green); font-weight:700;" title="Submit all approved pairs with matched orders to ITMS (Hotkey: B)">
+                        🚀 Submit Approved (0) <span class="hotkey">B</span>
+                    </button>
+                </div>
             </div>
 
             <div class="queue-cards-list" id="queue-cards-container">
@@ -69,15 +77,13 @@
                     <!-- Front Vehicle Photo Card -->
                     <div class="evidence-box">
                         <div class="evidence-box-header">
-                            <span class="tag-front-evidence">🚘 FRONT VEHICLE EVIDENCE</span>
+                            <span class="evidence-box-title">🚘 Front Angle Photo</span>
                             <span id="qfront-timestamp" style="color:var(--ug-text-dim); font-size:0.75rem;">--:--:--</span>
                         </div>
-                        <div class="evidence-viewport" onclick="openPhotoModal('front')">
-                            <img id="qimg-front" src="" alt="Front Photo" onerror="handlePhotoError('front')" style="opacity: 1;">
-                            <div class="viewport-placeholder" id="qfront-placeholder" style="display:none;">
-                                <span>🚘</span>
-                                <span>No front photo available</span>
-                            </div>
+                        <div class="evidence-viewport">
+                            <img id="qimg-front" src="" alt="Front vehicle" onerror="handlePhotoError('front')" onclick="openLightbox(this.src)">
+                            <div class="viewport-placeholder" id="qfront-placeholder">📷 No front angle photo</div>
+                            <span class="evidence-zoom-hint">🔍 Click to zoom</span>
                         </div>
                         <div class="evidence-crop-bar">
                             <div>Detected: <span class="crop-ocr-text" id="qfront-ocr-text">---</span></div>
@@ -88,15 +94,13 @@
                     <!-- Rear Vehicle Photo Card -->
                     <div class="evidence-box">
                         <div class="evidence-box-header">
-                            <span class="tag-rear-evidence">🏍️ REAR VEHICLE EVIDENCE</span>
+                            <span class="evidence-box-title">🏍️ Rear Angle Photo</span>
                             <span id="qrear-timestamp" style="color:var(--ug-text-dim); font-size:0.75rem;">--:--:--</span>
                         </div>
-                        <div class="evidence-viewport" onclick="openPhotoModal('rear')">
-                            <img id="qimg-rear" src="" alt="Rear Photo" onerror="handlePhotoError('rear')" style="opacity: 1;">
-                            <div class="viewport-placeholder" id="qrear-placeholder" style="display:none;">
-                                <span>🏍️</span>
-                                <span>No rear photo available</span>
-                            </div>
+                        <div class="evidence-viewport">
+                            <img id="qimg-rear" src="" alt="Rear vehicle" onerror="handlePhotoError('rear')" onclick="openLightbox(this.src)">
+                            <div class="viewport-placeholder" id="qrear-placeholder">📷 No rear angle photo</div>
+                            <span class="evidence-zoom-hint">🔍 Click to zoom</span>
                         </div>
                         <div class="evidence-crop-bar">
                             <div>Detected: <span class="crop-ocr-text" id="qrear-ocr-text">---</span></div>
@@ -144,14 +148,14 @@
                 <!-- Operator Decision Bar (TUI Bindings) -->
                 <div class="operator-decision-bar">
                     <div style="display:flex; align-items:center; gap:8px;">
-                        <button class="btn-decision btn-success" onclick="executePairAction('approve')">
-                            ✓ Approve Pair <span class="hotkey">A</span>
+                        <button class="btn-decision btn-success" id="btn-action-approve" onclick="executePairAction('approve')" title="Approve pair and advance to next item (Hotkey: A)">
+                            ✓ Approve &amp; Next <span class="hotkey">A</span>
                         </button>
-                        <button class="btn-decision btn-gold" onclick="executePairAction('swap')">
+                        <button class="btn-decision btn-gold" onclick="executePairAction('swap')" title="Swap front and rear photos (Hotkey: S)">
                             ⇄ Swap Front / Rear <span class="hotkey">S</span>
                         </button>
                         <button class="btn-decision btn-secondary" onclick="openEditPlateModal()" title="Edit plate, change verification status, or link ITMS order (Hotkeys: E or L)">
-                            ✏️ Edit Plate & Link Order <span class="hotkey">E / L</span>
+                            ✏️ Edit Plate &amp; Link Order <span class="hotkey">E / L</span>
                         </button>
                     </div>
                     <div>

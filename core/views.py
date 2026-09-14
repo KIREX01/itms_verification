@@ -491,6 +491,21 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
     action = action.lower().strip()
 
     if action == "approve":
+        # Attempt auto-linking if order is missing (matches TUI parity)
+        if pair.is_complete and not pair.order:
+            from core.matcher.order_matcher import match_pair_to_order
+            match_pair_to_order(pair)
+            if not pair.order:
+                clean_reg = "".join(c for c in pair.registration_number_detected.upper() if c.isalnum())
+                found_order = (
+                    InstallationOrder.objects.filter(registration_number__iexact=clean_reg)
+                    .exclude(status=InstallationOrder.Status.SUBMITTED)
+                    .first()
+                )
+                if found_order:
+                    pair.order = found_order
+                    pair.save(update_fields=["order"])
+
         was_failed = (pair.verification_status == VehicleInstallationPair.VerificationStatus.FAILED)
         pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
         pair.save(update_fields=["verification_status"])
@@ -630,16 +645,43 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
         })
 
     elif action == "submit":
+        dry_run_param = request.POST.get("dry_run")
+        if dry_run_param is not None and str(dry_run_param).strip() != "":
+            is_dry_run = str(dry_run_param).strip().lower() in ("true", "1", "yes")
+        else:
+            is_dry_run = config_service.get_setting("submission.dry_run_mode", True)
+
+        # Attempt auto-linking if order is missing
+        if pair.is_complete and not pair.order:
+            from core.matcher.order_matcher import match_pair_to_order
+            match_pair_to_order(pair)
+            if not pair.order:
+                clean_reg = "".join(c for c in pair.registration_number_detected.upper() if c.isalnum())
+                found_order = (
+                    InstallationOrder.objects.filter(registration_number__iexact=clean_reg)
+                    .exclude(status=InstallationOrder.Status.SUBMITTED)
+                    .first()
+                )
+                if found_order:
+                    pair.order = found_order
+                    pair.save(update_fields=["order"])
+
         if not pair.order:
             return JsonResponse({"success": False, "error": "Cannot submit: pair is not matched to an order."}, status=400)
 
-        outcome = submission_worker.submit_pair(pair)
+        # Auto-approve if currently PENDING_REVIEW or FAILED (operator decision to submit)
+        if pair.verification_status != VehicleInstallationPair.VerificationStatus.APPROVED:
+            pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
+            pair.save(update_fields=["verification_status"])
+
+        outcome = submission_worker.submit_pair(pair, dry_run=is_dry_run)
         return JsonResponse({
             "success": outcome.success,
             "status": pair.verification_status,
             "token": outcome.token,
             "error": outcome.error,
-            "message": "Submitted successfully to ITMS." if outcome.success else f"Submission failed: {outcome.error}",
+            "dry_run": is_dry_run,
+            "message": f"{'[DRY RUN] ' if is_dry_run else ''}Submitted successfully to ITMS." if outcome.success else f"Submission failed: {outcome.error}",
         })
 
     return JsonResponse({"success": False, "error": f"Unknown action: {action}"}, status=400)
@@ -1068,6 +1110,12 @@ def api_pipeline_status(request: HttpRequest) -> JsonResponse:
 @require_POST
 def api_batch_submit(request: HttpRequest) -> JsonResponse:
     """Submits all approved pairs to ITMS in a single operation."""
+    dry_run_param = request.POST.get("dry_run")
+    if dry_run_param is not None and str(dry_run_param).strip() != "":
+        is_dry_run = str(dry_run_param).strip().lower() in ("true", "1", "yes")
+    else:
+        is_dry_run = config_service.get_setting("submission.dry_run_mode", True)
+
     approved_pairs = list(
         VehicleInstallationPair.objects.filter(
             verification_status=VehicleInstallationPair.VerificationStatus.APPROVED,
@@ -1081,7 +1129,7 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
     succeeded = 0
     failed = 0
     for p in approved_pairs:
-        outcome = submission_worker.submit_pair(p)
+        outcome = submission_worker.submit_pair(p, dry_run=is_dry_run)
         if outcome.success:
             succeeded += 1
         else:
@@ -1092,7 +1140,8 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
         "total": len(approved_pairs),
         "succeeded": succeeded,
         "failed": failed,
-        "message": f"Batch submission complete: {succeeded} succeeded, {failed} failed.",
+        "dry_run": is_dry_run,
+        "message": f"{'[DRY RUN] ' if is_dry_run else ''}Batch submission complete: {succeeded} succeeded, {failed} failed.",
     })
 
 
@@ -1173,10 +1222,16 @@ def api_settings(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_POST
 def api_toggle_dry_run(request: HttpRequest) -> JsonResponse:
-    """Toggles safe simulation / dry-run mode for ITMS submissions."""
-    curr = config_service.get_setting("submission.dry_run_mode", True)
-    new_val = not curr
+    """Toggles or sets safe simulation / dry-run mode for ITMS submissions."""
+    mode_param = request.POST.get("mode") or request.POST.get("dry_run")
+    if mode_param is not None and str(mode_param).strip() != "":
+        new_val = str(mode_param).strip().lower() in ("true", "1", "yes", "dry_run", "dry")
+    else:
+        curr = config_service.get_setting("submission.dry_run_mode", True)
+        new_val = not curr
+
     config_service.set_setting("submission.dry_run_mode", new_val)
+    setattr(settings, "ITMS_WEB_DRY_RUN", new_val)
     return JsonResponse({
         "success": True,
         "dry_run": new_val,

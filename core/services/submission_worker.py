@@ -25,6 +25,7 @@ class SubmissionOutcome:
     token: str = ""
     error: str = ""
     backend: str = "mock"
+    dry_run: bool = True
 
 
 def _log(pair: VehicleInstallationPair, action: str, result: str, message: str, token: str = ""):
@@ -59,14 +60,14 @@ def submit_pair(
              f"[{backend_mode.upper()}] No matched InstallationOrder on this pair; cannot submit.")
         pair.verification_status = VehicleInstallationPair.VerificationStatus.FAILED
         pair.save(update_fields=["verification_status"])
-        return SubmissionOutcome(pair_id=pair.id, success=False, error="No matched order", backend=backend_mode)
+        return SubmissionOutcome(pair_id=pair.id, success=False, error="No matched order", backend=backend_mode, dry_run=is_dry_run)
 
     if not (pair.front_image and pair.rear_image):
         _log(pair, SubmissionAuditLog.Action.VALIDATE, SubmissionAuditLog.ResultStatus.FAILURE,
              f"[{backend_mode.upper()}] Pair is missing front or rear evidence; cannot submit.")
         pair.verification_status = VehicleInstallationPair.VerificationStatus.FAILED
         pair.save(update_fields=["verification_status"])
-        return SubmissionOutcome(pair_id=pair.id, success=False, error="Incomplete evidence", backend=backend_mode)
+        return SubmissionOutcome(pair_id=pair.id, success=False, error="Incomplete evidence", backend=backend_mode, dry_run=is_dry_run)
 
     order = pair.order
 
@@ -86,7 +87,7 @@ def submit_pair(
             _log(pair, SubmissionAuditLog.Action.SUBMIT, SubmissionAuditLog.ResultStatus.FAILURE, err_msg)
             pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
             pair.save(update_fields=["verification_status"])
-            return SubmissionOutcome(pair_id=pair.id, success=False, error=err_msg, backend=backend_mode)
+            return SubmissionOutcome(pair_id=pair.id, success=False, error=err_msg, backend=backend_mode, dry_run=is_dry_run)
 
         res = web_client.execute_installation_order_workflow(
             order_identifier=order.order_number,
@@ -113,7 +114,7 @@ def submit_pair(
                             log_callback(f"📦 [bold magenta][OFFLINE OUTBOX][/bold magenta] Queued {pair.registration_number_detected} for auto-sync.")
                         except Exception:
                             pass
-                    return SubmissionOutcome(pair_id=pair.id, success=False, error=f"Queued to Offline Outbox: {err_msg}", backend="live_web")
+                    return SubmissionOutcome(pair_id=pair.id, success=False, error=f"Queued to Offline Outbox: {err_msg}", backend="live_web", dry_run=is_dry_run)
                 else:
                     _log(pair, SubmissionAuditLog.Action.SUBMIT, SubmissionAuditLog.ResultStatus.FAILURE, f"[WEB NETWORK DROP] {err_msg}")
                     _log(pair, SubmissionAuditLog.Action.FALLBACK, SubmissionAuditLog.ResultStatus.INFO,
@@ -126,7 +127,7 @@ def submit_pair(
                 pair.save(update_fields=["verification_status"])
                 order.status = InstallationOrder.Status.FAILED
                 order.save(update_fields=["status"])
-            return SubmissionOutcome(pair_id=pair.id, success=False, error=err_msg, backend="live_web")
+            return SubmissionOutcome(pair_id=pair.id, success=False, error=err_msg, backend="live_web", dry_run=is_dry_run)
 
         token = res.get("redirect_url", res.get("order_uuid", ""))
         dry_run_tag = " [DRY-RUN]" if is_dry_run else ""
@@ -148,7 +149,7 @@ def submit_pair(
                     image.submitted_at = now
                     image.save(update_fields=["status", "submitted_at"])
 
-        return SubmissionOutcome(pair_id=pair.id, success=True, token=token, backend="live_web")
+        return SubmissionOutcome(pair_id=pair.id, success=True, token=token, backend="live_web", dry_run=is_dry_run)
 
     itms_service = itms_client.default_client if backend_mode == "live" else itms_mock
 
@@ -176,7 +177,7 @@ def submit_pair(
         pair.save(update_fields=["verification_status"])
         order.status = InstallationOrder.Status.FAILED
         order.save(update_fields=["status"])
-        return SubmissionOutcome(pair_id=pair.id, success=False, error=str(exc), backend=backend_mode)
+        return SubmissionOutcome(pair_id=pair.id, success=False, error=str(exc), backend=backend_mode, dry_run=is_dry_run)
 
     now = timezone.now()
     with transaction.atomic():
@@ -193,7 +194,7 @@ def submit_pair(
                 image.submitted_at = now
                 image.save(update_fields=["status", "submitted_at"])
 
-    return SubmissionOutcome(pair_id=pair.id, success=True, token=step.token or "")
+    return SubmissionOutcome(pair_id=pair.id, success=True, token=step.token or "", backend=backend_mode, dry_run=is_dry_run)
 
 
 def submit_approved_pairs(

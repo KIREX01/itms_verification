@@ -51,8 +51,16 @@ document.addEventListener("DOMContentLoaded", () => {
             if (selectedPairId) openEditPlateModal();
         } else if (key === "l" && activeNavTab === 4) {
             if (selectedPairId) openLinkOrderModal();
-        } else if (e.key === "Enter" && activeNavTab === 4) {
-            if (selectedPairId) executePairAction("submit");
+        } else if (e.key === "Enter") {
+            const subModal = document.getElementById("modal-submission-progress");
+            const subConfirm = document.getElementById("sub-phase-confirm");
+            if (subModal && subModal.classList.contains("active") && subConfirm && subConfirm.style.display !== "none") {
+                startSubmissionExecution();
+                return;
+            }
+            if (activeNavTab === 4 && selectedPairId) {
+                executePairAction("submit");
+            }
         } else if (e.key === "ArrowUp" || key === "k") {
             if (activeNavTab === 4) {
                 e.preventDefault();
@@ -64,7 +72,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 navigateQueue(1);
             }
         } else if (e.key === "Escape") {
-            const activeModal = document.querySelector(".modal-backdrop.active");
+            const subModal = document.getElementById("modal-submission-progress");
+            if (subModal && subModal.classList.contains("active")) {
+                if (typeof isBatchSubmitting !== "undefined" && isBatchSubmitting) {
+                    minimizeSubmissionModal();
+                } else {
+                    closeSubmissionModal();
+                }
+                return;
+            }
+            const activeModal = document.querySelector(".modal-overlay.active, .modal-backdrop.active");
             if (activeModal) {
                 activeModal.classList.remove("active");
             }

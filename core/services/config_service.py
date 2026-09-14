@@ -123,13 +123,20 @@ def load_config(base_dir: Optional[Path] = None) -> Dict[str, Any]:
 def save_config(config_data: Dict[str, Any], base_dir: Optional[Path] = None) -> bool:
     """Saves configuration dictionary to config.json."""
     cfg_path = get_config_path(base_dir)
+    root = Path(base_dir) if base_dir else _get_project_root()
+    legacy_path = root / CONFIG_FILE_NAME
     try:
         cfg_path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = cfg_path.with_suffix(".tmp")
         with open(temp_path, "w", encoding="utf-8") as f:
             json.dump(config_data, f, indent=2, ensure_ascii=False)
         temp_path.replace(cfg_path)
-        logger.info("System configuration saved to %s", cfg_path)
+        try:
+            with open(legacy_path, "w", encoding="utf-8") as f:
+                json.dump(config_data, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+        logger.info("System configuration saved to %s and %s", cfg_path, legacy_path)
         return True
     except Exception as exc:
         logger.error("Failed to save configuration to %s: %s", cfg_path, exc)

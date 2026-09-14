@@ -34,6 +34,21 @@ async function fetchPairs() {
                 }
             }
 
+            // Update queue approved counter & quick batch submit button
+            const approvedCount = pairsData.filter(p => p.verification_status === "APPROVED").length;
+            const approvedBtn = document.getElementById("btn-queue-batch-submit");
+            const approvedText = document.getElementById("queue-approved-count-text");
+            if (approvedBtn) {
+                approvedBtn.innerHTML = `🚀 Submit Approved (${approvedCount}) <span class="hotkey">B</span>`;
+                approvedBtn.disabled = (approvedCount === 0);
+                approvedBtn.style.opacity = approvedCount === 0 ? "0.6" : "1";
+                approvedBtn.style.cursor = approvedCount === 0 ? "not-allowed" : "pointer";
+            }
+            if (approvedText) {
+                approvedText.innerText = `${approvedCount} approved pair${approvedCount === 1 ? '' : 's'} ready`;
+            }
+            setText("kpi-approved", approvedCount);
+
             renderQueueCards();
             if (pairsData.length > 0 && !selectedPairId) {
                 selectPair(pairsData[0].id);
@@ -56,11 +71,10 @@ function filterWorkQueue() {
     renderQueueCards();
 }
 
-function renderQueueCards() {
-    const container = document.getElementById("queue-cards-container");
-    const searchVal = (document.getElementById("queue-search-input").value || "").trim().toUpperCase();
+function getFilteredQueuePairs() {
+    const searchVal = (document.getElementById("queue-search-input") ? document.getElementById("queue-search-input").value : "").trim().toUpperCase();
 
-    const filtered = pairsData.filter(p => {
+    return pairsData.filter(p => {
         // Tab status filter
         if (currentQueueFilter === "PENDING" && p.verification_status !== "PENDING_REVIEW") return false;
         if (currentQueueFilter === "APPROVED" && p.verification_status !== "APPROVED") return false;
@@ -83,8 +97,31 @@ function renderQueueCards() {
         }
         return true;
     });
+}
+
+function renderQueueCards() {
+    const container = document.getElementById("queue-cards-container");
+    const filtered = getFilteredQueuePairs();
 
     if (filtered.length === 0) {
+        if (currentQueueFilter === "PENDING") {
+            const approvedCount = pairsData.filter(p => p.verification_status === "APPROVED" && (p.order || p.order_number)).length;
+            if (approvedCount > 0) {
+                container.innerHTML = `
+                    <div style="text-align:center; padding:36px 14px; display:flex; flex-direction:column; align-items:center; gap:12px;">
+                        <span style="font-size:2.8rem;">🎉</span>
+                        <h4 style="color:#fff; font-size:1.05rem; font-weight:800; margin:0;">All Pairs Reviewed &amp; Approved!</h4>
+                        <p style="font-size:0.78rem; color:var(--ug-text-muted); max-width:280px; margin:0;">
+                            No pairs are waiting for review in this queue. Ready to submit <strong>${approvedCount}</strong> verified motorcycle pair(s) to ITMS.
+                        </p>
+                        <button class="btn btn-primary" onclick="triggerBatchSubmit()" style="background:var(--ug-green); border-color:var(--ug-green); padding:8px 18px; font-weight:800; font-size:0.85rem; box-shadow:0 4px 14px rgba(16,185,129,0.35);">
+                            🚀 Submit Approved Pairs to ITMS <span class="hotkey">B</span>
+                        </button>
+                    </div>
+                `;
+                return;
+            }
+        }
         container.innerHTML = `<div style="text-align:center; padding:40px; color:var(--ug-text-dim);">No pairs match criteria</div>`;
         return;
     }
@@ -253,41 +290,58 @@ async function executePairAction(action) {
             showToast("Cannot submit: vehicle pair has no linked ITMS order. Press L to link an order.", "warning");
             return;
         }
-        const plate = selectedPairDetail.registration_number_detected || "Pair";
-        const orderNo = selectedPairDetail.order.order_number || "—";
-        const btnSubmit = document.getElementById("btn-submit-action");
-        if (btnSubmit) {
-            btnSubmit.disabled = true;
-            btnSubmit.innerHTML = `🚀 Submitting ${escapeHtml(plate)}...`;
+        openSingleSubmissionModal(selectedPairDetail);
+        return;
+    }
+
+    if (action === "approve") {
+        const plate = (selectedPairDetail ? selectedPairDetail.registration_number_detected : "") || "Pair";
+        const btnApprove = document.getElementById("btn-action-approve");
+        if (btnApprove) btnApprove.disabled = true;
+
+        // Determine next pair to inspect before approving
+        const currentFiltered = getFilteredQueuePairs();
+        const currentIdx = currentFiltered.findIndex(p => p.id === selectedPairId);
+        let nextPair = null;
+        if (currentIdx !== -1 && currentIdx + 1 < currentFiltered.length) {
+            nextPair = currentFiltered[currentIdx + 1];
+        } else if (currentFiltered.length > 1) {
+            nextPair = currentFiltered[0];
         }
-        showTopSubmissionIndicator(`Submitting ${plate} (Order #${orderNo})...`);
-        appendConsoleLog(`Submitting ${plate} (Order #${orderNo}) to ITMS...`, "info");
 
         try {
             const res = await fetch(`/api/pairs/${selectedPairId}/action/`, {
                 method: "POST",
                 headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: "action=submit",
+                body: "action=approve",
             });
             const data = await res.json();
             if (data.success) {
-                showToast(`✓ Successfully submitted ${plate} to ITMS! Token: ${data.token || 'OK'}`, "success");
-                appendConsoleLog(`✓ Successfully submitted ${plate} to ITMS! Token: ${data.token}`, "success");
-                fetchStats();
-                fetchPairs();
-                selectPair(selectedPairId);
+                showToast(`✓ Approved ${plate}.`, "success");
+                await fetchStats();
+                await fetchPairs();
+
+                if (nextPair && nextPair.id !== selectedPairId) {
+                    selectPair(nextPair.id);
+                } else {
+                    const remainingPending = pairsData.filter(p => p.verification_status === "PENDING_REVIEW");
+                    if (remainingPending.length > 0) {
+                        selectPair(remainingPending[0].id);
+                    } else {
+                        // All pending pairs approved
+                        const approvedReady = pairsData.filter(p => p.verification_status === "APPROVED" && (p.order || p.order_number)).length;
+                        if (approvedReady > 0) {
+                            showToast(`🎉 All pairs in queue approved! Ready to submit ${approvedReady} pair(s) to ITMS.`, "info");
+                        }
+                    }
+                }
             } else {
-                showToast(data.error || data.message || "Submission failed", "error");
-                appendConsoleLog(`✕ Failed submitting ${plate}: ${data.error || data.message}`, "error");
+                showToast(data.error || "Failed to approve pair", "error");
             }
         } catch (err) {
-            showToast("Submission error: " + err, "error");
+            showToast("Approve error: " + err, "error");
         } finally {
-            if (btnSubmit) {
-                btnSubmit.disabled = false;
-                btnSubmit.innerHTML = `🚀 Submit to ITMS <span class="hotkey">Enter</span>`;
-            }
-            hideTopSubmissionIndicator();
+            if (btnApprove) btnApprove.disabled = false;
         }
         return;
     }

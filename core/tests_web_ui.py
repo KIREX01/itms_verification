@@ -383,3 +383,74 @@ class WebUITestCase(TestCase):
         res = self.client.get(reverse("core:api_batch_detail", args=["NON-EXISTENT-BATCH"]))
         self.assertEqual(res.status_code, 404)
 
+    def test_api_toggle_dry_run_updates_settings_and_config(self):
+        """POST /api/settings/toggle-dry-run/ toggles mode and updates settings.ITMS_WEB_DRY_RUN."""
+        from django.conf import settings
+        from core.services import config_service
+
+        # Set to True first
+        config_service.set_setting("submission.dry_run_mode", True)
+        setattr(settings, "ITMS_WEB_DRY_RUN", True)
+
+        # Toggle to False
+        res = self.client.post(reverse("core:api_toggle_dry_run"))
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data["success"])
+        self.assertFalse(data["dry_run"])
+        self.assertFalse(config_service.get_setting("submission.dry_run_mode"))
+        self.assertFalse(settings.ITMS_WEB_DRY_RUN)
+
+        # Toggle back with explicit mode=true
+        res2 = self.client.post(reverse("core:api_toggle_dry_run"), {"mode": "true"})
+        self.assertEqual(res2.status_code, 200)
+        data2 = res2.json()
+        self.assertTrue(data2["dry_run"])
+        self.assertTrue(config_service.get_setting("submission.dry_run_mode"))
+        self.assertTrue(settings.ITMS_WEB_DRY_RUN)
+
+    def test_api_pair_action_submit_respects_explicit_dry_run(self):
+        """POST /api/pairs/<id>/action/ with action=submit respects explicit dry_run param."""
+        from unittest.mock import patch
+        from core.services.submission_worker import SubmissionOutcome
+
+        with patch("core.services.submission_worker.submit_pair") as mock_sub:
+            mock_sub.return_value = SubmissionOutcome(pair_id=self.pair.id, success=True, token="TEST-RECEIPT", dry_run=False)
+
+            res = self.client.post(
+                reverse("core:api_pair_action", args=[self.pair.id]),
+                {"action": "submit", "dry_run": "false"},
+            )
+            self.assertEqual(res.status_code, 200)
+            data = res.json()
+            self.assertTrue(data["success"])
+            self.assertFalse(data["dry_run"])
+            # Assert mock was called with dry_run=False
+            mock_sub.assert_called_once()
+            _, kwargs = mock_sub.call_args
+            self.assertFalse(kwargs.get("dry_run"))
+
+    def test_api_pair_action_submit_follows_config_dry_run_when_unspecified(self):
+        """POST /api/pairs/<id>/action/ with action=submit defaults to config.json setting."""
+        from unittest.mock import patch
+        from core.services import config_service
+        from core.services.submission_worker import SubmissionOutcome
+
+        config_service.set_setting("submission.dry_run_mode", True)
+
+        with patch("core.services.submission_worker.submit_pair") as mock_sub:
+            mock_sub.return_value = SubmissionOutcome(pair_id=self.pair.id, success=True, token="SIM-RECEIPT", dry_run=True)
+
+            res = self.client.post(
+                reverse("core:api_pair_action", args=[self.pair.id]),
+                {"action": "submit"},
+            )
+            self.assertEqual(res.status_code, 200)
+            data = res.json()
+            self.assertTrue(data["success"])
+            self.assertTrue(data["dry_run"])
+            mock_sub.assert_called_once()
+            _, kwargs = mock_sub.call_args
+            self.assertTrue(kwargs.get("dry_run"))
+
+

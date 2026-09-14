@@ -59,6 +59,25 @@ def get_secure_config_path(base_dir: Optional[Path] = None) -> Path:
         except Exception as exc:
             logger.warning('Failed to auto-migrate legacy config.json: %s', exc)
             return legacy_path
+    elif secure_path.is_file() and not legacy_path.is_file():
+        try:
+            shutil.copy2(secure_path, legacy_path)
+        except Exception:
+            pass
+    elif secure_path.is_file() and legacy_path.is_file():
+        try:
+            # Sync whichever file was modified more recently
+            if legacy_path.stat().st_mtime > secure_path.stat().st_mtime:
+                shutil.copy2(legacy_path, secure_path)
+                try:
+                    os.chmod(secure_path, 0o600)
+                except Exception:
+                    pass
+                logger.info('Synchronized user edits from root config.json to secure storage: %s', secure_path)
+            elif secure_path.stat().st_mtime > legacy_path.stat().st_mtime:
+                shutil.copy2(secure_path, legacy_path)
+        except Exception as exc:
+            logger.debug('Config file mtime sync check error: %s', exc)
 
     return secure_path
 

@@ -84,17 +84,67 @@
 
 <!-- 2. Submission Progress & Verification Dispatch Modal -->
 <div class="modal-overlay" id="modal-submission-progress">
-    <div class="modal-box" style="width: 680px; max-width: 95vw;">
+    <div class="modal-box" style="width: 700px; max-width: 95vw;">
         <div class="modal-header">
-            <span class="modal-title">
+            <span class="modal-title" id="sub-modal-title">
                 🚀 ITMS Submission Engine
             </span>
             <div style="display:flex; align-items:center; gap:8px;">
-                <span class="badge badge-yellow" id="sub-modal-mode-badge">BATCH TRANSMISSION</span>
-                <button class="modal-close" id="btn-close-sub-modal" onclick="closeSubmissionModal()" style="display:none;">&times;</button>
+                <span class="badge badge-yellow" id="sub-modal-mode-badge">SIMULATED (DRY RUN)</span>
+                <button class="modal-close" id="btn-close-sub-modal" onclick="closeSubmissionModal()">&times;</button>
             </div>
         </div>
-        <div class="modal-body" style="gap:16px;">
+
+        <!-- PHASE 1: PRE-SUBMISSION CONFIRMATION & SAFETY REVIEW (TUI Parity) -->
+        <div id="sub-phase-confirm" style="display:flex; flex-direction:column; gap:16px; padding:20px;">
+            <!-- Target Summary Card -->
+            <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:16px; display:flex; flex-direction:column; gap:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:0.75rem; color:var(--ug-text-dim); text-transform:uppercase; font-weight:700;" id="sub-confirm-scope-title">SUBMISSION TARGET SCOPE</span>
+                    <span class="badge badge-green" id="sub-confirm-count-badge">0 Pairs Ready</span>
+                </div>
+                <div id="sub-confirm-target-details" style="display:flex; flex-direction:column; gap:6px;">
+                    <div style="font-family:var(--font-mono); font-size:1.25rem; font-weight:900; color:var(--ug-yellow);" id="sub-confirm-target-main">
+                        Loading target...
+                    </div>
+                    <div style="font-size:0.82rem; color:var(--ug-text-muted);" id="sub-confirm-target-sub">
+                        Order #—
+                    </div>
+                </div>
+                <div id="sub-confirm-batch-list-box" style="display:none; max-height:160px; overflow-y:auto; border:1px solid var(--ug-border); border-radius:var(--radius-sm); padding:6px 10px; font-family:var(--font-mono); font-size:0.78rem; background:rgba(0,0,0,0.3); display:none; flex-direction:column; gap:4px;">
+                    <!-- Dynamic preview list for batch items -->
+                </div>
+            </div>
+
+            <!-- Safety Mode Switch Card -->
+            <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:14px 16px; display:flex; justify-content:space-between; align-items:center;">
+                <div style="display:flex; flex-direction:column; gap:3px;">
+                    <div style="font-size:0.88rem; font-weight:700; color:#fff;">
+                        Dry-Run Safety Mode
+                    </div>
+                    <div style="font-size:0.75rem; color:var(--ug-text-muted);" id="sub-confirm-dryrun-desc">
+                        Simulates multi-step submission without remote server mutations (persisted to config.json).
+                    </div>
+                </div>
+                <label class="switch" style="flex-shrink:0;">
+                    <input type="checkbox" id="sub-modal-dryrun-chk" onchange="onSubModalDryRunToggled()">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <!-- Pre-submission Actions Footer -->
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:4px;">
+                <button class="btn btn-secondary" onclick="closeSubmissionModal()" style="padding:8px 18px; font-size:0.82rem;">
+                    Cancel [Esc]
+                </button>
+                <button class="btn btn-primary" id="btn-sub-start-confirm" onclick="startSubmissionExecution()" style="background:var(--ug-green); border-color:var(--ug-green); padding:8px 22px; font-weight:800; font-size:0.85rem; box-shadow:0 4px 14px rgba(16,185,129,0.35);">
+                    🚀 Confirm &amp; Submit [Enter]
+                </button>
+            </div>
+        </div>
+
+        <!-- PHASE 2: ACTIVE TRANSMISSION PROGRESS & TELEMETRY STREAM -->
+        <div id="sub-phase-progress" style="display:none; flex-direction:column; gap:16px; padding:20px;">
             <!-- Current Item Banner -->
             <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:14px; display:flex; flex-direction:column; gap:6px;">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -150,22 +200,23 @@
                 <div style="font-size:0.75rem; font-weight:700; color:var(--ug-text-dim); text-transform:uppercase;">
                     TRANSMISSION EVENT TRACE
                 </div>
-                <div id="sub-live-log-stream" style="max-height:180px; min-height:110px; overflow-y:auto; background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 12px; font-family:var(--font-mono); font-size:0.76rem; display:flex; flex-direction:column; gap:4px;">
+                <div id="sub-live-log-stream" style="max-height:160px; min-height:100px; overflow-y:auto; background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 12px; font-family:var(--font-mono); font-size:0.76rem; display:flex; flex-direction:column; gap:4px;">
                     <div style="color:var(--ug-text-dim);">Waiting to begin transmission...</div>
                 </div>
             </div>
-        </div>
-        <div class="modal-footer" style="justify-content:space-between;">
-            <button class="btn btn-danger" id="btn-sub-abort" onclick="abortBatchSubmission()" style="padding:6px 14px; font-size:0.8rem;">
-                ⏹ Stop / Abort
-            </button>
-            <div style="display:flex; gap:8px;">
-                <button class="btn btn-secondary" id="btn-sub-minimize" onclick="minimizeSubmissionModal()" style="padding:6px 14px; font-size:0.8rem;">
-                    🗕 Run in Background
+
+            <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; padding-top:12px; border-top:1px solid var(--ug-border);">
+                <button class="btn btn-danger" id="btn-sub-abort" onclick="abortBatchSubmission()" style="padding:6px 14px; font-size:0.8rem;">
+                    ⏹ Stop / Abort
                 </button>
-                <button class="btn btn-primary" id="btn-sub-done" onclick="closeSubmissionModal()" style="padding:6px 14px; font-size:0.8rem; display:none;">
-                    ✓ Done / Close
-                </button>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn btn-secondary" id="btn-sub-minimize" onclick="minimizeSubmissionModal()" style="padding:6px 14px; font-size:0.8rem;">
+                        🗕 Run in Background
+                    </button>
+                    <button class="btn btn-primary" id="btn-sub-done" onclick="closeSubmissionModal()" style="padding:6px 14px; font-size:0.8rem; display:none;">
+                        ✓ Done / Close
+                    </button>
+                </div>
             </div>
         </div>
     </div>

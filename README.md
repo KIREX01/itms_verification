@@ -27,6 +27,39 @@ curl -fsSL https://raw.githubusercontent.com/KIREX01/itms_verification/main/inst
 
 ---
 
+## 💻 Universal System-Wide CLI (`itms`)
+
+Once installed, use the `itms` command from any PowerShell, CMD, or Terminal window:
+
+| Command | Description |
+| :--- | :--- |
+| `itms` | Launches Web Operator Console in default browser (`http://127.0.0.1:8000`) |
+| `itms --tui` | Launches Textual Terminal UI (keyboard-driven operator dashboard) |
+| `itms status` | Runs health diagnostics (verifies database, AI plate weights, OCR) |
+| `itms update` | Checks for and applies latest software updates |
+| `itms uninstall` | Completely uninstalls application, shortcuts, and global commands |
+| `itms manage <args>` | Runs Django management commands directly |
+
+---
+
+## 🗑️ Complete Uninstallation
+
+To completely remove ITMS Verification Copilot, its shortcuts, and all data from your system:
+
+### Windows
+```powershell
+irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/uninstall.ps1 | iex
+```
+*Or type `itms uninstall` in any terminal.*
+
+### macOS / Linux
+```bash
+curl -fsSL https://raw.githubusercontent.com/KIREX01/itms_verification/main/uninstall.sh | bash
+```
+*Or type `itms uninstall` in any terminal.*
+
+---
+
 ## 1. Prerequisites
 
 * Python 3.11 recommended for PaddleOCR; Python 3.12+ uses the Tesseract fallback

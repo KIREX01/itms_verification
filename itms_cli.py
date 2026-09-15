@@ -39,6 +39,7 @@ Usage:
   itms status         Display system health, active database & diagnostics
   itms bootstrap      Verify AI plate models, dependencies & run migrations
   itms update         Check for and pull latest software updates
+  itms uninstall      Completely uninstall app, shortcuts, and global commands
   itms manage <cmd>   Execute any Django management command
   itms --version, -v  Display installed version
   itms --help, -h     Show this command guide
@@ -100,20 +101,43 @@ def run_bootstrap(extra_args=None):
 
 
 def run_update():
-    """Triggers system update script."""
+    """Triggers system update directly via Django check_updates command or git pull."""
+    print("====================================================================")
+    print("  ITMS VERIFICATION COPILOT - SYSTEM UPDATE MANAGER")
+    print("====================================================================")
+    print()
+    try:
+        import django
+        django.setup()
+        from django.core.management import call_command
+        call_command("check_updates", apply=True)
+    except Exception as exc:
+        print(f"[*] Checking updates via git pull: {exc}")
+        import subprocess
+        subprocess.run(["git", "pull", "--rebase", "origin", "main"], cwd=PROJECT_ROOT, check=False)
+
+
+def run_uninstall(extra_args=None):
+    """Triggers complete application uninstallation."""
     import subprocess
     if sys.platform == "win32":
-        update_bat = PROJECT_ROOT / "update.bat"
-        if update_bat.is_file():
-            subprocess.run([str(update_bat)], cwd=PROJECT_ROOT, check=False)
+        uninstall_ps1 = PROJECT_ROOT / "uninstall.ps1"
+        if not uninstall_ps1.is_file():
+            print("[!] uninstall.ps1 not found.")
             return
+        cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(uninstall_ps1)]
+        if extra_args:
+            cmd.extend(extra_args)
+        subprocess.run(cmd)
     else:
-        update_sh = PROJECT_ROOT / "update.sh"
-        if update_sh.is_file():
-            subprocess.run(["bash", str(update_sh)], cwd=PROJECT_ROOT, check=False)
+        uninstall_sh = PROJECT_ROOT / "uninstall.sh"
+        if not uninstall_sh.is_file():
+            print("[!] uninstall.sh not found.")
             return
-    # Fallback to git pull
-    subprocess.run(["git", "pull"], cwd=PROJECT_ROOT, check=False)
+        cmd = ["bash", str(uninstall_sh)]
+        if extra_args:
+            cmd.extend(extra_args)
+        subprocess.run(cmd)
 
 
 def run_manage(args):
@@ -160,6 +184,10 @@ def main():
 
     if first in ("update", "upgrade"):
         run_update()
+        return
+
+    if first in ("uninstall", "remove"):
+        run_uninstall(args[1:])
         return
 
     if first in ("manage", "django"):

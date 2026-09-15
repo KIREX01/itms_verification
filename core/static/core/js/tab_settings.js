@@ -131,7 +131,7 @@ async function applySystemUpdate() {
         if (data.success) {
             showToast(data.message || "Update completed successfully! Please restart the application.", "success");
             appendConsoleLog(data.message, "success");
-            alert(data.message || "Update applied successfully! Please restart the Web Console (run.bat / run.command) to start using the new version.");
+            alert(data.message || "Update applied successfully! Please restart the Web Console ('itms') to start using the new version.");
             checkForUpdates(true);
         } else {
             showToast(data.error || "Update failed", "error");

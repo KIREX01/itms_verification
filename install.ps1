@@ -251,13 +251,13 @@ Write-Host "[>] Registering Windows shortcuts..." -ForegroundColor Cyan
 try {
     $wsh = New-Object -ComObject WScript.Shell
     $iconPath = Join-Path $InstallDir "assets\logos\favicon.ico"
-    $runBat = Join-Path $InstallDir "run.bat"
+    $launcher = Join-Path $InstallDir "itms.cmd"
 
     # Desktop Shortcut
     $desktopPath = [Environment]::GetFolderPath('Desktop')
     $desktopLnk = Join-Path $desktopPath "ITMS Verification Copilot.lnk"
     $shortcut = $wsh.CreateShortcut($desktopLnk)
-    $shortcut.TargetPath = $runBat
+    $shortcut.TargetPath = $launcher
     $shortcut.WorkingDirectory = $InstallDir
     if (Test-Path $iconPath) {
         $shortcut.IconLocation = $iconPath
@@ -272,7 +272,7 @@ try {
     if (Test-Path $programsPath) {
         $startMenuLnk = Join-Path $programsPath "ITMS Verification Copilot.lnk"
         $shortcut2 = $wsh.CreateShortcut($startMenuLnk)
-        $shortcut2.TargetPath = $runBat
+        $shortcut2.TargetPath = $launcher
         $shortcut2.WorkingDirectory = $InstallDir
         if (Test-Path $iconPath) {
             $shortcut2.IconLocation = $iconPath
@@ -341,5 +341,5 @@ Write-Host ""
 if (-not $NoLaunch) {
     Write-Host "[>] Starting ITMS Verification Copilot..." -ForegroundColor Cyan
     Write-Host "    Opening Web Console in your default browser..." -ForegroundColor Gray
-    Start-Process -FilePath "$InstallDir\run.bat" -WorkingDirectory "$InstallDir"
+    Start-Process -FilePath "$InstallDir\itms.cmd" -WorkingDirectory "$InstallDir"
 }

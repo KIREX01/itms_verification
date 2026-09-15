@@ -34,18 +34,19 @@ irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.ps1
 ```
 * **What this does**:
   1. Downloads and installs the application to your user profile directory (`%LOCALAPPDATA%\Programs\ITMS-Verification`).
-  2. Automatically places an **"ITMS Verification Copilot"** shortcut on your **Desktop** and in your **Start Menu**.
-  3. Launches the self-healing bootstrap (`run.bat`), which auto-installs Python 3.11 if needed, creates `.venv`, provisions AI plate detector weights, and opens `http://127.0.0.1:8000/` in your browser.
-  4. **Requires zero administrator privileges!**
+  2. Configures the global system command `itms` in your `PATH` and `%LOCALAPPDATA%\Microsoft\WindowsApps`.
+  3. Automatically places an **"ITMS Verification Copilot"** shortcut on your **Desktop** and in your **Start Menu** (targeting `itms.cmd`).
+  4. Automatically provisions Python, `.venv`, AI plate detector weights, and opens `http://127.0.0.1:8000/` in your browser.
+  5. **Requires zero administrator privileges!**
 
 ---
 
 ### Manual Windows Installation (Archive or Git)
 1. Extract or clone the `itms_verification` folder to your computer (e.g. `C:\ITMS\itms_verification` or `D:\itms_verification`).
-2. **Double-click `run.bat`** (or run `.\run.bat` in PowerShell/CMD).
-3. The launcher will automatically detect/provision Python, create the `.venv\`, download fine-tuned AI weights, apply database migrations, and open the Web Operator Console at `http://127.0.0.1:8000/`.
+2. **Double-click `itms.cmd`** (or type `itms` in PowerShell/CMD).
+3. The launcher will automatically detect/provision Python, prepare `.venv\`, download fine-tuned AI weights, apply database migrations, and open the Web Operator Console at `http://127.0.0.1:8000/`.
 
-> **Tip**: You can also run `.\install.ps1` locally to generate Desktop and Start Menu shortcuts.
+> **Tip**: You can also run `.\install.ps1` locally to register the system-wide command and Desktop shortcuts.
 
 ---
 
@@ -54,31 +55,21 @@ Open Terminal and run:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.sh | bash
 ```
-Installs to `~/.local/share/itms-verification`, sets executable permissions, provisions Python environment, and launches the console.
+Installs to `~/.local/share/itms-verification`, links the global `itms` command to `~/.local/bin/itms`, provisions the environment, and launches the console.
 
 ---
 
-### macOS Installation (Apple Silicon & Intel)
-1. Extract or clone the project folder on your Mac.
-2. In Finder, navigate to the folder and **double-click `run.command`**.
-   * *If macOS flags the script on first run*: Right-click (Control-click) `run.command` -> select **Open** -> click **Open**.
-   * *Terminal Alternative*:
-     ```bash
-     chmod +x run.command run.sh update.command update.sh
-     ./run.command
-     ```
-3. The script automatically sets up the environment, prepares AI models, starts the server, and launches Safari/Chrome at `http://127.0.0.1:8000/`.
-
----
-
-### Linux Installation (Ubuntu / Debian / RHEL)
-1. Open a terminal in the project directory.
-2. Ensure execution permissions and run:
+### macOS & Linux Manual Installation
+1. Open a terminal in the extracted project folder.
+2. Run:
    ```bash
-   chmod +x run.sh update.sh
-   ./run.sh
+   chmod +x itms scripts/bootstrap.py
+   ./itms
    ```
-3. The launcher provisions the environment and opens the Web Console in your default browser.
+3. To launch the Terminal UI instead, run:
+   ```bash
+   ./itms --tui
+   ```
 
 ---
 
@@ -171,20 +162,16 @@ The ITMS Verification Copilot includes a built-in semantic update engine linked 
 
 ---
 
-### Method 2: 1-Click Update Scripts
-When the application is closed, you can update with a single click:
-* **Windows**: Double-click `update.bat`
-* **macOS**: Double-click `update.command`
-* **Linux**: Run `./update.sh`
-
-These scripts run:
+### Method 2: Universal CLI Update
+Anywhere in your terminal (PowerShell, CMD, Bash, or Zsh), simply run:
 ```bash
-python manage.py check_updates --force --apply
+itms update
 ```
+This automatically invokes the release engine: checks GitHub Releases for new tags, downloads application updates, runs database migrations, and prompts you to restart.
 
 ---
 
-### Method 3: Command Line Updates
+### Method 3: Command Line Updates via Django
 Inspect and apply updates via Django management commands:
 ```bash
 # Check status without applying:
@@ -221,16 +208,15 @@ During any update (via Git pull or ZIP release unpacking), the update engine str
 ```text
 itms_verification/
 │
-├── run.bat                   # 1-Click Launcher for Windows (Web UI default)
-├── run.command               # 1-Click Launcher for macOS Finder
-├── run.sh                    # Terminal Launcher for Linux / macOS
+├── itms                      # Universal CLI Launcher for Linux & macOS (bash)
+├── itms.cmd                  # Universal CLI Launcher for Windows (CMD & Explorer)
+├── itms.ps1                  # Universal CLI Launcher for PowerShell
+├── itms_cli.py               # Central Python CLI dispatcher
+├── install.ps1               # 1-Click Installer for Windows
+├── install.sh                # 1-Click Installer for Linux & macOS
 │
-├── update.bat                # 1-Click Updater for Windows
-├── update.command            # 1-Click Updater for macOS Finder
-├── update.sh                 # Shell Updater for Linux / macOS
-│
-├── manage.py                 # Django command-line utility
-├── requirements.txt          # Python dependencies
+├── manage.py                 # Django command-line administrative utility
+├── requirements.txt          # Python application dependencies
 │
 ├── core/                     # Application source code
 │   ├── models.py             # Database models (Evidence, Orders, Batches, Audits)
@@ -301,15 +287,36 @@ For inspection stations or remote checkpoints without any internet connectivity:
    * Tesseract OCR (`tools/tesseract/`)
 2. **Transfer to Offline Machine**: Copy the complete `itms_verification` directory to a USB thumb drive and paste it onto the offline PC.
 3. **Offline Execution**:
-   * Double-clicking `run.bat` will find `.venv`, `tools/tesseract`, and `models/` locally and launch the Web Console instantly with 0 network calls.
+   * Double-clicking `itms.cmd` (or typing `itms`) will find `.venv`, `tools/tesseract`, and `models/` locally and launch the Web Console instantly with 0 network calls.
    * Computer vision inference, plate cropping, OCR extraction, and local database operations run 100% offline.
 
 ---
 
-## 10. Troubleshooting & FAQ
+## 10. Complete System Uninstallation
+
+To cleanly and completely purge ITMS Verification Copilot, all application files, the local database, shortcuts, and global command shims:
+
+### Via Command Line
+```bash
+itms uninstall
+```
+
+### Windows 1-Click PowerShell Uninstaller
+```powershell
+irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/uninstall.ps1 | iex
+```
+
+### macOS / Linux 1-Click Shell Uninstaller
+```bash
+curl -fsSL https://raw.githubusercontent.com/KIREX01/itms_verification/main/uninstall.sh | bash
+```
+
+---
+
+## 11. Troubleshooting & FAQ
 
 ### Q1: The browser does not open automatically.
-If your browser does not launch automatically upon running `run.bat` or `run.command`, simply open Chrome, Edge, Safari, or Firefox and navigate to:
+If your browser does not launch automatically upon running `itms`, open your web browser and navigate directly to:
 ```
 http://127.0.0.1:8000/
 ```
@@ -317,8 +324,8 @@ http://127.0.0.1:8000/
 ### Q2: What are the default operator credentials?
 The automatic bootstrap seeds a default administrator account:
 * **Username**: `admin`
-* **Password**: `admin123`
-*(You can change this password or create new operators in the Django Admin at `http://127.0.0.1:8000/admin/` or via `python manage.py createsuperuser`).*
+* **Password**: `admin`
+*(You can change this password or create new operators in the Web Console or via `itms manage createsuperuser`).*
 
 ### Q3: How do I manually configure Tesseract OCR?
 If you prefer manual setup rather than automated provisioning:

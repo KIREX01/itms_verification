@@ -38,7 +38,7 @@ else
 fi
 
 cd "$INSTALL_DIR"
-chmod +x run.sh update.sh run.command update.command itms scripts/bootstrap.py 2>/dev/null || true
+chmod +x itms scripts/bootstrap.py 2>/dev/null || true
 
 # 2. Python Environment & Virtualenv
 echo "[>] Verifying Python 3 environment..."
@@ -109,5 +109,5 @@ echo ""
 # 6. Launch if running interactively
 if [ -t 0 ] || [ -n "$DISPLAY" ] || [ "$(uname)" = "Darwin" ]; then
     echo "[>] Starting ITMS Verification Copilot..."
-    ./run.sh
+    ./itms
 fi

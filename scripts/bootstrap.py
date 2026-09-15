@@ -62,6 +62,17 @@ def log_error(msg: str) -> None:
     print(f"  [\033[91mx\033[0m] {msg}")
 
 
+def suppress_windows_error_dialogs() -> None:
+    """Suppress blocking Windows GUI error dialogs (e.g. missing DLLs) for child processes."""
+    if platform.system().lower() == "windows":
+        try:
+            import ctypes
+            # SEM_FAILCRITICALERRORS (0x0001) | SEM_NOGPFAULTERRORBOX (0x0002) | SEM_NOOPENFILEERRORBOX (0x8000)
+            ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002 | 0x8000)
+        except Exception:
+            pass
+
+
 def ensure_directories() -> bool:
     """Creates all required runtime directories if missing."""
     log_step("Checking required directory structure...")
@@ -184,33 +195,41 @@ def ensure_tesseract_installed(download_missing: bool = True) -> Tuple[bool, Opt
     1. Attempts silent install via winget.
     2. If winget fails or is absent, downloads UB-Mannheim installer and runs silent install into tools/tesseract.
     """
-    project_tools_tesseract = PROJECT_ROOT / "tools" / "tesseract" / "tesseract.exe"
+    suppress_windows_error_dialogs()
+    creationflags = 0x08000000 if platform.system().lower() == "windows" else 0
 
+    project_tools_tesseract = PROJECT_ROOT / "tools" / "tesseract" / "tesseract.exe"
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
+    user_tesseract = Path(local_app_data) / "Programs" / "Tesseract-OCR" / "tesseract.exe" if local_app_data else None
+
+    # Priority order: standard system install > PATH > user install > project tools
     check_paths = [
-        project_tools_tesseract,
         Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
         Path(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"),
+        user_tesseract,
         Path("/opt/homebrew/bin/tesseract"),
         Path("/usr/local/bin/tesseract"),
         Path("/usr/bin/tesseract"),
+        project_tools_tesseract,
     ]
+
+    shutil_which = shutil.which("tesseract")
+    if shutil_which:
+        check_paths.insert(0, Path(shutil_which))
+
     for p in check_paths:
-        if p.is_file():
+        if p and p.is_file():
             try:
-                probe = subprocess.run([str(p), "--version"], capture_output=True, timeout=5)
+                probe = subprocess.run(
+                    [str(p), "--version"],
+                    capture_output=True,
+                    timeout=5,
+                    creationflags=creationflags,
+                )
                 if probe.returncode == 0:
                     return True, str(p)
             except Exception:
                 continue
-
-    shutil_which = shutil.which("tesseract")
-    if shutil_which:
-        try:
-            probe = subprocess.run([shutil_which, "--version"], capture_output=True, timeout=5)
-            if probe.returncode == 0:
-                return True, shutil_which
-        except Exception:
-            pass
 
     if not download_missing or platform.system().lower() != "windows":
         return False, None
@@ -227,6 +246,7 @@ def ensure_tesseract_installed(download_missing: bool = True) -> Tuple[bool, Opt
                 capture_output=True,
                 text=True,
                 timeout=180,
+                creationflags=creationflags,
             )
             standard_path = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
             if standard_path.is_file():
@@ -248,15 +268,24 @@ def ensure_tesseract_installed(download_missing: bool = True) -> Tuple[bool, Opt
             log_step(f"Running silent local installation into {dest_tools_dir} (user-level, no admin required)...")
             # NSIS installer /S runs silent, /D= specifies destination directory (without quotes)
             install_cmd = f'"{installer_path}" /S /D={dest_tools_dir}'
-            subprocess.run(install_cmd, shell=True, timeout=120)
+            subprocess.run(install_cmd, shell=True, timeout=120, creationflags=creationflags)
 
             # Allow filesystem a moment to flush files
             import time
             time.sleep(3)
 
             if project_tools_tesseract.is_file():
-                log_success(f"Tesseract successfully provisioned locally: {project_tools_tesseract}")
-                return True, str(project_tools_tesseract)
+                probe = subprocess.run(
+                    [str(project_tools_tesseract), "--version"],
+                    capture_output=True,
+                    timeout=5,
+                    creationflags=creationflags,
+                )
+                if probe.returncode == 0:
+                    log_success(f"Tesseract successfully provisioned locally: {project_tools_tesseract}")
+                    return True, str(project_tools_tesseract)
+                else:
+                    log_warning(f"Extracted Tesseract at {project_tools_tesseract} failed health check (exit code {probe.returncode}).")
             else:
                 log_warning(f"Installer completed but {project_tools_tesseract} was not found.")
         except Exception as exc:
@@ -367,6 +396,7 @@ def run_diagnostics_table() -> None:
 
 
 def main() -> int:
+    suppress_windows_error_dialogs()
     parser = argparse.ArgumentParser(description="ITMS Verification Copilot Bootstrap & Resource Manager")
     parser.add_argument("--verify-only", action="store_true", help="Run diagnostics without mutating files or downloading")
     args = parser.parse_args()

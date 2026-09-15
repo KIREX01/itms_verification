@@ -866,7 +866,7 @@ class ITMSWebClient:
                     wh_match = re.search(r"/warehouse/([0-9a-fA-F-]+)/", row_html)
                     warehouse_id = wh_match.group(1) if wh_match else ""
 
-                    is_row_archived = archive or (len(clean_tds) >= 11)
+                    is_row_archived = bool(archive)
 
                     order_num = clean_tds[0] if len(clean_tds) > 0 else ""
                     sales_order = clean_tds[1] if len(clean_tds) > 1 else ""
@@ -975,29 +975,33 @@ class ITMSWebClient:
 
             # Determine local system status & active/archive flags
             is_installed = "installed" in order_status.lower()
-            if is_archived or is_installed:
+            if is_archived:
+                local_status = InstallationOrder.Status.INSTALLED if is_installed else InstallationOrder.Status.SUBMITTED
+                is_active = False
+                stage = "ARCHIVED"
+            elif is_installed:
                 local_status = InstallationOrder.Status.INSTALLED
                 is_archived = True
                 is_active = False
-                if not order_status:
-                    order_status = "Installed"
+                stage = "ARCHIVED"
             elif "approve" in order_status.lower():
                 local_status = InstallationOrder.Status.SUBMITTED
                 is_active = True
+                is_archived = False
             else:
                 local_status = InstallationOrder.Status.PENDING
-                is_active = not is_archived
+                is_active = True
+                is_archived = False
 
-            if is_archived:
-                stage = "ARCHIVED"
-            elif "/confirmation" in action_url:
-                stage = "STAGE_3_CONFIRMATION"
-            elif "/approve" in action_url:
-                stage = "STAGE_2_APPROVE"
-            elif "/installation" in action_url:
-                stage = "STAGE_1_INSTALLATION"
-            else:
-                stage = "STAGE_UNKNOWN"
+            if not is_archived:
+                if "/confirmation" in action_url:
+                    stage = "STAGE_3_CONFIRMATION"
+                elif "/approve" in action_url:
+                    stage = "STAGE_2_APPROVE"
+                elif "/installation" in action_url:
+                    stage = "STAGE_1_INSTALLATION"
+                else:
+                    stage = "STAGE_UNKNOWN"
 
             defaults = {
                 "registration_number": canonical_reg,
@@ -1040,16 +1044,24 @@ class ITMSWebClient:
                 updated_count += 1
 
             # Cross-verify and record audit trail for any matching vehicle pairs
-            if local_status == InstallationOrder.Status.INSTALLED:
+            # ONLY when legitimately fetched from archive and confirmed as Installed!
+            if is_archived and is_installed and local_status == InstallationOrder.Status.INSTALLED:
                 verified_installed_count += 1
                 pairs = VehicleInstallationPair.objects.filter(
                     models.Q(order=obj) | models.Q(registration_number_detected=canonical_reg)
                 )
+                now = timezone.now()
                 for pair in pairs:
                     if pair.verification_status != VehicleInstallationPair.VerificationStatus.SUBMITTED:
                         pair.verification_status = VehicleInstallationPair.VerificationStatus.SUBMITTED
+                        pair.submitted_at = pair.submitted_at or now
                         pair.order = obj
-                        pair.save(update_fields=["verification_status", "order"])
+                        pair.save(update_fields=["verification_status", "order", "submitted_at"])
+                        for img in (pair.front_image, pair.rear_image):
+                            if img and img.status != EvidenceImage.Status.SUBMITTED:
+                                img.status = EvidenceImage.Status.SUBMITTED
+                                img.submitted_at = img.submitted_at or now
+                                img.save(update_fields=["status", "submitted_at"])
                         SubmissionAuditLog.objects.create(
                             pair=pair,
                             action=SubmissionAuditLog.Action.ARCHIVE_VERIFY,
@@ -2834,10 +2846,16 @@ class ITMSWebClient:
                         order_obj.order_status = "Installed"
                         order_obj.save(update_fields=["status", "order_status"])
                         pairs = VehicleInstallationPair.objects.filter(order=order_obj)
+                        now = timezone.now()
                         for p in pairs:
                             p.verification_status = VehicleInstallationPair.VerificationStatus.SUBMITTED
-                            p.submitted_at = timezone.now()
+                            p.submitted_at = now
                             p.save(update_fields=["verification_status", "submitted_at"])
+                            for img in (p.front_image, p.rear_image):
+                                if img and img.status != EvidenceImage.Status.SUBMITTED:
+                                    img.status = EvidenceImage.Status.SUBMITTED
+                                    img.submitted_at = now
+                                    img.save(update_fields=["status", "submitted_at"])
                             SubmissionAuditLog.objects.create(
                                 pair=p,
                                 action=SubmissionAuditLog.Action.SUBMIT,

@@ -23,6 +23,9 @@ class SecureStorageAndFileHandlingTests(TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
+        config_service.set_setting("storage.vault_path", "media/vault")
+        config_service.set_setting("matcher.uturn_threshold_seconds", 1800)
+        config_service.set_setting("system.developer_mode", True)
 
     def test_get_secure_directories_creation(self):
         secure_dir = get_secure_dir(self.temp_dir)
@@ -92,4 +95,26 @@ class SecureStorageAndFileHandlingTests(TestCase):
         self.assertIn('secure', str(web_sess))
         self.assertIn('auth', str(web_sess))
         self.assertEqual(web_sess.name, 'itms_web_session.json')
+
+    def test_vault_path_configuration_and_service(self):
+        from core.services import vault_service
+        custom_vault = self.temp_dir / "custom_evidence_vault"
+        vault_service.set_vault_root(custom_vault)
+        self.assertEqual(str(vault_service.get_vault_root()), str(custom_vault.resolve()))
+        self.assertTrue(custom_vault.is_dir())
+
+        # Verify it was saved to secure/config.json
+        saved_val = config_service.get_setting("storage.vault_path")
+        self.assertEqual(saved_val, str(custom_vault.resolve()))
+
+    def test_uturn_threshold_configuration(self):
+        config_service.set_setting("matcher.uturn_threshold_seconds", 2400)
+        threshold = config_service.get_setting("matcher.uturn_threshold_seconds")
+        self.assertEqual(threshold, 2400)
+
+    def test_developer_mode_toggle_in_secure_config(self):
+        config_service.set_setting("system.developer_mode", False)
+        self.assertFalse(config_service.is_developer_mode())
+        config_service.set_setting("system.developer_mode", True)
+        self.assertTrue(config_service.is_developer_mode())
 

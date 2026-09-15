@@ -453,4 +453,172 @@ class WebUITestCase(TestCase):
             _, kwargs = mock_sub.call_args
             self.assertTrue(kwargs.get("dry_run"))
 
+    # --- Shift & Date Scope Handling Tests ---
+
+    def test_api_stats_returns_shift_and_cumulative_metrics(self):
+        """GET /api/stats/ returns shift stats dictionary alongside cumulative totals."""
+        self.client.force_login(self.user)
+        res = self.client.get(reverse("core:api_stats"))
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data["success"])
+        self.assertIn("shift", data)
+        shift = data["shift"]
+        self.assertIn("date", shift)
+        self.assertIn("pending_review", shift)
+        self.assertIn("approved", shift)
+        self.assertIn("submitted", shift)
+        self.assertIn("total_photos", shift)
+
+    def test_api_pairs_list_scope_filtering(self):
+        """GET /api/pairs/ correctly filters pairs by TODAY, CARRYOVER, and ALL scopes."""
+        from datetime import timedelta
+        self.client.force_login(self.user)
+
+        # Create prior-day batch and pair
+        prior_batch = IngestionBatch.objects.create(
+            batch_id="BATCH-PRIOR-001",
+            source_type=IngestionBatch.SourceType.WEB,
+        )
+        prior_front = EvidenceImage.objects.create(
+            batch=prior_batch,
+            file_hash="hash_prior_f",
+            original_source_path="/test/prior_f.jpg",
+            vault_file="vault/prior_f.jpg",
+            detected_plate="PRIOR99",
+            orientation=EvidenceImage.Orientation.FRONT,
+        )
+        prior_pair = VehicleInstallationPair.objects.create(
+            registration_number_detected="PRIOR99",
+            front_image=prior_front,
+            verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW,
+        )
+        # Manually backdate prior batch and pair created_at
+        yesterday = timezone.now() - timedelta(days=2)
+        IngestionBatch.objects.filter(id=prior_batch.id).update(created_at=yesterday)
+        EvidenceImage.objects.filter(id=prior_front.id).update(ingested_at=yesterday)
+        VehicleInstallationPair.objects.filter(id=prior_pair.id).update(created_at=yesterday)
+
+        # Test scope=TODAY
+        res_today = self.client.get(reverse("core:api_pairs_list") + "?scope=TODAY")
+        self.assertEqual(res_today.status_code, 200)
+        data_today = res_today.json()
+        today_ids = [p["id"] for p in data_today["pairs"]]
+        self.assertIn(self.pair.id, today_ids)
+        self.assertNotIn(prior_pair.id, today_ids)
+
+        # Test scope=CARRYOVER
+        res_carry = self.client.get(reverse("core:api_pairs_list") + "?scope=CARRYOVER")
+        self.assertEqual(res_carry.status_code, 200)
+        data_carry = res_carry.json()
+        carry_ids = [p["id"] for p in data_carry["pairs"]]
+        self.assertIn(prior_pair.id, carry_ids)
+        self.assertNotIn(self.pair.id, carry_ids)
+
+        # Test scope=ALL
+        res_all = self.client.get(reverse("core:api_pairs_list") + "?scope=ALL")
+        self.assertEqual(res_all.status_code, 200)
+        data_all = res_all.json()
+        all_ids = [p["id"] for p in data_all["pairs"]]
+        self.assertIn(self.pair.id, all_ids)
+        self.assertIn(prior_pair.id, all_ids)
+
+    def test_api_batches_list_scope_filtering(self):
+        """GET /api/batches/ filters batches by shift scope."""
+        from datetime import timedelta
+        self.client.force_login(self.user)
+
+        prior_batch = IngestionBatch.objects.create(
+            batch_id="BATCH-OLD-999",
+            source_type=IngestionBatch.SourceType.WEB,
+        )
+        yesterday = timezone.now() - timedelta(days=2)
+        IngestionBatch.objects.filter(id=prior_batch.id).update(created_at=yesterday)
+
+        # scope=TODAY
+        res_today = self.client.get(reverse("core:api_batches_list") + "?scope=TODAY")
+        data_today = res_today.json()
+        batch_ids_today = [b["batch_id"] for b in data_today["batches"]]
+        self.assertIn(self.batch.batch_id, batch_ids_today)
+        self.assertNotIn(prior_batch.batch_id, batch_ids_today)
+
+        # scope=CARRYOVER
+        res_carry = self.client.get(reverse("core:api_batches_list") + "?scope=CARRYOVER")
+        data_carry = res_carry.json()
+        batch_ids_carry = [b["batch_id"] for b in data_carry["batches"]]
+        self.assertIn(prior_batch.batch_id, batch_ids_carry)
+        self.assertNotIn(self.batch.batch_id, batch_ids_carry)
+
+    def test_api_history_list_date_scoping(self):
+        """GET /api/history/ filters events by date_scope=TODAY vs ALL."""
+        from datetime import timedelta
+        self.client.force_login(self.user)
+
+        prior_pair = VehicleInstallationPair.objects.create(
+            registration_number_detected="HIST99",
+            order=self.order,
+            verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED,
+        )
+
+        # Create today's audit log
+        today_log = SubmissionAuditLog.objects.create(
+            pair=self.pair,
+            action=SubmissionAuditLog.Action.SUBMIT,
+            result=SubmissionAuditLog.ResultStatus.SUCCESS,
+            message="Submitted today",
+        )
+        # Create prior day audit log
+        prior_log = SubmissionAuditLog.objects.create(
+            pair=prior_pair,
+            action=SubmissionAuditLog.Action.SUBMIT,
+            result=SubmissionAuditLog.ResultStatus.SUCCESS,
+            message="Submitted 3 days ago",
+        )
+        three_days_ago = timezone.now() - timedelta(days=3)
+        SubmissionAuditLog.objects.filter(id=prior_log.id).update(timestamp=three_days_ago)
+
+        # date_scope=TODAY
+        res_today = self.client.get(reverse("core:api_history_list") + "?date_scope=TODAY")
+        data_today = res_today.json()
+        log_ids_today = [item["id"] for item in data_today["items"]]
+        self.assertIn(f"log_{today_log.id}", log_ids_today)
+        self.assertNotIn(f"log_{prior_log.id}", log_ids_today)
+
+        # date_scope=ALL
+        res_all = self.client.get(reverse("core:api_history_list") + "?date_scope=ALL")
+        data_all = res_all.json()
+        log_ids_all = [item["id"] for item in data_all["items"]]
+        self.assertIn(f"log_{today_log.id}", log_ids_all)
+        self.assertIn(f"log_{prior_log.id}", log_ids_all)
+
+    def test_api_batch_submit_scoped_to_today(self):
+        """POST /api/batch-submit/ with scope=TODAY only submits approved pairs created today."""
+        from datetime import timedelta
+        from unittest.mock import patch
+        from core.services.submission_worker import SubmissionOutcome
+        self.client.force_login(self.user)
+
+        # Approve today's pair
+        self.pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
+        self.pair.save()
+
+        # Create prior approved pair
+        prior_pair = VehicleInstallationPair.objects.create(
+            registration_number_detected="CARRY99",
+            order=self.order,
+            verification_status=VehicleInstallationPair.VerificationStatus.APPROVED,
+        )
+        three_days_ago = timezone.now() - timedelta(days=3)
+        VehicleInstallationPair.objects.filter(id=prior_pair.id).update(created_at=three_days_ago)
+
+        with patch("core.services.submission_worker.submit_pair") as mock_sub:
+            mock_sub.return_value = SubmissionOutcome(pair_id=self.pair.id, success=True, token="BATCH-SIM", dry_run=True)
+
+            res = self.client.post(reverse("core:api_batch_submit"), {"scope": "TODAY", "dry_run": "true"})
+            self.assertEqual(res.status_code, 200)
+            data = res.json()
+            self.assertTrue(data["success"])
+            self.assertEqual(data["total"], 1)  # Only today's pair
+            self.assertEqual(data["succeeded"], 1)
+
 

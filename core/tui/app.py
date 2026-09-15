@@ -34,6 +34,8 @@ if not apps.ready:
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "itms_project.settings")
     django.setup()
 
+from django.conf import settings
+
 from datetime import datetime
 from textual import events
 from textual.app import App, ComposeResult
@@ -98,6 +100,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         ("o", "drain_outbox", "Drain Outbox"),
         ("ctrl+r", "retry_failed", "Retry Failed (^R)"),
         ("e", "export_shift_report", "Export Report"),
+        ("d", "cycle_date_scope", "Date Scope (D)"),
         ("a", "approve", "Approve"),
         ("s", "swap", "Swap Front/Rear"),
         ("l", "link_pair", "Link / Pick Photo"),
@@ -114,6 +117,9 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         self.current_user = None
         self.history_filter_index = 0
         self.current_history_filter = HISTORY_FILTERS[0]
+        self.current_queue_scope = "TODAY"
+        self.current_batches_scope = "TODAY"
+        self.current_history_date_scope = "TODAY"
         self._selected_batch_id = None
         self._selected_image_id = None
         self._vision_running = False
@@ -140,6 +146,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
                     "[b]Add Photos:[/b] Press [bold green]I[/bold green] for Native Dialog  │  Press [bold cyan]W[/bold cyan] for Web Upload  │  Press [bold yellow]P[/bold yellow] to process batch  │  Press [bold magenta]V[/bold magenta] to view photo with BBox",
                     id="batches-upload-bar",
                 )
+                yield Static(id="batches-scope-bar")
                 with Horizontal(classes="tab-horizontal"):
                     with Vertical(classes="table-panel"):
                         yield Static(
@@ -165,6 +172,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
                     "Press [bold magenta]Y[/bold magenta] Sync Orders",
                     id="queue-action-bar",
                 )
+                yield Static(id="queue-scope-bar")
                 with Horizontal(classes="tab-horizontal"):
                     yield DataTable(id="table-queue", classes="table-panel")
                     yield InspectorPane(id="inspector-queue", classes="inspector-panel")
@@ -235,6 +243,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
                 self.query_one("#dashboard-pane", DashboardPane).refresh_dashboard()
             except Exception:
                 pass
+            self._check_vault_startup()
         else:
             self.push_screen(LandingAuthScreen(), self._on_auth_completed)
 
@@ -242,6 +251,20 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
 
         # Periodically refresh dashboard and outbox monitor every 15s
         self.set_interval(15.0, self._auto_refresh_dashboard_and_outbox)
+
+    def _on_vault_configured(self, chosen_path=None) -> None:
+        from core.services import vault_service
+        root = vault_service.get_vault_root()
+        self.log_message(f"Evidence Vault active: [bold green]{root}[/bold green]", level="SUCCESS")
+        try:
+            self.query_one("#dashboard-pane", DashboardPane).refresh_dashboard()
+        except Exception:
+            pass
+
+    def action_change_vault_location(self) -> None:
+        """Opens interactive Vault Directory chooser modal."""
+        from core.tui.dialogs import VaultLocationDialog
+        self.push_screen(VaultLocationDialog(is_startup=False), self._on_vault_configured)
 
     def _auto_refresh_dashboard_and_outbox(self) -> None:
         """Periodically updates dashboard telemetry and checks offline outbox queue."""
@@ -278,6 +301,16 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         except Exception:
             pass
 
+    def _check_vault_startup(self) -> None:
+        from django.conf import settings
+        from core.services import config_service, vault_service
+        is_testing = any("test" in arg for arg in sys.argv) or getattr(settings, "IS_TESTING", False)
+        if not is_testing and config_service.get_setting("storage.prompt_vault_on_startup", True):
+            from core.tui.dialogs import VaultLocationDialog
+            self.push_screen(VaultLocationDialog(is_startup=True), self._on_vault_configured)
+        else:
+            self.log_message(f"Active Evidence Vault: [cyan]{vault_service.get_vault_root()}[/cyan]", level="INFO")
+
     def _on_auth_completed(self, user):
         if not user:
             self.exit()
@@ -292,6 +325,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         except Exception:
             pass
         self.reload_data()
+        self._check_vault_startup()
 
     def log_message(self, message: str, level: str = "INFO"):
         """Writes a formatted, timestamped message to the bottom activity log."""
@@ -461,15 +495,23 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         self.log_message(f"[yellow]Scanner Input:[/yellow] Read '{raw_code}', no matching pair or order in system.", level="WARNING")
 
     def reload_data(self):
-        """Reloads dashboard telemetry and all table datasets from active database."""
+        """Reloads dashboard telemetry, scope bars, and all table datasets from active database."""
         try:
             from core.tui.dashboard_pane import DashboardPane
             self.query_one("#dashboard-pane", DashboardPane).refresh_dashboard()
         except Exception:
             pass
+        self._update_queue_scope_bar()
         self._reload_queue_table()
+        self._update_history_filter_bar()
         self._reload_history_table()
+        self._update_batches_scope_bar()
         self._reload_batches_table()
+        try:
+            metrics = self.query_one("#metrics")
+            metrics.refresh_metrics()
+        except Exception:
+            pass
 
 
 def run():

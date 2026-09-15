@@ -1,12 +1,18 @@
 """
 Settings and system-wide configuration pane for the ITMS Operator TUI.
 
-Provides an interactive GUI for operators and administrators to adjust:
-- Submission safety mode (Dry-run toggle, Step 3 auto-confirmation, timeouts)
-- Vision & OCR intelligence (Ensemble voting, Uganda plate syntax disambiguation)
-- Storage lifecycle retention (Crops retention, shift reports retention)
-- Database engine inspection & WAL optimization
-- Operator permissions (Developer mode toggle)
+Provides an interactive GUI for operators and developers:
+- Operator Mode:
+  * Submission safety mode (Dry-run toggle, Step 3 auto-confirmation, safety guarantee)
+  * Evidence Vault file location chooser & startup prompt toggle
+  * Developer Mode switch
+- Developer Mode (revealed when Developer Mode is ON):
+  * U-Turn Turnaround time threshold adjustment for Tier 2 spatial matcher
+  * Submission & Network timeouts and circuit breaker fine-tuning
+  * Smart on-the-fly multipart compression parameters
+  * Vision pipeline & OCR intelligence controls
+  * Storage retention lifecycle policies
+  * PostgreSQL connection and database engine switcher
 """
 import os
 import shutil
@@ -23,37 +29,92 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widget import Widget
 from textual.widgets import Button, Input, Label, Static, Switch
 
-from core.services import config_service
+from core.services import config_service, vault_service
 
 
 class SettingsPane(Vertical):
-    """Interactive Settings and System Configuration Pane (Tab 5)."""
+    """Interactive Settings and System Configuration Pane (Tab 6)."""
+
+    BINDINGS = [
+        ("down", "scroll_down", "Scroll Down"),
+        ("up", "scroll_up", "Scroll Up"),
+        ("pagedown", "page_down", "Page Down"),
+        ("pageup", "page_up", "Page Up"),
+        ("home", "scroll_home", "Top"),
+        ("end", "scroll_end", "Bottom"),
+    ]
+
+    def action_scroll_down(self) -> None:
+        try:
+            self.query_one("#settings-scroll-body", VerticalScroll).action_scroll_down()
+        except Exception:
+            pass
+
+    def action_scroll_up(self) -> None:
+        try:
+            self.query_one("#settings-scroll-body", VerticalScroll).action_scroll_up()
+        except Exception:
+            pass
+
+    def action_page_down(self) -> None:
+        try:
+            self.query_one("#settings-scroll-body", VerticalScroll).action_page_down()
+        except Exception:
+            pass
+
+    def action_page_up(self) -> None:
+        try:
+            self.query_one("#settings-scroll-body", VerticalScroll).action_page_up()
+        except Exception:
+            pass
+
+    def action_scroll_home(self) -> None:
+        try:
+            self.query_one("#settings-scroll-body", VerticalScroll).action_scroll_home()
+        except Exception:
+            pass
+
+    def action_scroll_end(self) -> None:
+        try:
+            self.query_one("#settings-scroll-body", VerticalScroll).action_scroll_end()
+        except Exception:
+            pass
 
     def compose(self) -> ComposeResult:
         cfg = config_service.load_config()
 
+        # Operator settings
         dry_run = cfg.get("submission", {}).get("dry_run_mode", True)
         step3 = cfg.get("submission", {}).get("submit_step3", True)
+        show_safety = cfg.get("system", {}).get("show_safety_guarantee", False)
+        vault_prompt_startup = cfg.get("storage", {}).get("prompt_vault_on_startup", True)
+        dev_mode = cfg.get("system", {}).get("developer_mode", False)
+
+        # Developer settings: Trajectory Matcher
+        uturn_threshold = str(cfg.get("matcher", {}).get("uturn_threshold_seconds", 1800))
+
+        # Developer settings: Network & Submission
         timeout = str(cfg.get("submission", {}).get("request_timeout_seconds", 30))
         circuit_breaker = str(cfg.get("submission", {}).get("circuit_breaker_threshold", 3))
-
-        ensemble = cfg.get("vision", {}).get("adaptive_ensemble_voting", True)
-        syntax_corr = cfg.get("vision", {}).get("positional_disambiguation", True)
-        auto_pre = cfg.get("vision", {}).get("auto_preprocess_ingest", True)
-
-        crop_days = str(cfg.get("storage", {}).get("crops_retention_days", 7))
-        export_days = str(cfg.get("storage", {}).get("export_retention_days", 30))
-
         compression_enabled = cfg.get("compression", {}).get("enabled", True)
         comp_max_dim = str(cfg.get("compression", {}).get("max_dimension", 1920))
         comp_quality = str(cfg.get("compression", {}).get("jpeg_quality", 88))
-
         outbox_enabled = cfg.get("outbox", {}).get("enabled", True)
         outbox_interval = str(cfg.get("outbox", {}).get("auto_sync_interval_seconds", 15))
 
-        dev_mode = cfg.get("system", {}).get("developer_mode", False)
-        show_safety = cfg.get("system", {}).get("show_safety_guarantee", False)
+        # Developer settings: Vision & OCR
+        ensemble = cfg.get("vision", {}).get("adaptive_ensemble_voting", True)
+        syntax_corr = cfg.get("vision", {}).get("positional_disambiguation", True)
+        auto_pre = cfg.get("vision", {}).get("auto_preprocess_ingest", True)
+        min_ocr_conf = str(cfg.get("vision", {}).get("min_ocr_confidence", 0.55))
+        detector_conf = str(cfg.get("vision", {}).get("detector_conf_threshold", 0.35))
 
+        # Developer settings: Storage retention
+        crop_days = str(cfg.get("storage", {}).get("crops_retention_days", 7))
+        export_days = str(cfg.get("storage", {}).get("export_retention_days", 30))
+        vault_days = str(cfg.get("storage", {}).get("vault_retention_days", 7))
+
+        # Developer settings: Database
         db_cfg = cfg.get("database", {})
         active_engine = db_cfg.get("engine", "sqlite").lower()
         use_pg = (connection.vendor != "sqlite" or active_engine in ("postgres", "postgresql"))
@@ -64,6 +125,7 @@ class SettingsPane(Vertical):
         pg_pass = str(db_cfg.get("postgres_password", ""))
 
         db_info = config_service.get_active_database_info()["display"]
+        current_vault_root = str(vault_service.get_vault_root())
 
         with Vertical(id="settings-container"):
             # Top toolbar
@@ -75,10 +137,14 @@ class SettingsPane(Vertical):
             )
 
             with VerticalScroll(id="settings-scroll-body"):
-                # Section 1: Submission Safety & Network
+                # ==========================================
+                # SECTION 1: OPERATOR ESSENTIALS (Visible)
+                # ==========================================
+
+                # Card 1A: Submission Safety Controls
                 with Vertical(classes="settings-card"):
                     yield Static("[bold yellow]🚀 Submission & Safety Controls[/bold yellow]", classes="settings-card-title")
-                    
+
                     with Horizontal(classes="settings-row"):
                         yield Static("[b]Dry-Run Safety Mode[/b]\n[dim]Simulate ITMS submission without remote mutating actions[/dim]", classes="settings-label")
                         yield Switch(value=dry_run, id="switch-dry-run")
@@ -88,117 +154,171 @@ class SettingsPane(Vertical):
                         yield Switch(value=step3, id="switch-submit-step3")
 
                     with Horizontal(classes="settings-row"):
-                        yield Static("[b]Smart On-The-Fly Multipart Compression[/b]\n[dim]Downsample 12-48MP photos for HTTP upload (Master photos in vault remain untouched)[/dim]", classes="settings-label")
-                        yield Switch(value=compression_enabled, id="switch-compression-enabled")
-
-                    with Horizontal(classes="settings-row"):
-                        yield Static("[b]Max Multipart Photo Dimension (px)[/b]\n[dim]Max width or height in px (LANCZOS downsampling, default: 1920)[/dim]", classes="settings-label")
-                        yield Input(value=comp_max_dim, id="input-compression-dim", classes="settings-input")
-
-                    with Horizontal(classes="settings-row"):
-                        yield Static("[b]JPEG Compression Quality (1-100)[/b]\n[dim]Quality factor for multipart payload (default: 88)[/dim]", classes="settings-label")
-                        yield Input(value=comp_quality, id="input-compression-quality", classes="settings-input")
-
-                    with Horizontal(classes="settings-row"):
-                        yield Static("[b]Offline Outbox & Auto-Sync[/b]\n[dim]Auto-transition network drops to OFFLINE_OUTBOX and background drain[/dim]", classes="settings-label")
-                        yield Switch(value=outbox_enabled, id="switch-outbox-enabled")
-
-                    with Horizontal(classes="settings-row"):
-                        yield Static("[b]Auto-Sync Ping Interval (seconds)[/b]\n[dim]Heartbeat interval to probe stock.itms.ug and drain outbox queue[/dim]", classes="settings-label")
-                        yield Input(value=outbox_interval, id="input-outbox-interval", classes="settings-input")
-
-                    with Horizontal(classes="settings-row"):
-                        yield Static("[b]Circuit Breaker Threshold[/b]\n[dim]Halt batch after N consecutive network disconnects[/dim]", classes="settings-label")
-                        yield Input(value=circuit_breaker, id="input-circuit-breaker", classes="settings-input")
-
-                    with Horizontal(classes="settings-row"):
-                        yield Static("[b]HTTP Request Timeout (seconds)[/b]\n[dim]Socket timeout per API request before retry[/dim]", classes="settings-label")
-                        yield Input(value=timeout, id="input-timeout", classes="settings-input")
-
-                    with Horizontal(classes="settings-row"):
-                        yield Static("[b]Show Safety Guarantee Card[/b]\n[dim]Display safe audit or live mode guarantee banner in ITMS Hub[/dim]", classes="settings-label")
+                        yield Static("[b]Show Safety Guarantee Card[/b]\n[dim]Display audit/live mode guarantee banner in ITMS Hub[/dim]", classes="settings-label")
                         yield Switch(value=show_safety, id="switch-show-safety")
 
-                # Section 2: Vision & OCR Intelligence
+                # Card 1B: Evidence Vault Storage Location
                 with Vertical(classes="settings-card"):
-                    yield Static("[bold magenta]🧠 Vision & OCR Intelligence[/bold magenta]", classes="settings-card-title")
+                    yield Static("[bold green]📦 Evidence Vault Storage Location[/bold green]", classes="settings-card-title")
 
                     with Horizontal(classes="settings-row"):
-                        yield Static("[b]Adaptive Contrast Ensemble Voting[/b]\n[dim]Run 5-variant contrast ensemble on challenging or shadowed plates[/dim]", classes="settings-label")
-                        yield Switch(value=ensemble, id="switch-ensemble")
+                        yield Static(
+                            f"[b]Active Vault Root:[/b] [bold yellow]{current_vault_root}[/bold yellow]\n"
+                            "[dim]Directory where incoming evidence photos, EXIF metadata, and hashes are stored[/dim]",
+                            id="label-vault-path",
+                            classes="settings-label",
+                        )
+                        yield Button("📂 Choose / Change Vault Directory", variant="primary", id="btn-change-vault")
 
                     with Horizontal(classes="settings-row"):
-                        yield Static("[b]Uganda Plate Positional Disambiguation[/b]\n[dim]Enforce Ugandan vehicle registration syntax on OCR characters[/dim]", classes="settings-label")
-                        yield Switch(value=syntax_corr, id="switch-syntax-corr")
+                        yield Static("[b]Prompt for Vault Location on Startup[/b]\n[dim]Allow operator to choose or confirm vault directory whenever the app launches[/dim]", classes="settings-label")
+                        yield Switch(value=vault_prompt_startup, id="switch-vault-prompt-startup")
 
-                    with Horizontal(classes="settings-row"):
-                        yield Static("[b]Auto-Enhance Photos at Ingestion[/b]\n[dim]Dynamic CLAHE contrast normalization and unsharp masking[/dim]", classes="settings-label")
-                        yield Switch(value=auto_pre, id="switch-auto-pre")
-
-                # Section 3: Storage & Lifecycle Retention
-                with Vertical(classes="settings-card"):
-                    yield Static("[bold green]📦 Storage Retention & Database Health[/bold green]", classes="settings-card-title")
-
-                    with Horizontal(classes="settings-row"):
-                        yield Static("[b]Temporary Crops Retention (Days)[/b]\n[dim]Delete localized plate crops older than N days[/dim]", classes="settings-label")
-                        yield Input(value=crop_days, id="input-crop-days", classes="settings-input")
-
-                    with Horizontal(classes="settings-row"):
-                        yield Static("[b]Shift Export Reports Retention (Days)[/b]\n[dim]Delete timestamped CSV shift reports older than N days[/dim]", classes="settings-label")
-                        yield Input(value=export_days, id="input-export-days", classes="settings-input")
-
-                # Section 4: Operator Role & Permissions
+                # Card 1C: Permissions & Developer Mode Switch
                 with Vertical(classes="settings-card"):
                     yield Static("[bold red]🛡️ Permissions & System Mode[/bold red]", classes="settings-card-title")
 
                     with Horizontal(classes="settings-row"):
-                        yield Static("[b]Developer & Test Mode[/b]\n[dim]When OFF, hides developer test commands, synthetic order seeders, and database switcher[/dim]", classes="settings-label")
-                        yield Switch(value=dev_mode, id="switch-dev-mode")
-
-                # Section 5: Developer Database & PostgreSQL Connection (active when Developer Mode is ON)
-                with Vertical(
-                    classes=f"settings-card{' ' if dev_mode else ' hidden'}",
-                    id="card-dev-database",
-                ):
-                    yield Static("[bold cyan]🗄️ Developer Database Engine & PostgreSQL Connection[/bold cyan]", classes="settings-card-title")
-
-                    with Horizontal(classes="settings-row"):
                         yield Static(
-                            "[b]Database Backend Engine[/b]\n"
-                            "[dim]Toggle ON to use PostgreSQL Server; OFF to use local SQLite (db.sqlite3)[/dim]",
+                            "[b]Developer & Test Mode[/b]\n"
+                            "[dim]Toggle ON to reveal advanced technical variables: U-Turn trajectory adjustment, side-by-side image comparison, vision tuning, multipart compression, and PostgreSQL switcher.[/dim]",
                             classes="settings-label",
                         )
-                        yield Switch(value=use_pg, id="switch-use-postgres")
+                        yield Switch(value=dev_mode, id="switch-dev-mode")
 
-                    with Vertical(id="pg-config-container", classes="" if use_pg else "hidden"):
-                        with Horizontal(classes="settings-row"):
-                            yield Static("[b]PostgreSQL Host[/b]\n[dim]Server hostname or IP (default: localhost)[/dim]", classes="settings-label")
-                            yield Input(value=pg_host, placeholder="localhost", id="input-pg-host", classes="settings-input")
-
-                        with Horizontal(classes="settings-row"):
-                            yield Static("[b]PostgreSQL Port[/b]\n[dim]Default port: 5432[/dim]", classes="settings-label")
-                            yield Input(value=pg_port, placeholder="5432", id="input-pg-port", classes="settings-input")
-
-                        with Horizontal(classes="settings-row"):
-                            yield Static("[b]Database Name[/b]\n[dim]PostgreSQL database name[/dim]", classes="settings-label")
-                            yield Input(value=pg_db, placeholder="itms", id="input-pg-db", classes="settings-input")
-
-                        with Horizontal(classes="settings-row"):
-                            yield Static("[b]Database User[/b]\n[dim]Database username (e.g. postgres)[/dim]", classes="settings-label")
-                            yield Input(value=pg_user, placeholder="postgres", id="input-pg-user", classes="settings-input")
+                # ==========================================
+                # SECTION 2: DEVELOPER MODE CONTROLS
+                # (Revealed ONLY when Developer Mode is ON)
+                # ==========================================
+                with Vertical(
+                    classes="" if dev_mode else "hidden",
+                    id="developer-settings-container",
+                ):
+                    # Card 2A: Trajectory & Spatial Matcher Calibration
+                    with Vertical(classes="settings-card"):
+                        yield Static("[bold cyan]🔄 Trajectory & Spatial Matcher Calibration (Developer Mode)[/bold cyan]", classes="settings-card-title")
 
                         with Horizontal(classes="settings-row"):
-                            yield Static("[b]Database Password[/b]\n[dim]Database password (masked)[/dim]", classes="settings-label")
-                            yield Input(value=pg_pass, password=True, placeholder="Password", id="input-pg-password", classes="settings-input")
+                            yield Static(
+                                "[b]U-Turn Turnaround Threshold (seconds)[/b]\n"
+                                "[dim]Maximum turnaround delta between first & last photos for Tier 2 reverse U-turn walk alignment (default: 1800s)[/dim]",
+                                classes="settings-label",
+                            )
+                            yield Input(value=uturn_threshold, id="input-uturn-threshold", classes="settings-input")
 
-                    with Horizontal(classes="settings-db-buttons"):
-                        yield Button("🔌 Test PostgreSQL Connection", variant="primary", id="btn-test-pg")
-                        yield Button("🔄 Switch Active Database Engine", variant="warning", id="btn-switch-db")
+                    # Card 2B: Submission & Network Fine-Tuning
+                    with Vertical(classes="settings-card"):
+                        yield Static("[bold cyan]⚡ Submission & Network Fine-Tuning (Developer Mode)[/bold cyan]", classes="settings-card-title")
 
-                    yield Static(
-                        "[dim]Ready. Test PostgreSQL reachability or switch active database engine.[/dim]",
-                        id="settings-db-feedback",
-                    )
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Smart Multipart Photo Compression[/b]\n[dim]Downsample 12-48MP photos for HTTP upload (Master photos in vault remain untouched)[/dim]", classes="settings-label")
+                            yield Switch(value=compression_enabled, id="switch-compression-enabled")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Max Photo Dimension (px)[/b]\n[dim]Max width or height in px (LANCZOS downsampling, default: 1920)[/dim]", classes="settings-label")
+                            yield Input(value=comp_max_dim, id="input-compression-dim", classes="settings-input")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]JPEG Compression Quality (1-100)[/b]\n[dim]Quality factor for multipart payload (default: 88)[/dim]", classes="settings-label")
+                            yield Input(value=comp_quality, id="input-compression-quality", classes="settings-input")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Offline Outbox & Auto-Sync[/b]\n[dim]Auto-transition network drops to OFFLINE_OUTBOX and background drain[/dim]", classes="settings-label")
+                            yield Switch(value=outbox_enabled, id="switch-outbox-enabled")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Auto-Sync Ping Interval (seconds)[/b]\n[dim]Heartbeat interval to probe stock.itms.ug and drain outbox queue[/dim]", classes="settings-label")
+                            yield Input(value=outbox_interval, id="input-outbox-interval", classes="settings-input")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Circuit Breaker Threshold[/b]\n[dim]Halt batch after N consecutive network disconnects (default: 3)[/dim]", classes="settings-label")
+                            yield Input(value=circuit_breaker, id="input-circuit-breaker", classes="settings-input")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]HTTP Request Timeout (seconds)[/b]\n[dim]Socket timeout per API request before retry (default: 30)[/dim]", classes="settings-label")
+                            yield Input(value=timeout, id="input-timeout", classes="settings-input")
+
+                    # Card 2C: Vision Pipeline & OCR Intelligence
+                    with Vertical(classes="settings-card"):
+                        yield Static("[bold magenta]🧠 Vision Pipeline & OCR Intelligence (Developer Mode)[/bold magenta]", classes="settings-card-title")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Adaptive Contrast Ensemble Voting[/b]\n[dim]Run 5-variant contrast ensemble on challenging or shadowed plates[/dim]", classes="settings-label")
+                            yield Switch(value=ensemble, id="switch-ensemble")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Uganda Plate Positional Disambiguation[/b]\n[dim]Enforce Ugandan vehicle registration syntax on OCR characters[/dim]", classes="settings-label")
+                            yield Switch(value=syntax_corr, id="switch-syntax-corr")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Auto-Enhance Photos at Ingestion[/b]\n[dim]Dynamic CLAHE contrast normalization and unsharp masking[/dim]", classes="settings-label")
+                            yield Switch(value=auto_pre, id="switch-auto-pre")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Minimum OCR Confidence Threshold[/b]\n[dim]Reject plate detections below this confidence (default: 0.55)[/dim]", classes="settings-label")
+                            yield Input(value=min_ocr_conf, id="input-min-ocr-conf", classes="settings-input")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]YOLO Detector Confidence Threshold[/b]\n[dim]Reject bounding boxes below this confidence (default: 0.35)[/dim]", classes="settings-label")
+                            yield Input(value=detector_conf, id="input-detector-conf", classes="settings-input")
+
+                    # Card 2D: Storage Retention & Lifecycle Policies
+                    with Vertical(classes="settings-card"):
+                        yield Static("[bold green]📦 Storage Retention & Lifecycle Policies (Developer Mode)[/bold green]", classes="settings-card-title")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Temporary Crops Retention (Days)[/b]\n[dim]Delete localized plate crops older than N days[/dim]", classes="settings-label")
+                            yield Input(value=crop_days, id="input-crop-days", classes="settings-input")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Shift Export Reports Retention (Days)[/b]\n[dim]Delete timestamped CSV shift reports older than N days[/dim]", classes="settings-label")
+                            yield Input(value=export_days, id="input-export-days", classes="settings-input")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Master Vault Photos Retention (Days)[/b]\n[dim]Prune submitted photos older than N days from vault storage[/dim]", classes="settings-label")
+                            yield Input(value=vault_days, id="input-vault-days", classes="settings-input")
+
+                    # Card 2E: Developer Database Engine & PostgreSQL Connection
+                    with Vertical(classes="settings-card", id="card-dev-database"):
+                        yield Static("[bold cyan]🗄️ Developer Database Engine & PostgreSQL Connection (Developer Mode)[/bold cyan]", classes="settings-card-title")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static(
+                                "[b]Database Backend Engine[/b]\n"
+                                "[dim]Toggle ON to use PostgreSQL Server; OFF to use local SQLite (db.sqlite3)[/dim]",
+                                classes="settings-label",
+                            )
+                            yield Switch(value=use_pg, id="switch-use-postgres")
+
+                        with Vertical(id="pg-config-container", classes="" if use_pg else "hidden"):
+                            with Horizontal(classes="settings-row"):
+                                yield Static("[b]PostgreSQL Host[/b]\n[dim]Server hostname or IP (default: localhost)[/dim]", classes="settings-label")
+                                yield Input(value=pg_host, placeholder="localhost", id="input-pg-host", classes="settings-input")
+
+                            with Horizontal(classes="settings-row"):
+                                yield Static("[b]PostgreSQL Port[/b]\n[dim]Default port: 5432[/dim]", classes="settings-label")
+                                yield Input(value=pg_port, placeholder="5432", id="input-pg-port", classes="settings-input")
+
+                            with Horizontal(classes="settings-row"):
+                                yield Static("[b]Database Name[/b]\n[dim]PostgreSQL database name[/dim]", classes="settings-label")
+                                yield Input(value=pg_db, placeholder="itms", id="input-pg-db", classes="settings-input")
+
+                            with Horizontal(classes="settings-row"):
+                                yield Static("[b]Database User[/b]\n[dim]Database username (e.g. postgres)[/dim]", classes="settings-label")
+                                yield Input(value=pg_user, placeholder="postgres", id="input-pg-user", classes="settings-input")
+
+                            with Horizontal(classes="settings-row"):
+                                yield Static("[b]Database Password[/b]\n[dim]Database password (masked)[/dim]", classes="settings-label")
+                                yield Input(value=pg_pass, password=True, placeholder="Password", id="input-pg-password", classes="settings-input")
+
+                        with Horizontal(classes="settings-db-buttons"):
+                            yield Button("🔌 Test PostgreSQL Connection", variant="primary", id="btn-test-pg")
+                            yield Button("🔄 Switch Active Database Engine", variant="warning", id="btn-switch-db")
+
+                        yield Static(
+                            "[dim]Ready. Test PostgreSQL reachability or switch active database engine.[/dim]",
+                            id="settings-db-feedback",
+                        )
 
             # Bottom Action Bar
             with Horizontal(id="settings-actions-bar"):
@@ -211,24 +331,28 @@ class SettingsPane(Vertical):
         sw_id = event.switch.id
         if sw_id == "switch-dev-mode":
             try:
-                card = self.query_one("#card-dev-database")
+                dev_box = self.query_one("#developer-settings-container")
+                scroll_body = self.query_one("#settings-scroll-body", VerticalScroll)
                 if event.value:
-                    card.remove_class("hidden")
+                    dev_box.remove_class("hidden")
                 else:
-                    card.add_class("hidden")
+                    dev_box.add_class("hidden")
+                scroll_body.refresh(layout=True)
             except Exception:
                 pass
         elif sw_id == "switch-use-postgres":
             try:
                 pg_box = self.query_one("#pg-config-container")
+                scroll_body = self.query_one("#settings-scroll-body", VerticalScroll)
                 if event.value:
                     pg_box.remove_class("hidden")
                 else:
                     pg_box.add_class("hidden")
+                scroll_body.refresh(layout=True)
             except Exception:
                 pass
 
-        # Real-time auto-persistence when any switch is changed
+        # Auto-persist state
         self._save_all_settings(silent=True)
 
         try:
@@ -243,25 +367,37 @@ class SettingsPane(Vertical):
                     f"Dry-Run Mode: {'ACTIVE' if event.value else 'OFF (LIVE MODE)'}",
                     severity="warning" if not event.value else "information",
                 )
-                app.log_message(
-                    f"Safety switch toggled: Submission mode is now {status_text}.",
-                    level="WARNING" if not event.value else "INFO",
-                )
+                if hasattr(app, "log_message"):
+                    app.log_message(
+                        f"Safety switch toggled: Submission mode is now {status_text}.",
+                        level="WARNING" if not event.value else "INFO",
+                    )
             elif sw_id == "switch-submit-step3":
                 app.notify(f"Auto-Submit Step 3: {'ENABLED' if event.value else 'DISABLED'}")
             elif sw_id == "switch-dev-mode":
                 app.notify(f"Developer Mode: {'ENABLED' if event.value else 'DISABLED'}")
+                if hasattr(app, "log_message"):
+                    app.log_message(
+                        f"System Mode: Developer Mode {'ENABLED' if event.value else 'DISABLED'}.",
+                        level="INFO",
+                    )
 
     def on_key(self, event: events.Key) -> None:
-        """Exit edit mode / blur input on Escape key."""
+        """Exit edit mode / blur input on Escape key and refocus scroll body."""
         if event.key == "escape":
-            self.app.set_focus(None)
+            try:
+                self.query_one("#settings-scroll-body", VerticalScroll).focus()
+            except Exception:
+                self.app.set_focus(None)
             event.prevent_default()
             event.stop()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Blurs input on Enter key so operator can navigate tabs with digits 1-5."""
-        self.app.set_focus(None)
+        """Blurs input on Enter key so operator can navigate tabs with digits 1-6 or scroll."""
+        try:
+            self.query_one("#settings-scroll-body", VerticalScroll).focus()
+        except Exception:
+            self.app.set_focus(None)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         btn_id = event.button.id
@@ -279,6 +415,29 @@ class SettingsPane(Vertical):
             self.action_test_postgres_connection()
         elif btn_id == "btn-switch-db":
             self.action_switch_active_database()
+        elif btn_id == "btn-change-vault":
+            self.action_change_vault()
+
+    def action_change_vault(self) -> None:
+        """Launches Vault Location dialog and refreshes display."""
+        from core.tui.dialogs import VaultLocationDialog
+
+        def _on_vault_selected(new_path):
+            self.refresh_vault_display()
+
+        self.app.push_screen(VaultLocationDialog(is_startup=False), _on_vault_selected)
+
+    def refresh_vault_display(self) -> None:
+        """Refreshes the displayed Evidence Vault path label."""
+        try:
+            lbl = self.query_one("#label-vault-path", Static)
+            active_root = str(vault_service.get_vault_root())
+            lbl.update(
+                f"[b]Active Vault Root:[/b] [bold yellow]{active_root}[/bold yellow]\n"
+                "[dim]Directory where incoming evidence photos, EXIF metadata, and hashes are stored[/dim]"
+            )
+        except Exception:
+            pass
 
     def _set_db_feedback(self, text: str, color: str = "white") -> None:
         try:
@@ -294,7 +453,7 @@ class SettingsPane(Vertical):
             top_bar.update(
                 f"[bold cyan]⚙️ System-Wide Configuration & Preferences[/bold cyan]  │  "
                 f"Active Engine: {db_info}  │  "
-                "[dim]Press [Esc] to exit edit mode, [1-5] to navigate, or [F1-F5] anytime[/dim]"
+                "[dim]Press [Esc] to exit edit mode, [1-6] to navigate, or [F1-F6] anytime[/dim]"
             )
         except Exception:
             pass
@@ -426,61 +585,93 @@ class SettingsPane(Vertical):
             )
 
     def _save_all_settings(self, silent: bool = False) -> None:
-        """Collects GUI inputs and persists to config.json."""
+        """Collects GUI inputs and persists to secure/config.json."""
         try:
             app = self.app
         except Exception:
             app = None
         try:
+            # 1. Operator settings
             dry_run = self.query_one("#switch-dry-run", Switch).value
             step3 = self.query_one("#switch-submit-step3", Switch).value
-            timeout = int(self.query_one("#input-timeout", Input).value.strip() or 30)
-            circuit_breaker = int(self.query_one("#input-circuit-breaker", Input).value.strip() or 3)
-
-            comp_enabled = self.query_one("#switch-compression-enabled", Switch).value
-            comp_dim = int(self.query_one("#input-compression-dim", Input).value.strip() or 1920)
-            comp_quality = int(self.query_one("#input-compression-quality", Input).value.strip() or 88)
-
-            outbox_enabled = self.query_one("#switch-outbox-enabled", Switch).value
-            outbox_interval = int(self.query_one("#input-outbox-interval", Input).value.strip() or 15)
-
-            ensemble = self.query_one("#switch-ensemble", Switch).value
-            syntax_corr = self.query_one("#switch-syntax-corr", Switch).value
-            auto_pre = self.query_one("#switch-auto-pre", Switch).value
-
-            crop_days = int(self.query_one("#input-crop-days", Input).value.strip() or 7)
-            export_days = int(self.query_one("#input-export-days", Input).value.strip() or 30)
-
-            dev_mode = self.query_one("#switch-dev-mode", Switch).value
             show_safety = self.query_one("#switch-show-safety", Switch).value
+            vault_prompt = self.query_one("#switch-vault-prompt-startup", Switch).value
+            dev_mode = self.query_one("#switch-dev-mode", Switch).value
 
             cfg = config_service.load_config()
 
+            cfg.setdefault("submission", {})
             cfg["submission"]["dry_run_mode"] = dry_run
             cfg["submission"]["submit_step3"] = step3
-            cfg["submission"]["request_timeout_seconds"] = timeout
-            cfg["submission"]["circuit_breaker_threshold"] = circuit_breaker
 
-            cfg.setdefault("compression", {})
-            cfg["compression"]["enabled"] = comp_enabled
-            cfg["compression"]["max_dimension"] = comp_dim
-            cfg["compression"]["jpeg_quality"] = comp_quality
-
-            cfg.setdefault("outbox", {})
-            cfg["outbox"]["enabled"] = outbox_enabled
-            cfg["outbox"]["auto_sync_interval_seconds"] = outbox_interval
-
-            cfg["vision"]["adaptive_ensemble_voting"] = ensemble
-            cfg["vision"]["positional_disambiguation"] = syntax_corr
-            cfg["vision"]["auto_preprocess_ingest"] = auto_pre
-
-            cfg["storage"]["crops_retention_days"] = crop_days
-            cfg["storage"]["export_retention_days"] = export_days
-
+            cfg.setdefault("system", {})
             cfg["system"]["developer_mode"] = dev_mode
             cfg["system"]["show_safety_guarantee"] = show_safety
 
-            # Collect PostgreSQL settings if available
+            cfg.setdefault("storage", {})
+            cfg["storage"]["prompt_vault_on_startup"] = vault_prompt
+
+            # 2. Developer Mode: Matcher
+            try:
+                uturn = int(self.query_one("#input-uturn-threshold", Input).value.strip() or 1800)
+                cfg.setdefault("matcher", {})
+                cfg["matcher"]["uturn_threshold_seconds"] = uturn
+            except Exception:
+                pass
+
+            # 3. Developer Mode: Network & Compression
+            try:
+                comp_enabled = self.query_one("#switch-compression-enabled", Switch).value
+                comp_dim = int(self.query_one("#input-compression-dim", Input).value.strip() or 1920)
+                comp_quality = int(self.query_one("#input-compression-quality", Input).value.strip() or 88)
+                cfg.setdefault("compression", {})
+                cfg["compression"]["enabled"] = comp_enabled
+                cfg["compression"]["max_dimension"] = comp_dim
+                cfg["compression"]["jpeg_quality"] = comp_quality
+            except Exception:
+                pass
+
+            try:
+                outbox_enabled = self.query_one("#switch-outbox-enabled", Switch).value
+                outbox_interval = int(self.query_one("#input-outbox-interval", Input).value.strip() or 15)
+                timeout = int(self.query_one("#input-timeout", Input).value.strip() or 30)
+                circuit_breaker = int(self.query_one("#input-circuit-breaker", Input).value.strip() or 3)
+                cfg.setdefault("outbox", {})
+                cfg["outbox"]["enabled"] = outbox_enabled
+                cfg["outbox"]["auto_sync_interval_seconds"] = outbox_interval
+                cfg["submission"]["request_timeout_seconds"] = timeout
+                cfg["submission"]["circuit_breaker_threshold"] = circuit_breaker
+            except Exception:
+                pass
+
+            # 4. Developer Mode: Vision & OCR
+            try:
+                ensemble = self.query_one("#switch-ensemble", Switch).value
+                syntax_corr = self.query_one("#switch-syntax-corr", Switch).value
+                auto_pre = self.query_one("#switch-auto-pre", Switch).value
+                min_ocr = float(self.query_one("#input-min-ocr-conf", Input).value.strip() or 0.55)
+                det_conf = float(self.query_one("#input-detector-conf", Input).value.strip() or 0.35)
+                cfg.setdefault("vision", {})
+                cfg["vision"]["adaptive_ensemble_voting"] = ensemble
+                cfg["vision"]["positional_disambiguation"] = syntax_corr
+                cfg["vision"]["auto_preprocess_ingest"] = auto_pre
+                cfg["vision"]["min_ocr_confidence"] = min_ocr
+                cfg["vision"]["detector_conf_threshold"] = det_conf
+            except Exception:
+                pass
+
+            # 5. Developer Mode: Storage Retention
+            try:
+                crop_days = int(self.query_one("#input-crop-days", Input).value.strip() or 7)
+                export_days = int(self.query_one("#input-export-days", Input).value.strip() or 30)
+                vault_days = int(self.query_one("#input-vault-days", Input).value.strip() or 7)
+                cfg["storage"]["crops_retention_days"] = crop_days
+                cfg["storage"]["export_retention_days"] = export_days
+                cfg["storage"]["vault_retention_days"] = vault_days
+            except Exception:
+                pass
+
+            # 6. Developer Mode: PostgreSQL Database
             try:
                 use_pg = self.query_one("#switch-use-postgres", Switch).value
                 pg_host = self.query_one("#input-pg-host", Input).value.strip() or "localhost"
@@ -505,9 +696,7 @@ class SettingsPane(Vertical):
             setattr(settings, "DEVELOPER_MODE", dev_mode)
             setattr(settings, "ITMS_WEB_DRY_RUN", dry_run)
             setattr(settings, "ITMS_SUBMIT_STEP3", step3)
-            setattr(settings, "ITMS_REQUEST_TIMEOUT_SECONDS", timeout)
-            setattr(settings, "CIRCUIT_BREAKER_THRESHOLD", circuit_breaker)
-            setattr(settings, "VAULT_RETENTION_DAYS", crop_days)
+            self.refresh_vault_display()
 
             # Dynamically refresh ITMS Hub pane if mounted
             if app:
@@ -519,10 +708,10 @@ class SettingsPane(Vertical):
                     pass
 
                 if not silent:
-                    app.notify("Configuration saved successfully!", severity="information")
+                    app.notify("Configuration saved successfully to secure/config.json!", severity="information")
                     dev_status = "ENABLED" if dev_mode else "DISABLED"
                     app.log_message(
-                        f"[bold green]✓ Settings Persisted:[/bold green] Dry-Run={dry_run}, Auto-Step3={step3}, Compression={comp_enabled} ({comp_dim}px Q{comp_quality}), Outbox={outbox_enabled}, DevMode={dev_status}.",
+                        f"[bold green]✓ Settings Persisted:[/bold green] Dry-Run={dry_run}, Auto-Step3={step3}, DevMode={dev_status}, Vault={vault_service.get_vault_root()}.",
                         level="SUCCESS",
                     )
         except Exception as exc:
@@ -531,7 +720,7 @@ class SettingsPane(Vertical):
                 app.log_message(f"Settings save error: {exc}", level="ERROR")
 
     def _reset_to_defaults(self) -> None:
-        """Resets inputs to factory defaults."""
+        """Resets inputs to factory defaults in secure/config.json."""
         try:
             app = self.app
         except Exception:
@@ -541,26 +730,30 @@ class SettingsPane(Vertical):
 
             self.query_one("#switch-dry-run", Switch).value = True
             self.query_one("#switch-submit-step3", Switch).value = True
-            self.query_one("#input-timeout", Input).value = "30"
-            self.query_one("#input-circuit-breaker", Input).value = "3"
             self.query_one("#switch-show-safety", Switch).value = False
-
-            self.query_one("#switch-compression-enabled", Switch).value = True
-            self.query_one("#input-compression-dim", Input).value = "1920"
-            self.query_one("#input-compression-quality", Input).value = "88"
-            self.query_one("#switch-outbox-enabled", Switch).value = True
-            self.query_one("#input-outbox-interval", Input).value = "15"
-
-            self.query_one("#switch-ensemble", Switch).value = True
-            self.query_one("#switch-syntax-corr", Switch).value = True
-            self.query_one("#switch-auto-pre", Switch).value = True
-
-            self.query_one("#input-crop-days", Input).value = "7"
-            self.query_one("#input-export-days", Input).value = "30"
-
+            self.query_one("#switch-vault-prompt-startup", Switch).value = True
             self.query_one("#switch-dev-mode", Switch).value = False
 
             try:
+                self.query_one("#input-uturn-threshold", Input).value = "1800"
+                self.query_one("#switch-compression-enabled", Switch).value = True
+                self.query_one("#input-compression-dim", Input).value = "1920"
+                self.query_one("#input-compression-quality", Input).value = "88"
+                self.query_one("#switch-outbox-enabled", Switch).value = True
+                self.query_one("#input-outbox-interval", Input).value = "15"
+                self.query_one("#input-timeout", Input).value = "30"
+                self.query_one("#input-circuit-breaker", Input).value = "3"
+
+                self.query_one("#switch-ensemble", Switch).value = True
+                self.query_one("#switch-syntax-corr", Switch).value = True
+                self.query_one("#switch-auto-pre", Switch).value = True
+                self.query_one("#input-min-ocr-conf", Input).value = "0.55"
+                self.query_one("#input-detector-conf", Input).value = "0.35"
+
+                self.query_one("#input-crop-days", Input).value = "7"
+                self.query_one("#input-export-days", Input).value = "30"
+                self.query_one("#input-vault-days", Input).value = "7"
+
                 self.query_one("#switch-use-postgres", Switch).value = False
                 self.query_one("#input-pg-host", Input).value = "localhost"
                 self.query_one("#input-pg-port", Input).value = "5432"
@@ -569,6 +762,8 @@ class SettingsPane(Vertical):
                 self.query_one("#input-pg-password", Input).value = ""
             except Exception:
                 pass
+
+            self.refresh_vault_display()
 
             # Dynamically refresh ITMS Hub pane if mounted
             try:

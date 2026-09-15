@@ -26,6 +26,20 @@ Screen {
     padding: 1;
     overflow-y: auto;
 }
+#queue-action-bar {
+    height: auto;
+    min-height: 1;
+    max-height: 2;
+    background: $surface;
+    color: $text-muted;
+    padding: 0 1;
+}
+#queue-scope-bar {
+    height: 1;
+    background: $panel;
+    color: $text;
+    padding: 0 1;
+}
 #history-filter-bar {
     height: 1;
     background: $surface;
@@ -36,6 +50,12 @@ Screen {
     height: 1;
     background: $surface;
     color: $text-muted;
+    padding: 0 1;
+}
+#batches-scope-bar {
+    height: 1;
+    background: $panel;
+    color: $text;
     padding: 0 1;
 }
 #batches-table-title {
@@ -75,7 +95,7 @@ Screen {
     padding: 0 1;
 }
 
-PhotoLinkerModal, SingleOrderSubmissionModal, BatchSubmissionModal, PlateQuickEntryModal, BatchProgressModal {
+PhotoLinkerModal, SingleOrderSubmissionModal, BatchSubmissionModal, PlateQuickEntryModal, BatchProgressModal, VaultLocationDialog {
     align: center middle;
     background: rgba(0, 0, 0, 0.75);
 }
@@ -87,6 +107,38 @@ PhotoLinkerModal, SingleOrderSubmissionModal, BatchSubmissionModal, PlateQuickEn
     background: $surface;
     border: thick $primary;
     padding: 1 2;
+}
+
+.vault-location-modal {
+    width: 80%;
+    height: auto;
+    max-height: 22;
+    padding: 1 2;
+}
+
+.vault-input-row {
+    height: 3;
+    margin: 1 0;
+}
+
+.vault-input-row Input {
+    width: 1fr;
+    margin-right: 1;
+}
+
+.vault-input-row Button {
+    margin-right: 1;
+}
+
+.vault-options-row {
+    height: 3;
+    margin: 0 0 1 0;
+}
+
+#vault-dialog-hint {
+    height: 1;
+    margin-bottom: 1;
+    color: $text-muted;
 }
 
 .batch-submission-modal {
@@ -475,7 +527,12 @@ LandingAuthScreen {
 
 #settings-scroll-body {
     height: 1fr;
-    overflow-y: auto;
+    scrollbar-gutter: stable;
+}
+
+#developer-settings-container {
+    height: auto;
+    width: 100%;
 }
 
 .settings-card {

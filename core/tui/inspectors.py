@@ -80,10 +80,18 @@ class InspectorPane(Static):
             getattr(front, "batch", None)
             or getattr(rear, "batch", None)
         )
+        from django.utils import timezone
+        today = timezone.localdate()
         latest_batch = IngestionBatch.objects.order_by("-created_at").first()
         if batch:
             is_latest = (latest_batch and batch.batch_id == latest_batch.batch_id)
-            tag = "[bold green]🔥 LATEST BATCH[/bold green]" if is_latest else "[yellow]⏳ CARRYOVER / PRIOR BATCH[/yellow]"
+            is_today = (batch.created_at.date() == today)
+            if is_latest:
+                tag = "[bold green]🔥 TODAY (Active Batch)[/bold green]"
+            elif is_today:
+                tag = "[green]● TODAY (Shift)[/green]"
+            else:
+                tag = f"[yellow]⏳ PRIOR DAY ({batch.created_at.strftime('%Y-%m-%d')})[/yellow]"
             batch_line = f"{batch.batch_id} ({batch.source_label or 'Batch'}) — {tag}"
         else:
             batch_line = "[dim]No batch associated[/dim]"
@@ -115,10 +123,17 @@ class InspectorPane(Static):
             f" [b]Rear:[/b]  {rear_file}{rear_cam}",
             f"        ocr_conf={rear_ocr} orient={rear_orient} {rear_conf}".rstrip(),
             "",
+        ])
+
+        from core.services import config_service
+        dev_mode = config_service.is_developer_mode()
+        v_action = "[b cyan]V[/b cyan]: Compare Images (Dev)" if dev_mode else "[dim]V: Compare (Dev Mode)[/dim]"
+
+        lines.extend([
             "[b]Quick Actions:[/b]",
             " [b green]A[/b green]: Approve / Retry   [b green]T[/b green]: Type Plate / Match",
             " [b yellow]S[/b yellow]: Swap Front/Rear       [b magenta]L[/b magenta]: Link / Pick Photo",
-            " [b cyan]V[/b cyan]: View Evidence         [b blue]U[/b blue]: Submit to ITMS",
+            f" {v_action}     [b blue]U[/b blue]: Submit to ITMS",
             " [b green]J[/b green]: Joint Re-Scan       [b green]P[/b green]: Batch Vision",
         ])
         self.update("\n".join(lines))

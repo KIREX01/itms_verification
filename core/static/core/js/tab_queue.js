@@ -6,6 +6,31 @@
 
 let currentQueueBatchFilter = "ALL";
 
+function setQueueDateScope(scope) {
+    currentQueueDateScope = scope;
+    const scopeButtons = {
+        "TODAY": "btn-qscope-today",
+        "ACTIVE_BATCH": "btn-qscope-active",
+        "CARRYOVER": "btn-qscope-carryover",
+        "ALL": "btn-qscope-all"
+    };
+    Object.keys(scopeButtons).forEach(k => {
+        const el = document.getElementById(scopeButtons[k]);
+        if (el) el.classList.toggle("active", k === scope);
+    });
+    fetchPairs();
+}
+
+function cycleQueueDateScope() {
+    const scopes = ["TODAY", "ACTIVE_BATCH", "CARRYOVER", "ALL"];
+    const idx = scopes.indexOf(currentQueueDateScope);
+    const nextScope = scopes[(idx + 1) % scopes.length];
+    setQueueDateScope(nextScope);
+    if (typeof showToast === "function") {
+        showToast(`Work Queue Scope: ${nextScope}`, "info");
+    }
+}
+
 function setQueueBatchFilter(batchVal) {
     currentQueueBatchFilter = batchVal;
     renderQueueCards();
@@ -13,7 +38,8 @@ function setQueueBatchFilter(batchVal) {
 
 async function fetchPairs() {
     try {
-        const res = await fetch("/api/pairs/");
+        const activeScope = currentQueueDateScope || "TODAY";
+        const res = await fetch(`/api/pairs/?scope=${encodeURIComponent(activeScope)}`);
         const data = await res.json();
         if (data.success) {
             pairsData = data.pairs || [];
@@ -25,10 +51,10 @@ async function fetchPairs() {
                     const currentVal = select.value || currentQueueBatchFilter || "ALL";
                     const latestId = data.latest_batch_id || (data.batches[0] ? data.batches[0].batch_id : "Latest");
                     select.innerHTML = `
-                        <option value="ALL">📦 All Batches (Mixed Queue)</option>
+                        <option value="ALL">📦 All Batches (${activeScope})</option>
                         <option value="LATEST">🔥 Latest Ingested Batch (${escapeHtml(latestId)})</option>
                         <option value="CARRYOVER">⏳ Carryover / Previous Batches</option>
-                        ${data.batches.map(b => `<option value="${escapeHtml(b.batch_id)}">📦 ${escapeHtml(b.batch_id)} (${escapeHtml(b.created_at)})</option>`).join("")}
+                        ${data.batches.map(b => `<option value="${escapeHtml(b.batch_id)}">${b.is_today ? '●' : '⏳'} ${escapeHtml(b.batch_id)} (${escapeHtml(b.created_at)})</option>`).join("")}
                     `;
                     select.value = currentVal;
                 }
@@ -43,9 +69,10 @@ async function fetchPairs() {
                 approvedBtn.disabled = (approvedCount === 0);
                 approvedBtn.style.opacity = approvedCount === 0 ? "0.6" : "1";
                 approvedBtn.style.cursor = approvedCount === 0 ? "not-allowed" : "pointer";
+                approvedBtn.onclick = () => triggerBatchSubmit(activeScope);
             }
             if (approvedText) {
-                approvedText.innerText = `${approvedCount} approved pair${approvedCount === 1 ? '' : 's'} ready`;
+                approvedText.innerText = `${approvedCount} approved ready (${activeScope})`;
             }
             setText("kpi-approved", approvedCount);
 
@@ -114,13 +141,33 @@ function renderQueueCards() {
                         <p style="font-size:0.78rem; color:var(--ug-text-muted); max-width:280px; margin:0;">
                             No pairs are waiting for review in this queue. Ready to submit <strong>${approvedCount}</strong> verified motorcycle pair(s) to ITMS.
                         </p>
-                        <button class="btn btn-primary" onclick="triggerBatchSubmit()" style="background:var(--ug-green); border-color:var(--ug-green); padding:8px 18px; font-weight:800; font-size:0.85rem; box-shadow:0 4px 14px rgba(16,185,129,0.35);">
+                        <button class="btn btn-primary" onclick="triggerBatchSubmit(currentQueueDateScope)" style="background:var(--ug-green); border-color:var(--ug-green); padding:8px 18px; font-weight:800; font-size:0.85rem; box-shadow:0 4px 14px rgba(16,185,129,0.35);">
                             🚀 Submit Approved Pairs to ITMS <span class="hotkey">B</span>
                         </button>
                     </div>
                 `;
                 return;
             }
+        }
+        if (currentQueueDateScope === "TODAY") {
+            container.innerHTML = `
+                <div style="text-align:center; padding:36px 14px; display:flex; flex-direction:column; align-items:center; gap:10px;">
+                    <span style="font-size:2.5rem;">📅</span>
+                    <h4 style="color:#fff; font-size:1rem; font-weight:800; margin:0;">No Pairs in Today's Shift</h4>
+                    <p style="font-size:0.78rem; color:var(--ug-text-muted); max-width:280px; margin:0;">
+                        No evidence photos or pairs ingested today yet. Switch scope to inspect prior days or upload new photos.
+                    </p>
+                    <div style="display:flex; gap:8px; margin-top:6px;">
+                        <button class="btn btn-secondary" onclick="setQueueDateScope('CARRYOVER')" style="font-size:0.75rem; padding:5px 10px;">
+                            ⏳ Check Carryover
+                        </button>
+                        <button class="btn btn-secondary" onclick="setQueueDateScope('ALL')" style="font-size:0.75rem; padding:5px 10px;">
+                            🌐 View All
+                        </button>
+                    </div>
+                </div>
+            `;
+            return;
         }
         container.innerHTML = `<div style="text-align:center; padding:40px; color:var(--ug-text-dim);">No pairs match criteria</div>`;
         return;
@@ -132,10 +179,12 @@ function renderQueueCards() {
         const status = p.verification_status || "PENDING";
         const orderNo = p.order ? `#${p.order.order_number}` : (p.order_number ? `#${p.order_number}` : "No order");
         const batchBadge = p.is_latest_batch
-            ? `<span class="badge badge-green" style="font-size:0.58rem; padding:1px 5px;" title="Latest Ingested Batch">🔥 NEW</span>`
-            : (p.is_carryover 
-                ? `<span class="badge badge-yellow" style="font-size:0.58rem; padding:1px 5px;" title="Carryover from Previous Shift / Batch">⏳ PRIOR</span>`
-                : `<span class="badge badge-muted" style="font-size:0.58rem; padding:1px 5px;">📦 BATCH</span>`);
+            ? `<span class="badge badge-green" style="font-size:0.58rem; padding:1px 5px;" title="Latest Ingested Batch Today">🔥 TODAY</span>`
+            : (p.is_today
+                ? `<span class="badge badge-green" style="font-size:0.58rem; padding:1px 5px;" title="Today's Shift">● TODAY</span>`
+                : (p.is_carryover 
+                    ? `<span class="badge badge-yellow" style="font-size:0.58rem; padding:1px 5px;" title="Carryover from Previous Shift / Batch">⏳ PRIOR</span>`
+                    : `<span class="badge badge-muted" style="font-size:0.58rem; padding:1px 5px;">📦 BATCH</span>`));
 
         return `<div class="queue-item-card ${isSelected ? 'selected' : ''}" onclick="selectPair(${p.id})">
             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
@@ -183,15 +232,19 @@ async function selectPair(pairId) {
             // Update Batch Badge in Header
             const batchBadgeEl = document.getElementById("qdetail-batch-badge");
             if (batchBadgeEl) {
+                const batchLabel = p.batch_id || 'Batch';
                 if (p.is_latest_batch) {
                     batchBadgeEl.className = "badge badge-green";
-                    batchBadgeEl.innerHTML = `🔥 Latest Batch: ${escapeHtml(p.batch_id || 'Current')}`;
+                    batchBadgeEl.innerHTML = `🔥 TODAY (Active: ${escapeHtml(batchLabel)})`;
+                } else if (p.is_today) {
+                    batchBadgeEl.className = "badge badge-green";
+                    batchBadgeEl.innerHTML = `● TODAY (Shift: ${escapeHtml(batchLabel)})`;
                 } else if (p.is_carryover) {
                     batchBadgeEl.className = "badge badge-yellow";
-                    batchBadgeEl.innerHTML = `⏳ Carryover: ${escapeHtml(p.batch_id || 'Prior Shift')}`;
+                    batchBadgeEl.innerHTML = `⏳ PRIOR DAY (${escapeHtml(batchLabel)})`;
                 } else {
                     batchBadgeEl.className = "badge badge-muted";
-                    batchBadgeEl.innerHTML = `Batch: ${escapeHtml(p.batch_id || 'Unbatched')}`;
+                    batchBadgeEl.innerHTML = `Batch: ${escapeHtml(batchLabel)}`;
                 }
             }
 

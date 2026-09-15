@@ -9,21 +9,140 @@ from core.models import (
 )
 from core.tui.inspectors import STATUS_STYLE
 
+from django.db.models import Q
+from django.utils import timezone
+
 HISTORY_FILTERS = ["ALL", "SUBMITTED", "FAILED", "APPROVED", "AUDIT_LOGS"]
+QUEUE_SCOPE_FILTERS = ["TODAY", "ACTIVE_BATCH", "CARRYOVER", "ALL"]
+BATCHES_SCOPE_FILTERS = ["TODAY", "ACTIVE_BATCH", "CARRYOVER", "ALL"]
+HISTORY_DATE_SCOPES = ["TODAY", "ALL"]
 
 class TableLoaderMixin:
     def _update_history_filter_bar(self):
+        try:
+            bar = self.query_one("#history-filter-bar", Static)
+        except Exception:
+            return
+
+        cur_filter = getattr(self, "current_history_filter", "ALL")
+        cur_date_scope = getattr(self, "current_history_date_scope", "TODAY")
+
         filter_str = "  ".join([
-            f"[bold green]▶ {f}[/bold green]" if f == self.current_history_filter else f"[dim]{f}[/dim]"
+            f"[bold green]▶ {f}[/bold green]" if f == cur_filter else f"[dim]{f}[/dim]"
             for f in HISTORY_FILTERS
         ])
-        bar = self.query_one("#history-filter-bar", Static)
-        bar.update(f"[b]History Label Filter:[/b] {filter_str}   [dim](Press [b]F[/b] to cycle)[/dim]")
+        date_str = "  ".join([
+            f"[bold cyan]▶ {d}[/bold cyan]" if d == cur_date_scope else f"[dim]{d}[/dim]"
+            for d in HISTORY_DATE_SCOPES
+        ])
+        bar.update(
+            f"[b]Filter:[/b] {filter_str} [dim]([b]F[/b] cycle)[/dim]  │  "
+            f"[b]Date Scope:[/b] {date_str} [dim]([b]D[/b] toggle)[/dim]"
+        )
+
+    def _update_queue_scope_bar(self):
+        try:
+            bar = self.query_one("#queue-scope-bar", Static)
+        except Exception:
+            return
+
+        from core.services.itms_web_client import get_current_itms_account
+        today = timezone.localdate()
+        active_acc = get_current_itms_account()
+        latest_batch = IngestionBatch.objects.order_by("-created_at").first()
+
+        base_qs = VehicleInstallationPair.objects.filter(
+            verification_status__in=[
+                VehicleInstallationPair.VerificationStatus.PENDING_REVIEW,
+                VehicleInstallationPair.VerificationStatus.APPROVED,
+                VehicleInstallationPair.VerificationStatus.CONFLICT,
+                VehicleInstallationPair.VerificationStatus.INCOMPLETE,
+                VehicleInstallationPair.VerificationStatus.UNREGISTERED,
+                VehicleInstallationPair.VerificationStatus.FAILED,
+            ]
+        )
+        if active_acc:
+            base_qs = base_qs.filter(
+                Q(order__account_email__iexact=active_acc) |
+                Q(account_email__iexact=active_acc) |
+                (
+                    (Q(order__isnull=True) | Q(order__account_email="") | Q(order__account_email__isnull=True)) &
+                    (Q(account_email="") | Q(account_email__isnull=True))
+                )
+            )
+
+        today_q = (
+            Q(created_at__date=today) |
+            Q(front_image__batch__created_at__date=today) |
+            Q(rear_image__batch__created_at__date=today) |
+            Q(front_image__ingested_at__date=today) |
+            Q(rear_image__ingested_at__date=today)
+        )
+
+        c_today = base_qs.filter(today_q).count()
+        c_active = base_qs.filter(Q(front_image__batch=latest_batch) | Q(rear_image__batch=latest_batch)).count() if latest_batch else 0
+        c_carryover = base_qs.exclude(today_q).count()
+        c_all = base_qs.count()
+
+        cur_scope = getattr(self, "current_queue_scope", "TODAY")
+
+        labels = {
+            "TODAY": f"TODAY ({c_today})",
+            "ACTIVE_BATCH": f"ACTIVE BATCH ({c_active})",
+            "CARRYOVER": f"PRIOR CARRYOVER ({c_carryover})",
+            "ALL": f"ALL TIME ({c_all})",
+        }
+
+        rendered = []
+        for s in QUEUE_SCOPE_FILTERS:
+            lbl = labels.get(s, s)
+            if s == cur_scope:
+                rendered.append(f"[bold green]▶ {lbl}[/bold green]")
+            else:
+                rendered.append(f"[dim]{lbl}[/dim]")
+
+        scope_str = "   ".join(rendered)
+        bar.update(f"[b]Queue Scope:[/b] {scope_str}   [dim](Press [b]D[/b] to cycle)[/dim]")
+
+    def _update_batches_scope_bar(self):
+        try:
+            bar = self.query_one("#batches-scope-bar", Static)
+        except Exception:
+            return
+
+        today = timezone.localdate()
+        latest_batch = IngestionBatch.objects.order_by("-created_at").first()
+
+        c_today = IngestionBatch.objects.filter(created_at__date=today).count()
+        c_active = 1 if latest_batch else 0
+        c_prior = IngestionBatch.objects.exclude(created_at__date=today).count()
+        c_all = IngestionBatch.objects.count()
+
+        cur_scope = getattr(self, "current_batches_scope", "TODAY")
+
+        labels = {
+            "TODAY": f"TODAY ({c_today})",
+            "ACTIVE_BATCH": f"ACTIVE BATCH ({c_active})",
+            "CARRYOVER": f"PRIOR DAYS ({c_prior})",
+            "ALL": f"ALL TIME ({c_all})",
+        }
+
+        rendered = []
+        for s in BATCHES_SCOPE_FILTERS:
+            lbl = labels.get(s, s)
+            if s == cur_scope:
+                rendered.append(f"[bold green]▶ {lbl}[/bold green]")
+            else:
+                rendered.append(f"[dim]{lbl}[/dim]")
+
+        scope_str = "   ".join(rendered)
+        bar.update(f"[b]Batches Scope:[/b] {scope_str}   [dim](Press [b]D[/b] to cycle)[/dim]")
 
     def _reload_queue_table(self):
         from core.services.itms_web_client import get_current_itms_account
         active_acc = get_current_itms_account()
 
+        today = timezone.localdate()
         latest_batch = IngestionBatch.objects.order_by("-created_at").first()
         latest_batch_id = latest_batch.batch_id if latest_batch else None
 
@@ -42,7 +161,6 @@ class TableLoaderMixin:
             ]
         )
         if active_acc:
-            from django.db.models import Q
             qs = qs.filter(
                 Q(order__account_email__iexact=active_acc) |
                 Q(account_email__iexact=active_acc) |
@@ -51,6 +169,23 @@ class TableLoaderMixin:
                     (Q(account_email="") | Q(account_email__isnull=True))
                 )
             )
+
+        today_q = (
+            Q(created_at__date=today) |
+            Q(front_image__batch__created_at__date=today) |
+            Q(rear_image__batch__created_at__date=today) |
+            Q(front_image__ingested_at__date=today) |
+            Q(rear_image__ingested_at__date=today)
+        )
+
+        cur_scope = getattr(self, "current_queue_scope", "TODAY")
+        if cur_scope == "TODAY":
+            qs = qs.filter(today_q)
+        elif cur_scope == "ACTIVE_BATCH" and latest_batch:
+            qs = qs.filter(Q(front_image__batch=latest_batch) | Q(rear_image__batch=latest_batch))
+        elif cur_scope == "CARRYOVER":
+            qs = qs.exclude(today_q)
+
         qs = qs.order_by("-updated_at")[:250]
 
         for pair in qs:
@@ -64,10 +199,16 @@ class TableLoaderMixin:
                 or getattr(pair.rear_image, "batch", None)
             )
             batch_id_str = pair_batch.batch_id if pair_batch else ""
-            if pair_batch and latest_batch_id and pair_batch.batch_id == latest_batch_id:
-                batch_display = f"[bold green]🔥 NEW[/bold green] [dim]({batch_id_str[:7]})[/dim]"
-            elif pair_batch:
-                batch_display = f"[yellow]⏳ PRIOR[/yellow] [dim]({batch_id_str[:7]})[/dim]"
+            if pair_batch:
+                is_batch_today = (pair_batch.created_at.date() == today)
+                is_latest = (latest_batch_id and pair_batch.batch_id == latest_batch_id)
+                if is_latest:
+                    batch_display = f"[bold green]🔥 TODAY (Active)[/bold green] [dim]({batch_id_str[:7]})[/dim]"
+                elif is_batch_today:
+                    batch_display = f"[green]● TODAY[/green] [dim]({batch_id_str[:7]})[/dim]"
+                else:
+                    batch_date_str = pair_batch.created_at.strftime("%m-%d")
+                    batch_display = f"[yellow]⏳ PRIOR ({batch_date_str})[/yellow] [dim]({batch_id_str[:7]})[/dim]"
             else:
                 batch_display = "[dim]—[/dim]"
 
@@ -91,12 +232,19 @@ class TableLoaderMixin:
                 key=str(pair.id),
             )
 
-        if table.row_count > 0 and table.cursor_row is not None:
+        if table.row_count > 0:
+            if table.cursor_row is None:
+                try:
+                    table.move_cursor(row=0, column=0)
+                except Exception:
+                    pass
             self._update_queue_inspector()
 
     def _reload_history_table(self):
         from core.services.itms_web_client import get_current_itms_account
         active_acc = get_current_itms_account()
+        today = timezone.localdate()
+        cur_date_scope = getattr(self, "current_history_date_scope", "TODAY")
 
         table = self.query_one("#table-history", DataTable)
         table.clear(columns=True)
@@ -105,11 +253,13 @@ class TableLoaderMixin:
             table.add_columns("Time", "Pair / Plate", "Action", "Result", "Message", "Token")
             logs = SubmissionAuditLog.objects.select_related("pair", "pair__order").order_by("-timestamp")
             if active_acc:
-                from django.db.models import Q
                 logs = logs.filter(
                     Q(pair__order__account_email__iexact=active_acc) |
                     Q(pair__account_email__iexact=active_acc)
                 )
+            if cur_date_scope == "TODAY":
+                logs = logs.filter(timestamp__date=today)
+
             for log in logs[:100]:
                 plate = log.pair.registration_number_detected if log.pair else "—"
                 res_color = "green" if log.result == "SUCCESS" else "red" if log.result == "FAILURE" else "yellow"
@@ -126,7 +276,6 @@ class TableLoaderMixin:
             table.add_columns("ID", "Plate", "Order", "Status", "Submitted At", "Updated At")
             qs = VehicleInstallationPair.objects.select_related("order", "front_image", "rear_image")
             if active_acc:
-                from django.db.models import Q
                 qs = qs.filter(
                     Q(order__account_email__iexact=active_acc) |
                     Q(account_email__iexact=active_acc)
@@ -137,6 +286,12 @@ class TableLoaderMixin:
                 qs = qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.FAILED)
             elif self.current_history_filter == "APPROVED":
                 qs = qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.APPROVED)
+
+            if cur_date_scope == "TODAY":
+                qs = qs.filter(
+                    Q(submitted_at__date=today) |
+                    (Q(submitted_at__isnull=True) & Q(updated_at__date=today))
+                )
 
             for pair in qs.order_by("-updated_at")[:100]:
                 style = STATUS_STYLE.get(pair.verification_status, "white")
@@ -153,14 +308,38 @@ class TableLoaderMixin:
                     key=str(pair.id),
                 )
 
-        if table.row_count > 0 and table.cursor_row is not None:
+        if table.row_count > 0:
+            if table.cursor_row is None:
+                try:
+                    table.move_cursor(row=0, column=0)
+                except Exception:
+                    pass
             self._update_history_inspector()
 
     def _reload_batches_table(self):
         table = self.query_one("#table-batches", DataTable)
         table.clear()
-        batches = list(IngestionBatch.objects.all().order_by("-created_at")[:50])
+
+        today = timezone.localdate()
+        latest_batch = IngestionBatch.objects.order_by("-created_at").first()
+
+        cur_scope = getattr(self, "current_batches_scope", "TODAY")
+        batches_qs = IngestionBatch.objects.all().order_by("-created_at")
+
+        if cur_scope == "TODAY":
+            batches_qs = batches_qs.filter(created_at__date=today)
+        elif cur_scope == "ACTIVE_BATCH" and latest_batch:
+            batches_qs = batches_qs.filter(id=latest_batch.id)
+        elif cur_scope == "CARRYOVER":
+            batches_qs = batches_qs.exclude(created_at__date=today)
+
+        batches = list(batches_qs[:50])
         for b in batches:
+            if b.created_at.date() == today:
+                created_display = f"[bold green]{b.created_at.strftime('%H:%M')} (Today)[/bold green]"
+            else:
+                created_display = f"[yellow]{b.created_at.strftime('%Y-%m-%d %H:%M')}[/yellow]"
+
             table.add_row(
                 b.batch_id,
                 b.source_type,
@@ -169,7 +348,7 @@ class TableLoaderMixin:
                 f"[green]{b.ingested_count}[/green]",
                 f"[yellow]{b.duplicate_count}[/yellow]",
                 f"[red]{b.failed_count}[/red]" if b.failed_count > 0 else "0",
-                b.created_at.strftime("%Y-%m-%d %H:%M"),
+                created_display,
                 key=str(b.batch_id),
             )
 

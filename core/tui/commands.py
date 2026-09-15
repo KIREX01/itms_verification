@@ -68,7 +68,7 @@ class ITMSCommandProvider(Provider):
             ("Review: Approve Selected Pair [A]", app.action_approve, "Mark active pair as approved for submission"),
             ("Review: Swap Front/Rear Photos [S]", app.action_swap, "Invert front and rear image assignments on active pair"),
             ("Review: Link / Pick Photo [L]", app.action_link_pair, "Manually pick and associate photos for selected pair"),
-            ("Review: View Side-by-Side Comparison [V]", app.action_view_evidence, "Launch high-res image viewer with plate crops & bounding boxes"),
+            ("Review: View Side-by-Side Comparison [V] (Dev Mode)", app.action_view_evidence, "Launch high-res image viewer with plate crops & bounding boxes (Requires Developer Mode)"),
             
             # 3. ITMS Submission & Sync
             ("ITMS: Submit Single Pair [U]", app.action_submit_pair, "Drive active pair through ITMS installation wizard"),

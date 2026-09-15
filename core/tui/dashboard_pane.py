@@ -161,6 +161,33 @@ class DashboardPane(VerticalScroll):
             Q(order_status__iexact="installed")
         ).count()
 
+        from django.utils import timezone
+        today = timezone.localdate()
+
+        today_images_qs = EvidenceImage.objects.filter(
+            Q(ingested_at__date=today) | Q(batch__created_at__date=today)
+        )
+        today_total_images = today_images_qs.count()
+        today_unprocessed = today_images_qs.filter(status=EvidenceImage.Status.NEW).count()
+        today_processed = today_images_qs.exclude(status=EvidenceImage.Status.NEW).count()
+
+        today_pairs_qs = pairs_qs.filter(
+            Q(created_at__date=today) |
+            Q(front_image__batch__created_at__date=today) |
+            Q(rear_image__batch__created_at__date=today) |
+            Q(front_image__ingested_at__date=today) |
+            Q(rear_image__ingested_at__date=today)
+        )
+        today_total_pairs = today_pairs_qs.count()
+        today_pending_review = today_pairs_qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW).count()
+        today_approved = today_pairs_qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.APPROVED).count()
+        today_submitted = today_pairs_qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED).count()
+        today_incomplete = today_pairs_qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.INCOMPLETE).count()
+        today_failed = today_pairs_qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.FAILED).count()
+        today_conflicts = today_pairs_qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.CONFLICT).count()
+        today_issues = today_incomplete + today_failed + today_conflicts
+        today_batches_count = IngestionBatch.objects.filter(created_at__date=today).count()
+
         total_images = EvidenceImage.objects.count()
         unprocessed_images = EvidenceImage.objects.filter(status=EvidenceImage.Status.NEW).count()
         processed_images = EvidenceImage.objects.exclude(status=EvidenceImage.Status.NEW).count()
@@ -201,11 +228,12 @@ class DashboardPane(VerticalScroll):
 
         header_text = (
             f"[bold cyan]ITMS CLOSING SYSTEM EXECUTIVE DASHBOARD[/bold cyan]  │  "
-            f"[b]Operator:[/b] [bold white]{op_name}[/bold white]  │  "
-            f"[b]Database:[/b] {db_info['badge']}  │  "
-            f"[b]ITMS Link:[/b] {itms_badge}  │  "
-            f"[b]Safety:[/b] {safety_badge}  │  "
-            f"[b]Compression:[/b] {comp_badge}"
+            f"[b]Shift (Today {today.strftime('%Y-%m-%d')}):[/b] "
+            f"[bold yellow]{today_total_pairs} pairs[/bold yellow] "
+            f"([green]{today_approved} Apprv[/green] │ [cyan]{today_submitted} Sub[/cyan] │ [red]{today_issues} Issues[/red])  │  "
+            f"[b]DB:[/b] {db_info['badge']}  │  "
+            f"[b]ITMS:[/b] {itms_badge}  │  "
+            f"{safety_badge}"
         )
         try:
             self.query_one("#dashboard-header-banner", Static).update(header_text)
@@ -213,41 +241,41 @@ class DashboardPane(VerticalScroll):
             pass
 
         # Stage 1: Ingestion
-        c1_status = "[bold yellow]● Ingesting...[/bold yellow]" if unprocessed_images > 0 else "[bold green]● All Ingested[/bold green]"
+        c1_status = "[bold yellow]● Ingesting...[/bold yellow]" if today_unprocessed > 0 else "[bold green]● All Ingested[/bold green]"
         c1_text = (
             f"[bold cyan]1. Photo Ingestion[/bold cyan]\n"
-            f"Total:   [b]{total_images:4d}[/b] photos\n"
-            f"Pending: [dim]{unprocessed_images:4d}[/dim]\n"
+            f"Shift:    [bold yellow]{today_total_images:3d}[/bold yellow] photos ({today_batches_count} batches)\n"
+            f"All-Time: [dim]{total_images:3d} photos[/dim]\n"
             f"{c1_status}\n"
             f"[dim]Click or [I][/dim]"
         )
 
         # Stage 2: Physical Pairing (U-Turn Walk & Filenames)
-        c2_status = f"[bold yellow]● {incomplete} Missing Partner[/bold yellow]" if incomplete > 0 else "[bold green]● Pairs Formed[/bold green]"
+        c2_status = f"[bold yellow]● {today_incomplete} Missing Partner[/bold yellow]" if today_incomplete > 0 else "[bold green]● Pairs Formed[/bold green]"
         c2_text = (
             f"[bold yellow]2. Physical Pairing[/bold yellow]\n"
-            f"Pairs:      [b]{total_pairs:4d}[/b] grouped\n"
-            f"Incomplete: [dim]{incomplete:4d}[/dim]\n"
+            f"Shift:    [bold yellow]{today_total_pairs:3d}[/bold yellow] pairs formed\n"
+            f"All-Time: [dim]{total_pairs:3d} pairs[/dim]\n"
             f"{c2_status}\n"
             f"[dim]Click or [M][/dim]"
         )
 
         # Stage 3: Joint Vision Engine (Dual-Stream YOLOv8 + Consensus)
-        c3_status = f"[bold yellow]● {unprocessed_images} Queued[/bold yellow]" if unprocessed_images > 0 else "[bold green]● 100% Verified[/bold green]"
+        c3_status = f"[bold yellow]● {today_unprocessed} Queued[/bold yellow]" if today_unprocessed > 0 else "[bold green]● 100% Verified[/bold green]"
         c3_text = (
             f"[bold magenta]3. Joint Vision Engine[/bold magenta]\n"
-            f"Processed:   [b]{processed_images:4d}[/b]\n"
-            f"Queued:      [dim]{unprocessed_images:4d}[/dim]\n"
+            f"Shift:    [bold yellow]{today_processed:3d}[/bold yellow] verified\n"
+            f"All-Time: [dim]{processed_images:3d} processed[/dim]\n"
             f"{c3_status}\n"
             f"[dim]Click or [P][/dim]"
         )
 
         # Stage 4: Operator Review
-        c4_status = f"[bold yellow]● {pending_review} Need Review[/bold yellow]" if pending_review > 0 else "[bold green]● Queue Clear[/bold green]"
+        c4_status = f"[bold yellow]● {today_pending_review} Need Review[/bold yellow]" if today_pending_review > 0 else "[bold green]● Shift Clear[/bold green]"
         c4_text = (
             f"[bold dodgerblue]4. Operator Review[/bold dodgerblue]\n"
-            f"Approved:   [b]{approved:4d}[/b]\n"
-            f"Pending:    [{'bold yellow' if pending_review else 'dim'}]{pending_review:4d}[/]\n"
+            f"Shift:    [green]{today_approved:3d} Apprv[/green] │ [yellow]{today_pending_review:2d} Pend[/yellow]\n"
+            f"All-Time: [dim]{approved:3d} Apprv │ {pending_review:2d} Pend[/dim]\n"
             f"{c4_status}\n"
             f"[dim]Click or [4][/dim]"
         )
@@ -259,8 +287,8 @@ class DashboardPane(VerticalScroll):
             c5_status = "[bold green]● Synced to ITMS[/bold green]"
         c5_text = (
             f"[bold green]5. ITMS Finalized[/bold green]\n"
-            f"Submitted:  [b]{submitted:4d}[/b]\n"
-            f"Completed:  [b]{completed_orders:4d}[/b]\n"
+            f"Shift:    [cyan]{today_submitted:3d}[/cyan] submitted\n"
+            f"All-Time: [dim]{submitted:3d} submitted ({completed_orders} done)[/dim]\n"
             f"{c5_status}\n"
             f"[dim]Click or [B][/dim]"
         )
@@ -274,7 +302,7 @@ class DashboardPane(VerticalScroll):
         except Exception:
             pass
 
-        def build_ascii_bar(val: int, tot: int, bar_len: int = 35) -> str:
+        def build_ascii_bar(val: int, tot: int, bar_len: int = 30) -> str:
             if tot <= 0 or val <= 0:
                 return "░" * bar_len
             filled = int(round((val / tot) * bar_len))
@@ -282,23 +310,20 @@ class DashboardPane(VerticalScroll):
             return ("█" * filled) + ("░" * (bar_len - filled))
 
         pct_sub = round((submitted / total_pairs * 100), 1) if total_pairs else 0.0
-        pct_app = round((approved / total_pairs * 100), 1) if total_pairs else 0.0
-        pct_pen = round((pending_review / total_pairs * 100), 1) if total_pairs else 0.0
-        pct_out = round((outbox_count / total_pairs * 100), 1) if total_pairs else 0.0
-        pct_iss = round((issues_total / total_pairs * 100), 1) if total_pairs else 0.0
 
-        bar_sub = build_ascii_bar(submitted, total_pairs, 35)
-        bar_app = build_ascii_bar(approved, total_pairs, 35)
-        bar_pen = build_ascii_bar(pending_review, total_pairs, 35)
-        bar_out = build_ascii_bar(outbox_count, total_pairs, 35)
-        bar_iss = build_ascii_bar(issues_total, total_pairs, 35)
+        bar_sub = build_ascii_bar(today_submitted, today_total_pairs, 30)
+        bar_app = build_ascii_bar(today_approved, today_total_pairs, 30)
+        bar_pen = build_ascii_bar(today_pending_review, today_total_pairs, 30)
+        bar_iss = build_ascii_bar(today_issues, today_total_pairs, 30)
 
         dist_text = (
-            f"  [cyan]● Submitted to ITMS[/cyan]:   [bold cyan]{bar_sub}[/bold cyan]  {submitted:4d} pairs  ({pct_sub:5.1f}%)\n"
-            f"  [green]● Approved (Ready)[/green]:     [bold green]{bar_app}[/bold green]  {approved:4d} pairs  ({pct_app:5.1f}%)\n"
-            f"  [yellow]● Pending Review[/yellow]:       [bold yellow]{bar_pen}[/bold yellow]  {pending_review:4d} pairs  ({pct_pen:5.1f}%)\n"
-            f"  [magenta]● Offline Outbox[/magenta]:       [bold magenta]{bar_out}[/bold magenta]  {outbox_count:4d} pairs  ({pct_out:5.1f}%)\n"
-            f"  [red]● Issues / Conflicts[/red]:   [bold red]{bar_iss}[/bold red]  {issues_total:4d} pairs  ({pct_iss:5.1f}%)"
+            f"  [bold yellow]Shift Work Distribution (Today {today.strftime('%Y-%m-%d')} - {today_total_pairs} pairs):[/bold yellow]\n"
+            f"  [cyan]● Submitted to ITMS[/cyan]:   [bold cyan]{bar_sub}[/bold cyan]  {today_submitted:3d} pairs\n"
+            f"  [green]● Approved (Ready)[/green]:     [bold green]{bar_app}[/bold green]  {today_approved:3d} pairs\n"
+            f"  [yellow]● Pending Review[/yellow]:       [bold yellow]{bar_pen}[/bold yellow]  {today_pending_review:3d} pairs\n"
+            f"  [red]● Issues / Conflicts[/red]:   [bold red]{bar_iss}[/bold red]  {today_issues:3d} pairs\n"
+            f"  [dim]───────────────────────────────────────────────────────────────────────[/dim]\n"
+            f"  [dim]All-Time Metrics: {submitted} submitted ({pct_sub:.1f}%) │ {approved} approved │ {pending_review} pending │ {issues_total} issues │ {total_pairs} total pairs[/dim]"
         )
         try:
             self.query_one("#dashboard-distribution-chart", Static).update(dist_text)

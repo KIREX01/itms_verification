@@ -81,11 +81,36 @@ def _ocr_with_paddle(plate_crop: np.ndarray) -> Optional[OCRResult]:
 
 import os
 import shutil
+import sys
+
+_TESSERACT_INITIALIZED: bool = False
+_TESSERACT_AVAILABLE: bool = False
+_TESSERACT_PATH: Optional[str] = None
+
+
+def _suppress_windows_error_dialogs() -> None:
+    """Suppress blocking Windows GUI error dialogs (e.g. missing DLLs) for subprocesses."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            # SEM_FAILCRITICALERRORS (0x0001) | SEM_NOGPFAULTERRORBOX (0x0002) | SEM_NOOPENFILEERRORBOX (0x8000)
+            ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002 | 0x8000)
+        except Exception:
+            pass
+
 
 def _configure_tesseract() -> bool:
+    global _TESSERACT_INITIALIZED, _TESSERACT_AVAILABLE, _TESSERACT_PATH
+    if _TESSERACT_INITIALIZED:
+        return _TESSERACT_AVAILABLE
+
+    _suppress_windows_error_dialogs()
+
     try:
         import pytesseract
     except ImportError:
+        _TESSERACT_INITIALIZED = True
+        _TESSERACT_AVAILABLE = False
         return False
 
     try:
@@ -97,19 +122,36 @@ def _configure_tesseract() -> bool:
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     local_tesseract = os.path.join(project_root, "tools", "tesseract", "tesseract.exe")
 
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
+    user_tesseract = os.path.join(local_app_data, "Programs", "Tesseract-OCR", "tesseract.exe") if local_app_data else None
+
+    # Order candidates with valid system-wide installations and explicit settings FIRST.
+    # Relative tools/ paths are checked last to prevent probing incomplete portable extractions.
     candidates = [
         tesseract_setting,
-        local_tesseract,
-        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
         shutil.which("tesseract"),
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
         r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        user_tesseract,
+        "/usr/bin/tesseract",
+        "/usr/local/bin/tesseract",
+        "/opt/homebrew/bin/tesseract",
+        local_tesseract,
     ]
+
+    creationflags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
+
     for c in candidates:
         if c and os.path.isfile(c):
-            # Probe candidate with a quick --version check to guarantee it executes cleanly
+            # Probe candidate with a quick --version check to guarantee it executes cleanly without missing DLLs
             try:
                 import subprocess
-                probe = subprocess.run([c, "--version"], capture_output=True, timeout=3)
+                probe = subprocess.run(
+                    [c, "--version"],
+                    capture_output=True,
+                    timeout=3,
+                    creationflags=creationflags,
+                )
                 if probe.returncode != 0:
                     continue
             except Exception:
@@ -119,7 +161,13 @@ def _configure_tesseract() -> bool:
             tessdata = os.path.join(os.path.dirname(c), "tessdata")
             if os.path.isdir(tessdata):
                 os.environ["TESSDATA_PREFIX"] = tessdata
+            _TESSERACT_INITIALIZED = True
+            _TESSERACT_AVAILABLE = True
+            _TESSERACT_PATH = c
             return True
+
+    _TESSERACT_INITIALIZED = True
+    _TESSERACT_AVAILABLE = False
     return False
 
 

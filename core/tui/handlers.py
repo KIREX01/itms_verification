@@ -31,9 +31,12 @@ class NavigationHandlersMixin:
             if pane_id == "tab-settings":
                 activity.display = False
                 try:
-                    self.set_focus(None)
+                    self.query_one("#settings-scroll-body").focus()
                 except Exception:
-                    pass
+                    try:
+                        self.set_focus(None)
+                    except Exception:
+                        pass
             else:
                 activity.display = True
                 target_focus_map = {

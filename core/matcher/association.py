@@ -226,6 +226,9 @@ def _align_and_pair_candidates(
 
     # --- Tier 2: Temporal Trajectory Alignment (U-Turn Walk Detection) ---
     if unpaired_fronts and unpaired_rears and len(unpaired_fronts) > 1 and len(unpaired_rears) > 1:
+        from core.services import config_service
+        uturn_threshold = int(config_service.get_setting("matcher.uturn_threshold_seconds", 1800))
+
         unpaired_rears.sort(key=lambda img: extract_chronological_sort_key(img.original_source_path or img.vault_file, img.captured_at, img.ingested_at))
         unpaired_fronts.sort(key=lambda img: extract_chronological_sort_key(img.original_source_path or img.vault_file, img.captured_at, img.ingested_at))
 
@@ -236,7 +239,7 @@ def _align_and_pair_candidates(
 
         gap_uturn = min(abs(f_first_time - r_last_time), abs(r_first_time - f_last_time))
         gap_parallel = abs(f_first_time - r_first_time)
-        is_uturn = gap_uturn <= gap_parallel
+        is_uturn = (gap_uturn <= gap_parallel) and (gap_uturn <= uturn_threshold)
 
         if is_uturn:
             if f_first_time >= r_first_time:
@@ -245,7 +248,7 @@ def _align_and_pair_candidates(
             else:
                 aligned_rears = list(reversed(unpaired_rears))
                 aligned_fronts = list(unpaired_fronts)
-            walk_desc = f"Temporal Trajectory (U-Turn Walk, Δt turnaround = {int(gap_uturn)}s)"
+            walk_desc = f"Temporal Trajectory (U-Turn Walk, Δt turnaround = {int(gap_uturn)}s [threshold: {uturn_threshold}s])"
 
             t_pair_count = min(len(aligned_rears), len(aligned_fronts))
             for i in range(t_pair_count):

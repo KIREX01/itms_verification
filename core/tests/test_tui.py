@@ -160,3 +160,138 @@ class TUIAppTests(TransactionTestCase):
             app.reload_data.assert_called_once()
             logged_messages = [call[0][0] for call in app.log_message.call_args_list]
             self.assertTrue(any("complete: 2 ingested (1 Front, 1 Rear)" in m for m in logged_messages))
+
+    def test_settings_pane_developer_mode_scroll(self):
+        """Verifies that enabling developer mode expands virtual height and enables scrolling."""
+        async def run_pilot():
+            app = ITMSOperatorApp()
+            async with app.run_test() as pilot:
+                tabs = app.query_one("#tabs-content")
+                await pilot.press("6")
+                self.assertEqual(tabs.active, "tab-settings")
+
+                scroll_body = app.query_one("#settings-scroll-body")
+                dev_container = app.query_one("#developer-settings-container")
+                dev_switch = app.query_one("#switch-dev-mode")
+
+                # Set dev mode to False
+                dev_switch.value = False
+                await pilot.pause()
+                off_max_scroll = scroll_body.max_scroll_y
+
+                # Enable Developer Mode
+                dev_switch.value = True
+                await pilot.pause()
+                on_max_scroll = scroll_body.max_scroll_y
+                self.assertGreater(on_max_scroll, off_max_scroll)
+                self.assertNotIn("hidden", dev_container.classes)
+
+                # Test keyboard scrolling downwards
+                scroll_body.focus()
+                await pilot.pause()
+                initial_y = scroll_body.scroll_y
+                await pilot.press("pagedown")
+                await pilot.pause()
+                self.assertGreater(scroll_body.scroll_y, initial_y)
+
+                # Test scrolling to bottom (End)
+                await pilot.press("end")
+                await pilot.pause()
+                self.assertEqual(scroll_body.scroll_y, on_max_scroll)
+
+                # Test scrolling to top (Home)
+                await pilot.press("home")
+                await pilot.pause()
+                self.assertEqual(scroll_body.scroll_y, 0)
+
+        asyncio.run(run_pilot())
+
+    def test_daily_date_scope_and_filtering(self):
+        """Verifies that the date scope filter isolates today's work from prior day carryover."""
+        from datetime import timedelta
+        from django.utils import timezone
+        today = timezone.now()
+        yesterday = today - timedelta(days=1)
+
+        # Create yesterday batch and pair
+        prior_batch = IngestionBatch.objects.create(
+            batch_id="BATCH-PRIOR-TEST",
+            created_at=yesterday,
+            total_files=2,
+            ingested_count=2,
+        )
+        prior_front = EvidenceImage.objects.create(
+            batch=prior_batch,
+            file_hash="pfront" + "0" * 58,
+            original_source_path="prior_front.jpg",
+            vault_file="vault/prior_front.jpg",
+            detected_plate="UMA999PR",
+            orientation="FRONT",
+            ocr_confidence=0.9,
+            ingested_at=yesterday,
+        )
+        prior_pair = VehicleInstallationPair.objects.create(
+            registration_number_detected="UMA999PR",
+            front_image=prior_front,
+            verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW,
+            created_at=yesterday,
+        )
+        # Update created_at directly in DB since auto_now_add might override
+        VehicleInstallationPair.objects.filter(id=prior_pair.id).update(created_at=yesterday)
+
+        async def run_pilot():
+            app = ITMSOperatorApp()
+            async with app.run_test() as pilot:
+                # 1. Queue Tab - defaults to TODAY
+                await pilot.press("4")
+                tabs = app.query_one("#tabs-content")
+                self.assertEqual(tabs.active, "tab-queue")
+                self.assertEqual(app.current_queue_scope, "TODAY")
+
+                queue_table = app.query_one("#table-queue")
+                # Today pair exists (self.pair from setUp), prior_pair is excluded
+                self.assertEqual(queue_table.row_count, 1)
+
+                # 2. Cycle scope to ACTIVE_BATCH via 'D'
+                await pilot.press("d")
+                self.assertEqual(app.current_queue_scope, "ACTIVE_BATCH")
+
+                # 3. Cycle scope to CARRYOVER via 'D'
+                await pilot.press("d")
+                self.assertEqual(app.current_queue_scope, "CARRYOVER")
+                self.assertEqual(queue_table.row_count, 1)  # only prior_pair
+
+                # 4. Cycle scope to ALL via 'D'
+                await pilot.press("d")
+                self.assertEqual(app.current_queue_scope, "ALL")
+                self.assertEqual(queue_table.row_count, 2)  # today + prior
+
+                # 5. Cycle back to TODAY via 'D'
+                await pilot.press("d")
+                self.assertEqual(app.current_queue_scope, "TODAY")
+                self.assertEqual(queue_table.row_count, 1)
+
+                # 6. Check Dashboard header includes Shift (Today)
+                await pilot.press("1")
+                self.assertEqual(tabs.active, "tab-dashboard")
+                banner = app.query_one("#dashboard-header-banner")
+                banner_text = str(getattr(banner, "content", banner.render()))
+                self.assertIn("Shift (Today", banner_text)
+
+                # 7. Check Batches Tab Scope
+                await pilot.press("3")
+                self.assertEqual(tabs.active, "tab-batches")
+                self.assertEqual(app.current_batches_scope, "TODAY")
+                await pilot.press("d")
+                self.assertEqual(app.current_batches_scope, "ACTIVE_BATCH")
+
+                # 8. Check History Tab Scope
+                await pilot.press("5")
+                self.assertEqual(tabs.active, "tab-history")
+                self.assertEqual(app.current_history_date_scope, "TODAY")
+                await pilot.press("d")
+                self.assertEqual(app.current_history_date_scope, "ALL")
+
+        asyncio.run(run_pilot())
+
+

@@ -12,11 +12,29 @@ function setHistoryFilter(filter) {
     fetchHistoryEvents();
 }
 
+function setHistoryDateScope(dateScope) {
+    currentHistoryDateScope = dateScope;
+    const btnToday = document.getElementById("btn-hscope-today");
+    const btnAll = document.getElementById("btn-hscope-all");
+    if (btnToday) btnToday.classList.toggle("active", dateScope === "TODAY");
+    if (btnAll) btnAll.classList.toggle("active", dateScope === "ALL");
+    fetchHistoryEvents();
+}
+
+function cycleHistoryDateScope() {
+    const nextScope = (currentHistoryDateScope === "TODAY") ? "ALL" : "TODAY";
+    setHistoryDateScope(nextScope);
+    if (typeof showToast === "function") {
+        showToast(`History Scope: ${nextScope === "TODAY" ? "Today's Shift" : "All Time"}`, "info");
+    }
+}
+
 async function fetchHistoryEvents() {
     const tbody = document.getElementById("history-table-tbody");
     if (!tbody) return;
     try {
-        const res = await fetch(`/api/history/?filter=${encodeURIComponent(currentHistoryFilter)}`);
+        const activeDateScope = currentHistoryDateScope || "TODAY";
+        const res = await fetch(`/api/history/?filter=${encodeURIComponent(currentHistoryFilter)}&date_scope=${encodeURIComponent(activeDateScope)}`);
         const data = await res.json();
         if (data.success && data.items) {
             historyItemsMap = {};
@@ -25,20 +43,30 @@ async function fetchHistoryEvents() {
             });
 
             if (data.items.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:40px; color:var(--ug-text-dim);">No historical verification events matching '${escapeHtml(currentHistoryFilter)}'.</td></tr>`;
+                const scopeMsg = activeDateScope === "TODAY" 
+                    ? `No verification events in Today's shift matching '${escapeHtml(currentHistoryFilter)}'. Click 'All Time' or press [D] to view earlier logs.`
+                    : `No historical verification events matching '${escapeHtml(currentHistoryFilter)}'.`;
+                tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:40px; color:var(--ug-text-dim);">${scopeMsg}</td></tr>`;
                 return;
             }
-            tbody.innerHTML = data.items.map(l => `
+            tbody.innerHTML = data.items.map(l => {
+                const todayBadge = l.is_today 
+                    ? `<span class="badge badge-green" style="font-size:0.55rem; padding:1px 4px; margin-left:4px;">TODAY</span>`
+                    : '';
+                return `
                 <tr onclick="openHistoryModal('${escapeHtml(String(l.id))}')" style="cursor:pointer;" title="Click to view complete audit log">
                     <td style="font-size:0.75rem; color:var(--ug-text-dim); font-family:var(--font-mono);">${escapeHtml(l.timestamp)}</td>
-                    <td><strong style="color:var(--ug-yellow); font-family:var(--font-mono);">${escapeHtml(l.plate)}</strong></td>
+                    <td>
+                        <strong style="color:var(--ug-yellow); font-family:var(--font-mono);">${escapeHtml(l.plate)}</strong>
+                        ${todayBadge}
+                    </td>
                     <td><span style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${escapeHtml(l.order_number)}</span></td>
                     <td><span class="badge badge-muted">${escapeHtml(l.action)}</span></td>
                     <td><span class="badge ${l.result === 'SUCCESS' ? 'badge-green' : (l.result === 'REVIEW' ? 'badge-yellow' : 'badge-red')}">${escapeHtml(l.result)}</span></td>
                     <td style="font-size:0.8rem; color:var(--ug-text-muted);">${escapeHtml(l.operator)}</td>
                     <td style="font-size:0.8rem; color:#fff; max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(l.message)}</td>
-                </tr>
-            `).join("");
+                </tr>`;
+            }).join("");
         }
     } catch (err) {
         console.warn("History fetch error:", err);

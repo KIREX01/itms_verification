@@ -44,12 +44,53 @@ def create_ingestion_batch(
     return batch
 
 
+def get_vault_root() -> Path:
+    """
+    Returns the absolute directory path to the active Evidence Vault.
+    Reads storage.vault_path from secure/config.json with fallback to settings.VAULT_ROOT.
+    Ensures directory exists and keeps settings.VAULT_ROOT synchronized.
+    """
+    from core.services import config_service
+    configured_path = config_service.get_setting("storage.vault_path", None)
+    if configured_path and configured_path not in ("media/vault", "media\\vault"):
+        p = Path(configured_path)
+        if not p.is_absolute():
+            base = getattr(settings, "BASE_DIR", None) or Path(__file__).resolve().parent.parent.parent
+            p = (Path(base) / p).resolve()
+    else:
+        media_dir = Path(getattr(settings, "MEDIA_ROOT", Path(__file__).resolve().parent.parent.parent / "media"))
+        vault_subdir = getattr(settings, "VAULT_SUBDIR", "vault")
+        p = Path(getattr(settings, "VAULT_ROOT", media_dir / vault_subdir))
+
+    p.mkdir(parents=True, exist_ok=True)
+    try:
+        settings.VAULT_ROOT = p
+    except Exception:
+        pass
+    return p
+
+
+def set_vault_root(new_path: Union[str, Path]) -> Path:
+    """
+    Updates and persists the Evidence Vault storage location in secure/config.json.
+    """
+    from core.services import config_service
+    p = Path(new_path).resolve()
+    p.mkdir(parents=True, exist_ok=True)
+    config_service.set_setting("storage.vault_path", str(p))
+    try:
+        settings.VAULT_ROOT = p
+    except Exception:
+        pass
+    return p
+
+
 def get_batch_vault_dir(batch: Optional[IngestionBatch] = None) -> Path:
     """
     Returns the absolute directory path for storing files in the vault.
     Layout: media/vault/YYYY-MM-DD/batch_HHMMSS_<id>/
     """
-    vault_root = Path(settings.VAULT_ROOT)
+    vault_root = get_vault_root()
     today_str = date.today().isoformat()
 
     if batch:
@@ -206,7 +247,10 @@ def ingest_from_disk(
     # saturation boost, sharpness, brightness normalization.
     enhance_whole_image(str(vault_abs_path))
 
-    vault_relative = str(vault_abs_path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
+    try:
+        vault_relative = str(vault_abs_path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
+    except ValueError:
+        vault_relative = str(vault_abs_path.resolve()).replace("\\", "/")
 
     clean_override = orientation_override.upper() if orientation_override else None
     if clean_override in (EvidenceImage.Orientation.FRONT, EvidenceImage.Orientation.REAR):
@@ -297,7 +341,10 @@ def ingest_uploaded_file(
     # saturation boost, sharpness, brightness normalization.
     enhance_whole_image(str(vault_abs_path))
 
-    vault_relative = str(vault_abs_path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
+    try:
+        vault_relative = str(vault_abs_path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
+    except ValueError:
+        vault_relative = str(vault_abs_path.resolve()).replace("\\", "/")
 
     clean_override = orientation_override.upper() if orientation_override else None
     if clean_override in (EvidenceImage.Orientation.FRONT, EvidenceImage.Orientation.REAR):

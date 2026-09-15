@@ -1085,3 +1085,90 @@ class BatchProgressModal(ModalScreen[None]):
             self.action_toggle_pause()
 
 
+class VaultLocationDialog(ModalScreen[Optional[str]]):
+    """
+    Interactive modal dialog allowing operators to choose or confirm
+    where the Evidence Vault is located on disk.
+    """
+    BINDINGS = [
+        Binding("escape", "dismiss_dialog", "Skip / Keep Current", priority=True),
+        Binding("enter", "confirm_selection", "Confirm Vault Path"),
+    ]
+
+    def __init__(self, is_startup: bool = True, **kwargs):
+        super().__init__(**kwargs)
+        self.is_startup = is_startup
+
+    def compose(self) -> ComposeResult:
+        from core.services import config_service, vault_service
+        current_vault = str(config_service.get_setting("storage.vault_path", "media/vault"))
+        prompt_on_startup = config_service.get_setting("storage.prompt_vault_on_startup", True)
+
+        header_lines = [
+            "[bold cyan]═══ 📦 Evidence Vault Storage Location ═══[/bold cyan]",
+            "The Evidence Vault stores all incoming motorcycle evidence photos, EXIF metadata, timestamps, and hashes.",
+            f"Active Vault Root: [bold yellow]{vault_service.get_vault_root()}[/bold yellow]",
+            "[dim]Choose your desired vault folder below, or keep the default (media/vault).[/dim]",
+        ]
+
+        with Vertical(id="modal-dialog", classes="vault-location-modal"):
+            yield Static("\n".join(header_lines), id="modal-header")
+            with Horizontal(classes="vault-input-row"):
+                yield Input(value=current_vault, placeholder="e.g. media/vault or D:/itms_vault", id="input-vault-path")
+                yield Button("📂 Browse Folder...", variant="primary", id="btn-browse-vault")
+                yield Button("Default (media/vault)", variant="default", id="btn-default-vault")
+
+            with Horizontal(classes="vault-options-row"):
+                yield Checkbox(
+                    "Prompt for Vault Location on application startup",
+                    value=prompt_on_startup,
+                    id="chk-prompt-startup",
+                )
+
+            yield Static("[dim]Press Enter or click Confirm to save, or Esc to keep current location.[/dim]", id="vault-dialog-hint")
+
+            with Horizontal(id="modal-footer"):
+                yield Button("💾 Confirm & Use Vault [Enter]", variant="success", id="btn-confirm-vault")
+                yield Button("Skip / Keep Current [Esc]", variant="warning", id="btn-cancel-vault")
+
+    def action_dismiss_dialog(self) -> None:
+        self.dismiss(None)
+
+    def action_confirm_selection(self) -> None:
+        from core.services import config_service, vault_service
+        input_w = self.query_one("#input-vault-path", Input)
+        chk_w = self.query_one("#chk-prompt-startup", Checkbox)
+        new_path = input_w.value.strip() or "media/vault"
+
+        # Update settings in secure/config.json
+        vault_service.set_vault_root(new_path)
+        config_service.set_setting("storage.prompt_vault_on_startup", bool(chk_w.value))
+
+        self.notify(f"Evidence Vault configured: {new_path}", severity="information")
+        self.dismiss(new_path)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        btn_id = event.button.id
+        if btn_id == "btn-confirm-vault":
+            self.action_confirm_selection()
+        elif btn_id == "btn-cancel-vault":
+            self.action_dismiss_dialog()
+        elif btn_id == "btn-default-vault":
+            input_w = self.query_one("#input-vault-path", Input)
+            input_w.value = "media/vault"
+        elif btn_id == "btn-browse-vault":
+            self._browse_directory()
+
+    def _browse_directory(self) -> None:
+        from core.services.file_dialog import prompt_native_directory_selection
+        input_w = self.query_one("#input-vault-path", Input)
+        chosen = prompt_native_directory_selection(
+            initial_dir=input_w.value.strip() or None,
+            title="Choose Evidence Vault Storage Directory",
+        )
+        if chosen:
+            input_w.value = chosen
+            self.notify(f"Selected: {chosen}")
+
+
+

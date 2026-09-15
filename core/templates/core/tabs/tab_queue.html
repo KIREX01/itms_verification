@@ -16,6 +16,25 @@
                         <option value="CARRYOVER">⚠️ Carryover / Previous Batches</option>
                     </select>
                 </div>
+                <!-- Date / Session Scope Filter (TUI Mirror) -->
+                <div class="scope-filter-bar" style="padding:4px 6px;">
+                    <span class="scope-filter-label" style="font-size:0.68rem;">📅 SCOPE:</span>
+                    <div class="scope-pills-group" style="padding:1px 2px; flex:1; justify-content:space-between;">
+                        <button class="scope-pill-btn active" id="btn-qscope-today" onclick="setQueueDateScope('TODAY')" title="Focus exclusively on today's active shift work (Hotkey: D)">
+                            🔥 Today
+                        </button>
+                        <button class="scope-pill-btn" id="btn-qscope-active" onclick="setQueueDateScope('ACTIVE_BATCH')" title="Focus on the single latest ingested batch">
+                            ⚡ Active
+                        </button>
+                        <button class="scope-pill-btn" id="btn-qscope-carryover" onclick="setQueueDateScope('CARRYOVER')" title="Inspect carryover / unsubmitted pairs from prior days">
+                            ⏳ Carryover
+                        </button>
+                        <button class="scope-pill-btn" id="btn-qscope-all" onclick="setQueueDateScope('ALL')" title="Show all pairs across entire database">
+                            🌐 All
+                        </button>
+                    </div>
+                </div>
+
                 <div class="queue-filter-pills">
                     <div class="queue-filter-pill active" data-filter="ALL" onclick="setWorkQueueFilter('ALL')">All</div>
                     <div class="queue-filter-pill" data-filter="PENDING" onclick="setWorkQueueFilter('PENDING')">Review</div>
@@ -27,7 +46,7 @@
                     <span style="font-size:0.72rem; color:var(--ug-text-muted);" id="queue-approved-count-text">
                         0 ready to submit
                     </span>
-                    <button class="btn btn-primary" id="btn-queue-batch-submit" onclick="triggerBatchSubmit()" style="padding:4px 10px; font-size:0.75rem; background:var(--ug-green); border-color:var(--ug-green); font-weight:700;" title="Submit all approved pairs with matched orders to ITMS (Hotkey: B)">
+                    <button class="btn btn-primary" id="btn-queue-batch-submit" onclick="triggerBatchSubmit(currentQueueDateScope)" style="padding:4px 10px; font-size:0.75rem; background:var(--ug-green); border-color:var(--ug-green); font-weight:700;" title="Submit approved pairs in active scope to ITMS (Hotkey: B)">
                         🚀 Submit Approved (0) <span class="hotkey">B</span>
                     </button>
                 </div>

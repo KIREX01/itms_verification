@@ -13,6 +13,17 @@
                     <button class="history-chip" data-hfilter="FAILED" onclick="setHistoryFilter('FAILED')">Failed</button>
                     <button class="history-chip" data-hfilter="ISSUES" onclick="setHistoryFilter('ISSUES')">Issues / Conflicts</button>
                 </div>
+
+                <!-- Date Scope Filter (TUI Scope Mirror) -->
+                <div class="scope-pills-group" style="margin-left:4px;">
+                    <span style="font-size:0.68rem; color:var(--ug-text-dim); padding-left:4px; font-weight:700;">DATE:</span>
+                    <button class="scope-pill-btn active" id="btn-hscope-today" onclick="setHistoryDateScope('TODAY')" title="Show audit logs from today's shift (Hotkey: D)">
+                        🔥 Today's Shift
+                    </button>
+                    <button class="scope-pill-btn" id="btn-hscope-all" onclick="setHistoryDateScope('ALL')" title="Show all audit logs across entire history">
+                        🌐 All Time
+                    </button>
+                </div>
             </div>
 
             <div style="display:flex; align-items:center; gap:8px;">

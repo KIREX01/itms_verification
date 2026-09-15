@@ -237,6 +237,9 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
 @require_GET
 def api_stats(request: HttpRequest) -> JsonResponse:
     """Returns real-time operational summary metrics for the header ribbon and dashboard."""
+    from django.utils import timezone
+    today = timezone.localdate()
+
     total_orders = InstallationOrder.objects.count()
     pending_orders = InstallationOrder.objects.filter(status=InstallationOrder.Status.PENDING).count()
     total_pairs = VehicleInstallationPair.objects.count()
@@ -261,6 +264,38 @@ def api_stats(request: HttpRequest) -> JsonResponse:
     total_photos = EvidenceImage.objects.count()
     batches_count = IngestionBatch.objects.count()
 
+    today_pairs_qs = VehicleInstallationPair.objects.filter(
+        Q(created_at__date=today) |
+        Q(front_image__batch__created_at__date=today) |
+        Q(rear_image__batch__created_at__date=today)
+    )
+    shift_stats = {
+        "date": today.strftime("%Y-%m-%d"),
+        "total_pairs": today_pairs_qs.count(),
+        "pending_review": today_pairs_qs.filter(
+            verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
+        ).count(),
+        "approved": today_pairs_qs.filter(
+            verification_status=VehicleInstallationPair.VerificationStatus.APPROVED
+        ).count(),
+        "submitted": today_pairs_qs.filter(
+            verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED
+        ).count(),
+        "issues": today_pairs_qs.filter(
+            verification_status__in=[
+                VehicleInstallationPair.VerificationStatus.INCOMPLETE,
+                VehicleInstallationPair.VerificationStatus.CONFLICT,
+                VehicleInstallationPair.VerificationStatus.UNREGISTERED,
+                VehicleInstallationPair.VerificationStatus.FAILED,
+                VehicleInstallationPair.VerificationStatus.OFFLINE_OUTBOX,
+            ]
+        ).count(),
+        "batches_count": IngestionBatch.objects.filter(created_at__date=today).count(),
+        "total_photos": EvidenceImage.objects.filter(
+            Q(ingested_at__date=today) | Q(batch__created_at__date=today)
+        ).count(),
+    }
+
     dry_run = config_service.get_setting("submission.dry_run_mode", True)
     db_info = config_service.get_active_database_info()
 
@@ -274,6 +309,7 @@ def api_stats(request: HttpRequest) -> JsonResponse:
         "issues": issues,
         "total_photos": total_photos,
         "batches_count": batches_count,
+        "shift": shift_stats,
     }
 
     return JsonResponse({
@@ -293,8 +329,12 @@ def api_stats(request: HttpRequest) -> JsonResponse:
 @require_GET
 def api_pairs_list(request: HttpRequest) -> JsonResponse:
     """Returns filtered list of vehicle installation pairs for the work queue with batch clarity."""
+    from django.utils import timezone
+    today = timezone.localdate()
+
     status_filter = request.GET.get("status", "ALL").upper().strip()
     batch_filter = request.GET.get("batch", "ALL").strip()
+    scope = request.GET.get("scope", "").upper().strip()
     search = request.GET.get("search", "").strip()
     limit = int(request.GET.get("limit", 250))
 
@@ -303,6 +343,19 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
     qs = VehicleInstallationPair.objects.all().select_related(
         "order", "front_image", "rear_image", "front_image__batch", "rear_image__batch"
     )
+
+    today_q = (
+        Q(created_at__date=today) |
+        Q(front_image__batch__created_at__date=today) |
+        Q(rear_image__batch__created_at__date=today)
+    )
+
+    if scope == "TODAY":
+        qs = qs.filter(today_q)
+    elif scope == "ACTIVE_BATCH" and latest_batch:
+        qs = qs.filter(Q(front_image__batch=latest_batch) | Q(rear_image__batch=latest_batch))
+    elif scope == "CARRYOVER":
+        qs = qs.exclude(today_q)
 
     if status_filter == "PENDING":
         qs = qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW)
@@ -345,8 +398,9 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
         batch_obj = (p.front_image.batch if p.front_image and p.front_image.batch else None) or (
             p.rear_image.batch if p.rear_image and p.rear_image.batch else None
         )
+        is_today = bool(batch_obj and batch_obj.created_at and batch_obj.created_at.date() == today)
         is_latest = bool(batch_obj and latest_batch and batch_obj.id == latest_batch.id)
-        is_carryover = bool(latest_batch and (not batch_obj or batch_obj.id != latest_batch.id))
+        is_carryover = bool(batch_obj and batch_obj.created_at and batch_obj.created_at.date() < today)
 
         pairs_data.append({
             "id": p.id,
@@ -364,6 +418,7 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
             "batch_id": batch_obj.batch_id if batch_obj else "Carryover",
             "batch_label": batch_obj.batch_id if batch_obj else "Carryover Batch",
             "batch_created_at": batch_obj.created_at.strftime("%Y-%m-%d %H:%M") if (batch_obj and batch_obj.created_at) else "",
+            "is_today": is_today,
             "is_latest_batch": is_latest,
             "is_carryover": is_carryover,
             "order": {
@@ -381,15 +436,26 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
             "source_label": b.source_label or b.batch_id,
             "created_at": b.created_at.strftime("%Y-%m-%d %H:%M") if b.created_at else "",
             "is_latest": bool(latest_batch and b.id == latest_batch.id),
+            "is_today": bool(b.created_at and b.created_at.date() == today),
         }
         for b in IngestionBatch.objects.order_by("-created_at")[:20]
     ]
 
+    today_approved_count = VehicleInstallationPair.objects.filter(
+        verification_status=VehicleInstallationPair.VerificationStatus.APPROVED
+    ).filter(today_q).count()
+    carryover_approved_count = VehicleInstallationPair.objects.filter(
+        verification_status=VehicleInstallationPair.VerificationStatus.APPROVED
+    ).exclude(today_q).count()
+
     return JsonResponse({
         "success": True,
         "count": len(pairs_data),
+        "scope": scope or "ALL",
         "pairs": pairs_data,
         "latest_batch_id": latest_batch.batch_id if latest_batch else None,
+        "today_approved_count": today_approved_count,
+        "carryover_approved_count": carryover_approved_count,
         "batches": batches_list,
     })
 
@@ -1109,22 +1175,65 @@ def api_pipeline_status(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_POST
 def api_batch_submit(request: HttpRequest) -> JsonResponse:
-    """Submits all approved pairs to ITMS in a single operation."""
+    """Submits approved pairs to ITMS in a single operation, scoped to shift or batch."""
+    from django.utils import timezone
+    today = timezone.localdate()
+
     dry_run_param = request.POST.get("dry_run")
     if dry_run_param is not None and str(dry_run_param).strip() != "":
         is_dry_run = str(dry_run_param).strip().lower() in ("true", "1", "yes")
     else:
         is_dry_run = config_service.get_setting("submission.dry_run_mode", True)
 
-    approved_pairs = list(
-        VehicleInstallationPair.objects.filter(
-            verification_status=VehicleInstallationPair.VerificationStatus.APPROVED,
-            order__isnull=False,
-        )
+    scope = request.POST.get("scope", "TODAY").upper().strip()
+    latest_batch = IngestionBatch.objects.order_by("-created_at").first()
+
+    qs = VehicleInstallationPair.objects.filter(
+        verification_status=VehicleInstallationPair.VerificationStatus.APPROVED,
+        order__isnull=False,
     )
 
-    if not approved_pairs:
-        return JsonResponse({"success": False, "message": "No approved pairs available for submission."})
+    today_q = (
+        Q(created_at__date=today) |
+        Q(front_image__batch__created_at__date=today) |
+        Q(rear_image__batch__created_at__date=today)
+    )
+
+    if scope == "TODAY":
+        approved_pairs = list(qs.filter(today_q))
+        carryover_cnt = qs.exclude(today_q).count()
+        if not approved_pairs:
+            if carryover_cnt > 0:
+                return JsonResponse({
+                    "success": False,
+                    "message": f"No APPROVED orders ready in Today's scope. Found {carryover_cnt} in Prior Carryover (switch Date Scope to Prior Carryover or All Work).",
+                    "carryover_count": carryover_cnt,
+                })
+            return JsonResponse({
+                "success": False,
+                "message": "No approved pairs available for submission in Today's scope.",
+            })
+    elif scope == "ACTIVE_BATCH" and latest_batch:
+        approved_pairs = list(qs.filter(Q(front_image__batch=latest_batch) | Q(rear_image__batch=latest_batch)))
+        if not approved_pairs:
+            return JsonResponse({
+                "success": False,
+                "message": f"No APPROVED orders found in Active Batch ({latest_batch.batch_id}).",
+            })
+    elif scope == "CARRYOVER":
+        approved_pairs = list(qs.exclude(today_q))
+        if not approved_pairs:
+            return JsonResponse({
+                "success": False,
+                "message": "No APPROVED orders found in Prior Carryover.",
+            })
+    else:  # ALL
+        approved_pairs = list(qs)
+        if not approved_pairs:
+            return JsonResponse({
+                "success": False,
+                "message": "No approved pairs available for submission across all scopes.",
+            })
 
     succeeded = 0
     failed = 0
@@ -1141,7 +1250,8 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
         "succeeded": succeeded,
         "failed": failed,
         "dry_run": is_dry_run,
-        "message": f"{'[DRY RUN] ' if is_dry_run else ''}Batch submission complete: {succeeded} succeeded, {failed} failed.",
+        "scope": scope,
+        "message": f"{'[DRY RUN] ' if is_dry_run else ''}Batch submission complete ({scope}): {succeeded} succeeded, {failed} failed.",
     })
 
 
@@ -1525,7 +1635,24 @@ def api_batch_detail(request: HttpRequest, batch_id: str) -> JsonResponse:
 
 @require_GET
 def api_batches_list(request: HttpRequest) -> JsonResponse:
-    """Returns list of all photo ingestion batches."""
+    """Returns list of photo ingestion batches with shift scope filtering."""
+    from django.utils import timezone
+    today = timezone.localdate()
+    latest_batch = IngestionBatch.objects.order_by("-created_at").first()
+    scope = request.GET.get("scope", "TODAY").upper().strip()
+
+    qs = IngestionBatch.objects.all().order_by("-created_at")
+    total_batches = qs.count()
+    today_batches_cnt = qs.filter(created_at__date=today).count()
+    carryover_batches_cnt = qs.exclude(created_at__date=today).count()
+
+    if scope == "TODAY":
+        qs = qs.filter(created_at__date=today)
+    elif scope == "ACTIVE_BATCH" and latest_batch:
+        qs = qs.filter(id=latest_batch.id)
+    elif scope == "CARRYOVER":
+        qs = qs.exclude(created_at__date=today)
+
     batches = [
         {
             "id": str(b.id),
@@ -1533,28 +1660,47 @@ def api_batches_list(request: HttpRequest) -> JsonResponse:
             "source_type": b.source_type,
             "source_label": b.source_label,
             "created_at": b.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "created_date": b.created_at.strftime("%Y-%m-%d"),
+            "is_today": bool(b.created_at and b.created_at.date() == today),
+            "is_latest": bool(latest_batch and b.id == latest_batch.id),
             "total_files": b.total_files,
             "ingested_count": b.ingested_count,
             "duplicate_count": b.duplicate_count,
             "failed_count": b.failed_count,
         }
-        for b in IngestionBatch.objects.all().order_by("-created_at")[:50]
+        for b in qs[:60]
     ]
-    return JsonResponse({"success": True, "batches": batches})
+    return JsonResponse({
+        "success": True,
+        "batches": batches,
+        "scope": scope,
+        "latest_batch_id": latest_batch.batch_id if latest_batch else None,
+        "total_batches": total_batches,
+        "today_batches": today_batches_cnt,
+        "carryover_batches": carryover_batches_cnt,
+    })
 
 
 @require_GET
 def api_history_list(request: HttpRequest) -> JsonResponse:
-    """Returns historical verification events and audit logs for the History tab."""
+    """Returns historical verification events and audit logs for the History tab with date scoping."""
+    from django.utils import timezone
+    today = timezone.localdate()
+
     flt = request.GET.get("filter", "ALL").strip().upper()
+    date_scope = request.GET.get("date_scope", "TODAY").strip().upper()
 
     history_items = []
 
     # 1. Direct SubmissionAuditLog entries
     logs_qs = (
         SubmissionAuditLog.objects.select_related("pair", "pair__order", "pair__front_image", "pair__rear_image")
-        .order_by("-timestamp")[:150]
+        .order_by("-timestamp")
     )
+    if date_scope == "TODAY":
+        logs_qs = logs_qs.filter(timestamp__date=today)
+
+    logs_qs = logs_qs[:150]
 
     for l in logs_qs:
         pair = l.pair
@@ -1571,9 +1717,12 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
         front_url = f"/media/{str(pair.front_image.vault_file).replace('\\', '/')}" if (pair and pair.front_image) else None
         rear_url = f"/media/{str(pair.rear_image.vault_file).replace('\\', '/')}" if (pair and pair.rear_image) else None
 
+        is_item_today = bool(l.timestamp and l.timestamp.date() == today)
+
         history_items.append({
             "id": f"log_{l.id}",
             "timestamp": l.timestamp.strftime("%Y-%m-%d %H:%M:%S") if l.timestamp else "",
+            "is_today": is_item_today,
             "plate": plate,
             "order_number": order_no,
             "order_plate": order_plate,
@@ -1591,8 +1740,14 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
     # 2. Historical actions from VehicleInstallationPair records (ensures history displays even before submissions)
     pairs_qs = (
         VehicleInstallationPair.objects.select_related("order", "front_image", "rear_image")
-        .order_by("-updated_at")[:150]
+        .order_by("-updated_at")
     )
+    if date_scope == "TODAY":
+        pairs_qs = pairs_qs.filter(
+            Q(submitted_at__date=today) |
+            (Q(submitted_at__isnull=True) & Q(updated_at__date=today))
+        )
+
     if flt == "SUBMITTED":
         pairs_qs = pairs_qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED)
     elif flt == "FAILED":
@@ -1605,8 +1760,9 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
             VehicleInstallationPair.VerificationStatus.FAILED,
         ])
 
-    for p in pairs_qs:
+    for p in pairs_qs[:150]:
         sub_time = p.submitted_at or p.updated_at
+        is_item_today = bool(sub_time and sub_time.date() == today)
         front_url = f"/media/{str(p.front_image.vault_file).replace('\\', '/')}" if (p.front_image and p.front_image.vault_file) else None
         rear_url = f"/media/{str(p.rear_image.vault_file).replace('\\', '/')}" if (p.rear_image and p.rear_image.vault_file) else None
 
@@ -1626,6 +1782,7 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
         history_items.append({
             "id": f"pair_{p.id}",
             "timestamp": sub_time.strftime("%Y-%m-%d %H:%M:%S") if sub_time else "",
+            "is_today": is_item_today,
             "plate": p.registration_number_detected or "NO_PLATE",
             "order_number": p.order.order_number if p.order else "Unlinked",
             "order_plate": p.order.registration_number if p.order else "",
@@ -1646,6 +1803,7 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
     return JsonResponse({
         "success": True,
         "filter": flt,
+        "date_scope": date_scope,
         "total": len(history_items),
         "items": history_items[:150],
     })

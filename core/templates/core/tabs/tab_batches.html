@@ -29,6 +29,28 @@
             </div>
         </div>
 
+        <!-- Batches Date Scope Bar (TUI Mirror) -->
+        <div class="scope-filter-bar">
+            <div class="scope-filter-bar-left">
+                <span class="scope-filter-label">📅 SCOPE:</span>
+                <div class="scope-pills-group">
+                    <button class="scope-pill-btn active" id="btn-bscope-today" onclick="setBatchesDateScope('TODAY')" title="Batches created during today's shift (Hotkey: D)">
+                        🔥 Today's Batches
+                    </button>
+                    <button class="scope-pill-btn" id="btn-bscope-active" onclick="setBatchesDateScope('ACTIVE_BATCH')" title="Focus solely on the active latest batch">
+                        ⚡ Active Batch
+                    </button>
+                    <button class="scope-pill-btn" id="btn-bscope-carryover" onclick="setBatchesDateScope('CARRYOVER')" title="Batches from previous shifts">
+                        ⏳ Prior Carryover
+                    </button>
+                    <button class="scope-pill-btn" id="btn-bscope-all" onclick="setBatchesDateScope('ALL')" title="All batches across history">
+                        🌐 All Batches
+                    </button>
+                </div>
+            </div>
+            <span class="scope-summary-tag" id="batches-scope-summary-tag">Showing today's shift</span>
+        </div>
+
         <!-- Full-Width Batches Accordion Stream -->
         <div class="batches-stream-scroll" id="batches-stream-container">
             <div class="batches-loading-state" id="batches-loading-state">

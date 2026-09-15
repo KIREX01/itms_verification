@@ -1,6 +1,7 @@
 import os
 from typing import Any, Dict, List, Optional
 from django.conf import settings
+from django.db.models import Q
 from django.core.management import call_command
 from textual import work
 from textual.widgets import TabbedContent
@@ -342,6 +343,43 @@ class OperatorActionsMixin:
         self._reload_history_table()
         self.log_message(f"History filter switched to: [b]{self.current_history_filter}[/b]")
 
+    def action_cycle_date_scope(self):
+        """Cycles date and session scope (Today -> Active Batch -> Carryover -> All) across tabs."""
+        from textual.widgets import TabbedContent
+        from core.tui.tables import QUEUE_SCOPE_FILTERS, BATCHES_SCOPE_FILTERS, HISTORY_DATE_SCOPES
+
+        try:
+            tabs = self.query_one("#tabs-content", TabbedContent)
+            active_tab = getattr(tabs, "active", "")
+        except Exception:
+            active_tab = "tab-queue"
+
+        if active_tab == "tab-batches":
+            cur = getattr(self, "current_batches_scope", "TODAY")
+            idx = BATCHES_SCOPE_FILTERS.index(cur) if cur in BATCHES_SCOPE_FILTERS else 0
+            self.current_batches_scope = BATCHES_SCOPE_FILTERS[(idx + 1) % len(BATCHES_SCOPE_FILTERS)]
+            self._update_batches_scope_bar()
+            self._reload_batches_table()
+            self.notify(f"Batches Scope: {self.current_batches_scope}")
+            self.log_message(f"Batches Scope switched to: [b cyan]{self.current_batches_scope}[/b cyan]")
+        elif active_tab == "tab-history":
+            cur = getattr(self, "current_history_date_scope", "TODAY")
+            idx = HISTORY_DATE_SCOPES.index(cur) if cur in HISTORY_DATE_SCOPES else 0
+            self.current_history_date_scope = HISTORY_DATE_SCOPES[(idx + 1) % len(HISTORY_DATE_SCOPES)]
+            self._update_history_filter_bar()
+            self._reload_history_table()
+            self.notify(f"History Date Scope: {self.current_history_date_scope}")
+            self.log_message(f"History Date Scope switched to: [b cyan]{self.current_history_date_scope}[/b cyan]")
+        else:
+            # tab-queue (or default)
+            cur = getattr(self, "current_queue_scope", "TODAY")
+            idx = QUEUE_SCOPE_FILTERS.index(cur) if cur in QUEUE_SCOPE_FILTERS else 0
+            self.current_queue_scope = QUEUE_SCOPE_FILTERS[(idx + 1) % len(QUEUE_SCOPE_FILTERS)]
+            self._update_queue_scope_bar()
+            self._reload_queue_table()
+            self.notify(f"Queue Scope: {self.current_queue_scope}")
+            self.log_message(f"Queue Scope switched to: [bold green]{self.current_queue_scope}[/bold green]")
+
     def action_refresh(self):
         self.reload_data()
         self.log_message("Dashboard refreshed from database.", level="INFO")
@@ -540,6 +578,19 @@ class OperatorActionsMixin:
         pair = self._get_active_pair("table-queue") or self._get_active_pair("table-history")
         if not pair:
             self.notify("Select a pair to view comparison.", severity="warning")
+            return
+
+        from core.services import config_service
+        if not config_service.is_developer_mode():
+            self.notify(
+                "🔒 Side-by-Side Image Comparison is restricted to Developer Mode.\n"
+                "Please enable Developer Mode in Settings (Tab 6) to launch image comparison.",
+                severity="warning",
+            )
+            self.log_message(
+                "Image Comparison blocked: Developer Mode is disabled. Enable in Settings (Tab 6).",
+                level="WARNING",
+            )
             return
 
         try:
@@ -783,7 +834,6 @@ class OperatorActionsMixin:
         ).select_related("order", "front_image", "rear_image")
 
         if active_acc:
-            from django.db.models import Q
             qs = qs.filter(
                 Q(order__account_email__iexact=active_acc) |
                 Q(account_email__iexact=active_acc) |
@@ -793,11 +843,49 @@ class OperatorActionsMixin:
                 )
             )
 
-        approved_pairs = list(qs)
+        from django.utils import timezone
+        from core.models import IngestionBatch
+        today = timezone.localdate()
+        cur_scope = getattr(self, "current_queue_scope", "TODAY")
 
-        if not approved_pairs:
-            self.notify("No APPROVED orders ready for submission. Approve orders with [A] or [T] first.", severity="warning")
-            return
+        today_q = (
+            Q(created_at__date=today) |
+            Q(front_image__batch__created_at__date=today) |
+            Q(rear_image__batch__created_at__date=today)
+        )
+
+        if cur_scope == "TODAY":
+            scoped_qs = qs.filter(today_q)
+            carryover_cnt = qs.exclude(today_q).count()
+            approved_pairs = list(scoped_qs)
+            if not approved_pairs:
+                if carryover_cnt > 0:
+                    self.notify(
+                        f"No APPROVED orders in Today's scope. Found {carryover_cnt} in Prior Carryover (press [D] to switch scope).",
+                        severity="warning",
+                    )
+                else:
+                    self.notify("No APPROVED orders ready for submission today. Approve orders with [A] or [T] first.", severity="warning")
+                return
+        elif cur_scope == "ACTIVE_BATCH":
+            latest_batch = IngestionBatch.objects.order_by("-created_at").first()
+            if latest_batch:
+                approved_pairs = list(qs.filter(Q(front_image__batch=latest_batch) | Q(rear_image__batch=latest_batch)))
+            else:
+                approved_pairs = list(qs)
+            if not approved_pairs:
+                self.notify("No APPROVED orders in active batch. Approve orders with [A] or [T] first.", severity="warning")
+                return
+        elif cur_scope == "CARRYOVER":
+            approved_pairs = list(qs.exclude(today_q))
+            if not approved_pairs:
+                self.notify("No APPROVED orders in Prior Carryover scope.", severity="warning")
+                return
+        else:
+            approved_pairs = list(qs)
+            if not approved_pairs:
+                self.notify("No APPROVED orders ready for submission. Approve orders with [A] or [T] first.", severity="warning")
+                return
 
         from core.services import config_service
         from core.tui.dialogs import BatchSubmissionModal
@@ -1125,7 +1213,6 @@ class OperatorActionsMixin:
         ).select_related("order", "front_image", "rear_image")
 
         if active_acc:
-            from django.db.models import Q
             qs = qs.filter(
                 Q(order__account_email__iexact=active_acc) |
                 Q(account_email__iexact=active_acc) |

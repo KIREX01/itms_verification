@@ -452,8 +452,40 @@ def prompt_native_photo_selection() -> List[Dict[str, str]]:
                 return results
         return []
     except Exception:
-        # Fallback to in-process if subprocess execution is restricted
         return _run_native_picker_gui()
+
+
+def prompt_native_directory_selection(initial_dir: Optional[str] = None, title: str = "Select Directory") -> Optional[str]:
+    """
+    Launches a native OS directory picker dialog in a lightweight subprocess.
+    Returns the chosen directory path as a string, or None if cancelled.
+    """
+    code = f"""
+import tkinter as tk
+from tkinter import filedialog
+root = tk.Tk()
+root.withdraw()
+root.attributes('-topmost', True)
+dir_path = filedialog.askdirectory(title={title!r}, initialdir={initial_dir!r} or None)
+root.destroy()
+if dir_path:
+    print(dir_path)
+"""
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            selected = proc.stdout.strip().splitlines()[-1].strip()
+            if os.path.isdir(selected):
+                return selected
+    except Exception as exc:
+        logger.debug("Native directory picker subprocess error: %s", exc)
+    return None
 
 
 if __name__ == "__main__":

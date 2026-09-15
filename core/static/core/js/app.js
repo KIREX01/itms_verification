@@ -40,7 +40,21 @@ document.addEventListener("DOMContentLoaded", () => {
         } else if (key === "y") {
             triggerSyncOrders();
         } else if (key === "b") {
-            triggerBatchSubmit();
+            triggerBatchSubmit(typeof currentQueueDateScope !== "undefined" ? currentQueueDateScope : "TODAY");
+        } else if (key === "d") {
+            if (activeNavTab === 4 && typeof cycleQueueDateScope === "function") {
+                cycleQueueDateScope();
+            } else if (activeNavTab === 3 && typeof cycleBatchesDateScope === "function") {
+                cycleBatchesDateScope();
+            } else if (activeNavTab === 5 && typeof cycleHistoryDateScope === "function") {
+                cycleHistoryDateScope();
+            } else if (activeNavTab === 1 && typeof setDashboardViewMode === "function") {
+                const nextMode = (dashboardViewMode === "SHIFT") ? "ALL_TIME" : "SHIFT";
+                setDashboardViewMode(nextMode);
+                if (typeof showToast === "function") {
+                    showToast(`Dashboard View: ${nextMode === "SHIFT" ? "Today's Shift" : "All-Time"}`, "info");
+                }
+            }
         } else if (key === "i") {
             openBatchUploadModal();
         } else if (key === "a" && activeNavTab === 4) {

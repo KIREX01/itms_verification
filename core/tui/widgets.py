@@ -66,6 +66,34 @@ class MetricsBar(Static):
         else:
             orders_tag = "0 [dim](0 Act │ 0 Done)[/dim]"
 
+        from django.utils import timezone
+        today = timezone.localdate()
+
+        today_pairs = pairs_qs.filter(
+            Q(created_at__date=today) |
+            Q(front_image__batch__created_at__date=today) |
+            Q(rear_image__batch__created_at__date=today) |
+            Q(front_image__ingested_at__date=today) |
+            Q(rear_image__ingested_at__date=today)
+        )
+        today_queue = today_pairs.filter(
+            verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
+        ).count()
+        today_approved = today_pairs.filter(
+            verification_status=VehicleInstallationPair.VerificationStatus.APPROVED
+        ).count()
+        today_submitted = today_pairs.filter(
+            verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED
+        ).count()
+        today_issues = today_pairs.filter(
+            verification_status__in=[
+                VehicleInstallationPair.VerificationStatus.FAILED,
+                VehicleInstallationPair.VerificationStatus.INCOMPLETE,
+                VehicleInstallationPair.VerificationStatus.CONFLICT,
+            ]
+        ).count()
+        today_batches = IngestionBatch.objects.filter(created_at__date=today).count()
+
         vault_images = EvidenceImage.objects.count()
         queue = pairs_qs.filter(
             verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
@@ -104,14 +132,15 @@ class MetricsBar(Static):
         db_badge = db_info.get("badge", "[dim]DB[/dim]")
 
         self.update(
-            f"[b]System Op:[/b] {op_str}  │  "
-            f"[b]DB:[/b] {db_badge}  │  "
-            f"[b]Link:[/b] {itms_badge}  │  "
-            f"[b]Orders:[/b] {orders_tag}  │  "
-            f"[b]Vault:[/b] {vault_images}  │  "
-            f"[b]Queue:[/b] [yellow]{queue}[/yellow]  │  "
-            f"[b]Approved:[/b] [green]{approved}[/green]  │  "
-            f"[b]Submitted:[/b] [cyan]{submitted}[/cyan]  │  "
-            f"[b]Issues:[/b] [red]{issues}[/red]  │  "
-            f"[b]Batches:[/b] {batches}"
+            f"[b]Op:[/b] {op_str} │ "
+            f"[b]DB:[/b] {db_badge} │ "
+            f"[b]ITMS:[/b] {itms_badge} │ "
+            f"[b]Orders:[/b] {orders_tag} │ "
+            f"[bold yellow]Shift (Today):[/bold yellow] "
+            f"Queue:[yellow]{today_queue}[/yellow] "
+            f"Apprv:[green]{today_approved}[/green] "
+            f"Sub:[cyan]{today_submitted}[/cyan] "
+            f"Issues:[red]{today_issues}[/red] "
+            f"Batches:[bold white]{today_batches}[/bold white]  │  "
+            f"[dim]All-Time: {pairs_qs.count()} pairs ({submitted} sub) │ {batches} batches[/dim]"
         )

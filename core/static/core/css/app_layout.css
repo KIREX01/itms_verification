@@ -206,3 +206,81 @@ footer.app-footer {
     padding: 0 4px;
     border-radius: 2px;
 }
+
+/* Universal Date / Session Scope Filter Controls (TUI Scope Mirror) */
+.scope-filter-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: var(--ug-black-card);
+    border: 1px solid var(--ug-border);
+    border-radius: var(--radius-md);
+    padding: 6px 10px;
+    gap: 8px;
+}
+.scope-filter-bar-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.scope-filter-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--ug-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.scope-pills-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background-color: var(--ug-black-surface);
+    border: 1px solid var(--ug-border);
+    padding: 2px 3px;
+    border-radius: var(--radius-sm);
+    flex-wrap: wrap;
+}
+.scope-pill-btn {
+    background: transparent;
+    border: none;
+    color: var(--ug-text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.scope-pill-btn:hover {
+    color: #ffffff;
+    background-color: var(--ug-black-card-hover);
+}
+.scope-pill-btn.active {
+    background-color: var(--ug-yellow);
+    color: #000000;
+    font-weight: 800;
+}
+.scope-pill-btn.active.scope-carryover {
+    background-color: #f59e0b;
+    color: #000000;
+}
+.scope-pill-btn.active.scope-active-batch {
+    background-color: var(--ug-green);
+    color: #ffffff;
+}
+.scope-pill-btn.active.scope-all {
+    background-color: var(--ug-cyan);
+    color: #000000;
+}
+.scope-summary-tag {
+    font-size: 0.7rem;
+    color: var(--ug-text-dim);
+    font-family: var(--font-mono);
+}

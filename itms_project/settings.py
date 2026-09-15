@@ -90,7 +90,9 @@ STATIC_URL = "static/"
 MEDIA_ROOT = BASE_DIR / env("MEDIA_ROOT", default="media")
 MEDIA_URL = "/media/"
 VAULT_SUBDIR = env("VAULT_SUBDIR", default="vault")
-VAULT_ROOT = MEDIA_ROOT / VAULT_SUBDIR
+_vault_cfg = get_setting("storage.vault_path", "media/vault")
+_vault_p = Path(_vault_cfg)
+VAULT_ROOT = _vault_p if _vault_p.is_absolute() else (BASE_DIR / _vault_p)
 CROPS_SUBDIR = env("CROPS_SUBDIR", default="crops")
 CROPS_ROOT = MEDIA_ROOT / CROPS_SUBDIR
 

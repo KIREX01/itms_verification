@@ -44,6 +44,7 @@ def get_secure_auth_dir(base_dir: Optional[Path] = None) -> Path:
 
 
 def get_secure_config_path(base_dir: Optional[Path] = None) -> Path:
+    """Returns the single source-of-truth configuration path in secure/config.json."""
     root = Path(base_dir) if base_dir else get_project_root()
     secure_path = get_secure_dir(root) / CONFIG_FILE_NAME
     legacy_path = root / CONFIG_FILE_NAME
@@ -56,28 +57,18 @@ def get_secure_config_path(base_dir: Optional[Path] = None) -> Path:
             except Exception:
                 pass
             logger.info('Migrated legacy config.json to secure storage: %s', secure_path)
+            try:
+                legacy_path.unlink()
+            except Exception:
+                pass
         except Exception as exc:
             logger.warning('Failed to auto-migrate legacy config.json: %s', exc)
-            return legacy_path
-    elif secure_path.is_file() and not legacy_path.is_file():
+    elif secure_path.is_file() and legacy_path.is_file():
+        # Remove legacy duplicate in root to maintain single source of truth in secure folder
         try:
-            shutil.copy2(secure_path, legacy_path)
+            legacy_path.unlink()
         except Exception:
             pass
-    elif secure_path.is_file() and legacy_path.is_file():
-        try:
-            # Sync whichever file was modified more recently
-            if legacy_path.stat().st_mtime > secure_path.stat().st_mtime:
-                shutil.copy2(legacy_path, secure_path)
-                try:
-                    os.chmod(secure_path, 0o600)
-                except Exception:
-                    pass
-                logger.info('Synchronized user edits from root config.json to secure storage: %s', secure_path)
-            elif secure_path.stat().st_mtime > legacy_path.stat().st_mtime:
-                shutil.copy2(secure_path, legacy_path)
-        except Exception as exc:
-            logger.debug('Config file mtime sync check error: %s', exc)
 
     return secure_path
 

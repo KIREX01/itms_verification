@@ -32,26 +32,69 @@ function initDropzones() {
     });
 }
 
+function setBatchesDateScope(scope) {
+    currentBatchesDateScope = scope;
+    const scopeButtons = {
+        "TODAY": "btn-bscope-today",
+        "ACTIVE_BATCH": "btn-bscope-active",
+        "CARRYOVER": "btn-bscope-carryover",
+        "ALL": "btn-bscope-all"
+    };
+    Object.keys(scopeButtons).forEach(k => {
+        const el = document.getElementById(scopeButtons[k]);
+        if (el) el.classList.toggle("active", k === scope);
+    });
+    fetchBatchesList();
+}
+
+function cycleBatchesDateScope() {
+    const scopes = ["TODAY", "ACTIVE_BATCH", "CARRYOVER", "ALL"];
+    const idx = scopes.indexOf(currentBatchesDateScope);
+    const nextScope = scopes[(idx + 1) % scopes.length];
+    setBatchesDateScope(nextScope);
+    if (typeof showToast === "function") {
+        showToast(`Batches Scope: ${nextScope}`, "info");
+    }
+}
+
 async function fetchBatchesList() {
     const container = document.getElementById("batches-stream-container");
     const countBadge = document.getElementById("batches-count-badge");
+    const summaryTag = document.getElementById("batches-scope-summary-tag");
     try {
-        const res = await fetch("/api/batches/");
+        const activeScope = currentBatchesDateScope || "TODAY";
+        const res = await fetch(`/api/batches/?scope=${encodeURIComponent(activeScope)}`);
         const data = await res.json();
         if (data.success && data.batches) {
             batchesData = data.batches;
-            if (countBadge) countBadge.innerText = `${batchesData.length} Batches`;
+            if (countBadge) countBadge.innerText = `${batchesData.length} Batches (${activeScope})`;
+            if (summaryTag) {
+                const totalText = data.total_batches ? ` • ${data.total_batches} all-time` : '';
+                summaryTag.innerText = `Scope: ${activeScope} • ${batchesData.length} batch(es) shown${totalText}`;
+            }
 
             if (batchesData.length === 0) {
                 if (container) {
                     container.innerHTML = `
                         <div class="batches-empty-state">
                             <span style="font-size:2.5rem;">📦</span>
-                            <h4 style="color:#fff; font-size:1.1rem; margin-top:8px;">No Batches Ingested Yet</h4>
-                            <p style="font-size:0.8rem; max-width:400px; margin-top:4px;">Upload photos from the field to start processing motorcycle pairs.</p>
-                            <button class="btn btn-primary" style="margin-top:12px;" onclick="openBatchUploadModal()">
-                                📷 + New Upload Batch
-                            </button>
+                            <h4 style="color:#fff; font-size:1.1rem; margin-top:8px;">No Batches in Scope (${activeScope})</h4>
+                            <p style="font-size:0.8rem; max-width:400px; margin-top:4px;">
+                                ${activeScope === 'TODAY' ? "No photos ingested during today's shift yet. Check prior carryover or upload a new batch." : "No batches found matching the selected scope."}
+                            </p>
+                            <div style="display:flex; gap:8px; margin-top:12px;">
+                                ${activeScope === 'TODAY' ? `
+                                    <button class="btn btn-secondary" onclick="setBatchesDateScope('CARRYOVER')">
+                                        ⏳ Check Carryover
+                                    </button>
+                                    <button class="btn btn-secondary" onclick="setBatchesDateScope('ALL')">
+                                        🌐 All Batches
+                                    </button>
+                                ` : ''}
+                                <button class="btn btn-primary" onclick="openBatchUploadModal()">
+                                    📷 + New Upload Batch
+                                </button>
+                            </div>
                         </div>
                     `;
                 }
@@ -110,12 +153,19 @@ function renderBatchesStream() {
             <span class="batch-pill pill-dup">⚠️ <strong>${b.duplicate_count}</strong> Duplicates</span>
         ` : '';
 
+        const shiftBadge = b.is_latest
+            ? `<span class="badge badge-green" style="font-size:0.65rem;" title="Latest active batch">🔥 TODAY (Active)</span>`
+            : (b.is_today
+                ? `<span class="badge badge-green" style="font-size:0.65rem;" title="Today's shift batch">● TODAY</span>`
+                : `<span class="badge badge-yellow" style="font-size:0.65rem;" title="Prior shift batch">⏳ PRIOR (${escapeHtml(b.created_date || '')})</span>`);
+
         return `
             <div class="batch-stream-card ${isExp ? 'is-expanded' : ''}" id="batch-stream-${escapeHtml(b.batch_id)}">
                 <div class="batch-stream-header" onclick="toggleBatchAccordion('${escapeHtml(b.batch_id)}')">
                     <div class="batch-header-left">
                         <span class="batch-chevron" id="batch-chevron-${escapeHtml(b.batch_id)}">${isExp ? '▼' : '▶'}</span>
                         <span class="batch-id-text">${escapeHtml(b.batch_id)}</span>
+                        ${shiftBadge}
                         <span class="badge badge-yellow">${escapeHtml(b.source_type || 'WEB')}</span>
                         <span class="batch-label-text">${escapeHtml(b.source_label || 'Ingestion Session')}</span>
                         <span class="batch-time-text">📅 ${escapeHtml(b.created_at || '--')}</span>

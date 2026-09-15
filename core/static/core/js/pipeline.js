@@ -182,31 +182,37 @@ async function openSingleSubmissionModal(pair) {
 /**
  * Opens pre-submission review & confirmation modal for ALL approved pairs (Batch).
  */
-async function triggerBatchSubmit() {
+async function triggerBatchSubmit(requestedScope) {
     if (isBatchSubmitting) {
         reopenSubmissionModal();
         return;
     }
 
+    const scope = requestedScope || currentQueueDateScope || "TODAY";
+
     try {
-        const res = await fetch("/api/pairs/?status=APPROVED&limit=500");
+        const res = await fetch(`/api/pairs/?status=APPROVED&scope=${encodeURIComponent(scope)}&limit=500`);
         const data = await res.json();
         const approvedPairs = (data.pairs || []).filter(p => p.verification_status === "APPROVED");
 
         if (approvedPairs.length === 0) {
-            showToast("No approved pairs ready for submission. Please approve pairs in Review Queue [A].", "info");
+            if (scope === "TODAY" && data.carryover_approved_count > 0) {
+                showToast(`No approved pairs in Today's shift. Found ${data.carryover_approved_count} in Prior Carryover (switch Date Scope to Prior Carryover).`, "warning");
+            } else {
+                showToast(`No approved pairs ready for submission in ${scope} scope. Please approve pairs in Review Queue [A].`, "info");
+            }
             return;
         }
 
         // Refresh live config from config.json
         const isDry = await fetchLatestSubmissionSettings();
-        currentSubmissionTask = { type: "batch", pairs: approvedPairs };
+        currentSubmissionTask = { type: "batch", pairs: approvedPairs, scope: scope };
 
-        setText("sub-modal-title", "🚀 Batch ITMS Submission Confirmation");
-        setText("sub-confirm-scope-title", "BATCH TRANSMISSION SCOPE");
+        setText("sub-modal-title", `🚀 Batch ITMS Submission (${scope})`);
+        setText("sub-confirm-scope-title", `SCOPE: ${scope} TRANSMISSION`);
         setText("sub-confirm-count-badge", `${approvedPairs.length} Orders Ready`);
-        setText("sub-confirm-target-main", `${approvedPairs.length} Approved Vehicle Orders`);
-        setText("sub-confirm-target-sub", "All verified motorcycle pairs will be sequentially submitted through the automated ITMS installation wizard.");
+        setText("sub-confirm-target-main", `${approvedPairs.length} Approved Orders (${scope})`);
+        setText("sub-confirm-target-sub", `All verified motorcycle pairs within the '${scope}' date scope will be sequentially submitted to ITMS.`);
 
         const batchListBox = document.getElementById("sub-confirm-batch-list-box");
         if (batchListBox) {
@@ -214,8 +220,9 @@ async function triggerBatchSubmit() {
             batchListBox.innerHTML = approvedPairs.slice(0, 50).map((p, idx) => {
                 const pPlate = p.registration_number_detected || "Pair #" + p.id;
                 const pOrder = p.order ? p.order.order_number : (p.order_number || "—");
+                const shiftTag = p.is_latest_batch ? '🔥' : (p.is_today ? '●' : '⏳');
                 return `<div style="display:flex; justify-content:space-between; align-items:center; padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
-                    <span style="color:var(--ug-yellow); font-weight:700;">#${idx+1} ${escapeHtml(pPlate)}</span>
+                    <span style="color:var(--ug-yellow); font-weight:700;">${shiftTag} #${idx+1} ${escapeHtml(pPlate)}</span>
                     <span style="color:#ffffff;">Order #${escapeHtml(pOrder)}</span>
                     <span style="color:var(--ug-green); font-size:0.75rem;">✓ Ready</span>
                 </div>`;

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# ITMS Verification Copilot - CLI Launcher for Linux and macOS
+
+set -e
+
+# Determine Project Directory
+APP_DIR="${ITMS_HOME:-$(cd "$(dirname "$0")" && pwd)}"
+
+# Prioritize Virtual Environment Python
+VENV_PY="$APP_DIR/.venv/bin/python"
+if [ ! -f "$VENV_PY" ]; then
+    VENV_PY="python3"
+fi
+
+exec "$VENV_PY" "$APP_DIR/itms_cli.py" "$@"

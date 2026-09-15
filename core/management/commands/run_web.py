@@ -68,7 +68,7 @@ class Command(BaseCommand):
 
         # 3. Start Django Server
         try:
-            call_command("runserver", f"{host}:{port}")
+            call_command("runserver", f"{host}:{port}", insecure_serving=True)
         except KeyboardInterrupt:
             self.stdout.write("\nWeb server stopped cleanly.")
             sys.exit(0)

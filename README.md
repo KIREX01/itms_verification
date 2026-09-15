@@ -12,14 +12,18 @@ Open PowerShell and run:
 irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.ps1 | iex
 ```
 * Installs to `%LOCALAPPDATA%\Programs\ITMS-Verification` (no admin rights needed)
+* Adds global system command `itms` (open Web UI) and `itms --tui` (open Terminal UI)
+* Defaults to SQLite zero-setup database with pre-configured `admin` / `admin` login
 * Creates Desktop & Start Menu shortcuts
-* Automatically provisions Python 3.11, virtual environment, and AI plate weights
+* Automatically provisions Python, virtual environment, and AI plate weights
 * Opens `http://127.0.0.1:8000/` in your default browser
 
 ### macOS / Linux (Terminal)
 ```bash
 curl -fsSL https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.sh | bash
 ```
+* Installs to `~/.local/share/itms-verification`
+* Registers global `itms` command in `~/.local/bin` and `/usr/local/bin`
 
 ---
 

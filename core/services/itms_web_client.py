@@ -1,8 +1,7 @@
 """
 ITMS (Intelligent Transport Management System) Web Application Client.
 
-Connects to the live ITMS web application (https://stock.itms.ug) using the
-reverse-engineered Yii2 session & CSRF cookie authentication flow.
+Connects to the ITMS web application using standard session & CSRF cookie authentication.
 
 Architecture & Safety Principles:
 ---------------------------------

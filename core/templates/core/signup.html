@@ -48,7 +48,7 @@
                         </div>
                         <div class="form-field">
                             <label for="email">Work Email</label>
-                            <input type="email" id="email" name="email" value="{{ form_data.email|default:'' }}" placeholder="e.g. john@works.go.ug">
+                            <input type="email" id="email" name="email" value="{{ form_data.email|default:'' }}" placeholder="e.g. operator@example.com">
                         </div>
                     </div>
 
@@ -67,13 +67,13 @@
                     <div class="itms-connect-card">
                         <label class="toggle-label">
                             <input type="checkbox" id="connect_itms" name="connect_itms" value="1" onchange="toggleItmsFields()" {% if form_data.connect_itms %}checked{% endif %}>
-                            <span>🌐 Connect Official ITMS Account (stock.itms.ug)</span>
+                            <span>🌐 Connect Official ITMS Account</span>
                         </label>
 
                         <div class="itms-fields" id="itms-fields-container" style="display: none;">
                             <div class="form-field">
                                 <label for="itms_email">ITMS Account Email / Username</label>
-                                <input type="text" id="itms_email" name="itms_email" value="{{ form_data.itms_email|default:'' }}" placeholder="e.g. operator@itms.ug">
+                                <input type="text" id="itms_email" name="itms_email" value="{{ form_data.itms_email|default:'' }}" placeholder="e.g. operator@example.com">
                             </div>
 
                             <div class="form-field">
@@ -82,8 +82,7 @@
                             </div>
 
                             <div class="itms-signup-hint">
-                                💡 Connecting your ITMS account enables 1-click live order synchronisation and photo submissions.<br>
-                                Don't have an ITMS account yet? <a href="https://stock.itms.ug/site/signup" target="_blank" rel="noopener noreferrer">Sign up or request access on stock.itms.ug</a>.
+                                💡 Connecting your ITMS account enables 1-click order synchronisation and photo submissions.
                             </div>
                         </div>
                     </div>

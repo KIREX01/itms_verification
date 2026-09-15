@@ -27,8 +27,8 @@ class ITMSWebSessionStoreTests(TestCase):
     def test_save_and_load_session(self):
         data = ITMSWebSessionData(
             base_url="https://stock.itms.ug",
-            user_email="k.jeremiah@itms-ug.com",
-            user_uuid="ce1e5fe5-02b5-4a3e-8eb9-ebba8ac1ce13",
+            user_email="operator@example.com",
+            user_uuid="11111111-2222-3333-4444-555555555555",
             cookies={"_identity-frontend": "dummy-val", "advanced-frontend": "sess-1"},
             csrf_token="csrf-abc",
             is_authenticated=True,
@@ -42,15 +42,15 @@ class ITMSWebSessionStoreTests(TestCase):
 
         new_store = ITMSWebSessionStore(storage_path=self.session_file)
         loaded = new_store.load()
-        self.assertEqual(loaded.user_email, "k.jeremiah@itms-ug.com")
-        self.assertEqual(loaded.user_uuid, "ce1e5fe5-02b5-4a3e-8eb9-ebba8ac1ce13")
+        self.assertEqual(loaded.user_email, "operator@example.com")
+        self.assertEqual(loaded.user_uuid, "11111111-2222-3333-4444-555555555555")
         self.assertTrue(loaded.is_authenticated)
         self.assertTrue(loaded.is_cookie_valid())
         self.assertTrue(loaded.is_recently_verified(max_age_seconds=60))
 
     def test_clear_session(self):
         data = ITMSWebSessionData(
-            user_email="test@itms.ug",
+            user_email="test@example.com",
             cookies={"_identity-frontend": "tok"},
             is_authenticated=True,
         )
@@ -103,16 +103,16 @@ class ITMSWebClientTests(TestCase):
         mock_cookies = {
             "_csrf-frontend": "csrf_cookie_val",
             "advanced-frontend": "adv_cookie_val",
-            "_identity-frontend": 'edcdc7b8cba54e4aa2a716c19de46acbf0bc25ad83bf9e9657d64259ce61d7e9a%3A2%3A%7Bi%3A0%3Bs%3A18%3A%22_identity-frontend%22%3Bi%3A1%3Bs%3A83%3A%22%5B%22ce1e5fe5-02b5-4a3e-8eb9-ebba8ac1ce13%22%2C%22A2dljxuDH5Ch-JeKoGKcLUP_PbRMytC1%22%2C2592000%5D%22%3B%7D',
+            "_identity-frontend": 'edcdc7b8cba54e4aa2a716c19de46acbf0bc25ad83bf9e9657d64259ce61d7e9a%3A2%3A%7Bi%3A0%3Bs%3A18%3A%22_identity-frontend%22%3Bi%3A1%3Bs%3A83%3A%22%5B%2211111111-2222-3333-4444-555555555555%22%2C%22A2dljxuDH5Ch-JeKoGKcLUP_PbRMytC1%22%2C2592000%5D%22%3B%7D',
         }
         mock_session.cookies.get_dict.return_value = mock_cookies
         mock_session.cookies.get.side_effect = lambda k, default="": mock_cookies.get(k, default)
 
-        ok, msg, sess = self.client.login("k.jeremiah@itms-ug.com", "secretpass")
+        ok, msg, sess = self.client.login("operator@example.com", "secretpass")
         self.assertTrue(ok)
         self.assertIn("Successfully authenticated", msg)
-        self.assertEqual(sess["user_uuid"], "ce1e5fe5-02b5-4a3e-8eb9-ebba8ac1ce13")
-        self.assertEqual(sess["user_email"], "k.jeremiah@itms-ug.com")
+        self.assertEqual(sess["user_uuid"], "11111111-2222-3333-4444-555555555555")
+        self.assertEqual(sess["user_email"], "operator@example.com")
 
     @patch("requests.Session.post")
     @patch("requests.Session.get")
@@ -136,7 +136,7 @@ class ITMSWebClientTests(TestCase):
     def test_verify_session_cooldown_rate_limit(self):
         # Save an active session verified 10 seconds ago
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             last_verified_at=time.time() - 10,
@@ -153,8 +153,8 @@ class ITMSWebClientTests(TestCase):
     @patch("requests.Session.get")
     def test_fetch_read_only_dashboard(self, mock_get):
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
-            user_uuid="ce1e5fe5-02b5-4a3e-8eb9-ebba8ac1ce13",
+            user_email="operator@example.com",
+            user_uuid="11111111-2222-3333-4444-555555555555",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             expires_at=time.time() + 86400,
@@ -170,7 +170,7 @@ class ITMSWebClientTests(TestCase):
         <body>
             <a href="/installation-orders/index">Installation Orders</a>
             <a href="/installation-kits">Installation Kits</a>
-            <a href="/user/ce1e5fe5-02b5-4a3e-8eb9-ebba8ac1ce13/main/information">Profile</a>
+            <a href="/user/11111111-2222-3333-4444-555555555555/main/information">Profile</a>
         </body>
         </html>
         """
@@ -179,13 +179,13 @@ class ITMSWebClientTests(TestCase):
         res = self.client.fetch_read_only_dashboard()
         self.assertTrue(res["success"])
         self.assertEqual(res["page_title"], "ITMS - Dashboard")
-        self.assertEqual(res["user_uuid"], "ce1e5fe5-02b5-4a3e-8eb9-ebba8ac1ce13")
+        self.assertEqual(res["user_uuid"], "11111111-2222-3333-4444-555555555555")
         self.assertEqual(len(res["accessible_modules"]), 3)
 
     @patch("requests.Session.get")
     def test_fetch_installation_orders_and_sync(self, mock_get):
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             expires_at=time.time() + 86400,
@@ -250,7 +250,7 @@ class ITMSWebClientTests(TestCase):
     @patch("requests.Session.get")
     def test_fetch_installation_orders_with_url_and_unspaced_plate(self, mock_get):
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             expires_at=time.time() + 86400,
@@ -273,7 +273,7 @@ class ITMSWebClientTests(TestCase):
     @patch("requests.Session.get")
     def test_fetch_archive_orders_and_sync_installed(self, mock_get):
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             expires_at=time.time() + 86400,
@@ -299,7 +299,7 @@ class ITMSWebClientTests(TestCase):
                     <td>PO-UMA633PG-080926</td><td>-</td><td>First Time Registration</td>
                     <td>LC6PCJBJ7T0A94706</td><td>UMA 633PG</td><td>-</td>
                     <td>EAGLE GENERAL TRADERS</td><td>Installed</td><td>Active</td>
-                    <td>JEREMIAH KATO</td><td>08.09.2026 - 15:05</td><td></td>
+                    <td>TEST OFFICER</td><td>08.09.2026 - 15:05</td><td></td>
                 </tr>
             </tbody>
             </table>
@@ -324,7 +324,7 @@ class ITMSWebClientTests(TestCase):
         self.assertEqual(orders[0]["order_number"], "PO-UMA633PG-080926")
         self.assertEqual(orders[0]["order_status"], "Installed")
         self.assertEqual(orders[0]["registration_status"], "Active")
-        self.assertEqual(orders[0]["officer"], "JEREMIAH KATO")
+        self.assertEqual(orders[0]["officer"], "TEST OFFICER")
 
         # Sync to local DB
         sync_res = self.client.sync_orders_to_local_db(orders)
@@ -336,7 +336,7 @@ class ITMSWebClientTests(TestCase):
         self.assertTrue(db_order.is_archived)
         self.assertEqual(db_order.order_status, "Installed")
         self.assertEqual(db_order.registration_status, "Active")
-        self.assertEqual(db_order.installation_officer, "JEREMIAH KATO")
+        self.assertEqual(db_order.installation_officer, "TEST OFFICER")
 
         # Check that the pair was cross-verified and audited
         pair.refresh_from_db()
@@ -361,7 +361,7 @@ class ITMSWebClientTests(TestCase):
         res = self.client.parse_order_info_html(html)
 
         self.assertEqual(res["order_number"], "PO-UMA282PG-080926")
-        self.assertEqual(res["installed_by"], "JEREMIAH KATO")
+        self.assertEqual(res["installed_by"], "TEST OFFICER")
         self.assertIn("EAGLE", res["warehouse"])
         self.assertEqual(res["vin"], "LC6PCJBJ7T0A11226")
         self.assertEqual(res["registration_number"], "UMA 282PG")
@@ -390,7 +390,7 @@ class ITMSWebClientTests(TestCase):
     def test_fetch_order_info_and_sync_db(self, mock_get):
         """Tests fetching order info via UUID and synchronizing full metadata to local DB."""
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "valid-token"},
             is_authenticated=True,
             expires_at=time.time() + 86400,
@@ -513,7 +513,7 @@ class ITMSWebClientTests(TestCase):
     @patch("requests.Session.get")
     def test_fetch_installation_step1(self, mock_get):
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             expires_at=time.time() + 86400,
@@ -537,7 +537,7 @@ class ITMSWebClientTests(TestCase):
     @patch("requests.Session.post")
     def test_validate_installation_step1_valid(self, mock_post):
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             csrf_token="csrf-test-token",
@@ -570,7 +570,7 @@ class ITMSWebClientTests(TestCase):
     @patch("requests.Session.post")
     def test_validate_installation_step1_invalid(self, mock_post):
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             expires_at=time.time() + 86400,
@@ -596,7 +596,7 @@ class ITMSWebClientTests(TestCase):
     @patch("requests.Session.post")
     def test_submit_installation_step1_success_302(self, mock_post):
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             csrf_token="csrf-val-xyz",
@@ -697,7 +697,7 @@ class ITMSWebClientTests(TestCase):
     @patch("requests.Session.get")
     def test_fetch_approve_step2(self, mock_get):
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             expires_at=time.time() + 86400,
@@ -720,7 +720,7 @@ class ITMSWebClientTests(TestCase):
     @patch("requests.Session.post")
     def test_upload_installation_step2_photos_success_302(self, mock_post):
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             csrf_token="csrf-val-xyz",
@@ -767,7 +767,7 @@ class ITMSWebClientTests(TestCase):
     @patch("requests.Session.post")
     def test_upload_installation_step2_photos_error_200(self, mock_post):
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             expires_at=time.time() + 86400,
@@ -800,7 +800,7 @@ class ITMSWebClientTests(TestCase):
     def test_upload_installation_step2_photos_dry_run_default(self, mock_post):
         """Verifies dry_run=True by default prevents any POST network call to ITMS."""
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             expires_at=time.time() + 86400,
@@ -828,7 +828,7 @@ class ITMSWebClientTests(TestCase):
     def test_submit_installation_step1_dry_run_default(self, mock_post):
         """Verifies dry_run=True by default prevents mutating POST network call on Step 1."""
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             expires_at=time.time() + 86400,
@@ -918,7 +918,7 @@ class ITMSWebClientTests(TestCase):
     @patch("requests.Session.get")
     def test_fetch_confirmation_step3(self, mock_get):
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             expires_at=time.time() + 86400,
@@ -945,7 +945,7 @@ class ITMSWebClientTests(TestCase):
     def test_submit_confirmation_step3_dry_run_default(self, mock_post):
         """Verifies Step 3 confirmation defaults to dry_run=True and does NOT send network POST."""
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             expires_at=time.time() + 86400,
@@ -963,7 +963,7 @@ class ITMSWebClientTests(TestCase):
     def test_submit_confirmation_step3_live_302(self, mock_post):
         """Verifies Step 3 confirmation sends multipart form with touched identifiers = 0 when dry_run=False."""
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             csrf_token="csrf-step3-token",
@@ -1036,7 +1036,7 @@ class ITMSWebClientTests(TestCase):
     def test_submit_confirmation_step3_with_replacement_photos(self, mock_post):
         """Verifies Step 3 confirmation correctly sets touched='1' and attaches binary for replaced photos."""
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             csrf_token="csrf-step3-token",
@@ -1085,7 +1085,7 @@ class ITMSWebClientTests(TestCase):
     def test_fetch_confirmation_step3_fallback_synthesis(self, mock_get):
         """Verifies fetch_confirmation_step3 synthesizes Step 3 data from order_info when GET /confirmation redirects."""
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             expires_at=time.time() + 86400,
@@ -1128,7 +1128,7 @@ class ITMSWebClientTests(TestCase):
     def test_detect_order_stage_lifecycle(self):
         """Verifies detect_order_stage accurately classifies STAGE_3_CONFIRMATION, STAGE_2_APPROVE, and STAGE_ARCHIVED."""
         self.store.save(ITMSWebSessionData(
-            user_email="k.jeremiah@itms-ug.com",
+            user_email="operator@example.com",
             cookies={"_identity-frontend": "some-val"},
             is_authenticated=True,
             expires_at=time.time() + 86400,

@@ -375,7 +375,7 @@ class DashboardMetricsAndOrderSyncTests(TestCase):
         pane._refresh_status_card = MagicMock()
 
         url_input = MagicMock(value="https://stock.itms.ug")
-        email_input = MagicMock(value="s.ssemakula@itms-ug.com")
+        email_input = MagicMock(value="operator@example.com")
         pw_input = MagicMock(value="secretpass")
         chk_input = MagicMock(value=True)
 
@@ -394,10 +394,10 @@ class DashboardMetricsAndOrderSyncTests(TestCase):
 
         fake_tuple = (
             True,
-            "Successfully authenticated as s.ssemakula@itms-ug.com.",
+            "Successfully authenticated as operator@example.com.",
             {
-                "user_uuid": "8038a438-5dda-48b5-869f-e0f9c3e3ec3f",
-                "user_email": "s.ssemakula@itms-ug.com",
+                "user_uuid": "00000000-0000-0000-0000-000000000001",
+                "user_email": "operator@example.com",
             },
         )
 
@@ -405,7 +405,7 @@ class DashboardMetricsAndOrderSyncTests(TestCase):
              patch("core.tui.itms_pane.ITMSWebClient") as MockClientClass:
             mock_inst = MagicMock()
             mock_inst.login.return_value = fake_tuple
-            mock_inst.session_store.session.user_uuid = "8038a438-5dda-48b5-869f-e0f9c3e3ec3f"
+            mock_inst.session_store.session.user_uuid = "00000000-0000-0000-0000-000000000001"
             MockClientClass.return_value = mock_inst
 
             if hasattr(pane.action_login, "__wrapped__"):
@@ -413,7 +413,7 @@ class DashboardMetricsAndOrderSyncTests(TestCase):
             else:
                 pane.action_login()
 
-            mock_inst.login.assert_called_once_with("s.ssemakula@itms-ug.com", "secretpass", remember_me=True)
+            mock_inst.login.assert_called_once_with("operator@example.com", "secretpass", remember_me=True)
             self.assertEqual(pane.client, mock_inst)
             self.assertEqual(pw_input.value, "")
 
@@ -601,8 +601,8 @@ class MultiAccountDataIntegrityTests(TestCase):
 
         mock_client = MagicMock()
         mock_client.session_store.session = ITMSWebSessionData(
-            user_email="s.ssemakula@itms-ug.com",
-            user_uuid="8038a438-5dda-48b5-869f-e0f9c3e3ec3f",
+            user_email="operator@example.com",
+            user_uuid="00000000-0000-0000-0000-000000000001",
             is_authenticated=True,
         )
         mock_client.fetch_installation_orders.return_value = {
@@ -623,8 +623,8 @@ class MultiAccountDataIntegrityTests(TestCase):
         self.assertTrue(res.get("success") or res.get("created", 0) > 0 or res.get("result", {}).get("created", 0) > 0)
 
         order = InstallationOrder.objects.get(order_number="ORD-ACC-001")
-        self.assertEqual(order.account_email, "s.ssemakula@itms-ug.com")
-        self.assertEqual(order.account_uuid, "8038a438-5dda-48b5-869f-e0f9c3e3ec3f")
+        self.assertEqual(order.account_email, "operator@example.com")
+        self.assertEqual(order.account_uuid, "00000000-0000-0000-0000-000000000001")
 
     def test_order_sync_multi_account_disappearance_isolation(self):
         """
@@ -639,7 +639,7 @@ class MultiAccountDataIntegrityTests(TestCase):
         order_a = InstallationOrder.objects.create(
             order_number="ORD-USER-A",
             registration_number="UMA100A",
-            account_email="user_a@itms-ug.com",
+            account_email="user_a@example.com",
             is_active_on_itms=True,
             is_archived=False,
             status=InstallationOrder.Status.PENDING,
@@ -648,7 +648,7 @@ class MultiAccountDataIntegrityTests(TestCase):
         # Account B syncs, which only sees ORD-USER-B
         mock_client = MagicMock()
         mock_client.session_store.session = ITMSWebSessionData(
-            user_email="user_b@itms-ug.com",
+            user_email="user_b@example.com",
             user_uuid="uuid-b",
             is_authenticated=True,
         )
@@ -681,20 +681,20 @@ class MultiAccountDataIntegrityTests(TestCase):
         InstallationOrder.objects.create(
             order_number="ORD-A-1",
             registration_number="UMA100A",
-            account_email="user_a@itms-ug.com",
+            account_email="user_a@example.com",
             is_active_on_itms=True,
             is_archived=False,
         )
         InstallationOrder.objects.create(
             order_number="ORD-B-1",
             registration_number="UBB200B",
-            account_email="user_b@itms-ug.com",
+            account_email="user_b@example.com",
             is_active_on_itms=True,
             is_archived=False,
         )
 
         # Scope to User B
-        cached_b = get_active_orders_cache(account_email="user_b@itms-ug.com")
+        cached_b = get_active_orders_cache(account_email="user_b@example.com")
         plates_b = [o["registration_number"] for o in cached_b]
         self.assertIn("UBB200B", plates_b)
         self.assertNotIn("UMA100A", plates_b)
@@ -708,7 +708,7 @@ class MultiAccountDataIntegrityTests(TestCase):
         order_a = InstallationOrder.objects.create(
             order_number="ORD-SECURE-A",
             registration_number="UMA333A",
-            account_email="user_a@itms-ug.com",
+            account_email="user_a@example.com",
         )
         front_img = EvidenceImage.objects.create(
             file_hash="hash_front_1",
@@ -731,10 +731,10 @@ class MultiAccountDataIntegrityTests(TestCase):
             verification_status=VehicleInstallationPair.VerificationStatus.APPROVED,
         )
 
-        # Mock active session as user_b@itms-ug.com
+        # Mock active session as user_b@example.com
         mock_client = MagicMock()
         mock_client.session_store.session = ITMSWebSessionData(
-            user_email="user_b@itms-ug.com",
+            user_email="user_b@example.com",
             is_authenticated=True,
         )
 
@@ -757,7 +757,7 @@ class MultiAccountDataIntegrityTests(TestCase):
         temp_store_file = Path(tempfile.mktemp(suffix=".json"))
         store = ITMSWebSessionStore(storage_path=temp_store_file)
         client = ITMSWebClient(session_store=store)
-        client.session_store.session.user_email = "test@itms-ug.com"
+        client.session_store.session.user_email = "test@example.com"
         client.session_store.session.is_authenticated = True
 
         res = client.logout()

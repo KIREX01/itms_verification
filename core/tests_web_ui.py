@@ -123,7 +123,7 @@ class WebUITestCase(TestCase):
         res = self.client.post(reverse("core:signup"), {
             "username": "new_operator",
             "full_name": "New Officer",
-            "email": "officer@works.go.ug",
+            "email": "officer@example.com",
             "password": "securepassword123",
             "password_confirm": "securepassword123",
         })

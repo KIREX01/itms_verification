@@ -32,7 +32,7 @@ class TokenStoreTests(TestCase):
             access_token="acc-12345",
             refresh_token="ref-67890",
             expires_in=3600,
-            user_email="operator@itms.ug",
+            user_email="operator@example.com",
         )
         self.assertEqual(tokens.access_token, "acc-12345")
         self.assertEqual(tokens.refresh_token, "ref-67890")
@@ -44,7 +44,7 @@ class TokenStoreTests(TestCase):
         loaded = new_store.load()
         self.assertEqual(loaded.access_token, "acc-12345")
         self.assertEqual(loaded.refresh_token, "ref-67890")
-        self.assertEqual(loaded.user_email, "operator@itms.ug")
+        self.assertEqual(loaded.user_email, "operator@example.com")
 
     def test_clear_tokens(self):
         self.store.save(access_token="acc-test", refresh_token="ref-test")
@@ -77,7 +77,7 @@ class ITMSClientTests(TestCase):
             "refresh_token": "ref-token-xyz",
             "expires_in": 1800,
         }
-        tokens = self.client._extract_tokens_from_json(payload, "user@itms.ug")
+        tokens = self.client._extract_tokens_from_json(payload, "user@example.com")
         self.assertIsNotNone(tokens)
         self.assertEqual(tokens.access_token, "acc-token-xyz")
         self.assertEqual(tokens.refresh_token, "ref-token-xyz")
@@ -89,7 +89,7 @@ class ITMSClientTests(TestCase):
                 "refreshToken": "nested-refresh",
             }
         }
-        tokens = self.client._extract_tokens_from_json(payload, "user@itms.ug")
+        tokens = self.client._extract_tokens_from_json(payload, "user@example.com")
         self.assertIsNotNone(tokens)
         self.assertEqual(tokens.access_token, "nested-token")
         self.assertEqual(tokens.refresh_token, "nested-refresh")
@@ -105,7 +105,7 @@ class ITMSClientTests(TestCase):
         }
         mock_post.return_value = mock_resp
 
-        tokens = self.client.login("operator@itms.ug", "mypassword")
+        tokens = self.client.login("operator@example.com", "mypassword")
         self.assertEqual(tokens.access_token, "test-access-token")
         self.assertEqual(tokens.refresh_token, "test-refresh-token")
 

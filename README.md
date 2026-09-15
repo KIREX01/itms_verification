@@ -117,18 +117,18 @@ python manage.py submit_itms --auto-approve
 # Options:
 #   --auto-approve         Promote complete high-confidence pairs to APPROVED first
 #   --backend mock         Submit to simulated sandbox (default)
-#   --backend live         Submit to live ITMS web app (https://stock.itms.ug)
+#   --backend live         Submit to live ITMS web app
 ```
 
 ### 3.1 Live ITMS WebApp Orders Synchronization (`fetch_itms_orders`)
 
-The system directly interfaces with the live ITMS web application (`https://stock.itms.ug`) using reverse-engineered Yii2 session cookies (`_identity-frontend`, `advanced-frontend`, and `_csrf-frontend`), persisted locally in `media/vault/.itms_web_session.json` (mode 0600).
+The system directly interfaces with the ITMS web application using authenticated session management, persisted locally and securely in the vault store.
 
 Features:
 * **Safe Read-Only Ingestion**: Performs pure `GET` requests to inspect and retrieve fitment orders without sending any live modification/fitment changes to the ITMS server.
 * **Smart Plate Spacing**: Automatically detects and normalizes unspaced Ugandan plates (e.g. converting `UMA946DQ` to `UMA 946DQ`) so ITMS SQL substring queries match reliably.
-* **Pagination Support**: ITMS renders 20 records per page. Query page 1 (records 1–20), page 2 (records 20–40), etc.
-* **Browser Query URL Pasting**: Paste the full search URL directly from your browser's address bar.
+* **Pagination Support**: Handles paginated orders index. Query page 1 (records 1–20), page 2 (records 20–40), etc.
+* **Browser Query URL Pasting**: Paste search URLs directly from your browser's address bar.
 * **Rate-Limiting Cooldown**: 5-minute session caching prevents repetitive requests and protects against ITMS API limits.
 * **Local Database Upsert**: The `--sync` flag upserts live orders into the local `InstallationOrder` table with canonical plate normalization (`normalizer.canonicalize`), immediately enabling automatic pairing with incoming photos.
 
@@ -214,7 +214,7 @@ python manage.py itms_auth --ping
 python manage.py itms_auth --status
 
 # Authenticate against ITMS and securely cache access + refresh tokens
-python manage.py itms_auth --login --username "operator@itms.ug" --password "secret"
+python manage.py itms_auth --login --username "operator@example.com" --password "change_this_password"
 
 # Test refreshing the access token via the refresh token
 python manage.py itms_auth --refresh

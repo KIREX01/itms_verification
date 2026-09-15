@@ -119,12 +119,12 @@ end-to-end on any machine with no extra downloads.
 ## Level 5: Production ITMS Automation Worker & Live WebApp Integration
 
 * `[x]` **Live ITMS Web Connector** (`core/services/itms_web.py`):
-  - Authenticated session management against `stock.itms.ug`.
-  - Step 1: `/installation-orders/index` and `vehicle-installations/create` lookup & validation.
-  - Step 2: Multipart photo upload (`media-files/upload-file`) replacing existing or uploading new front & rear evidence.
-  - Step 3: `/vehicle-installations/approve` and final confirmation submission.
+  - Authenticated session management against ITMS portal.
+  - Step 1: Order lookup & parameter validation.
+  - Step 2: Multipart photo upload replacing existing or uploading new front & rear evidence.
+  - Step 3: Approval and final confirmation submission.
 * `[x]` **Production Verification Milestone**:
-  - Order `PO-UMA835DS-030926` (Pair 173) successfully submitted, validated live, and archived on `stock.itms.ug` with status `Installed`, date `10.09.2026 - 23:01`, officer `Name`, and replacement front/rear photos verified.
+  - Sample installation pairs successfully submitted, validated, and archived with status `Installed`, full audit trail, and replacement front/rear photos verified.
 * `[x]` **Automated Order Synchronization Service** (`core/services/order_sync.py`):
   - Ingests active orders, serial numbers, and tracker IDs into local PostgreSQL cache.
   - Intelligent rate limiting and cache-time checks to prevent redundant network overhead.

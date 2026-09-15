@@ -4,7 +4,7 @@ ITMS Web Application Connection & Safe Read-Only Verification Hub.
 Provides:
 - Real-time session monitoring for https://stock.itms.ug
 - Sub-view navigation filter (Press [F] to cycle: Connect -> Orders -> Archive)
-- Reverse-engineered Yii2 cookie authentication & 30-day session persistence
+- Standard cookie authentication & 30-day session persistence
 - Interactive DataTables for Active Orders & Completed Archive
 - Side-by-side photographic evidence viewer (Press [V] on any order)
 - Safe vault storage for downloaded evidence photos (media/vault/itms_photos/<order_number>/)

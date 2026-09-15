@@ -37,8 +37,11 @@ urlpatterns = [
     path("api/export/report/", views.api_export_report, name="api_export_report"),
     path("api/settings/", views.api_settings, name="api_settings"),
     path("api/settings/toggle-dry-run/", views.api_toggle_dry_run, name="api_toggle_dry_run"),
+    path("api/settings/vault-folder/", views.api_vault_folder, name="api_vault_folder"),
+    path("api/settings/browse-vault-folder/", views.api_browse_vault_folder, name="api_browse_vault_folder"),
     path("api/updates/check/", views.api_check_updates, name="api_check_updates"),
     path("api/updates/apply/", views.api_apply_update, name="api_apply_update"),
+    path("media/<path:path>", views.serve_media, name="serve_media"),
 
     # File Ingestion & Batches REST APIs
     path("api/upload/", views.api_upload_photos, name="api_upload_photos"),

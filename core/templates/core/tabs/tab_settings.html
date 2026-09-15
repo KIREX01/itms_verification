@@ -32,21 +32,55 @@
             </div>
         </div>
 
-        <!-- Evidence Vault & Media Telemetry -->
+        <!-- Evidence Vault & Media Storage Settings -->
         <div class="settings-card">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <span>💾 Storage & Evidence Vault Retention</span>
+                    <span>💾 Storage & Evidence Vault Folder</span>
                 </div>
-                <span class="badge badge-cyan">Retention Enforced</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span class="badge badge-cyan" id="vault-status-badge">Checking...</span>
+                    <span class="badge badge-green" id="vault-disk-badge">-- GB Free</span>
+                </div>
             </div>
 
-            <div class="settings-row">
-                <div class="settings-label-group">
+            <div class="settings-row" style="flex-direction:column; align-items:flex-start; gap:12px;">
+                <div class="settings-label-group" style="width:100%;">
                     <span class="settings-label-title">Vault Root Directory</span>
-                    <span class="settings-label-desc">Local directory where incoming photographic evidence is safely persisted.</span>
+                    <span class="settings-label-desc">Location on this computer where photographic evidence is stored and organized by date.</span>
                 </div>
-                <span style="font-family:var(--font-mono); font-size:0.8rem; color:var(--ug-text-muted);">media/vault/</span>
+
+                <!-- Path Display & Action Controls -->
+                <div style="width:100%; display:flex; gap:8px; align-items:center;">
+                    <div style="position:relative; flex:1;">
+                        <input type="text" id="settings-vault-path-input"
+                               style="width:100%; font-family:var(--font-mono); font-size:0.82rem; padding:8px 12px; background-color:var(--ug-black-surface); border:1px solid var(--ug-border); color:#fff; border-radius:var(--radius-md);"
+                               placeholder="e.g. C:\ITMS_Vault or media/vault">
+                    </div>
+                    <button type="button" class="btn btn-secondary" onclick="browseVaultFolder()" id="btn-browse-vault" style="white-space:nowrap; padding:8px 14px; font-size:0.82rem;">
+                        📁 Browse...
+                    </button>
+                    <button type="button" class="btn btn-primary" onclick="saveVaultFolder()" id="btn-save-vault" style="white-space:nowrap; padding:8px 14px; font-size:0.82rem;">
+                        💾 Save Location
+                    </button>
+                </div>
+
+                <!-- Presets & Migration Option -->
+                <div style="width:100%; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+                    <div style="display:flex; align-items:center; gap:6px; font-size:0.75rem; color:var(--ug-text-dim);">
+                        <span>Presets:</span>
+                        <button type="button" class="btn btn-secondary" onclick="setVaultPreset('default')" style="padding:2px 8px; font-size:0.75rem;">Default (media/vault)</button>
+                        <button type="button" class="btn btn-secondary" onclick="setVaultPreset('documents')" style="padding:2px 8px; font-size:0.75rem;">Documents</button>
+                        <button type="button" class="btn btn-secondary" onclick="setVaultPreset('pictures')" style="padding:2px 8px; font-size:0.75rem;">Pictures</button>
+                    </div>
+
+                    <label style="display:flex; align-items:center; gap:6px; font-size:0.75rem; color:var(--ug-text-muted); cursor:pointer;">
+                        <input type="checkbox" id="settings-vault-migrate-chk" checked>
+                        <span>Copy existing photos to new folder</span>
+                    </label>
+                </div>
+
+                <div id="vault-message-box" style="display:none; font-size:0.78rem; padding:8px 12px; border-radius:var(--radius-sm); width:100%;"></div>
             </div>
 
             <div class="settings-row">

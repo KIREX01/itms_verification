@@ -30,5 +30,8 @@ function switchNavTab(tabIndex) {
         fetchHistoryEvents();
     } else if (tabIndex === 6) {
         checkForUpdates(false);
+        if (typeof loadVaultSettings === "function") {
+            loadVaultSettings();
+        }
     }
 }

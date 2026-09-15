@@ -14,6 +14,11 @@ import io
 import json
 import logging
 import math
+import os
+import shutil
+import subprocess
+import sys
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -1365,6 +1370,220 @@ def api_apply_update(request: HttpRequest) -> JsonResponse:
     result = update_service.apply_update()
     status_code = 200 if result.get("success") else 400
     return JsonResponse(result, status=status_code)
+
+
+def _get_dir_disk_stats(path: Path) -> dict:
+    try:
+        usage = shutil.disk_usage(path)
+        return {
+            "total_gb": round(usage.total / (1024 ** 3), 1),
+            "used_gb": round(usage.used / (1024 ** 3), 1),
+            "free_gb": round(usage.free / (1024 ** 3), 1),
+        }
+    except Exception:
+        return {"total_gb": 0, "used_gb": 0, "free_gb": 0}
+
+
+@csrf_exempt
+def api_vault_folder(request: HttpRequest) -> JsonResponse:
+    """
+    GET: Returns current active Evidence Vault folder, disk space, and presets.
+    POST: Updates and persists the Evidence Vault storage location in config.json.
+    """
+    default_vault = (settings.BASE_DIR / "media" / "vault").resolve()
+    docs_vault = (Path.home() / "Documents" / "ITMS_Vault").resolve()
+    pics_vault = (Path.home() / "Pictures" / "ITMS_Vault").resolve()
+
+    if request.method == "POST":
+        new_path_raw = ""
+        migrate_files = False
+        if request.content_type == "application/json" and request.body:
+            try:
+                body = json.loads(request.body.decode("utf-8"))
+                new_path_raw = str(body.get("path", "")).strip()
+                migrate_files = bool(body.get("migrate", False))
+            except Exception:
+                pass
+        if not new_path_raw:
+            new_path_raw = request.POST.get("path", "").strip()
+            migrate_files = request.POST.get("migrate", "").lower() in ("true", "1", "yes")
+
+        if not new_path_raw:
+            return JsonResponse({"success": False, "error": "Folder path cannot be empty."}, status=400)
+
+        # Handle 'default' keyword
+        if new_path_raw.lower() in ("default", "media/vault", "media\\vault"):
+            target_path = default_vault
+        else:
+            target_path = Path(os.path.expanduser(new_path_raw)).resolve()
+
+        old_vault = vault_service.get_vault_root().resolve()
+
+        try:
+            target_path.mkdir(parents=True, exist_ok=True)
+            # Test write access
+            test_probe = target_path / f".write_test_{uuid.uuid4().hex[:6]}"
+            test_probe.write_text("ok", encoding="utf-8")
+            test_probe.unlink(missing_ok=True)
+        except Exception as exc:
+            return JsonResponse({"success": False, "error": f"Cannot write to specified directory: {exc}"}, status=400)
+
+        # Migrate existing files if requested
+        migrated_count = 0
+        if migrate_files and old_vault != target_path and old_vault.is_dir():
+            try:
+                for item in old_vault.rglob("*"):
+                    if item.is_file():
+                        rel = item.relative_to(old_vault)
+                        dest = target_path / rel
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        if not dest.exists():
+                            shutil.copy2(item, dest)
+                            migrated_count += 1
+            except Exception as exc:
+                logger.warning("Error migrating vault files: %s", exc)
+
+        # Set and persist new vault path
+        vault_service.set_vault_root(target_path)
+        stats = _get_dir_disk_stats(target_path)
+
+        return JsonResponse({
+            "success": True,
+            "message": f"Evidence vault location updated to '{target_path}'.",
+            "vault_path": str(target_path),
+            "is_default": target_path == default_vault,
+            "migrated_count": migrated_count,
+            "stats": stats,
+        })
+
+    # GET request
+    current_vault = vault_service.get_vault_root().resolve()
+    stats = _get_dir_disk_stats(current_vault)
+    is_default = (current_vault == default_vault)
+
+    try:
+        photo_count = sum(1 for p in current_vault.rglob("*") if p.suffix.lower() in vault_service.VALID_EXTENSIONS)
+    except Exception:
+        photo_count = EvidenceImage.objects.count()
+
+    return JsonResponse({
+        "success": True,
+        "vault_path": str(current_vault),
+        "is_default": is_default,
+        "photo_count": photo_count,
+        "stats": stats,
+        "presets": {
+            "default": str(default_vault),
+            "documents": str(docs_vault),
+            "pictures": str(pics_vault),
+        },
+    })
+
+
+@csrf_exempt
+def api_browse_vault_folder(request: HttpRequest) -> JsonResponse:
+    """
+    Launches the host operating system's native folder browser dialog
+    and returns the selected folder path.
+    """
+    current_vault = vault_service.get_vault_root()
+    initial_dir = str(current_vault)
+    selected_path = None
+
+    try:
+        if sys.platform == "win32":
+            # Modern Windows FolderBrowserDialog via PowerShell
+            ps_script = f"""
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = 'Select Evidence Vault Storage Folder'
+$dialog.ShowNewFolderButton = $true
+if (Test-Path '{initial_dir}') {{
+    $dialog.SelectedPath = '{initial_dir}'
+}}
+$form = New-Object System.Windows.Forms.Form
+$form.TopMost = $true
+$res = $dialog.ShowDialog($form)
+if ($res -eq [System.Windows.Forms.DialogResult]::OK) {{
+    Write-Output $dialog.SelectedPath
+}}
+"""
+            proc = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-Command", ps_script],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            out = proc.stdout.strip()
+            if out and os.path.isdir(out):
+                selected_path = out
+        elif sys.platform == "darwin":
+            as_cmd = f'POSIX path of (choose folder with prompt "Select Evidence Vault Storage Folder" default location POSIX file "{initial_dir}")'
+            proc = subprocess.run(["osascript", "-e", as_cmd], capture_output=True, text=True, timeout=120)
+            out = proc.stdout.strip()
+            if out and os.path.isdir(out):
+                selected_path = out
+        elif sys.platform == "linux":
+            if shutil.which("zenity"):
+                proc = subprocess.run(
+                    ["zenity", "--file-selection", "--directory", f"--filename={initial_dir}/", "--title=Select Evidence Vault Storage Folder"],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                out = proc.stdout.strip()
+                if out and os.path.isdir(out):
+                    selected_path = out
+    except subprocess.TimeoutExpired:
+        return JsonResponse({"success": False, "canceled": True, "error": "Folder selection timed out."})
+    except Exception as exc:
+        logger.warning("Native folder picker invocation error: %s", exc)
+
+    if selected_path:
+        return JsonResponse({
+            "success": True,
+            "selected_path": selected_path,
+            "canceled": False,
+        })
+    else:
+        return JsonResponse({
+            "success": True,
+            "selected_path": None,
+            "canceled": True,
+        })
+
+
+def serve_media(request: HttpRequest, path: str) -> HttpResponse:
+    """
+    Dynamically serves photographic evidence and crops.
+    Resolves vault files against the active vault root, even if outside MEDIA_ROOT.
+    """
+    from django.http import FileResponse, Http404
+    import mimetypes
+
+    clean_path = path.replace("\\", "/").lstrip("/")
+
+    # Check if path starts with 'vault/'
+    if clean_path.startswith("vault/"):
+        sub_rel = clean_path[6:]
+        vault_file = vault_service.get_vault_root() / sub_rel
+        if vault_file.is_file():
+            mime, _ = mimetypes.guess_type(str(vault_file))
+            return FileResponse(open(vault_file, "rb"), content_type=mime or "image/jpeg")
+
+    # Check vault root directly
+    direct_vault = vault_service.get_vault_root() / clean_path
+    if direct_vault.is_file():
+        mime, _ = mimetypes.guess_type(str(direct_vault))
+        return FileResponse(open(direct_vault, "rb"), content_type=mime or "image/jpeg")
+
+    # Fallback to settings.MEDIA_ROOT (e.g. for crops/)
+    media_file = Path(settings.MEDIA_ROOT) / clean_path
+    if media_file.is_file():
+        mime, _ = mimetypes.guess_type(str(media_file))
+        return FileResponse(open(media_file, "rb"), content_type=mime or "image/jpeg")
+
+    raise Http404("Media file not found")
 
 
 # ============================================================================

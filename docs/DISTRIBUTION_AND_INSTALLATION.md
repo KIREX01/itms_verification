@@ -27,17 +27,34 @@ Welcome to the **ITMS Verification Copilot** distribution guide. This document p
 
 ## 3. 60-Second Quick Start
 
-### Windows Installation
-1. Extract or clone the `itms_verification` folder to your computer (e.g. `C:\ITMS\itms_verification` or `D:\itms_verification`).
-2. **Double-click `run.bat`** (or open PowerShell/Terminal and run `.\run.bat`).
-3. The launcher will automatically:
-   * Detect your Python installation.
-   * Create the local virtual environment (`.venv\`).
-   * Install/verify all requirements via pip.
-   * Provision missing AI weights, directories, and database tables.
-   * Launch the Web Operator Console and open your default browser at `http://127.0.0.1:8000/`.
+### Windows 1-Command Web/PowerShell Install (Recommended)
+Open PowerShell (Win + X -> Terminal or PowerShell) and run:
+```powershell
+irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.ps1 | iex
+```
+* **What this does**:
+  1. Downloads and installs the application to your user profile directory (`%LOCALAPPDATA%\Programs\ITMS-Verification`).
+  2. Automatically places an **"ITMS Verification Copilot"** shortcut on your **Desktop** and in your **Start Menu**.
+  3. Launches the self-healing bootstrap (`run.bat`), which auto-installs Python 3.11 if needed, creates `.venv`, provisions AI plate detector weights, and opens `http://127.0.0.1:8000/` in your browser.
+  4. **Requires zero administrator privileges!**
 
-> **Tip**: You can create a Desktop shortcut to `run.bat` for instant 1-click access.
+---
+
+### Manual Windows Installation (Archive or Git)
+1. Extract or clone the `itms_verification` folder to your computer (e.g. `C:\ITMS\itms_verification` or `D:\itms_verification`).
+2. **Double-click `run.bat`** (or run `.\run.bat` in PowerShell/CMD).
+3. The launcher will automatically detect/provision Python, create the `.venv\`, download fine-tuned AI weights, apply database migrations, and open the Web Operator Console at `http://127.0.0.1:8000/`.
+
+> **Tip**: You can also run `.\install.ps1` locally to generate Desktop and Start Menu shortcuts.
+
+---
+
+### macOS / Linux 1-Command Install
+Open Terminal and run:
+```bash
+curl -fsSL https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.sh | bash
+```
+Installs to `~/.local/share/itms-verification`, sets executable permissions, provisions Python environment, and launches the console.
 
 ---
 
@@ -65,7 +82,49 @@ Welcome to the **ITMS Verification Copilot** distribution guide. This document p
 
 ---
 
-## 4. What Happens During Bootstrap?
+## 4. Filesystem Architecture: Where Does the App Sit & Where is Data Stored?
+
+### Default Installation Paths
+| Operating System | Default Install Location (`InstallDir`) | Shortcut Location |
+| :--- | :--- | :--- |
+| **Windows (PowerShell 1-Click)** | `%LOCALAPPDATA%\Programs\ITMS-Verification\`<br>*(e.g. `C:\Users\<User>\AppData\Local\Programs\ITMS-Verification\`)* | **Desktop**: `ITMS Verification Copilot.lnk`<br>**Start Menu**: `ITMS Verification Copilot` |
+| **Windows (Manual Extract)** | Custom folder chosen by operator (e.g. `C:\ITMS\itms_verification\` or `D:\itms_verification\`) | Operator creates shortcut to `run.bat` |
+| **macOS / Linux (1-Click)** | `~/.local/share/itms-verification/` | Terminal command or Desktop launcher |
+
+> **Why `%LOCALAPPDATA%\Programs` on Windows?**
+> - **Zero Administrator Privileges Required**: Any operator can install and run the application on corporate or restricted workstations without IT administrative elevation (UAC prompt).
+> - **Follows Microsoft Standards**: This is the official per-user application directory used by Microsoft (VS Code User Edition), Google Chrome, and modern CLI tools.
+> - **Clean Per-User Isolation**: Multi-user computers keep each operator's local database, credentials, and settings isolated.
+
+### Anatomy of Stored Data & Persistence Guarantees
+Inside the installation directory, data is cleanly segregated into immutable code vs persistent operator state:
+
+```
+ITMS-Verification/
+├── .venv/                      # Python isolated virtual environment & installed packages
+├── core/                       # Application source code & Web UI assets
+├── models/                     # Fine-tuned YOLOv8 plate detection AI weights
+│   ├── license-plate-finetune-v1n.pt
+│   └── license-plate-finetune-v1s.pt
+├── tools/                      # Portable self-contained runtimes (e.g. Tesseract OCR)
+├── db.sqlite3                  # Local SQLite database (Orders, batches, audit history, pairs)
+├── secure/                     # Cryptographic secrets & ITMS encrypted session tokens
+│   └── auth/
+├── exports/                    # CSV shift reports & audit exports
+└── media/                      # Evidence storage
+    ├── vault/                  # [DEFAULT] Cryptographic SHA-256 evidence photo vault
+    └── crops/                  # Temporary high-resolution plate crops
+```
+
+### Custom Vault Storage (Network Drives & External Disks)
+The Evidence Vault (`media/vault/`) does not have to remain on the system drive. It can be redirected to **any storage location**:
+1. Open the TUI or Web UI -> Enable **Developer Mode**.
+2. Under **Vault Location**, click **Browse Folder** to select any external SSD, secondary hard disk (e.g. `D:\ITMS_Vault\`), or network mapped drive (`Z:\SharedVault\`).
+3. The system immediately routes all incoming evidence ingestion batches to the selected drive without modifying application code or database integrity.
+
+---
+
+## 5. What Happens During Bootstrap?
 
 When you run the 1-click launcher, `scripts/bootstrap.py` executes an automated health check:
 

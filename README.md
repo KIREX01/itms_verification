@@ -1,10 +1,27 @@
-# Intelligent Vehicle Installation-Photo Recognition & Verification System
+# Intelligent Vehicle Installation-Photo Recognition & Verification System (ITMS Verification Copilot)
 
-Django/PostgreSQL-backed pipeline that ingests unsorted vehicle installation photos,
-localizes and reads number plates, classifies front/rear orientation, matches evidence
-against an installation-order registry, and drives a simulated ITMS submission workflow --
-all reviewed through a keyboard-driven Textual TUI. See `docs/propsal.md` and
-`docs/ROADMAP.md` for the full design rationale.
+Django/SQLite/PostgreSQL-backed computer vision verification pipeline that ingests unsorted vehicle installation photos, localizes and reads number plates via fine-tuned YOLOv8 models, pairs front/rear photos, matches against ITMS installation orders, and facilitates 1-click bulk submission via Web Console and Textual TUI.
+
+---
+
+## ⚡ 1-Click Quick Install
+
+### Windows (PowerShell)
+Open PowerShell and run:
+```powershell
+irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.ps1 | iex
+```
+* Installs to `%LOCALAPPDATA%\Programs\ITMS-Verification` (no admin rights needed)
+* Creates Desktop & Start Menu shortcuts
+* Automatically provisions Python 3.11, virtual environment, and AI plate weights
+* Opens `http://127.0.0.1:8000/` in your default browser
+
+### macOS / Linux (Terminal)
+```bash
+curl -fsSL https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.sh | bash
+```
+
+---
 
 ## 1. Prerequisites
 

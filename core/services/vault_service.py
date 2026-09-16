@@ -85,6 +85,41 @@ def set_vault_root(new_path: Union[str, Path]) -> Path:
     return p
 
 
+def resolve_vault_path(rel_or_abs: Union[str, Path]) -> Path:
+    """
+    Safely resolves an EvidenceImage vault_file path to an absolute path on disk,
+    checking active vault_root, MEDIA_ROOT, and absolute paths.
+    """
+    if not rel_or_abs:
+        return get_vault_root()
+
+    p = Path(rel_or_abs)
+    if p.is_absolute() and p.exists():
+        return p
+
+    vault_root = get_vault_root()
+    clean_str = str(rel_or_abs).replace("\\", "/").lstrip("/")
+
+    # Check 1: direct in active vault root
+    direct_vault = vault_root / clean_str
+    if direct_vault.exists():
+        return direct_vault
+
+    # Check 2: strip 'vault/' prefix if path has it
+    if clean_str.startswith("vault/"):
+        sub = clean_str[6:]
+        sub_vault = vault_root / sub
+        if sub_vault.exists():
+            return sub_vault
+
+    # Check 3: fallback to Django settings.MEDIA_ROOT
+    media_path = Path(settings.MEDIA_ROOT) / clean_str
+    if media_path.exists():
+        return media_path
+
+    return direct_vault
+
+
 def get_batch_vault_dir(batch: Optional[IngestionBatch] = None) -> Path:
     """
     Returns the absolute directory path for storing files in the vault.

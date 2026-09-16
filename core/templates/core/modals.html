@@ -4,79 +4,81 @@
 <div class="modal-overlay" id="modal-edit-plate">
     <div class="modal-box" style="width: 760px; max-width: 95vw; max-height: 90vh;">
         <div class="modal-header">
-            <span class="modal-title">✏️ Pair Override & Installation Order Linker</span>
+            <span class="modal-title">🔗 Link Order & Plate Correction</span>
             <button class="modal-close" onclick="closeModal('modal-edit-plate')">&times;</button>
         </div>
-        <div class="modal-body" style="gap: 16px; overflow-y: auto;">
-            <!-- Section 1: Plate & Status Override -->
-            <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:14px; display:flex; flex-direction:column; gap:12px;">
-                <div style="font-size:0.78rem; font-weight:800; color:var(--ug-yellow); text-transform:uppercase; letter-spacing:0.5px;">
-                    1. License Plate & Verification Status Override
-                </div>
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                    <div class="form-field" style="margin:0;">
-                        <label>Plate Number (Uganda Syntax, e.g. UMA 835DS)</label>
-                        <input type="text" id="input-edit-plate" style="font-family:var(--font-mono); font-size:1.1rem; font-weight:800; text-transform:uppercase; color:var(--ug-yellow);" onkeydown="if(event.key==='Enter') submitEditPlate()">
-                        <div style="font-size:0.7rem; color:var(--ug-text-dim);">
-                            Input is automatically normalized into Ugandan vehicle plate syntax.
-                        </div>
+        <div class="modal-body" style="gap: 14px; overflow-y: auto;">
+            <!-- Unified Primary Input -->
+            <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:16px; display:flex; flex-direction:column; gap:10px;">
+                <label style="font-size:0.82rem; font-weight:800; color:#ffffff; text-transform:uppercase; letter-spacing:0.5px; display:flex; justify-content:space-between; align-items:center;">
+                    <span>Type Plate Number or Order Number</span>
+                    <span style="font-size:0.72rem; color:var(--ug-text-dim); text-transform:none; font-weight:normal;">Auto-links if order exists, or updates record directly</span>
+                </label>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <div style="position:relative; flex:1;">
+                        <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); font-size:1.1rem; color:var(--ug-yellow);">🔍</span>
+                        <input type="text" id="input-edit-plate"
+                               style="width:100%; padding:10px 14px 10px 38px; font-family:var(--font-mono); font-size:1.15rem; font-weight:900; text-transform:uppercase; color:var(--ug-yellow); background:var(--ug-black-card); border:1px solid var(--ug-border); border-radius:var(--radius-md);"
+                               placeholder="e.g. UMA 835DS or ORD-1042..."
+                               oninput="onUnifiedPlateInput(this.value)"
+                               onkeydown="if(event.key==='Enter') submitUnifiedLinkOrder()">
                     </div>
-
-                    <div class="form-field" style="margin:0;">
-                        <label>Verification Status Override</label>
-                        <select id="select-edit-status" style="background-color:var(--ug-black-card); border:1px solid var(--ug-border); color:#fff; padding:8px 12px; border-radius:var(--radius-md); font-size:0.88rem; outline:none; height:38px;">
-                            <option value="">-- Keep Current Status --</option>
-                            <option value="APPROVED">✓ APPROVED (Ready for ITMS Submission)</option>
-                            <option value="NEEDS_REVIEW">🔍 NEEDS_REVIEW (Flagged for Review)</option>
-                            <option value="INCOMPLETE">⚠️ INCOMPLETE (Missing Front or Rear Angle)</option>
-                            <option value="UNREGISTERED">❓ UNREGISTERED (Vehicle Not in ITMS Registry)</option>
-                            <option value="FAILED">✕ FAILED (Rejected or Resubmission Needed)</option>
-                        </select>
-                    </div>
+                    <button class="btn btn-primary" id="btn-submit-unified-link" onclick="submitUnifiedLinkOrder()" style="padding:10px 20px; font-size:0.88rem; font-weight:800; white-space:nowrap; background:var(--ug-green); border-color:var(--ug-green);">
+                        ✓ Link / Save (Enter)
+                    </button>
                 </div>
-
-                <div class="form-field" style="margin:0;">
-                    <label>Operator Override Note / Reason</label>
-                    <input type="text" id="input-edit-note" placeholder="e.g. Verified visually from rear fender stamp; corrected OCR error...">
+                <div id="unified-link-hint" style="font-size:0.74rem; color:var(--ug-text-dim);">
+                    Type a plate or order number. If matched in ITMS registry, it links to the order; if unlisted, it updates the plate number directly.
                 </div>
             </div>
 
-            <!-- Section 2: Installation Order Association -->
-            <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:14px; display:flex; flex-direction:column; gap:12px;">
-                <div style="font-size:0.78rem; font-weight:800; color:var(--ug-cyan); text-transform:uppercase; letter-spacing:0.5px;">
-                    2. Matched ITMS Installation Order
+            <!-- Current Linked Order Status Banner -->
+            <div id="linker-current-order-banner" style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 14px; display:flex; align-items:center; justify-content:space-between;">
+                <div>
+                    <span style="font-size:0.7rem; color:var(--ug-text-dim); text-transform:uppercase;">Currently Linked Order:</span>
+                    <div style="font-family:var(--font-mono); font-size:0.92rem; font-weight:800; color:#fff;" id="linker-current-order-text">No order linked</div>
                 </div>
+                <button class="btn btn-danger" id="btn-modal-unlink" onclick="unlinkOrderFromSelectedPair()" style="padding:4px 10px; font-size:0.75rem; display:none;">
+                    ✕ Unlink Order
+                </button>
+            </div>
 
-                <!-- Current Linked Order Banner -->
-                <div id="linker-current-order-banner" style="background-color:var(--ug-black-card); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 14px; display:flex; align-items:center; justify-content:space-between;">
-                    <div>
-                        <span style="font-size:0.72rem; color:var(--ug-text-dim); text-transform:uppercase;">Currently Linked Order:</span>
-                        <div style="font-family:var(--font-mono); font-size:0.95rem; font-weight:800; color:#fff;" id="linker-current-order-text">No order linked</div>
-                    </div>
-                    <button class="btn btn-danger" id="btn-modal-unlink" onclick="unlinkOrderFromSelectedPair()" style="padding:4px 10px; font-size:0.75rem; display:none;">
-                        ✕ Unlink Order
-                    </button>
+            <!-- Matching Active Orders Live Table -->
+            <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:12px; display:flex; flex-direction:column; gap:8px;">
+                <div style="font-size:0.75rem; font-weight:800; color:var(--ug-cyan); text-transform:uppercase; letter-spacing:0.5px; display:flex; justify-content:space-between;">
+                    <span>Available ITMS Installation Orders</span>
+                    <span id="linker-orders-count" style="color:var(--ug-text-dim); font-size:0.72rem;">Matching...</span>
                 </div>
+                <div style="max-height:190px; overflow-y:auto; border:1px solid var(--ug-border); border-radius:var(--radius-sm);" id="linker-orders-list">
+                    <div style="padding:20px; text-align:center; color:var(--ug-text-dim); font-size:0.78rem;">Loading active orders...</div>
+                </div>
+            </div>
 
-                <!-- Order Search Field -->
+            <!-- Optional Status & Note Overrides (Collapsible) -->
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
                 <div class="form-field" style="margin:0;">
-                    <label>Search Active Orders (Order #, Plate, VIN, Warehouse)</label>
-                    <input type="text" id="input-search-order" placeholder="Type plate, order number, or VIN to search..." oninput="searchOrdersForLinking(this.value)">
+                    <label style="font-size:0.75rem;">Status Override (Default: Approved)</label>
+                    <select id="select-edit-status" style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); color:#fff; padding:6px 10px; border-radius:var(--radius-md); font-size:0.8rem; outline:none; height:34px;">
+                        <option value="APPROVED">✓ APPROVED (Ready for ITMS Submission)</option>
+                        <option value="NEEDS_REVIEW">🔍 NEEDS_REVIEW (Flagged for Review)</option>
+                        <option value="INCOMPLETE">⚠️ INCOMPLETE (Missing Front/Rear Angle)</option>
+                        <option value="UNREGISTERED">❓ UNREGISTERED (Vehicle Not in Registry)</option>
+                        <option value="FAILED">✕ FAILED (Rejected)</option>
+                    </select>
                 </div>
-
-                <!-- Orders Table -->
-                <div style="max-height:220px; overflow-y:auto; border:1px solid var(--ug-border); border-radius:var(--radius-md);" id="linker-orders-list">
-                    <div style="padding:20px; text-align:center; color:var(--ug-text-dim);">Loading active orders...</div>
+                <div class="form-field" style="margin:0;">
+                    <label style="font-size:0.75rem;">Operator Note (Optional)</label>
+                    <input type="text" id="input-edit-note" placeholder="e.g. Visual confirmation; manual match..." style="padding:6px 10px; font-size:0.8rem; height:34px;">
                 </div>
             </div>
         </div>
         <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-size:0.75rem; color:var(--ug-text-dim);">
-                Hotkeys: <span class="hotkey">E</span> / <span class="hotkey">L</span> opens this dialog • <span class="hotkey">Esc</span> closes
+            <span style="font-size:0.74rem; color:var(--ug-text-dim);">
+                Hotkeys: <span class="hotkey">E</span> / <span class="hotkey">L</span> opens • <span class="hotkey">Enter</span> confirms • <span class="hotkey">Esc</span> closes
             </span>
             <div style="display:flex; gap:8px;">
                 <button class="btn btn-secondary" onclick="closeModal('modal-edit-plate')">Close</button>
-                <button class="btn btn-primary" onclick="submitEditPlate()">Save Plate & Status</button>
+                <button class="btn btn-primary" onclick="submitUnifiedLinkOrder()" style="font-weight:700;">✓ Confirm &amp; Save</button>
             </div>
         </div>
     </div>

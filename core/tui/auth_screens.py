@@ -104,27 +104,6 @@ class LandingAuthScreen(Screen[Optional[User]]):
                             yield Static("", id="reg-error-msg", classes="error-label")
                             yield Button("Create Operator Account & Sign In", variant="success", id="btn-reg-submit")
 
-                        # Tab 3: Database & Engine Switcher
-                        with TabPane("💾 Database & Engine", id="tab-database"):
-                            yield Static("[dim]Active Database Connection & Seamless Engine Switcher[/dim]", classes="auth-hint")
-                            yield Static(self._get_db_details_markup(), id="auth-db-details")
-                            yield Static("", id="auth-db-feedback", classes="error-label")
-                            with Horizontal(classes="auth-db-btn-row"):
-                                yield Button("⚡ Switch to PostgreSQL", variant="primary", id="btn-auth-switch-pg")
-                                yield Button("⚡ Use Local SQLite", variant="default", id="btn-auth-switch-sqlite")
-                            with Vertical(id="auth-pg-inputs-container"):
-                                yield Static("[dim]PostgreSQL Parameters (Saved from Last Session):[/dim]")
-                                with Horizontal():
-                                    yield Input(placeholder="Host (localhost)", id="input-auth-pg-host")
-                                    yield Input(placeholder="Port (5432)", id="input-auth-pg-port")
-                                with Horizontal():
-                                    yield Input(placeholder="Database (itms)", id="input-auth-pg-db")
-                                    yield Input(placeholder="User (postgres)", id="input-auth-pg-user")
-                                yield Input(placeholder="Password", password=True, id="input-auth-pg-password")
-                                with Horizontal():
-                                    yield Button("Test Connection", variant="default", id="btn-auth-test-pg")
-                                    yield Button("Apply & Connect PostgreSQL", variant="success", id="btn-auth-apply-pg")
-
         yield Footer()
 
     def _get_db_badge_markup(self) -> str:

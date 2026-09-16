@@ -224,9 +224,11 @@ class InspectorPane(Static):
 
         # Ugandan syntax check
         syntax_info = ""
+        is_syntax_valid = False
         if image.detected_plate:
             norm = normalizer.normalize_plate(image.detected_plate)
-            syntax_info = " [green](✓ Valid Uganda Syntax)[/green]" if norm["is_valid"] else " [yellow](⚠ Non-standard Syntax)[/yellow]"
+            is_syntax_valid = norm.get("is_valid", False)
+            syntax_info = " [green](✓ Valid Uganda Syntax)[/green]" if is_syntax_valid else " [yellow](⚠ Non-standard Syntax)[/yellow]"
 
         # Orientation badge
         orient_color = "green" if image.orientation == "FRONT" else "cyan" if image.orientation == "REAR" else "yellow"
@@ -263,7 +265,10 @@ class InspectorPane(Static):
         if image.error_message:
             lines.append(f" [yellow]{image.error_message}[/yellow]")
         elif image.status == EvidenceImage.Status.PLATE_DETECTED:
-            lines.append(" [green]Plate recognized and validated against Uganda plate grammar.[/green]")
+            if is_syntax_valid:
+                lines.append(" [green]Plate recognized and validated against Uganda plate grammar.[/green]")
+            else:
+                lines.append(" [yellow]Plate detected but syntax does not conform to standard Uganda plate grammar.[/yellow]")
         elif image.status == EvidenceImage.Status.NEW:
             lines.append(" [dim]Image ingested; pending vision processing (press P).[/dim]")
         else:

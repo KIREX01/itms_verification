@@ -475,15 +475,21 @@ function appendSubmissionLog(msg, type = "info") {
 
 function startPipelinePolling() {
     if (pipelinePollInterval) clearInterval(pipelinePollInterval);
+    const qInd = document.getElementById("queue-processing-indicator");
+    const qTxt = document.getElementById("queue-processing-text");
+
     pipelinePollInterval = setInterval(async () => {
         try {
             const res = await fetch("/api/pipeline/status/");
             const st = await res.json();
             if (st.running) {
+                if (qInd) qInd.style.display = "flex";
+                if (qTxt) qTxt.innerText = `Vision: ${st.stage || 'Processing'} (${st.progress || 0}%)`;
                 appendConsoleLog(`Stage: ${st.stage || 'Processing'} (${st.progress || 0}%) - ${st.message || ''}`, "info");
             } else {
                 clearInterval(pipelinePollInterval);
                 pipelinePollInterval = null;
+                if (qInd) qInd.style.display = "none";
                 appendConsoleLog(`Pipeline task finished: ${st.message || 'Complete'}`, st.success ? "success" : "error");
                 fetchStats();
                 fetchPairs();

@@ -614,86 +614,103 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
             "message": f"Swapped front and rear photos for {pair.registration_number_detected}.",
         })
 
-    elif action in ("edit_plate", "manual_override"):
-        raw_plate = request.POST.get("plate") or body_data.get("plate", "")
+    elif action in ("edit_plate", "manual_override", "link_order"):
+        # Unified Link Order & Plate Correction (parity with TUI QuickPlateTypeModal)
+        raw_val = (
+            request.POST.get("query") or request.POST.get("plate") or request.POST.get("order_number") or
+            body_data.get("query") or body_data.get("plate") or body_data.get("order_number") or ""
+        ).strip()
+        order_id = request.POST.get("order_id") or body_data.get("order_id")
         new_status = request.POST.get("verification_status") or body_data.get("verification_status")
         operator_note = request.POST.get("operator_note") or body_data.get("operator_note")
 
-        updated_fields = []
-        if raw_plate and raw_plate.strip():
-            clean_plate = raw_plate.strip().upper()
-            canonical = normalizer.canonicalize(clean_plate)
-            pair.manual_plate_override = clean_plate
-            pair.registration_number_detected = canonical
-            pair.is_manual_override = True
+        target_order = None
+        if order_id:
+            try:
+                target_order = InstallationOrder.objects.filter(id=order_id).first()
+            except Exception:
+                pass
+
+        if not target_order and raw_val:
+            clean_val = normalizer.canonicalize(raw_val) or raw_val.replace(" ", "").upper()
+            target_order = InstallationOrder.objects.filter(
+                Q(registration_number__iexact=clean_val) |
+                Q(registration_number__iexact=raw_val) |
+                Q(order_number__iexact=raw_val) |
+                Q(order_number__iexact=clean_val) |
+                Q(vin__iexact=raw_val)
+            ).first()
+
+            if not target_order:
+                outcome = order_matcher.find_best_match(clean_val)
+                if outcome and outcome.order and outcome.score >= 85:
+                    target_order = outcome.order
+
+        canonical_plate = ""
+        if target_order:
+            canonical_plate = normalizer.canonicalize(target_order.registration_number) or target_order.registration_number
+            pair.order = target_order
+            is_exact = (normalizer.canonicalize(target_order.registration_number) == normalizer.canonicalize(raw_val or pair.registration_number_detected))
+            pair.match_type = VehicleInstallationPair.MatchType.EXACT if is_exact else VehicleInstallationPair.MatchType.FUZZY
+            pair.match_score = 100.0 if is_exact else 90.0
+            pair.matched_via = VehicleInstallationPair.MatchedVia.MANUAL
+        elif raw_val:
+            canonical_plate = normalizer.canonicalize(raw_val) or raw_val.strip().upper()
+            pair.match_type = VehicleInstallationPair.MatchType.NONE
+            pair.match_score = None
             pair.matched_via = VehicleInstallationPair.MatchedVia.MANUAL
 
-            # Re-run fuzzy order matcher with updated plate string if not already locked
-            outcome = order_matcher.find_best_match(canonical)
-            if outcome and outcome.order:
-                pair.order = outcome.order
-                pair.match_type = outcome.match_type
-                pair.match_score = outcome.score
-            updated_fields.extend(["manual_plate_override", "registration_number_detected", "is_manual_override", "matched_via", "order", "match_type", "match_score"])
+        if canonical_plate:
+            pair.manual_plate_override = canonical_plate
+            pair.registration_number_detected = canonical_plate
+            pair.is_manual_override = True
+
+            if pair.front_image:
+                pair.front_image.detected_plate = canonical_plate
+                pair.front_image.save(update_fields=["detected_plate"])
+            if pair.rear_image:
+                pair.rear_image.detected_plate = canonical_plate
+                pair.rear_image.save(update_fields=["detected_plate"])
 
         if new_status and new_status in VehicleInstallationPair.VerificationStatus.values:
             pair.verification_status = new_status
-            updated_fields.append("verification_status")
+        else:
+            pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
 
-        if operator_note is not None:
+        pair.refresh_completeness()
+
+        if operator_note is not None and str(operator_note).strip():
             pair.operator_note = str(operator_note).strip()
-            updated_fields.append("operator_note")
+        elif target_order:
+            pair.operator_note = f"Linked to Order #{target_order.order_number} ({target_order.registration_number})"
 
-        if updated_fields:
-            pair.save(update_fields=list(set(updated_fields)))
+        pair.save()
 
+        order_desc = f"linked to order #{target_order.order_number}" if target_order else "no matching order; plate updated directly"
         SubmissionAuditLog.objects.create(
             pair=pair,
-            action=SubmissionAuditLog.Action.OPERATOR_OVERRIDE,
+            action=SubmissionAuditLog.Action.MANUAL_PLATE_ASSIGN,
             result=SubmissionAuditLog.ResultStatus.SUCCESS,
-            message=f"Operator override on pair #{pair.id}: plate='{pair.registration_number_detected}', status='{pair.verification_status}', note='{pair.operator_note}'.",
+            message=f"Operator Link/Override: plate='{pair.registration_number_detected}' ({order_desc}), status='{pair.verification_status}'.",
         )
+
         return JsonResponse({
             "success": True,
-            "message": f"Pair {pair.registration_number_detected} updated.",
+            "message": f"Pair updated: {pair.registration_number_detected} " + (f"(Linked to #{target_order.order_number})" if target_order else ""),
             "registration_number_detected": pair.registration_number_detected,
             "verification_status": pair.verification_status,
             "operator_note": pair.operator_note,
             "match_type": pair.match_type,
             "match_score": pair.match_score,
             "order_number": pair.order.order_number if pair.order else None,
-        })
-
-    elif action == "link_order":
-        order_id = request.POST.get("order_id") or body_data.get("order_id")
-        order_number = request.POST.get("order_number") or body_data.get("order_number")
-
-        target_order = None
-        if order_id:
-            target_order = get_object_or_404(InstallationOrder, id=order_id)
-        elif order_number:
-            target_order = get_object_or_404(InstallationOrder, order_number=order_number)
-        else:
-            return JsonResponse({"success": False, "error": "order_id or order_number required."}, status=400)
-
-        pair.order = target_order
-        is_exact = (normalizer.canonicalize(target_order.registration_number) == pair.registration_number_detected)
-        pair.match_type = VehicleInstallationPair.MatchType.EXACT if is_exact else VehicleInstallationPair.MatchType.FUZZY
-        pair.match_score = 100.0 if is_exact else 90.0
-        pair.matched_via = VehicleInstallationPair.MatchedVia.MANUAL
-        pair.is_manual_override = True
-        pair.save(update_fields=["order", "match_type", "match_score", "matched_via", "is_manual_override"])
-
-        SubmissionAuditLog.objects.create(
-            pair=pair,
-            action=SubmissionAuditLog.Action.OPERATOR_OVERRIDE,
-            result=SubmissionAuditLog.ResultStatus.SUCCESS,
-            message=f"Operator manually linked pair to order #{target_order.order_number} ({target_order.registration_number}) via Web Console.",
-        )
-        return JsonResponse({
-            "success": True,
-            "message": f"Linked to order #{target_order.order_number}.",
-            "order_number": target_order.order_number,
+            "order": {
+                "id": pair.order.id,
+                "order_number": pair.order.order_number,
+                "registration_number": pair.order.registration_number,
+                "vin": pair.order.vin,
+                "warehouse_name": pair.order.warehouse_name,
+                "installation_officer": pair.order.installation_officer,
+            } if pair.order else None,
         })
 
     elif action == "unlink_order":

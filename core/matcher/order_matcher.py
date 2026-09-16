@@ -161,6 +161,9 @@ def match_all_pending_pairs() -> int:
     from core.matcher.prior_guided import get_active_orders_cache
     active_orders = get_active_orders_cache()
     registry = _active_registry()
+    if not registry and not active_orders:
+        return 0
+
     order_ids = [r[0] for r in registry]
     order_map = {o.id: o for o in InstallationOrder.objects.filter(id__in=order_ids)}
 

@@ -50,9 +50,14 @@ class Command(BaseCommand):
         self.stdout.write(f"Active Database: {db_info.get('vendor', 'sqlite').upper()} ({db_info.get('name', 'db.sqlite3')})")
 
         # 2. Timer to auto-launch browser once server is listening
-        if not no_browser:
+        # Guarded: only launch from the active child process (or when --noreload) to avoid dual instances
+        is_reloader_child = os.environ.get("RUN_MAIN") == "true"
+        is_noreload = "--noreload" in sys.argv
+        should_open_browser = not no_browser and (is_reloader_child or is_noreload)
+
+        if should_open_browser:
             def _launch_browser():
-                time.sleep(1.2)
+                time.sleep(1.0)
                 try:
                     webbrowser.open(url)
                 except Exception as exc:
@@ -60,6 +65,8 @@ class Command(BaseCommand):
 
             threading.Thread(target=_launch_browser, daemon=True).start()
             self.stdout.write(self.style.NOTICE(f"Opening browser at: {url}"))
+        elif not no_browser and not is_reloader_child:
+            self.stdout.write(self.style.NOTICE(f"Web server starting at: {url}"))
         else:
             self.stdout.write(f"Web server ready at: {url}")
 

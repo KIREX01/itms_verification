@@ -4,45 +4,53 @@
         <!-- Left Column: Work Queue Pane -->
         <div class="queue-column-pane">
             <div class="queue-controls-top">
-                <div style="position:relative;">
-                    <span style="position:absolute; left:10px; top:50%; transform:translateY(-50%); font-size:0.8rem; color:var(--ug-text-dim);">🔍</span>
-                    <input type="text" class="queue-search-input" id="queue-search-input" placeholder="Search Plate, Order, VIN, Batch... (Esc)" oninput="filterWorkQueue()">
-                </div>
-                <div style="display:flex; align-items:center; gap:6px;">
-                    <span style="font-size:0.75rem; color:var(--ug-text-dim);">📦</span>
-                    <select id="queue-batch-select" onchange="setQueueBatchFilter(this.value)" style="flex:1; background:var(--ug-black-card); border:1px solid var(--ug-border); color:#ffffff; font-size:0.76rem; padding:4px 8px; border-radius:var(--radius-sm); outline:none; cursor:pointer;" title="Filter work queue by ingestion batch">
-                        <option value="ALL">All Batches (Mixed Queue)</option>
-                        <option value="LATEST">🔥 Latest Ingested Batch</option>
-                        <option value="CARRYOVER">⚠️ Carryover / Previous Batches</option>
+                <!-- Row 1: Search and Batch Selector -->
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <div style="position:relative; flex:1;">
+                        <span style="position:absolute; left:10px; top:50%; transform:translateY(-50%); font-size:0.8rem; color:var(--ug-text-dim);">🔍</span>
+                        <input type="text" class="queue-search-input" id="queue-search-input" placeholder="Search Plate, Order, VIN... (Esc)" oninput="filterWorkQueue()">
+                    </div>
+                    <select id="queue-batch-select" onchange="setQueueBatchFilter(this.value)" style="background:var(--ug-black-card); border:1px solid var(--ug-border); color:#ffffff; font-size:0.75rem; padding:6px 10px; border-radius:var(--radius-md); outline:none; cursor:pointer; max-width:160px;" title="Filter work queue by ingestion batch">
+                        <option value="ALL">📦 All Batches</option>
+                        <option value="LATEST">🔥 Latest Batch</option>
+                        <option value="CARRYOVER">⏳ Carryover</option>
                     </select>
                 </div>
-                <!-- Date / Session Scope Filter (TUI Mirror) -->
-                <div class="scope-filter-bar" style="padding:4px 6px;">
-                    <span class="scope-filter-label" style="font-size:0.68rem;">📅 SCOPE:</span>
-                    <div class="scope-pills-group" style="padding:1px 2px; flex:1; justify-content:space-between;">
-                        <button class="scope-pill-btn active" id="btn-qscope-today" onclick="setQueueDateScope('TODAY')" title="Focus exclusively on today's active shift work (Hotkey: D)">
+
+                <!-- Row 2: Scope and Status Filters -->
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                    <!-- Date / Session Scope Filter -->
+                    <div class="scope-pills-group" style="display:flex; padding:2px; justify-content:space-between; background:var(--ug-black-card); border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.06);">
+                        <button class="scope-pill-btn active" id="btn-qscope-today" onclick="setQueueDateScope('TODAY')" title="Focus on today's active shift (Hotkey: D)" style="flex:1; text-align:center; padding:3px 6px; font-size:0.72rem;">
                             🔥 Today
                         </button>
-                        <button class="scope-pill-btn" id="btn-qscope-active" onclick="setQueueDateScope('ACTIVE_BATCH')" title="Focus on the single latest ingested batch">
+                        <button class="scope-pill-btn" id="btn-qscope-active" onclick="setQueueDateScope('ACTIVE_BATCH')" title="Focus on latest ingested batch" style="flex:1; text-align:center; padding:3px 6px; font-size:0.72rem;">
                             ⚡ Active
                         </button>
-                        <button class="scope-pill-btn" id="btn-qscope-carryover" onclick="setQueueDateScope('CARRYOVER')" title="Inspect carryover / unsubmitted pairs from prior days">
+                        <button class="scope-pill-btn" id="btn-qscope-carryover" onclick="setQueueDateScope('CARRYOVER')" title="Prior unsubmitted pairs" style="flex:1; text-align:center; padding:3px 6px; font-size:0.72rem;">
                             ⏳ Carryover
                         </button>
-                        <button class="scope-pill-btn" id="btn-qscope-all" onclick="setQueueDateScope('ALL')" title="Show all pairs across entire database">
+                        <button class="scope-pill-btn" id="btn-qscope-all" onclick="setQueueDateScope('ALL')" title="All records across database" style="flex:1; text-align:center; padding:3px 6px; font-size:0.72rem;">
                             🌐 All
                         </button>
                     </div>
+
+                    <!-- Status Filter Pills -->
+                    <div class="queue-filter-pills">
+                        <div class="queue-filter-pill active" data-filter="ALL" onclick="setWorkQueueFilter('ALL')">All</div>
+                        <div class="queue-filter-pill" data-filter="PENDING" onclick="setWorkQueueFilter('PENDING')">Review</div>
+                        <div class="queue-filter-pill" data-filter="APPROVED" onclick="setWorkQueueFilter('APPROVED')">Approved</div>
+                        <div class="queue-filter-pill" data-filter="ISSUES" onclick="setWorkQueueFilter('ISSUES')">Issues</div>
+                        <div class="queue-filter-pill" data-filter="SUBMITTED" onclick="setWorkQueueFilter('SUBMITTED')">Done</div>
+                    </div>
                 </div>
 
-                <div class="queue-filter-pills">
-                    <div class="queue-filter-pill active" data-filter="ALL" onclick="setWorkQueueFilter('ALL')">All</div>
-                    <div class="queue-filter-pill" data-filter="PENDING" onclick="setWorkQueueFilter('PENDING')">Review</div>
-                    <div class="queue-filter-pill" data-filter="APPROVED" onclick="setWorkQueueFilter('APPROVED')">Approved</div>
-                    <div class="queue-filter-pill" data-filter="ISSUES" onclick="setWorkQueueFilter('ISSUES')">Issues</div>
-                    <div class="queue-filter-pill" data-filter="SUBMITTED" onclick="setWorkQueueFilter('SUBMITTED')">Done</div>
-                </div>
-                <div style="display:flex; align-items:center; justify-content:space-between; padding-top:2px;">
+                <!-- Row 3: Live Pipeline Indicator & Batch Action -->
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; padding-top:2px;">
+                    <div id="queue-processing-indicator" style="display:none; align-items:center; gap:5px; background:rgba(252,220,4,0.12); border:1px solid rgba(252,220,4,0.3); padding:3px 8px; border-radius:12px;">
+                        <span class="live-pulse-dot" style="display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--ug-yellow); animation:pulse 1.5s infinite;"></span>
+                        <span id="queue-processing-text" style="font-size:0.7rem; color:var(--ug-yellow); font-weight:700;">Vision Active</span>
+                    </div>
                     <span style="font-size:0.72rem; color:var(--ug-text-muted);" id="queue-approved-count-text">
                         0 ready to submit
                     </span>

@@ -4,7 +4,11 @@
 set -e
 
 # Determine Project Directory
-APP_DIR="${ITMS_HOME:-$(cd "$(dirname "$0")" && pwd)}"
+if [ -f "$(pwd)/itms_cli.py" ]; then
+    APP_DIR="$(pwd)"
+else
+    APP_DIR="${ITMS_HOME:-$(cd "$(dirname "$0")" && pwd)}"
+fi
 
 # Prioritize Virtual Environment Python
 VENV_PY="$APP_DIR/.venv/bin/python"

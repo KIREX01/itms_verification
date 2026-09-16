@@ -351,8 +351,9 @@ class DualStreamVisionEngine:
         differential orientation, and character consensus on two evidence images.
         """
         details: List[str] = []
-        path_a = os.path.join(settings.MEDIA_ROOT, img_a.vault_file)
-        path_b = os.path.join(settings.MEDIA_ROOT, img_b.vault_file)
+        from core.services import vault_service
+        path_a = str(vault_service.resolve_vault_path(img_a.vault_file))
+        path_b = str(vault_service.resolve_vault_path(img_b.vault_file))
 
         raw_a = preprocess.load_image(path_a)
         raw_b = preprocess.load_image(path_b)
@@ -363,8 +364,9 @@ class DualStreamVisionEngine:
         det_a = detector.detect_plate(pre_a)
         det_b = detector.detect_plate(pre_b)
 
-        crop_a = detector.crop_detection(pre_a, det_a) if det_a else None
-        crop_b = detector.crop_detection(pre_b, det_b) if det_b else None
+        # High-resolution crops preserving raw pixel density for crisp OCR
+        crop_a = detector.crop_raw_detection(raw_a, pre_a, det_a) if det_a else None
+        crop_b = detector.crop_raw_detection(raw_b, pre_b, det_b) if det_b else None
 
         # ── 2. Plate Background Category & Homogeneity Check ─────────────
         cat_a, col_a, conf_col_a = classify_plate_background_category(crop_a) if crop_a is not None else (VehicleCategory.UNKNOWN, "unknown", 0.0)
@@ -372,31 +374,6 @@ class DualStreamVisionEngine:
 
         is_homogenous, category, cat_msg = validate_plate_category_homogeneity(col_a, col_b)
         details.append(cat_msg)
-
-        if not is_homogenous:
-            # Immediate rejection due to mismatched vehicle class
-            res = DualStreamResult(
-                success=False,
-                plate_number="",
-                vehicle_category=VehicleCategory.UNKNOWN.value,
-                front_image=img_a,
-                rear_image=img_b,
-                reconciliation_status="COLOR_CONFLICT",
-                color_match=False,
-                front_color=col_a,
-                rear_color=col_b,
-                details=details,
-            )
-            if pair:
-                pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
-                pair.save(update_fields=["verification_status"])
-                SubmissionAuditLog.objects.create(
-                    pair=pair,
-                    action=SubmissionAuditLog.Action.VALIDATE,
-                    result=SubmissionAuditLog.ResultStatus.FAILURE,
-                    message=f"Joint Vision: {cat_msg}",
-                )
-            return res
 
         # ── 3. Differential Orientation Consensus (Geometry / Taillight) ─
         # Respect classified folder ground truth if established at ingestion
@@ -440,21 +417,45 @@ class DualStreamVisionEngine:
         conf_f = ocr_f.confidence if ocr_f else 0.0
         conf_r = ocr_r.confidence if ocr_r else 0.0
 
-        # Update single image records
+        min_conf = float(getattr(settings, "OCR_MIN_CONFIDENCE", 0.55))
+        norm_f = normalizer.normalize_plate(raw_plate_f) if raw_plate_f else {"canonical": "", "is_valid": False}
+        norm_r = normalizer.normalize_plate(raw_plate_r) if raw_plate_r else {"canonical": "", "is_valid": False}
+
+        # Update single image records with syntax validation
         if front_det:
             front_img.bbox = front_det.bbox
             front_img.detector_confidence = front_det.confidence
-        front_img.detected_plate = raw_plate_f
+        front_img.detected_plate = norm_f["canonical"] or raw_plate_f[:32]
         front_img.ocr_confidence = conf_f
-        front_img.status = EvidenceImage.Status.PLATE_DETECTED if raw_plate_f else EvidenceImage.Status.NEEDS_REVIEW
+        if norm_f["is_valid"] and (conf_f is None or conf_f >= min_conf):
+            front_img.status = EvidenceImage.Status.PLATE_DETECTED
+            front_img.error_message = ""
+        else:
+            front_img.status = EvidenceImage.Status.NEEDS_REVIEW
+            if not raw_plate_f:
+                front_img.error_message = "Plate localized but OCR extracted no readable text."
+            elif not norm_f["is_valid"]:
+                front_img.error_message = f"Invalid plate syntax '{front_img.detected_plate}'"
+            else:
+                front_img.error_message = f"OCR confidence {conf_f:.2f} below threshold"
         front_img.save()
 
         if rear_det:
             rear_img.bbox = rear_det.bbox
             rear_img.detector_confidence = rear_det.confidence
-        rear_img.detected_plate = raw_plate_r
+        rear_img.detected_plate = norm_r["canonical"] or raw_plate_r[:32]
         rear_img.ocr_confidence = conf_r
-        rear_img.status = EvidenceImage.Status.PLATE_DETECTED if raw_plate_r else EvidenceImage.Status.NEEDS_REVIEW
+        if norm_r["is_valid"] and (conf_r is None or conf_r >= min_conf):
+            rear_img.status = EvidenceImage.Status.PLATE_DETECTED
+            rear_img.error_message = ""
+        else:
+            rear_img.status = EvidenceImage.Status.NEEDS_REVIEW
+            if not raw_plate_r:
+                rear_img.error_message = "Plate localized but OCR extracted no readable text."
+            elif not norm_r["is_valid"]:
+                rear_img.error_message = f"Invalid plate syntax '{rear_img.detected_plate}'"
+            else:
+                rear_img.error_message = f"OCR confidence {conf_r:.2f} below threshold"
         rear_img.save()
 
         # ── 5. Multi-View Character Consensus & Conflict Resolution ──────
@@ -464,7 +465,12 @@ class DualStreamVisionEngine:
         details.extend(recon_details)
 
         # ── 6. Persist Pair Updates & Audit Logs ─────────────────────────
-        success = recon_status in ("EXACT_MATCH", "SYNTAX_RESOLVED", "ORDER_PRIOR_MATCH", "ASYMMETRIC_RECOVERED")
+        if not is_homogenous:
+            recon_status = "COLOR_CONFLICT"
+            success = False
+            details.append(f"Flagged as CONFLICT due to plate category divergence: {cat_msg}")
+        else:
+            success = recon_status in ("EXACT_MATCH", "SYNTAX_RESOLVED", "ORDER_PRIOR_MATCH", "ASYMMETRIC_RECOVERED")
 
         if pair is None:
             pair, _ = VehicleInstallationPair.objects.get_or_create(
@@ -481,16 +487,18 @@ class DualStreamVisionEngine:
 
         if success and consensus_plate:
             # Propagate consensus plate to partner images if one side was unreadable/occluded
-            if not front_img.detected_plate:
+            if not front_img.detected_plate or front_img.status != EvidenceImage.Status.PLATE_DETECTED:
                 front_img.detected_plate = consensus_plate
                 front_img.order_guided_plate = consensus_plate
                 front_img.status = EvidenceImage.Status.PLATE_DETECTED
-                front_img.save(update_fields=["detected_plate", "order_guided_plate", "status"])
-            if not rear_img.detected_plate:
+                front_img.error_message = ""
+                front_img.save(update_fields=["detected_plate", "order_guided_plate", "status", "error_message"])
+            if not rear_img.detected_plate or rear_img.status != EvidenceImage.Status.PLATE_DETECTED:
                 rear_img.detected_plate = consensus_plate
                 rear_img.order_guided_plate = consensus_plate
                 rear_img.status = EvidenceImage.Status.PLATE_DETECTED
-                rear_img.save(update_fields=["detected_plate", "order_guided_plate", "status"])
+                rear_img.error_message = ""
+                rear_img.save(update_fields=["detected_plate", "order_guided_plate", "status", "error_message"])
 
             # Link to active InstallationOrder via full-featured order matcher
             from core.matcher.order_matcher import match_pair_to_order
@@ -503,6 +511,8 @@ class DualStreamVisionEngine:
             audit_res = SubmissionAuditLog.ResultStatus.SUCCESS
         else:
             pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
+            if not is_homogenous:
+                pair.operator_note = f"Color Conflict: {cat_msg}"
             audit_action = SubmissionAuditLog.Action.VALIDATE
             audit_res = SubmissionAuditLog.ResultStatus.FAILURE
 
@@ -512,7 +522,7 @@ class DualStreamVisionEngine:
             pair=pair,
             action=audit_action,
             result=audit_res,
-            message=f"Dual-Stream Joint Vision [{recon_status}]: {consensus_plate} (Conf: {consensus_conf:.2f}, Category: {category.value}). " + " ".join(details),
+            message=f"Dual-Stream Joint Vision [{recon_status}]: {consensus_plate or 'No plate'} (Conf: {consensus_conf:.2f}, Category: {category.value}). " + " ".join(details),
         )
 
         return DualStreamResult(

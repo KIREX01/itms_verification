@@ -34,6 +34,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from core.models import EvidenceImage, IngestionBatch
+from core.services import vault_service
 from core.vision import detector, normalizer, ocr_engine, orientation, preprocess
 
 # Default cap — overridable via VISION_MAX_RETRIES in settings or the CLI flag.
@@ -145,7 +146,7 @@ class Command(BaseCommand):
                     Q(rear_image__batch__batch_id=batch_arg)
                 )
 
-            # Process pairs that need vision (e.g. placeholder PAIR-, unanalyzed, or force reprocess)
+            # Process pairs that need vision
             if not options.get("reprocess_all") and not options.get("joint_pairs"):
                 pair_qs = pair_qs.filter(
                     Q(registration_number_detected__startswith="PAIR-") |
@@ -244,13 +245,7 @@ class Command(BaseCommand):
                 img.retry_count = 0
                 img.save(update_fields=["status", "error_message", "retry_count"])
 
-        # ── 2. Build the processable queryset ──────────────────────────
-        # Pending images:
-        # 1. NEW (freshly ingested)
-        # 2. FAILED (retry_count < max_retries, or forced via --reprocess-failed)
-        # 3. NEEDS_REVIEW with no detected plate (retry_count < max_retries) -- left out from vision
-        # 4. If --include-needs-review: all NEEDS_REVIEW
-        # 5. If --reprocess-all: all unsubmitted images
+        # ── Phase 3: Single-Image Vision for Remaining/Unpaired Evidence Images ──
         if options.get("reprocess_all"):
             base_filter = ~Q(status=EvidenceImage.Status.SUBMITTED)
         else:
@@ -260,84 +255,70 @@ class Command(BaseCommand):
                 Q(status=EvidenceImage.Status.INCOMPLETE, detected_plate="") |
                 Q(status=EvidenceImage.Status.NEEDS_REVIEW, detected_plate="")
             )
-            if options["include_needs_review"]:
+            if options.get("include_needs_review"):
                 base_filter = base_filter | Q(status=EvidenceImage.Status.NEEDS_REVIEW)
 
-        batch_arg = options.get("batch")
-        if batch_arg:
-            try:
-                batch_obj = IngestionBatch.objects.get(batch_id=batch_arg)
-                base_filter = base_filter & Q(batch=batch_obj)
-                self.stdout.write(f"Filtering to IngestionBatch: {batch_obj.batch_id}")
-            except IngestionBatch.DoesNotExist:
-                raise CommandError(f"IngestionBatch with id '{batch_arg}' does not exist.")
+        if batch_obj:
+            base_filter = base_filter & Q(batch=batch_obj)
 
         if options.get("reprocess_all"):
             qs = EvidenceImage.objects.filter(base_filter).order_by("ingested_at")
         elif options.get("reprocess_failed"):
-            # Include images matching base_filter where FAILED are force-retried
             qs = EvidenceImage.objects.filter(
                 base_filter & (Q(status=EvidenceImage.Status.FAILED) | Q(retry_count__lt=max_retries))
             ).order_by("ingested_at")
         else:
             qs = EvidenceImage.objects.filter(base_filter, retry_count__lt=max_retries).order_by("ingested_at")
 
-        if options["limit"]:
+        if options.get("limit"):
             qs = qs[: options["limit"]]
 
         total = qs.count() if hasattr(qs, "count") else len(qs)
-        if total == 0:
-            self.stdout.write(self.style.WARNING("No pending images to process."))
-            self._print_stuck_summary(max_retries)
-            return
+        if total > 0:
+            self.stdout.write(f"Processing {total} pending image(s) (max_retries={max_retries})...\n")
+            processed = 0
+            plate_found = 0
+            failed = 0
+            skipped = 0
 
-        self.stdout.write(f"Processing {total} image(s) (max_retries={max_retries})...\n")
-
-        processed = 0
-        plate_found = 0
-        failed = 0
-        skipped = 0
-
-        image_stream = qs.iterator(chunk_size=50) if hasattr(qs, "iterator") else qs
-        for image in image_stream:
-            # ── Guard: double-check retry budget (race-safe) ───────────
-            if image.retry_count >= max_retries:
-                skipped += 1
-                continue
-
-            image.status = EvidenceImage.Status.PROCESSING
-            image.retry_count += 1
-            image.error_message = ""
-            image.save(update_fields=["status", "retry_count", "error_message"])
-
-            abs_path = os.path.join(settings.MEDIA_ROOT, image.vault_file)
-            try:
-                self._process_one(image, abs_path, save_crops=options.get("save_crops", False))
-                processed += 1
-                if image.detected_plate:
-                    plate_found += 1
-            except Exception as exc:  # noqa: BLE001 - want to log any vision failure without killing the batch
-                image.status = EvidenceImage.Status.FAILED
-                image.error_message = str(exc)
-                image.processed_at = timezone.now()
+            image_stream = qs.iterator(chunk_size=50) if hasattr(qs, "iterator") else qs
+            for image in image_stream:
                 if image.retry_count >= max_retries:
-                    image.error_message += f" [max retries ({max_retries}) exhausted]"
-                image.save(update_fields=["status", "error_message", "processed_at"])
-                self.stderr.write(
-                    self.style.ERROR(
-                        f"FAILED  {image.id} (attempt {image.retry_count}/{max_retries}): {exc}"
-                    )
-                )
-                failed += 1
+                    skipped += 1
+                    continue
 
-        self.stdout.write("")
-        self.stdout.write(
-            self.style.SUCCESS(
-                f"Vision pipeline complete: {processed} processed, "
-                f"{plate_found} plates found, {failed} failed, {skipped} skipped (exhausted retries)."
+                image.status = EvidenceImage.Status.PROCESSING
+                image.retry_count += 1
+                image.error_message = ""
+                image.save(update_fields=["status", "retry_count", "error_message"])
+
+                abs_path = str(vault_service.resolve_vault_path(image.vault_file))
+                try:
+                    self._process_one(image, abs_path, save_crops=options.get("save_crops", False))
+                    processed += 1
+                    if image.detected_plate:
+                        plate_found += 1
+                except Exception as exc:  # noqa: BLE001
+                    image.status = EvidenceImage.Status.FAILED
+                    image.error_message = str(exc)
+                    image.processed_at = timezone.now()
+                    if image.retry_count >= max_retries:
+                        image.error_message += f" [max retries ({max_retries}) exhausted]"
+                    image.save(update_fields=["status", "error_message", "processed_at"])
+                    self.stderr.write(
+                        self.style.ERROR(
+                            f"FAILED  {image.id} (attempt {image.retry_count}/{max_retries}): {exc}"
+                        )
+                    )
+                    failed += 1
+
+            self.stdout.write("")
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"Vision pipeline complete: {processed} processed, "
+                    f"{plate_found} plates found, {failed} failed, {skipped} skipped."
+                )
             )
-        )
-        self._print_stuck_summary(max_retries)
 
         # ── Phase 4: Order Matching & Registry Reconciliation ───────────
         try:
@@ -349,6 +330,8 @@ class Command(BaseCommand):
                 )
         except Exception as err:
             self.stderr.write(f"Warning: Order matching reconciliation error: {err}")
+
+        self._print_stuck_summary(max_retries)
 
         if options.get("cleanup_crops"):
             self.stdout.write("\nCleaning up temporary crops as requested...")
@@ -386,7 +369,9 @@ class Command(BaseCommand):
             )
             return
 
-        crop = detector.crop_detection(pre, detection)
+        crop = detector.crop_raw_detection(raw, pre, detection)
+        if crop is None or crop.size == 0:
+            crop = detector.crop_detection(pre, detection)
         if save_crops and crop is not None:
             crops_root = Path(getattr(settings, "CROPS_ROOT", settings.MEDIA_ROOT / "crops"))
             date_dir = crops_root / timezone.now().strftime("%Y-%m-%d")

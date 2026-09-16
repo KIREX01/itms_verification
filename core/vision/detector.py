@@ -21,6 +21,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
 
+# Ensure Ultralytics operates 100% offline without network checks
+os.environ["ULTRALYTICS_AUTOINSTALL"] = "0"
+os.environ["YOLO_VERBOSE"] = "False"
+
 import cv2
 import numpy as np
 
@@ -137,9 +141,14 @@ def _detect_with_yolo(image: np.ndarray) -> Optional[Detection]:
         return None
 
     try:
-        results = model.predict(source=image, conf=_CONF_THRESHOLD, verbose=False)
+        import torch
+        with torch.inference_mode():
+            results = model.predict(source=image, conf=_CONF_THRESHOLD, verbose=False)
     except Exception:
-        return None
+        try:
+            results = model.predict(source=image, conf=_CONF_THRESHOLD, verbose=False)
+        except Exception:
+            return None
 
     if not results:
         return None
@@ -297,3 +306,38 @@ def crop_detection(image: np.ndarray, detection: Detection, padding: int = 4) ->
     x2 = min(w, x2 + padding)
     y2 = min(h, y2 + padding)
     return image[y1:y2, x1:x2]
+
+
+def crop_raw_detection(
+    raw_image: np.ndarray,
+    pre_image: np.ndarray,
+    detection: Detection,
+    padding: int = 8,
+) -> np.ndarray:
+    """
+    Crops the detection bounding box from full-resolution `raw_image`
+    by projecting coordinates from normalized `pre_image` back to `raw_image`.
+    Preserves maximum character sharpness and pixel density for OCR.
+    """
+    if raw_image is None or raw_image.size == 0:
+        return crop_detection(pre_image, detection, padding=padding)
+
+    h_raw, w_raw = raw_image.shape[:2]
+    h_pre, w_pre = pre_image.shape[:2]
+
+    if h_raw == h_pre and w_raw == w_pre:
+        return crop_detection(raw_image, detection, padding=padding)
+
+    scale_x = w_raw / float(w_pre)
+    scale_y = h_raw / float(h_pre)
+
+    x1, y1, x2, y2 = detection.bbox
+    rx1 = max(0, int(x1 * scale_x) - padding)
+    ry1 = max(0, int(y1 * scale_y) - padding)
+    rx2 = min(w_raw, int(x2 * scale_x) + padding)
+    ry2 = min(h_raw, int(y2 * scale_y) + padding)
+
+    if ry2 > ry1 and rx2 > rx1:
+        return raw_image[ry1:ry2, rx1:rx2]
+    return crop_detection(pre_image, detection, padding=padding)
+

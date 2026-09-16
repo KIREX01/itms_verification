@@ -218,16 +218,22 @@
     font-weight: 700;
 }
 
-/* Batch Body / Full-Scale Photos Area (Scrollable Picture Area) */
+/* Batch Body / Full-Scale Photos Area (Dedicated Fixed-Height Scroll Container) */
 .batch-stream-body {
     padding: 18px;
     background-color: var(--ug-black-card);
-    max-height: calc(100vh - 270px);
+    height: 540px;
+    max-height: 540px;
     overflow-y: auto;
     overflow-x: hidden;
     overscroll-behavior: contain;
     scrollbar-width: thin;
-    scrollbar-color: var(--ug-yellow) rgba(255, 255, 255, 0.08);
+    scrollbar-color: var(--ug-yellow) rgba(255, 255, 255, 0.12);
+}
+
+.batch-stream-card.is-maximized .batch-stream-body {
+    height: calc(100vh - 210px);
+    max-height: calc(100vh - 210px);
 }
 
 .batch-stream-body::-webkit-scrollbar {
@@ -244,9 +250,9 @@
 
 .batch-full-photos-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-    gap: 18px;
-    padding-bottom: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    gap: 20px;
+    padding-bottom: 16px;
 }
 
 @media (max-width: 992px) {
@@ -273,7 +279,8 @@
 
 .batch-photo-full-wrap {
     position: relative;
-    height: 340px;
+    height: 380px;
+    min-height: 380px;
     background-color: #06070a;
     display: flex;
     align-items: center;

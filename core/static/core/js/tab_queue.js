@@ -433,59 +433,65 @@ function updateLinkerBanner() {
 }
 
 function openEditPlateModal() {
-    if (!selectedPairDetail) {
-        showToast("Please select a pair first", "warning");
-        return;
-    }
-    document.getElementById("input-edit-plate").value = selectedPairDetail.registration_number_detected || "";
-    const statusSelect = document.getElementById("select-edit-status");
-    if (statusSelect) statusSelect.value = selectedPairDetail.verification_status || "";
-    const noteInput = document.getElementById("input-edit-note");
-    if (noteInput) noteInput.value = selectedPairDetail.operator_note || "";
-
-    updateLinkerBanner();
-    openModal("modal-edit-plate");
-    const plateQuery = selectedPairDetail.registration_number_detected || "";
-    const searchInput = document.getElementById("input-search-order");
-    if (searchInput) searchInput.value = plateQuery;
-    searchOrdersForLinking(plateQuery);
-    setTimeout(() => document.getElementById("input-edit-plate").focus(), 100);
+    openUnifiedLinkModal();
 }
 
 function openLinkOrderModal() {
+    openUnifiedLinkModal();
+}
+
+function openUnifiedLinkModal() {
     if (!selectedPairDetail) {
         showToast("Please select a pair first", "warning");
         return;
     }
-    document.getElementById("input-edit-plate").value = selectedPairDetail.registration_number_detected || "";
+    const input = document.getElementById("input-edit-plate");
+    const currentPlate = selectedPairDetail.registration_number_detected || "";
+    if (input) {
+        input.value = currentPlate;
+    }
     const statusSelect = document.getElementById("select-edit-status");
-    if (statusSelect) statusSelect.value = selectedPairDetail.verification_status || "";
+    if (statusSelect) statusSelect.value = "APPROVED";
     const noteInput = document.getElementById("input-edit-note");
     if (noteInput) noteInput.value = selectedPairDetail.operator_note || "";
 
     updateLinkerBanner();
     openModal("modal-edit-plate");
-    const plateQuery = selectedPairDetail.registration_number_detected || "";
-    const searchInput = document.getElementById("input-search-order");
-    if (searchInput) {
-        searchInput.value = plateQuery;
-        setTimeout(() => searchInput.focus(), 100);
-    }
-    searchOrdersForLinking(plateQuery);
+    searchOrdersForLinking(currentPlate);
+    setTimeout(() => {
+        if (input) {
+            input.focus();
+            input.select();
+        }
+    }, 100);
 }
 
-async function submitEditPlate() {
+let linkSearchTimeout = null;
+function onUnifiedPlateInput(val) {
+    clearTimeout(linkSearchTimeout);
+    linkSearchTimeout = setTimeout(() => {
+        searchOrdersForLinking(val.trim());
+    }, 180);
+}
+
+async function submitUnifiedLinkOrder() {
     if (!selectedPairId) return;
-    const plate = document.getElementById("input-edit-plate").value.trim();
-    const status = document.getElementById("select-edit-status").value;
-    const note = document.getElementById("input-edit-note").value.trim();
+    const input = document.getElementById("input-edit-plate");
+    const query = input ? input.value.trim() : "";
+    const status = document.getElementById("select-edit-status") ? document.getElementById("select-edit-status").value : "";
+    const note = document.getElementById("input-edit-note") ? document.getElementById("input-edit-note").value.trim() : "";
+
+    if (!query) {
+        showToast("Please enter a plate or order number.", "warning");
+        return;
+    }
 
     try {
         const bodyParams = new URLSearchParams();
-        bodyParams.append("action", "manual_override");
-        if (plate) bodyParams.append("plate", plate);
+        bodyParams.append("action", "link_order");
+        bodyParams.append("query", query);
         if (status) bodyParams.append("verification_status", status);
-        bodyParams.append("operator_note", note);
+        if (note) bodyParams.append("operator_note", note);
 
         const res = await fetch(`/api/pairs/${selectedPairId}/action/`, {
             method: "POST",
@@ -494,17 +500,21 @@ async function submitEditPlate() {
         });
         const data = await res.json();
         if (data.success) {
-            showToast(data.message, "success");
+            showToast(data.message || "Pair updated successfully!", "success");
             closeModal("modal-edit-plate");
+            await selectPair(selectedPairId);
             fetchStats();
             fetchPairs();
-            selectPair(selectedPairId);
         } else {
-            showToast(data.error || "Failed updating pair override", "error");
+            showToast(data.error || "Linking/update failed", "error");
         }
     } catch (err) {
         showToast("Error: " + err, "error");
     }
+}
+
+async function submitEditPlate() {
+    return submitUnifiedLinkOrder();
 }
 
 async function unlinkOrderFromSelectedPair() {
@@ -586,6 +596,7 @@ async function linkOrderToPair(orderId) {
         const data = await res.json();
         if (data.success) {
             showToast(data.message, "success");
+            closeModal("modal-edit-plate");
             await selectPair(selectedPairId);
             updateLinkerBanner();
             fetchStats();

@@ -32,18 +32,18 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # HSV ranges for Uganda plate background classification
-# White plates (private vehicles): low saturation, high value
+# White plates (PSV boda / private cars): low saturation, high value
 _WHITE_PLATE_HSV = {
     "h_range": (0, 180),    # any hue
-    "s_range": (0, 50),     # very low saturation
-    "v_range": (180, 255),  # bright
+    "s_range": (0, 70),     # low-to-moderate saturation (accommodates warm daylight)
+    "v_range": (115, 255),  # readable luminance
 }
 
-# Yellow plates (commercial, rear): mid hue, high saturation, high value
+# Yellow plates (PMO private motorcycle): mid hue, strongly saturated yellow pigment
 _YELLOW_PLATE_HSV = {
-    "h_range": (15, 40),    # yellow hue band
-    "s_range": (80, 255),   # saturated
-    "v_range": (150, 255),  # bright
+    "h_range": (15, 38),    # yellow hue band
+    "s_range": (85, 255),   # strongly saturated
+    "v_range": (110, 255),  # bright
 }
 
 
@@ -233,10 +233,12 @@ def detect_plate_color(crop: np.ndarray) -> str:
     y_hi = np.array([_YELLOW_PLATE_HSV["h_range"][1], _YELLOW_PLATE_HSV["s_range"][1], _YELLOW_PLATE_HSV["v_range"][1]])
     yellow_pct = float(cv2.countNonZero(cv2.inRange(hsv, y_lo, y_hi))) / total_px
 
-    if white_pct > 0.25:
+    if white_pct > 0.20 and white_pct >= yellow_pct:
         return "white"
-    elif yellow_pct > 0.15:
+    elif yellow_pct > 0.18 and yellow_pct > white_pct * 1.3:
         return "yellow"
+    elif white_pct > 0.12:
+        return "white"
     return "unknown"
 
 

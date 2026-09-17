@@ -233,9 +233,58 @@ def _ocr_with_tesseract(plate_crop: np.ndarray) -> Optional[OCRResult]:
 
         wh, ww = work_crop.shape[:2]
 
-        # Primary passes: test inter-line bolt trim 0.08 first (to clear mounting screws on digit 1), then 0.0
+        # Pass 1A: Connected-Components character cluster segmentation
+        try:
+            gray_cc = cv2.cvtColor(work_crop, cv2.COLOR_BGR2GRAY) if work_crop.ndim == 3 else work_crop
+            _, bin_cc = cv2.threshold(gray_cc, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
+            n_labels, _, cc_stats, _ = cv2.connectedComponentsWithStats(bin_cc)
+            top_boxes, bot_boxes = [], []
+            for i in range(1, n_labels):
+                cx, cy, cw_c, ch_c, carea = cc_stats[i]
+                if 0.10 * wh < ch_c < 0.60 * wh and 0.02 * ww < cw_c < 0.45 * ww and carea > 200:
+                    if cy + ch_c * 0.5 < wh * 0.50:
+                        top_boxes.append((cx, cy, cw_c, ch_c))
+                    else:
+                        bot_boxes.append((cx, cy, cw_c, ch_c))
+
+            if top_boxes and bot_boxes:
+                min_tx = max(0, min(b[0] for b in top_boxes) - 10)
+                max_tx = min(ww, max(b[0] + b[2] for b in top_boxes) + 10)
+                min_ty = max(0, min(b[1] for b in top_boxes) - 8)
+                max_ty = min(wh, max(b[1] + b[3] for b in top_boxes) + 8)
+
+                min_bx = max(0, min(b[0] for b in bot_boxes) - 10)
+                max_bx = min(ww, max(b[0] + b[2] for b in bot_boxes) + 10)
+                min_by = max(0, min(b[1] for b in bot_boxes) - 8)
+                max_by = min(wh, max(b[1] + b[3] for b in bot_boxes) + 8)
+
+                cc_top = work_crop[min_ty:max_ty, min_tx:max_tx]
+                cc_bot = work_crop[min_by:max_by, min_bx:max_bx]
+
+                valid_candidates = []
+                for psm_t in ("8", "7", "6"):
+                    t1 = pytesseract.image_to_string(cc_top, config=f"--psm {psm_t} -c tessedit_char_whitelist={PLATE_CHAR_WHITELIST}").strip()
+                    if not t1:
+                        continue
+                    for psm_b in ("7", "8", "6"):
+                        t2 = pytesseract.image_to_string(cc_bot, config=f"--psm {psm_b} -c tessedit_char_whitelist={PLATE_CHAR_WHITELIST}").strip()
+                        res = _parse_motorcycle_sublines(t1, t2)
+                        if res and is_valid_plate(res.text):
+                            c_len = len(res.text.replace(" ", ""))
+                            if c_len == 8:
+                                return res  # Full 8-char Ugandan plate found!
+                            valid_candidates.append(res)
+                        if t1 and t2:
+                            all_candidates.append((t1 + t2, 0.80))
+                if valid_candidates:
+                    valid_candidates.sort(key=lambda r: len(r.text.replace(" ", "")), reverse=True)
+                    return valid_candidates[0]
+        except Exception:
+            pass
+
+        # Pass 1B: Multi-ratio split passes with PSM 8, 7, 6
         for bot_trim in (0.08, 0.0):
-            for split_ratio in (0.46, 0.48):
+            for split_ratio in (0.44, 0.46, 0.48):
                 mid_y = int(wh * split_ratio)
                 raw_top = work_crop[:mid_y, :]
                 raw_bot = work_crop[mid_y:, :]
@@ -248,7 +297,7 @@ def _ocr_with_tesseract(plate_crop: np.ndarray) -> Optional[OCRResult]:
                 bot_gray = cv2.cvtColor(bot_padded, cv2.COLOR_BGR2GRAY) if bot_padded.ndim == 3 else bot_padded
                 _, bot_otsu = cv2.threshold(bot_gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
 
-                for psm in ("6", "7"):
+                for psm in ("8", "7", "6"):
                     cfg_line = f"--psm {psm} -c tessedit_char_whitelist={PLATE_CHAR_WHITELIST}"
                     try:
                         t1 = pytesseract.image_to_string(top_padded, config=cfg_line).strip()
@@ -280,7 +329,7 @@ def _ocr_with_tesseract(plate_crop: np.ndarray) -> Optional[OCRResult]:
         pass
 
     for img_variant in variants:
-        for psm in ("7", "6"):
+        for psm in ("7", "6", "8"):
             cfg = f"--psm {psm} -c tessedit_char_whitelist={PLATE_CHAR_WHITELIST}"
             try:
                 txt = pytesseract.image_to_string(img_variant, config=cfg).strip()
@@ -288,13 +337,34 @@ def _ocr_with_tesseract(plate_crop: np.ndarray) -> Optional[OCRResult]:
                 if norm["is_valid"]:
                     return OCRResult(text=norm["canonical"], confidence=0.92, backend="tesseract")
                 if txt:
-                    all_candidates.append((norm["canonical"] if norm["canonical"] else txt, 0.60))
+                    clean_c = "".join(c for c in txt.upper() if c.isalnum())
+                    # Only accept candidate if not absurdly long noise
+                    if len(clean_c) <= 12:
+                        all_candidates.append((norm["canonical"] if norm["canonical"] else clean_c, 0.60))
             except Exception:
                 pass
 
     if all_candidates:
-        all_candidates.sort(key=lambda c: len(c[0]), reverse=True)
-        return OCRResult(text=all_candidates[0][0], confidence=all_candidates[0][1], backend="tesseract")
+        def _score_candidate(cand_tuple):
+            txt, conf = cand_tuple
+            cleaned = re.sub(r"[^A-Z0-9]", "", txt.upper())
+            n = normalize_plate(cleaned)
+            if n["is_valid"]:
+                return (100, conf)
+            l = len(cleaned)
+            len_dist = min(abs(l - 7), abs(l - 8)) if l > 0 else 99
+            if l > 10:
+                len_dist += 40
+            return (-len_dist, conf)
+
+        all_candidates.sort(key=_score_candidate, reverse=True)
+        best_txt, best_conf = all_candidates[0]
+        norm_best = normalize_plate(best_txt)
+        return OCRResult(
+            text=norm_best["canonical"] if norm_best["canonical"] else best_txt[:10],
+            confidence=best_conf,
+            backend="tesseract",
+        )
 
     return None
 

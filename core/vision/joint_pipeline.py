@@ -108,18 +108,20 @@ def classify_plate_background_category(crop: np.ndarray) -> Tuple[VehicleCategor
         return VehicleCategory.UNKNOWN, "unknown", 0.0
 
     total_px = center.shape[0] * center.shape[1]
-    # Yellow mask: H: 16-38, S: 50-255, V: 70-255
-    yellow_mask = cv2.inRange(center, np.array([16, 50, 70]), np.array([38, 255, 255]))
+    # Yellow mask: H: 15-38, S: 85-255, V: 110-255 (strongly saturated yellow pigment)
+    yellow_mask = cv2.inRange(center, np.array([15, 85, 110]), np.array([38, 255, 255]))
     yellow_ratio = float(np.sum(yellow_mask > 0)) / total_px
 
-    # White mask: S: 0-45, V: 130-255
-    white_mask = cv2.inRange(center, np.array([0, 0, 130]), np.array([180, 45, 255]))
+    # White mask: S: 0-70, V: 115-255 (accommodates warm daylight / ambient lighting)
+    white_mask = cv2.inRange(center, np.array([0, 0, 115]), np.array([180, 70, 255]))
     white_ratio = float(np.sum(white_mask > 0)) / total_px
 
-    if yellow_ratio > 0.18 and yellow_ratio > white_ratio:
+    if yellow_ratio > 0.18 and yellow_ratio > white_ratio * 1.3:
         return VehicleCategory.PMO, "yellow", min(0.95, 0.70 + yellow_ratio)
-    elif white_ratio > 0.20:
+    elif white_ratio > 0.18 and white_ratio >= yellow_ratio:
         return VehicleCategory.PSV, "white", min(0.95, 0.70 + white_ratio)
+    elif white_ratio > 0.12:
+        return VehicleCategory.PSV, "white", min(0.85, 0.60 + white_ratio)
 
     return VehicleCategory.UNKNOWN, "unknown", 0.40
 
@@ -309,11 +311,16 @@ def _character_level_consensus(
         return norm_f["canonical"], conf_front, "ASYMMETRIC_RECOVERED", details
 
     # 5. Irreconcilable mismatch
-    higher = clean_r if conf_rear >= conf_front else clean_f
-    norm = normalizer.normalize_plate(higher)
     sim = SequenceMatcher(None, clean_f, clean_r).ratio()
-    details.append(f"Plates diverge ({clean_f} vs {clean_r}, similarity={sim:.2f}). Requires manual review.")
-    return norm["canonical"], min(conf_front, conf_rear), "PLATE_MISMATCH", details
+    if norm_r.get("is_valid") and norm_f.get("is_valid"):
+        higher = clean_r if conf_rear >= conf_front else clean_f
+        norm = normalizer.normalize_plate(higher)
+        details.append(f"Plates diverge ({clean_f} vs {clean_r}, similarity={sim:.2f}). Requires manual review.")
+        return norm["canonical"], min(conf_front, conf_rear), "PLATE_MISMATCH", details
+
+    # If neither side produced a valid Ugandan plate syntax, do NOT assign noise
+    details.append(f"Neither photo produced a valid Ugandan plate syntax ({clean_f or 'empty'} vs {clean_r or 'empty'}).")
+    return "", 0.0, "PLATE_MISMATCH", details
 
 
 class DualStreamVisionEngine:
@@ -482,6 +489,8 @@ class DualStreamVisionEngine:
         pair.rear_image = rear_img
         if consensus_plate:
             pair.registration_number_detected = consensus_plate
+        elif not pair.registration_number_detected or not normalizer.is_valid_plate(pair.registration_number_detected):
+            pair.registration_number_detected = f"PAIR-{pair.id}"
         pair.match_score = consensus_conf
         pair.is_complete = True
 

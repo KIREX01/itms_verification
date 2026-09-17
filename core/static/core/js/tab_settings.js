@@ -95,7 +95,7 @@ async function checkForUpdates(force = false) {
                 badge.innerText = "Offline / Current";
             }
             if (desc) {
-                desc.innerText = `Running v${escapeHtml(data.current_version || '1.0.0')}. (Offline mode: could not connect to GitHub Releases API)`;
+                desc.innerText = `Running v${escapeHtml(data.current_version || '1.0.1')}. (Offline mode: could not connect to GitHub Releases API)`;
             }
             if (applyBtn) applyBtn.style.display = "none";
             if (notesBox) notesBox.style.display = "none";

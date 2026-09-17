@@ -4,7 +4,7 @@ Tracks semantic versioning and GitHub Release repository information.
 """
 from typing import Tuple
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 GITHUB_REPO = "KIREX01/itms_verification"
 GITHUB_RELEASES_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_REPO_HTML_URL = f"https://github.com/{GITHUB_REPO}"

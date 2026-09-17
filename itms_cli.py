@@ -335,7 +335,11 @@ def main():
         return
 
     if first in ("--version", "-v", "version"):
-        print("ITMS Verification Copilot v1.0.0")
+        try:
+            from core.version import __version__
+            print(f"ITMS Verification Copilot v{__version__}")
+        except Exception:
+            print("ITMS Verification Copilot v1.0.1")
         return
 
     if first in ("start", "--daemon", "--bg", "-bg", "bg", "daemon"):

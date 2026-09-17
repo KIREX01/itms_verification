@@ -300,12 +300,12 @@ class UpdateEndpointsAndCommandTests(TestCase):
         mock_check.return_value = {
             "success": True,
             "update_available": False,
-            "current_version": "1.0.0",
-            "latest_version": "1.0.0",
+            "current_version": __version__,
+            "latest_version": __version__,
         }
 
         out = io.StringIO()
         call_command("check_updates", stdout=out)
         output = out.getvalue()
-        self.assertIn("v1.0.0", output)
+        self.assertIn(f"v{__version__}", output)
         self.assertIn("up-to-date", output)

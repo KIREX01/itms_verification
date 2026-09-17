@@ -1,8 +1,4 @@
-[CmdletBinding()]
-param(
-    [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]]$CliArgs
-)
+# Do not use [CmdletBinding()] to prevent PowerShell from consuming -v as -Verbose
 
 # Determine Application Directory
 if (Test-Path (Join-Path (Get-Location) "itms_cli.py")) {
@@ -30,5 +26,5 @@ if (-not (Test-Path $venvPy)) {
 }
 
 $cliScript = Join-Path $AppDir "itms_cli.py"
-& $venvPy $cliScript @CliArgs
+& $venvPy $cliScript @args
 exit $LASTEXITCODE

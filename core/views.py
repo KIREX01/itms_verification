@@ -642,9 +642,28 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
             ).first()
 
             if not target_order:
-                outcome = order_matcher.find_best_match(clean_val)
-                if outcome and outcome.order and outcome.score >= 85:
-                    target_order = outcome.order
+                try:
+                    outcome = order_matcher.find_best_match(clean_val)
+                    if outcome and outcome.order and outcome.score >= 85:
+                        target_order = outcome.order
+                except Exception as match_err:
+                    logger.warning("Order matcher lookup error: %s", match_err)
+
+            # Live lookup against ITMS server if order not in local DB (TUI Parity)
+            if not target_order:
+                try:
+                    client = get_web_client()
+                    if client.session_store.session.is_cookie_valid():
+                        fetch_res = client.fetch_order_info(clean_val, download_photos=False)
+                        if not fetch_res.get("success") and clean_val != raw_val:
+                            fetch_res = client.fetch_order_info(raw_val, download_photos=False)
+                        if fetch_res.get("success"):
+                            client.sync_order_info_to_local_db(fetch_res, order_uuid=fetch_res.get("order_uuid", ""))
+                            target_order = InstallationOrder.objects.filter(
+                                order_number=fetch_res.get("order_number")
+                            ).first()
+                except Exception as itms_err:
+                    logger.warning("Live ITMS lookup failed for '%s': %s", raw_val, itms_err)
 
         canonical_plate = ""
         if target_order:
@@ -804,6 +823,28 @@ def api_orders_list(request: HttpRequest) -> JsonResponse:
         }
         for o in qs[:limit]
     ]
+
+    # If no local orders found and search query is provided, query ITMS live (TUI Parity)
+    if not orders and search and len(search) >= 3:
+        try:
+            client = get_web_client()
+            if client.session_store.session.is_cookie_valid():
+                live_info = client.fetch_order_info(search, download_photos=False)
+                if live_info.get("success"):
+                    client.sync_order_info_to_local_db(live_info, order_uuid=live_info.get("order_uuid", ""))
+                    o = InstallationOrder.objects.filter(order_number=live_info.get("order_number")).first()
+                    if o:
+                        orders.append({
+                            "id": o.id,
+                            "order_number": o.order_number,
+                            "registration_number": o.registration_number,
+                            "vin": o.vin,
+                            "warehouse_name": o.warehouse_name,
+                            "status": o.status,
+                        })
+        except Exception:
+            pass
+
     return JsonResponse({"success": True, "orders": orders})
 
 

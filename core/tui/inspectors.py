@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 import os
+from typing import Any, Dict, Optional
+
 from django.conf import settings
 from textual.widgets import Static
 from core.models import (

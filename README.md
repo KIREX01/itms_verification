@@ -9,7 +9,7 @@ Django/SQLite/PostgreSQL-backed computer vision verification pipeline that inges
 ### Windows (PowerShell)
 Open PowerShell and run:
 ```powershell
-irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.ps1 | iex
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process; irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.ps1 | iex
 ```
 * Installs to `%LOCALAPPDATA%\Programs\ITMS-Verification` (no admin rights needed)
 * Adds global system command `itms` (open Web UI) and `itms --tui` (open Terminal UI)
@@ -48,7 +48,7 @@ To completely remove ITMS Verification Copilot, its shortcuts, and all data from
 
 ### Windows
 ```powershell
-irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/uninstall.ps1 | iex
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process; irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/uninstall.ps1 | iex
 ```
 *Or type `itms uninstall` in any terminal.*
 

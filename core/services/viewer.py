@@ -13,6 +13,8 @@ Architecture:
   never triggers Windows "Not Responding" alerts.
 - Single-key close: [Esc], [Q], or clicking the window close button.
 """
+from __future__ import annotations
+
 import argparse
 import os
 import platform
@@ -20,7 +22,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import cv2
 import numpy as np

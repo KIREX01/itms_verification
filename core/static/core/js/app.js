@@ -61,10 +61,8 @@ document.addEventListener("DOMContentLoaded", () => {
             if (selectedPairId) executePairAction("approve");
         } else if (key === "s" && activeNavTab === 4) {
             if (selectedPairId) executePairAction("swap");
-        } else if (key === "e" && activeNavTab === 4) {
+        } else if ((key === "t" || key === "e" || key === "l") && activeNavTab === 4) {
             if (selectedPairId) openEditPlateModal();
-        } else if (key === "l" && activeNavTab === 4) {
-            if (selectedPairId) openLinkOrderModal();
         } else if (e.key === "Enter") {
             const subModal = document.getElementById("modal-submission-progress");
             const subConfirm = document.getElementById("sub-phase-confirm");

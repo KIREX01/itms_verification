@@ -4,15 +4,40 @@
 <div class="modal-overlay" id="modal-edit-plate">
     <div class="modal-box" style="width: 760px; max-width: 95vw; max-height: 90vh;">
         <div class="modal-header">
-            <span class="modal-title">🔗 Link Order & Plate Correction</span>
+            <span class="modal-title">⚡ Quick Plate & Order Matcher [T]</span>
             <button class="modal-close" onclick="closeModal('modal-edit-plate')">&times;</button>
         </div>
         <div class="modal-body" style="gap: 14px; overflow-y: auto;">
+            <!-- Pair Photographic Evidence Preview Strip (TUI Parity) -->
+            <div id="linker-pair-photos-strip" style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 14px; display:flex; gap:14px; align-items:center;">
+                <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:5px;">
+                    <span style="font-size:0.68rem; font-weight:800; color:var(--ug-green); text-transform:uppercase;">📷 Front Photo</span>
+                    <div style="width:100%; height:110px; background:#050505; border-radius:var(--radius-sm); overflow:hidden; display:flex; align-items:center; justify-content:center; border:1px solid var(--ug-border); position:relative;">
+                        <img id="linker-thumb-front" src="" alt="Front Photo" style="max-width:100%; max-height:100%; object-fit:contain; cursor:pointer; display:none;" onclick="if(this.src) openLightbox(this.src)" title="Click to zoom photo">
+                        <span id="linker-empty-front" style="color:var(--ug-text-dim); font-size:0.72rem;">No Front Photo</span>
+                    </div>
+                    <span id="linker-tag-front" style="font-family:var(--font-mono); font-size:0.75rem; font-weight:700; color:#fff; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">—</span>
+                </div>
+                <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; padding:0 8px; min-width:140px;">
+                    <span style="font-size:0.66rem; color:var(--ug-text-dim); text-transform:uppercase; letter-spacing:0.5px;">Vision Detected</span>
+                    <div id="linker-vision-tag" style="font-family:var(--font-mono); font-size:1.15rem; font-weight:900; color:var(--ug-yellow); background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3); border-radius:var(--radius-sm); padding:4px 12px; white-space:nowrap;">—</div>
+                    <span style="font-size:0.68rem; color:var(--ug-text-muted); text-align:center;">Verify against photo.<br>Type below if mismatched.</span>
+                </div>
+                <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:5px;">
+                    <span style="font-size:0.68rem; font-weight:800; color:var(--ug-yellow); text-transform:uppercase;">📷 Rear Photo</span>
+                    <div style="width:100%; height:110px; background:#050505; border-radius:var(--radius-sm); overflow:hidden; display:flex; align-items:center; justify-content:center; border:1px solid var(--ug-border); position:relative;">
+                        <img id="linker-thumb-rear" src="" alt="Rear Photo" style="max-width:100%; max-height:100%; object-fit:contain; cursor:pointer; display:none;" onclick="if(this.src) openLightbox(this.src)" title="Click to zoom photo">
+                        <span id="linker-empty-rear" style="color:var(--ug-text-dim); font-size:0.72rem;">No Rear Photo</span>
+                    </div>
+                    <span id="linker-tag-rear" style="font-family:var(--font-mono); font-size:0.75rem; font-weight:700; color:#fff; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">—</span>
+                </div>
+            </div>
+
             <!-- Unified Primary Input -->
-            <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:16px; display:flex; flex-direction:column; gap:10px;">
-                <label style="font-size:0.82rem; font-weight:800; color:#ffffff; text-transform:uppercase; letter-spacing:0.5px; display:flex; justify-content:space-between; align-items:center;">
-                    <span>Type Plate Number or Order Number</span>
-                    <span style="font-size:0.72rem; color:var(--ug-text-dim); text-transform:none; font-weight:normal;">Auto-links if order exists, or updates record directly</span>
+            <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:14px; display:flex; flex-direction:column; gap:10px;">
+                <label style="font-size:0.8rem; font-weight:800; color:#ffffff; text-transform:uppercase; letter-spacing:0.5px; display:flex; justify-content:space-between; align-items:center;">
+                    <span>Correct / Enter Real Plate Number</span>
+                    <span style="font-size:0.72rem; color:var(--ug-text-dim); text-transform:none; font-weight:normal;">Looks up matching ITMS order and approves pair</span>
                 </label>
                 <div style="display:flex; gap:10px; align-items:center;">
                     <div style="position:relative; flex:1;">
@@ -24,11 +49,11 @@
                                onkeydown="if(event.key==='Enter') submitUnifiedLinkOrder()">
                     </div>
                     <button class="btn btn-primary" id="btn-submit-unified-link" onclick="submitUnifiedLinkOrder()" style="padding:10px 20px; font-size:0.88rem; font-weight:800; white-space:nowrap; background:var(--ug-green); border-color:var(--ug-green);">
-                        ✓ Link / Save (Enter)
+                        ✓ Apply &amp; Approve (Enter)
                     </button>
                 </div>
                 <div id="unified-link-hint" style="font-size:0.74rem; color:var(--ug-text-dim);">
-                    Type a plate or order number. If matched in ITMS registry, it links to the order; if unlisted, it updates the plate number directly.
+                    Enter the real plate number seen in photos. Looks up local and live ITMS orders, sets status to APPROVED, and prepares for submission.
                 </div>
             </div>
 
@@ -74,11 +99,11 @@
         </div>
         <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
             <span style="font-size:0.74rem; color:var(--ug-text-dim);">
-                Hotkeys: <span class="hotkey">E</span> / <span class="hotkey">L</span> opens • <span class="hotkey">Enter</span> confirms • <span class="hotkey">Esc</span> closes
+                Hotkeys: <span class="hotkey">T</span> opens • <span class="hotkey">Enter</span> applies &amp; approves • <span class="hotkey">Esc</span> closes
             </span>
             <div style="display:flex; gap:8px;">
-                <button class="btn btn-secondary" onclick="closeModal('modal-edit-plate')">Close</button>
-                <button class="btn btn-primary" onclick="submitUnifiedLinkOrder()" style="font-weight:700;">✓ Confirm &amp; Save</button>
+                <button class="btn btn-secondary" onclick="closeModal('modal-edit-plate')">Close [Esc]</button>
+                <button class="btn btn-primary" onclick="submitUnifiedLinkOrder()" style="font-weight:700;">✓ Apply Plate &amp; Approve [Enter]</button>
             </div>
         </div>
     </div>

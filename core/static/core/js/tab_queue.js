@@ -448,16 +448,55 @@ function openUnifiedLinkModal() {
     const input = document.getElementById("input-edit-plate");
     const currentPlate = selectedPairDetail.registration_number_detected || "";
     if (input) {
-        input.value = currentPlate;
+        input.value = (currentPlate.startsWith("PAIR-") || currentPlate.startsWith("MISSING-")) ? "" : currentPlate;
     }
     const statusSelect = document.getElementById("select-edit-status");
     if (statusSelect) statusSelect.value = "APPROVED";
     const noteInput = document.getElementById("input-edit-note");
     if (noteInput) noteInput.value = selectedPairDetail.operator_note || "";
 
+    // Populate photographic evidence preview strip (TUI Parity)
+    const thumbFront = document.getElementById("linker-thumb-front");
+    const emptyFront = document.getElementById("linker-empty-front");
+    const tagFront = document.getElementById("linker-tag-front");
+    const thumbRear = document.getElementById("linker-thumb-rear");
+    const emptyRear = document.getElementById("linker-empty-rear");
+    const tagRear = document.getElementById("linker-tag-rear");
+    const visionTag = document.getElementById("linker-vision-tag");
+
+    if (visionTag) {
+        visionTag.innerText = currentPlate || "—";
+    }
+
+    if (selectedPairDetail.front_image && selectedPairDetail.front_image.url) {
+        if (thumbFront) {
+            thumbFront.src = selectedPairDetail.front_image.url;
+            thumbFront.style.display = "block";
+        }
+        if (emptyFront) emptyFront.style.display = "none";
+        if (tagFront) tagFront.innerText = selectedPairDetail.front_image.detected_plate ? `Plate: ${selectedPairDetail.front_image.detected_plate}` : "Front Photo";
+    } else {
+        if (thumbFront) thumbFront.style.display = "none";
+        if (emptyFront) emptyFront.style.display = "block";
+        if (tagFront) tagFront.innerText = "—";
+    }
+
+    if (selectedPairDetail.rear_image && selectedPairDetail.rear_image.url) {
+        if (thumbRear) {
+            thumbRear.src = selectedPairDetail.rear_image.url;
+            thumbRear.style.display = "block";
+        }
+        if (emptyRear) emptyRear.style.display = "none";
+        if (tagRear) tagRear.innerText = selectedPairDetail.rear_image.detected_plate ? `Plate: ${selectedPairDetail.rear_image.detected_plate}` : "Rear Photo";
+    } else {
+        if (thumbRear) thumbRear.style.display = "none";
+        if (emptyRear) emptyRear.style.display = "block";
+        if (tagRear) tagRear.innerText = "—";
+    }
+
     updateLinkerBanner();
     openModal("modal-edit-plate");
-    searchOrdersForLinking(currentPlate);
+    searchOrdersForLinking(currentPlate.startsWith("PAIR-") ? "" : currentPlate);
     setTimeout(() => {
         if (input) {
             input.focus();
@@ -542,12 +581,20 @@ async function unlinkOrderFromSelectedPair() {
 
 async function searchOrdersForLinking(q) {
     const container = document.getElementById("linker-orders-list");
+    const countEl = document.getElementById("linker-orders-count");
     try {
         const res = await fetch(`/api/orders/?search=${encodeURIComponent(q)}&limit=50`);
         const data = await res.json();
         if (data.success && data.orders) {
+            if (countEl) countEl.innerText = `${data.orders.length} order(s) found`;
             if (data.orders.length === 0) {
-                container.innerHTML = `<div style="padding:24px; text-align:center; color:var(--ug-text-dim);">No active orders matching '${escapeHtml(q)}'.</div>`;
+                container.innerHTML = `
+                    <div style="padding:22px 16px; text-align:center; color:var(--ug-text-dim); font-size:0.78rem;">
+                        <div>No orders in local database matching '<strong>${escapeHtml(q || 'all')}</strong>'.</div>
+                        <div style="margin-top:6px; color:var(--ug-text-muted); font-size:0.73rem;">
+                            Press <strong style="color:var(--ug-green);">Enter</strong> to apply plate &amp; query live ITMS, or sync orders in Tab 2.
+                        </div>
+                    </div>`;
                 return;
             }
             container.innerHTML = `

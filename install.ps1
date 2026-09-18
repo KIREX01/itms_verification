@@ -7,7 +7,7 @@
     dependencies (requirements.txt), provisions AI models and database,
     creates Desktop and Start Menu shortcuts, and launches the Web Operator Console.
 .EXAMPLE
-    irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.ps1 | iex
+    Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process; irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.ps1 | iex
 #>
 
 [CmdletBinding()]
@@ -18,6 +18,11 @@ param (
 )
 
 $ErrorActionPreference = "Stop"
+
+# Allow executing scripts within the installer process
+try {
+    Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force -ErrorAction SilentlyContinue
+} catch {}
 
 Write-Host "====================================================================" -ForegroundColor Cyan
 Write-Host "   ITMS VERIFICATION COPILOT - 1-CLICK POWERSHELL INSTALLER" -ForegroundColor Yellow
@@ -311,6 +316,17 @@ try {
         Copy-Item -Path (Join-Path $InstallDir "itms.ps1") -Destination (Join-Path $winAppsDir "itms.ps1") -Force -ErrorAction SilentlyContinue
         Write-Host "    [+] Registered 'itms' launcher in $winAppsDir" -ForegroundColor Green
     }
+
+    # Unblock launcher scripts so Windows does not block execution
+    Unblock-File -Path (Join-Path $InstallDir "itms.ps1") -ErrorAction SilentlyContinue
+    if (Test-Path (Join-Path $winAppsDir "itms.ps1")) {
+        Unblock-File -Path (Join-Path $winAppsDir "itms.ps1") -ErrorAction SilentlyContinue
+    }
+
+    # Enable running local scripts for current user so itms.ps1 runs seamlessly in PowerShell
+    try {
+        Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force -ErrorAction SilentlyContinue
+    } catch {}
 
     # Update current session PATH so 'itms' works immediately in this terminal!
     if (($env:PATH -split ";") -notcontains $InstallDir) {

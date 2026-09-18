@@ -12,8 +12,10 @@ Thresholds (configurable via settings / .env):
     FUZZY_REJECT_THRESHOLD <= score < ACCEPT (75-85) -> ambiguous, needs operator review
     score < FUZZY_REJECT_THRESHOLD (75)            -> UNREGISTERED_VEHICLE
 """
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Optional
+from typing import Dict, List, Optional
 
 from django.conf import settings
 from rapidfuzz import fuzz, process

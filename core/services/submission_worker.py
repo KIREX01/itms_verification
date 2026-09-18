@@ -7,8 +7,10 @@ every step (success or failure). On any failure, the pair is marked
 FAILED and a FALLBACK audit entry is written -- automation never blocks
 the operator from taking over manually.
 """
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from django.conf import settings
 from django.db import transaction

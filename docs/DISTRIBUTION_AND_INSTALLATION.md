@@ -30,7 +30,7 @@ Welcome to the **ITMS Verification Copilot** distribution guide. This document p
 ### Windows 1-Command Web/PowerShell Install (Recommended)
 Open PowerShell (Win + X -> Terminal or PowerShell) and run:
 ```powershell
-irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.ps1 | iex
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process; irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.ps1 | iex
 ```
 * **What this does**:
   1. Downloads and installs the application to your user profile directory (`%LOCALAPPDATA%\Programs\ITMS-Verification`).
@@ -303,7 +303,7 @@ itms uninstall
 
 ### Windows 1-Click PowerShell Uninstaller
 ```powershell
-irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/uninstall.ps1 | iex
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process; irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/uninstall.ps1 | iex
 ```
 
 ### macOS / Linux 1-Click Shell Uninstaller

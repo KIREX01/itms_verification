@@ -31,6 +31,7 @@ urlpatterns = [
     path("api/pairs/<int:pair_id>/action/", views.api_pair_action, name="api_pair_action"),
     path("api/orders/", views.api_orders_list, name="api_orders_list"),
     path("api/orders/sync/", views.api_sync_orders, name="api_sync_orders"),
+    path("api/orders/seed/", views.api_seed_orders, name="api_seed_orders"),
     path("api/pipeline/run/", views.api_run_pipeline, name="api_run_pipeline"),
     path("api/pipeline/status/", views.api_pipeline_status, name="api_pipeline_status"),
     path("api/submissions/batch/", views.api_batch_submit, name="api_batch_submit"),

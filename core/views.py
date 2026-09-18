@@ -735,10 +735,11 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
     elif action == "unlink_order":
         prev_order = pair.order
         pair.order = None
-        pair.match_type = VehicleInstallationPair.MatchType.MANUAL
+        pair.match_type = VehicleInstallationPair.MatchType.NONE
+        pair.matched_via = VehicleInstallationPair.MatchedVia.MANUAL
         pair.match_score = 0.0
         pair.is_manual_override = True
-        pair.save(update_fields=["order", "match_type", "match_score", "is_manual_override"])
+        pair.save(update_fields=["order", "match_type", "matched_via", "match_score", "is_manual_override"])
 
         SubmissionAuditLog.objects.create(
             pair=pair,
@@ -1301,7 +1302,14 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
     succeeded = 0
     failed = 0
     for p in approved_pairs:
-        outcome = submission_worker.submit_pair(p, dry_run=is_dry_run)
+        # Check that pair is still APPROVED to prevent concurrent race condition submissions
+        refreshed = VehicleInstallationPair.objects.filter(
+            id=p.id,
+            verification_status=VehicleInstallationPair.VerificationStatus.APPROVED,
+        ).first()
+        if not refreshed:
+            continue
+        outcome = submission_worker.submit_pair(refreshed, dry_run=is_dry_run)
         if outcome.success:
             succeeded += 1
         else:
@@ -1542,22 +1550,24 @@ def api_vault_folder(request: HttpRequest) -> JsonResponse:
 def api_browse_vault_folder(request: HttpRequest) -> JsonResponse:
     """
     Launches the host operating system's native folder browser dialog
-    and returns the selected folder path.
+    and returns the selected folder path with input sanitization.
     """
-    current_vault = vault_service.get_vault_root()
-    initial_dir = str(current_vault)
+    current_vault = vault_service.get_vault_root().resolve()
+    # Sanitize initial_dir to prevent command injection
+    initial_dir = str(current_vault).replace('"', '').replace("'", "").replace(";", "").replace("\n", "").replace("\r", "")
     selected_path = None
 
     try:
         if sys.platform == "win32":
             # Modern Windows FolderBrowserDialog via PowerShell
+            clean_ps_dir = initial_dir.replace("'", "''")
             ps_script = f"""
 Add-Type -AssemblyName System.Windows.Forms
 $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
 $dialog.Description = 'Select Evidence Vault Storage Folder'
 $dialog.ShowNewFolderButton = $true
-if (Test-Path '{initial_dir}') {{
-    $dialog.SelectedPath = '{initial_dir}'
+if (Test-Path '{clean_ps_dir}') {{
+    $dialog.SelectedPath = '{clean_ps_dir}'
 }}
 $form = New-Object System.Windows.Forms.Form
 $form.TopMost = $true
@@ -1576,7 +1586,8 @@ if ($res -eq [System.Windows.Forms.DialogResult]::OK) {{
             if out and os.path.isdir(out):
                 selected_path = out
         elif sys.platform == "darwin":
-            as_cmd = f'POSIX path of (choose folder with prompt "Select Evidence Vault Storage Folder" default location POSIX file "{initial_dir}")'
+            clean_as_dir = initial_dir.replace('\\', '\\\\').replace('"', '\\"')
+            as_cmd = f'POSIX path of (choose folder with prompt "Select Evidence Vault Storage Folder" default location POSIX file "{clean_as_dir}")'
             proc = subprocess.run(["osascript", "-e", as_cmd], capture_output=True, text=True, timeout=120)
             out = proc.stdout.strip()
             if out and os.path.isdir(out):
@@ -1613,33 +1624,52 @@ if ($res -eq [System.Windows.Forms.DialogResult]::OK) {{
 
 def serve_media(request: HttpRequest, path: str) -> HttpResponse:
     """
-    Dynamically serves photographic evidence and crops.
+    Dynamically serves photographic evidence and crops with strict path traversal protection.
     Resolves vault files against the active vault root, even if outside MEDIA_ROOT.
     """
     from django.http import FileResponse, Http404
     import mimetypes
 
     clean_path = path.replace("\\", "/").lstrip("/")
+    if ".." in clean_path.split("/"):
+        raise Http404("Invalid media path traversal detected")
+
+    vault_root = vault_service.get_vault_root().resolve()
+    media_root = Path(settings.MEDIA_ROOT).resolve()
+
+    candidate_file = None
 
     # Check if path starts with 'vault/'
     if clean_path.startswith("vault/"):
         sub_rel = clean_path[6:]
-        vault_file = vault_service.get_vault_root() / sub_rel
-        if vault_file.is_file():
-            mime, _ = mimetypes.guess_type(str(vault_file))
-            return FileResponse(open(vault_file, "rb"), content_type=mime or "image/jpeg")
+        candidate = (vault_root / sub_rel).resolve()
+        try:
+            if candidate.is_file() and candidate.is_relative_to(vault_root):
+                candidate_file = candidate
+        except (ValueError, AttributeError):
+            pass
 
     # Check vault root directly
-    direct_vault = vault_service.get_vault_root() / clean_path
-    if direct_vault.is_file():
-        mime, _ = mimetypes.guess_type(str(direct_vault))
-        return FileResponse(open(direct_vault, "rb"), content_type=mime or "image/jpeg")
+    if not candidate_file:
+        candidate = (vault_root / clean_path).resolve()
+        try:
+            if candidate.is_file() and candidate.is_relative_to(vault_root):
+                candidate_file = candidate
+        except (ValueError, AttributeError):
+            pass
 
     # Fallback to settings.MEDIA_ROOT (e.g. for crops/)
-    media_file = Path(settings.MEDIA_ROOT) / clean_path
-    if media_file.is_file():
-        mime, _ = mimetypes.guess_type(str(media_file))
-        return FileResponse(open(media_file, "rb"), content_type=mime or "image/jpeg")
+    if not candidate_file:
+        candidate = (media_root / clean_path).resolve()
+        try:
+            if candidate.is_file() and candidate.is_relative_to(media_root):
+                candidate_file = candidate
+        except (ValueError, AttributeError):
+            pass
+
+    if candidate_file:
+        mime, _ = mimetypes.guess_type(str(candidate_file))
+        return FileResponse(open(candidate_file, "rb"), content_type=mime or "image/jpeg")
 
     raise Http404("Media file not found")
 
@@ -1991,8 +2021,10 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
         if flt in ("FAILED", "ISSUES") and l.result not in (SubmissionAuditLog.ResultStatus.FAILURE, "FAILED"):
             continue
 
-        front_url = f"/media/{str(pair.front_image.vault_file).replace('\\', '/')}" if (pair and pair.front_image) else None
-        rear_url = f"/media/{str(pair.rear_image.vault_file).replace('\\', '/')}" if (pair and pair.rear_image) else None
+        front_vault = str(pair.front_image.vault_file).replace("\\", "/") if (pair and pair.front_image) else None
+        rear_vault = str(pair.rear_image.vault_file).replace("\\", "/") if (pair and pair.rear_image) else None
+        front_url = f"/media/{front_vault}" if front_vault else None
+        rear_url = f"/media/{rear_vault}" if rear_vault else None
 
         is_item_today = bool(l.timestamp and l.timestamp.date() == today)
 
@@ -2040,8 +2072,10 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
     for p in pairs_qs[:150]:
         sub_time = p.submitted_at or p.updated_at
         is_item_today = bool(sub_time and sub_time.date() == today)
-        front_url = f"/media/{str(p.front_image.vault_file).replace('\\', '/')}" if (p.front_image and p.front_image.vault_file) else None
-        rear_url = f"/media/{str(p.rear_image.vault_file).replace('\\', '/')}" if (p.rear_image and p.rear_image.vault_file) else None
+        front_vault = str(p.front_image.vault_file).replace('\\', '/') if (p.front_image and p.front_image.vault_file) else None
+        rear_vault = str(p.rear_image.vault_file).replace('\\', '/') if (p.rear_image and p.rear_image.vault_file) else None
+        front_url = f"/media/{front_vault}" if front_vault else None
+        rear_url = f"/media/{rear_vault}" if rear_vault else None
 
         action_name = "VERIFY_PAIR"
         if p.verification_status == VehicleInstallationPair.VerificationStatus.SUBMITTED:

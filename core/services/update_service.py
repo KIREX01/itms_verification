@@ -259,19 +259,30 @@ class UpdateService:
             with urllib.request.urlopen(req, timeout=60) as response, open(zip_path, "wb") as f:
                 shutil.copyfileobj(response, f)
 
-            # 2. Extract to temp directory
+            # 2. Extract to temp directory with strict ZipSlip validation
             extract_dir = temp_dir / "extracted"
             extract_dir.mkdir()
+            extract_dir_resolved = extract_dir.resolve()
             with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(extract_dir)
+                for member in zf.infolist():
+                    target_member_path = (extract_dir / member.filename).resolve()
+                    if not target_member_path.is_relative_to(extract_dir_resolved):
+                        raise ValueError(f"ZipSlip traversal detected in archive member: {member.filename}")
+                    if member.is_dir():
+                        target_member_path.mkdir(parents=True, exist_ok=True)
+                    else:
+                        target_member_path.parent.mkdir(parents=True, exist_ok=True)
+                        with zf.open(member) as src_file, open(target_member_path, "wb") as dst_file:
+                            shutil.copyfileobj(src_file, dst_file)
 
             # Locate root folder inside extracted zip (GitHub zips usually have a single root folder)
             extracted_items = list(extract_dir.iterdir())
             source_root = extracted_items[0] if len(extracted_items) == 1 and extracted_items[0].is_dir() else extract_dir
 
             # 3. Copy files into PROJECT_ROOT, strictly skipping protected paths
+            project_root_resolved = PROJECT_ROOT.resolve()
             for item in source_root.rglob("*"):
-                if item.is_dir():
+                if item.is_dir() or item.is_symlink():
                     continue
                 rel_path = item.relative_to(source_root)
                 first_segment = rel_path.parts[0]
@@ -280,7 +291,10 @@ class UpdateService:
                 if first_segment in PROTECTED_PATHS or rel_path.name in PROTECTED_PATHS:
                     continue
 
-                dest_file = PROJECT_ROOT / rel_path
+                dest_file = (PROJECT_ROOT / rel_path).resolve()
+                if not dest_file.is_relative_to(project_root_resolved):
+                    continue
+
                 dest_file.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(item, dest_file)
 

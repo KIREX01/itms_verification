@@ -24,10 +24,22 @@ os.chdir(PROJECT_ROOT)
 sys.path.insert(0, str(PROJECT_ROOT))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "itms_project.settings")
 
+# Configure UTF-8 encoding on Windows console if available
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
-def get_python_exe() -> str:
+
+def get_python_exe(windowless: bool = False) -> str:
     local_venv = PROJECT_ROOT / ".venv"
     if sys.platform == "win32":
+        if windowless:
+            venv_pyw = local_venv / "Scripts" / "pythonw.exe"
+            if venv_pyw.is_file():
+                return str(venv_pyw)
         venv_py = local_venv / "Scripts" / "python.exe"
     else:
         venv_py = local_venv / "bin" / "python"
@@ -120,18 +132,18 @@ def start_daemon(extra_args=None, port=8000):
 
     if is_port_in_use(port):
         url = f"http://127.0.0.1:{port}/"
-        print(f"[✓] ITMS Web Console is already running at {url}")
+        print(f"[+] ITMS Web Console is already running at {url}")
         print("[*] Opening browser...")
         import webbrowser
         webbrowser.open(url)
         return
 
-    py_exe = get_python_exe()
+    py_exe = get_python_exe(windowless=True)
     log_dir = PROJECT_ROOT / "media"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "itms_web.log"
 
-    cmd = [py_exe, "manage.py", "run_web", "--noreload"]
+    cmd = [py_exe, "-u", str(PROJECT_ROOT / "manage.py"), "run_web", "--noreload"]
     if extra_args:
         cmd.extend(extra_args)
 
@@ -140,17 +152,16 @@ def start_daemon(extra_args=None, port=8000):
     log_fp = open(log_file, "a", encoding="utf-8")
 
     if sys.platform == "win32":
-        DETACHED_PROCESS = 0x00000008
         CREATE_NEW_PROCESS_GROUP = 0x00000200
-        CREATE_NO_WINDOW = 0x08000000
-        flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+        flags = CREATE_NEW_PROCESS_GROUP
+        if not py_exe.lower().endswith("pythonw.exe"):
+            flags |= 0x08000000  # CREATE_NO_WINDOW
         proc = subprocess.Popen(
             cmd,
             cwd=str(PROJECT_ROOT),
             stdout=log_fp,
             stderr=subprocess.STDOUT,
             creationflags=flags,
-            close_fds=True,
         )
     else:
         proc = subprocess.Popen(
@@ -159,24 +170,38 @@ def start_daemon(extra_args=None, port=8000):
             stdout=log_fp,
             stderr=subprocess.STDOUT,
             start_new_session=True,
-            close_fds=True,
         )
 
     pid_file = PROJECT_ROOT / ".itms_web.pid"
     pid_file.write_text(str(proc.pid))
 
     import time
-    time.sleep(1.5)
-    url = f"http://127.0.0.1:{port}/"
+    time.sleep(2.0)
 
-    print(f"[✓] ITMS Web Console active in background (PID: {proc.pid}).")
+    # Verify that background process did not immediately terminate/crash
+    if proc.poll() is not None:
+        log_content = ""
+        try:
+            log_content = log_file.read_text(encoding="utf-8", errors="replace")[-600:]
+        except Exception:
+            pass
+        print(f"[x] Error: Background Web Console process failed to start (exit code {proc.returncode}).")
+        if log_content:
+            print(f"Log excerpt:\n{log_content.strip()}")
+        if pid_file.is_file():
+            pid_file.unlink(missing_ok=True)
+        return
+
+    url = f"http://127.0.0.1:{port}/"
+    print(f"[+] ITMS Web Console active in background (PID: {proc.pid}).")
     print(f"[i] URL: {url}")
     print(f"[i] Output logs: {log_file}")
     print("[i] The terminal window can now be closed safely without stopping the server.")
     print("[i] To stop the server at any time, run: itms stop\n")
 
-    import webbrowser
-    webbrowser.open(url)
+    if not ("--no-browser" in (extra_args or [])):
+        import webbrowser
+        webbrowser.open(url)
 
 
 def stop_server():
@@ -192,14 +217,33 @@ def stop_server():
                 subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, check=False)
             else:
                 import os, signal
-                os.kill(pid, signal.SIGTERM)
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
             stopped = True
-            print(f"[✓] Terminated ITMS Web server process (PID {pid}).")
+            print(f"[+] Terminated ITMS Web server process (PID {pid}).")
         except Exception as e:
             print(f"[*] Note: Could not terminate PID from file: {e}")
         finally:
             if pid_file.is_file():
                 pid_file.unlink(missing_ok=True)
+
+    # Also terminate any running run_web processes on Windows to prevent orphan processes
+    if sys.platform == "win32":
+        import subprocess
+        try:
+            wmic_res = subprocess.run(
+                'wmic process where "commandline like \'%run_web%\' and not commandline like \'%wmic%\'" get processid',
+                shell=True, capture_output=True, text=True
+            )
+            for line in wmic_res.stdout.splitlines():
+                line = line.strip()
+                if line.isdigit() and int(line) != os.getpid():
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", line], capture_output=True, check=False)
+                    stopped = True
+        except Exception:
+            pass
 
     # Verify if port 8000 is still listening
     if is_port_in_use(8000):
@@ -211,11 +255,12 @@ def stop_server():
                 parts = line.strip().split()
                 if len(parts) >= 5 and "LISTENING" in parts:
                     proc_pid = parts[-1]
-                    subprocess.run(["taskkill", "/F", "/T", "/PID", proc_pid], capture_output=True, check=False)
-                    stopped = True
-        print("[✓] Port 8000 released.")
+                    if proc_pid.isdigit() and int(proc_pid) != os.getpid():
+                        subprocess.run(["taskkill", "/F", "/T", "/PID", proc_pid], capture_output=True, check=False)
+                        stopped = True
+        print("[+] Port 8000 released.")
     elif stopped:
-        print("[✓] ITMS Web server stopped cleanly.")
+        print("[+] ITMS Web server stopped cleanly.")
     else:
         print("[i] No running ITMS Web server found.")
 
@@ -361,6 +406,8 @@ def main():
 
     if first in ("restart", "reboot"):
         stop_server()
+        import time
+        time.sleep(1.0)
         start_daemon(args[1:])
         return
 

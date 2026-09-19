@@ -31,10 +31,16 @@ class Command(BaseCommand):
             action="store_true",
             help="Do not automatically launch the web browser on startup.",
         )
+        parser.add_argument(
+            "--noreload",
+            action="store_true",
+            help="Tells Django to NOT use the auto-reloader.",
+        )
 
     def handle(self, *args, **options):
         port = options["port"]
         no_browser = options["no_browser"]
+        noreload = options["noreload"]
         host = "127.0.0.1"
         url = f"http://{host}:{port}/"
 
@@ -53,7 +59,7 @@ class Command(BaseCommand):
         # 2. Timer to auto-launch browser once server is listening
         # Guarded: only launch from the active child process (or when --noreload) to avoid dual instances
         is_reloader_child = os.environ.get("RUN_MAIN") == "true"
-        is_noreload = "--noreload" in sys.argv
+        is_noreload = noreload or ("--noreload" in sys.argv)
         should_open_browser = not no_browser and (is_reloader_child or is_noreload)
 
         if should_open_browser:
@@ -76,7 +82,12 @@ class Command(BaseCommand):
 
         # 3. Start Django Server
         try:
-            call_command("runserver", f"{host}:{port}", insecure_serving=True)
+            call_command(
+                "runserver",
+                f"{host}:{port}",
+                use_reloader=not is_noreload,
+                insecure_serving=True,
+            )
         except KeyboardInterrupt:
             self.stdout.write("\nWeb server stopped cleanly.")
             sys.exit(0)

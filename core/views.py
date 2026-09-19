@@ -735,10 +735,11 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
     elif action == "unlink_order":
         prev_order = pair.order
         pair.order = None
-        pair.match_type = VehicleInstallationPair.MatchType.MANUAL
+        pair.match_type = VehicleInstallationPair.MatchType.NONE
+        pair.matched_via = VehicleInstallationPair.MatchedVia.MANUAL
         pair.match_score = 0.0
         pair.is_manual_override = True
-        pair.save(update_fields=["order", "match_type", "match_score", "is_manual_override"])
+        pair.save(update_fields=["order", "match_type", "matched_via", "match_score", "is_manual_override"])
 
         SubmissionAuditLog.objects.create(
             pair=pair,
@@ -863,6 +864,21 @@ def api_sync_orders(request: HttpRequest) -> JsonResponse:
         "success": True,
         "message": "Order synchronization started in background.",
     })
+
+
+@csrf_exempt
+@require_POST
+def api_seed_orders(request: HttpRequest) -> JsonResponse:
+    """Seeds demo/synthetic installation orders for developer or testing workflows."""
+    from django.core.management import call_command
+    try:
+        call_command("seed_orders")
+        return JsonResponse({
+            "success": True,
+            "message": "Demo installation orders seeded successfully.",
+        })
+    except Exception as exc:
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
 # ============================================================================
@@ -1301,6 +1317,12 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
     succeeded = 0
     failed = 0
     for p in approved_pairs:
+        try:
+            p.refresh_from_db()
+        except VehicleInstallationPair.DoesNotExist:
+            continue
+        if p.verification_status != VehicleInstallationPair.VerificationStatus.APPROVED:
+            continue
         outcome = submission_worker.submit_pair(p, dry_run=is_dry_run)
         if outcome.success:
             succeeded += 1
@@ -1545,7 +1567,9 @@ def api_browse_vault_folder(request: HttpRequest) -> JsonResponse:
     and returns the selected folder path.
     """
     current_vault = vault_service.get_vault_root()
-    initial_dir = str(current_vault)
+    clean_initial = str(current_vault).replace("\n", "").replace("\r", "").replace(";", "").strip()
+    initial_dir_ps = clean_initial.replace("'", "''")
+    initial_dir_as = clean_initial.replace('"', '\\"')
     selected_path = None
 
     try:
@@ -1556,8 +1580,8 @@ Add-Type -AssemblyName System.Windows.Forms
 $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
 $dialog.Description = 'Select Evidence Vault Storage Folder'
 $dialog.ShowNewFolderButton = $true
-if (Test-Path '{initial_dir}') {{
-    $dialog.SelectedPath = '{initial_dir}'
+if (Test-Path '{initial_dir_ps}') {{
+    $dialog.SelectedPath = '{initial_dir_ps}'
 }}
 $form = New-Object System.Windows.Forms.Form
 $form.TopMost = $true
@@ -1576,7 +1600,7 @@ if ($res -eq [System.Windows.Forms.DialogResult]::OK) {{
             if out and os.path.isdir(out):
                 selected_path = out
         elif sys.platform == "darwin":
-            as_cmd = f'POSIX path of (choose folder with prompt "Select Evidence Vault Storage Folder" default location POSIX file "{initial_dir}")'
+            as_cmd = f'POSIX path of (choose folder with prompt "Select Evidence Vault Storage Folder" default location POSIX file "{initial_dir_as}")'
             proc = subprocess.run(["osascript", "-e", as_cmd], capture_output=True, text=True, timeout=120)
             out = proc.stdout.strip()
             if out and os.path.isdir(out):
@@ -1584,7 +1608,7 @@ if ($res -eq [System.Windows.Forms.DialogResult]::OK) {{
         elif sys.platform == "linux":
             if shutil.which("zenity"):
                 proc = subprocess.run(
-                    ["zenity", "--file-selection", "--directory", f"--filename={initial_dir}/", "--title=Select Evidence Vault Storage Folder"],
+                    ["zenity", "--file-selection", "--directory", f"--filename={clean_initial}/", "--title=Select Evidence Vault Storage Folder"],
                     capture_output=True,
                     text=True,
                     timeout=120,
@@ -1615,31 +1639,41 @@ def serve_media(request: HttpRequest, path: str) -> HttpResponse:
     """
     Dynamically serves photographic evidence and crops.
     Resolves vault files against the active vault root, even if outside MEDIA_ROOT.
+    Includes strict path traversal guards to prevent arbitrary file disclosure.
     """
     from django.http import FileResponse, Http404
     import mimetypes
 
-    clean_path = path.replace("\\", "/").lstrip("/")
+    clean_path = path.replace("\\", "/").strip("/")
+
+    # Reject null bytes and path traversal attempts
+    if "\x00" in clean_path or ".." in clean_path.split("/"):
+        raise Http404("Invalid media path")
+
+    vault_root = vault_service.get_vault_root().resolve()
+    media_root = Path(settings.MEDIA_ROOT).resolve()
+
+    candidate_files = []
 
     # Check if path starts with 'vault/'
     if clean_path.startswith("vault/"):
         sub_rel = clean_path[6:]
-        vault_file = vault_service.get_vault_root() / sub_rel
-        if vault_file.is_file():
-            mime, _ = mimetypes.guess_type(str(vault_file))
-            return FileResponse(open(vault_file, "rb"), content_type=mime or "image/jpeg")
+        candidate_files.append((vault_root / sub_rel, vault_root))
 
     # Check vault root directly
-    direct_vault = vault_service.get_vault_root() / clean_path
-    if direct_vault.is_file():
-        mime, _ = mimetypes.guess_type(str(direct_vault))
-        return FileResponse(open(direct_vault, "rb"), content_type=mime or "image/jpeg")
+    candidate_files.append((vault_root / clean_path, vault_root))
 
     # Fallback to settings.MEDIA_ROOT (e.g. for crops/)
-    media_file = Path(settings.MEDIA_ROOT) / clean_path
-    if media_file.is_file():
-        mime, _ = mimetypes.guess_type(str(media_file))
-        return FileResponse(open(media_file, "rb"), content_type=mime or "image/jpeg")
+    candidate_files.append((media_root / clean_path, media_root))
+
+    for target, base_dir in candidate_files:
+        try:
+            resolved_target = target.resolve()
+            if resolved_target.is_file() and resolved_target.is_relative_to(base_dir):
+                mime, _ = mimetypes.guess_type(str(resolved_target))
+                return FileResponse(open(resolved_target, "rb"), content_type=mime or "image/jpeg")
+        except (ValueError, RuntimeError, OSError):
+            continue
 
     raise Http404("Media file not found")
 
@@ -1991,8 +2025,10 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
         if flt in ("FAILED", "ISSUES") and l.result not in (SubmissionAuditLog.ResultStatus.FAILURE, "FAILED"):
             continue
 
-        front_url = f"/media/{str(pair.front_image.vault_file).replace('\\', '/')}" if (pair and pair.front_image) else None
-        rear_url = f"/media/{str(pair.rear_image.vault_file).replace('\\', '/')}" if (pair and pair.rear_image) else None
+        front_file = str(pair.front_image.vault_file).replace("\\", "/") if (pair and pair.front_image) else None
+        front_url = f"/media/{front_file}" if front_file else None
+        rear_file = str(pair.rear_image.vault_file).replace("\\", "/") if (pair and pair.rear_image) else None
+        rear_url = f"/media/{rear_file}" if rear_file else None
 
         is_item_today = bool(l.timestamp and l.timestamp.date() == today)
 
@@ -2040,8 +2076,10 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
     for p in pairs_qs[:150]:
         sub_time = p.submitted_at or p.updated_at
         is_item_today = bool(sub_time and sub_time.date() == today)
-        front_url = f"/media/{str(p.front_image.vault_file).replace('\\', '/')}" if (p.front_image and p.front_image.vault_file) else None
-        rear_url = f"/media/{str(p.rear_image.vault_file).replace('\\', '/')}" if (p.rear_image and p.rear_image.vault_file) else None
+        front_file = str(p.front_image.vault_file).replace("\\", "/") if (p.front_image and p.front_image.vault_file) else None
+        front_url = f"/media/{front_file}" if front_file else None
+        rear_file = str(p.rear_image.vault_file).replace("\\", "/") if (p.rear_image and p.rear_image.vault_file) else None
+        rear_url = f"/media/{rear_file}" if rear_file else None
 
         action_name = "VERIFY_PAIR"
         if p.verification_status == VehicleInstallationPair.VerificationStatus.SUBMITTED:

@@ -113,7 +113,9 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS("No expired submitted evidence files to prune."))
         else:
             for img in candidates:
-                abs_path = media_root / img.vault_file
+                from core.services.vault_service import resolve_vault_path
+                resolved = resolve_vault_path(img.vault_file)
+                abs_path = resolved if resolved.is_file() else (media_root / img.vault_file)
                 file_size = 0
                 if abs_path.is_file():
                     file_size = abs_path.stat().st_size

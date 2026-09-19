@@ -17,6 +17,10 @@ async function fetchItmsStatus() {
             const accountDetails = document.getElementById("itms-account-details");
             const btnDisconnectView = document.getElementById("btn-disconnect-itms-view");
             const settingsEmail = document.getElementById("settings-itms-email");
+            const modalBadge = document.getElementById("itms-modal-badge");
+            const modalUser = document.getElementById("itms-modal-user");
+            const modalDetail = document.getElementById("itms-modal-detail");
+            const modalBtnDisconnect = document.getElementById("btn-itms-disconnect");
 
             if (st.authenticated) {
                 if (badge) {
@@ -32,6 +36,10 @@ async function fetchItmsStatus() {
                 if (accountDetails) accountDetails.innerText = `Session active on ${st.url}. Session expires in ~${st.expires_in_days} day(s).`;
                 if (btnDisconnectView) btnDisconnectView.style.display = "block";
                 if (settingsEmail) settingsEmail.innerText = `${st.user_email} (stock.itms.ug)`;
+                if (modalBadge) { modalBadge.className = "badge badge-green"; modalBadge.innerText = "● Connected"; }
+                if (modalUser) modalUser.innerText = st.user_email || "Connected Operator";
+                if (modalDetail) modalDetail.innerText = `Session active on ${st.url || "stock.itms.ug"}.`;
+                if (modalBtnDisconnect) modalBtnDisconnect.style.display = "inline-block";
             } else {
                 if (badge) {
                     badge.className = "badge badge-yellow";
@@ -46,6 +54,10 @@ async function fetchItmsStatus() {
                 if (accountDetails) accountDetails.innerText = "Connect your stock.itms.ug credentials to enable live order synchronization and evidence submissions.";
                 if (btnDisconnectView) btnDisconnectView.style.display = "none";
                 if (settingsEmail) settingsEmail.innerText = "Not connected. Submissions in simulation mode.";
+                if (modalBadge) { modalBadge.className = "badge badge-yellow"; modalBadge.innerText = "● Disconnected"; }
+                if (modalUser) modalUser.innerText = "No Account Connected";
+                if (modalDetail) modalDetail.innerText = "Connect your ITMS portal credentials.";
+                if (modalBtnDisconnect) modalBtnDisconnect.style.display = "none";
             }
         }
     } catch (err) {
@@ -57,16 +69,29 @@ function openItmsModal() {
     openModal("modal-itms");
 }
 
-async function submitItmsCredentials() {
-    const email = document.getElementById("itms-input-email").value.trim();
-    const password = document.getElementById("itms-input-password").value.trim();
+async function submitItmsConnect() {
+    let email = "";
+    let password = "";
+    const modalEmail = document.getElementById("itms-connect-email");
+    const modalPass = document.getElementById("itms-connect-password");
+    if (modalEmail && modalPass && (modalEmail.value || modalPass.value)) {
+        email = modalEmail.value.trim();
+        password = modalPass.value.trim();
+    } else {
+        const inputEmail = document.getElementById("itms-input-email");
+        const inputPass = document.getElementById("itms-input-password");
+        if (inputEmail) email = inputEmail.value.trim();
+        if (inputPass) password = inputPass.value.trim();
+    }
+
     if (!email || !password) {
         showToast("ITMS Email and Password are required.", "error");
         return;
     }
-    const btn = document.getElementById("btn-submit-itms-connect");
-    btn.disabled = true;
-    btn.innerText = "Authenticating against ITMS...";
+    const btnModal = document.getElementById("btn-itms-connect");
+    const btnPane = document.getElementById("btn-submit-itms-connect");
+    if (btnModal) { btnModal.disabled = true; btnModal.innerText = "Connecting..."; }
+    if (btnPane) { btnPane.disabled = true; btnPane.innerText = "Authenticating against ITMS..."; }
 
     try {
         const res = await fetch("/api/itms/connect/", {
@@ -77,20 +102,27 @@ async function submitItmsCredentials() {
         const data = await res.json();
         if (data.success) {
             showToast(data.message || "Connected to ITMS WebApp successfully.", "success");
-            appendConsoleLog(`ITMS session authenticated as '${email}'.`, "success");
-            document.getElementById("itms-input-password").value = "";
+            if (typeof appendConsoleLog === "function") appendConsoleLog(`ITMS session authenticated as '${email}'.`, "success");
+            if (modalPass) modalPass.value = "";
+            const inputPass = document.getElementById("itms-input-password");
+            if (inputPass) inputPass.value = "";
+            closeModal("modal-itms");
             fetchItmsStatus();
-            switchItmsSubview("ORDERS");
+            if (typeof switchItmsSubview === "function") switchItmsSubview("ORDERS");
         } else {
             showToast(data.message || data.error || "ITMS authentication failed.", "error");
-            appendConsoleLog(`ITMS login failed: ${data.error || data.message}`, "error");
+            if (typeof appendConsoleLog === "function") appendConsoleLog(`ITMS login failed: ${data.error || data.message}`, "error");
         }
     } catch (err) {
         showToast("Connection error: " + err, "error");
     } finally {
-        btn.disabled = false;
-        btn.innerText = "Connect & Sign In";
+        if (btnModal) { btnModal.disabled = false; btnModal.innerText = "Connect Account"; }
+        if (btnPane) { btnPane.disabled = false; btnPane.innerText = "Connect & Sign In"; }
     }
+}
+
+async function submitItmsCredentials() {
+    return submitItmsConnect();
 }
 
 async function disconnectItms() {

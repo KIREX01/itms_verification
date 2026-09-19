@@ -275,7 +275,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         self._check_offline_outbox()
 
     def _check_offline_outbox(self) -> None:
-        """Heartbeat daemon: pings ITMS and auto-drains queued outbox orders when online."""
+        """Heartbeat daemon: auto-drains queued outbox orders asynchronously when online."""
         try:
             from core.services import config_service
             from core.models import VehicleInstallationPair
@@ -289,15 +289,8 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
             if not has_outbox:
                 return
 
-            from core.services.itms_web_client import get_web_client
-            client = get_web_client()
-            probe = client.test_connection()
-            if probe.get("success"):
-                self.log_message(
-                    "Heartbeat: ITMS connectivity online. Auto-draining Offline Outbox queue...",
-                    level="ITMS",
-                )
-                self.action_drain_outbox()
+            # action_drain_outbox is @work(thread=True) and handles pinging and draining asynchronously
+            self.action_drain_outbox()
         except Exception:
             pass
 

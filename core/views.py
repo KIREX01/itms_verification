@@ -58,10 +58,15 @@ logger = logging.getLogger(__name__)
 
 def login_view(request: HttpRequest) -> HttpResponse:
     """Operator Sign In view."""
-    if request.user.is_authenticated:
-        return redirect(request.GET.get("next") or "core:dashboard")
+    from django.utils.http import url_has_allowed_host_and_scheme
+    raw_next = request.GET.get("next") or request.POST.get("next") or ""
+    if raw_next and url_has_allowed_host_and_scheme(raw_next, allowed_hosts={request.get_host()}):
+        next_url = raw_next
+    else:
+        next_url = "/"
 
-    next_url = request.GET.get("next") or request.POST.get("next") or "/"
+    if request.user.is_authenticated:
+        return redirect(next_url if next_url != "/" else "core:dashboard")
 
     if request.method == "POST":
         username = request.POST.get("username", "").strip()
@@ -78,7 +83,7 @@ def login_view(request: HttpRequest) -> HttpResponse:
 
         auth_login(request, user)
         auth_service.save_remembered_session(user, remember=remember)
-        return redirect(next_url)
+        return redirect(next_url if next_url != "/" else "core:dashboard")
 
     # If no users exist in the active database yet, prompt first-time onboarding
     if User.objects.count() == 0:
@@ -341,7 +346,10 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
     batch_filter = request.GET.get("batch", "ALL").strip()
     scope = request.GET.get("scope", "").upper().strip()
     search = request.GET.get("search", "").strip()
-    limit = int(request.GET.get("limit", 250))
+    try:
+        limit = max(1, min(1000, int(request.GET.get("limit", 250))))
+    except (ValueError, TypeError):
+        limit = 250
 
     latest_batch = IngestionBatch.objects.order_by("-created_at").first()
 
@@ -397,15 +405,15 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
 
     pairs_data = []
     for p in qs[:limit]:
-        front_url = f"/media/{p.front_image.vault_file}" if p.front_image and p.front_image.vault_file else None
-        rear_url = f"/media/{p.rear_image.vault_file}" if p.rear_image and p.rear_image.vault_file else None
+        front_url = f"/media/{str(p.front_image.vault_file).replace(chr(92), '/')}" if p.front_image and p.front_image.vault_file else None
+        rear_url = f"/media/{str(p.rear_image.vault_file).replace(chr(92), '/')}" if p.rear_image and p.rear_image.vault_file else None
 
         batch_obj = (p.front_image.batch if p.front_image and p.front_image.batch else None) or (
             p.rear_image.batch if p.rear_image and p.rear_image.batch else None
         )
-        is_today = bool(batch_obj and batch_obj.created_at and batch_obj.created_at.date() == today)
+        is_today = bool(batch_obj and batch_obj.created_at and timezone.localdate(batch_obj.created_at) == today)
         is_latest = bool(batch_obj and latest_batch and batch_obj.id == latest_batch.id)
-        is_carryover = bool(batch_obj and batch_obj.created_at and batch_obj.created_at.date() < today)
+        is_carryover = bool(batch_obj and batch_obj.created_at and timezone.localdate(batch_obj.created_at) < today)
 
         pairs_data.append({
             "id": p.id,
@@ -468,12 +476,11 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
 @require_GET
 def api_pair_detail(request: HttpRequest, pair_id: int) -> JsonResponse:
     """Returns complete details of a specific pair for high-resolution inspection."""
-    pair = get_object_or_404(
-        VehicleInstallationPair.objects.select_related(
-            "order", "front_image", "rear_image", "front_image__batch", "rear_image__batch"
-        ),
-        id=pair_id,
-    )
+    pair = VehicleInstallationPair.objects.select_related(
+        "order", "front_image", "rear_image", "front_image__batch", "rear_image__batch"
+    ).filter(id=pair_id).first()
+    if not pair:
+        return JsonResponse({"success": False, "error": f"Pair #{pair_id} not found."}, status=404)
 
     latest_batch = IngestionBatch.objects.order_by("-created_at").first()
     batch_obj = (pair.front_image.batch if pair.front_image and pair.front_image.batch else None) or (
@@ -504,6 +511,13 @@ def api_pair_detail(request: HttpRequest, pair_id: int) -> JsonResponse:
             "captured_at": pair.rear_image.captured_at.strftime("%H:%M:%S") if pair.rear_image.captured_at else None,
         }
 
+    time_delta_sec = None
+    if pair.front_image and pair.rear_image and pair.front_image.captured_at and pair.rear_image.captured_at:
+        try:
+            time_delta_sec = abs((pair.rear_image.captured_at - pair.front_image.captured_at).total_seconds())
+        except Exception:
+            pass
+
     return JsonResponse({
         "success": True,
         "pair": {
@@ -516,6 +530,7 @@ def api_pair_detail(request: HttpRequest, pair_id: int) -> JsonResponse:
             "is_complete": pair.is_complete,
             "is_manual_override": pair.is_manual_override,
             "operator_note": pair.operator_note,
+            "time_delta_sec": time_delta_sec,
             "front": front,
             "rear": rear,
             "batch_id": batch_obj.batch_id if batch_obj else "Carryover",
@@ -545,7 +560,9 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
     if request.method != "POST":
         return JsonResponse({"success": False, "error": "POST required"}, status=405)
 
-    pair = get_object_or_404(VehicleInstallationPair, id=pair_id)
+    pair = VehicleInstallationPair.objects.filter(id=pair_id).first()
+    if not pair:
+        return JsonResponse({"success": False, "error": f"Pair #{pair_id} not found."}, status=404)
 
     action = request.POST.get("action")
     body_data = {}
@@ -691,6 +708,9 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
                 pair.rear_image.detected_plate = canonical_plate
                 pair.rear_image.save(update_fields=["detected_plate"])
 
+        if new_status == "NEEDS_REVIEW":
+            new_status = VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
+
         if new_status and new_status in VehicleInstallationPair.VerificationStatus.values:
             pair.verification_status = new_status
         else:
@@ -803,7 +823,10 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
 def api_orders_list(request: HttpRequest) -> JsonResponse:
     """Returns list of installation orders for search / manual linking dropdowns."""
     search = request.GET.get("search", "").strip()
-    limit = int(request.GET.get("limit", 50))
+    try:
+        limit = max(1, min(500, int(request.GET.get("limit", 50))))
+    except (ValueError, TypeError):
+        limit = 50
 
     qs = InstallationOrder.objects.all()
     if search:
@@ -1778,8 +1801,11 @@ def upload_photos_view(request: HttpRequest) -> HttpResponse:
                 "batch_label": batch.source_label,
                 "total_files": batch.total_files,
                 "ingested": batch.ingested_count,
+                "ingested_count": batch.ingested_count,
                 "duplicates": batch.duplicate_count,
+                "duplicate_count": batch.duplicate_count,
                 "failed": batch.failed_count,
+                "failed_count": batch.failed_count,
                 "front_count": front_count,
                 "rear_count": rear_count,
                 "is_symmetric": is_symmetric,
@@ -1865,8 +1891,8 @@ def api_upload_photos(request: HttpRequest) -> JsonResponse:
     try:
         from core.matcher import association
         association.run_association(batch_id=batch.batch_id)
-    except Exception:
-        pass
+    except Exception as assoc_err:
+        logger.warning("Auto-association warning on API upload %s: %s", batch.batch_id, assoc_err)
 
     return JsonResponse({
         "success": True,
@@ -1875,8 +1901,11 @@ def api_upload_photos(request: HttpRequest) -> JsonResponse:
         "source_label": batch.source_label,
         "total_files": batch.total_files,
         "ingested_count": batch.ingested_count,
+        "ingested": batch.ingested_count,
         "duplicate_count": batch.duplicate_count,
+        "duplicates": batch.duplicate_count,
         "failed_count": batch.failed_count,
+        "failed": batch.failed_count,
         "front_count": front_count,
         "rear_count": rear_count,
         "is_symmetric": is_symmetric,
@@ -1887,7 +1916,9 @@ def api_upload_photos(request: HttpRequest) -> JsonResponse:
 
 def api_batch_detail(request: HttpRequest, batch_id: str) -> JsonResponse:
     """Returns batch metadata and list of associated images with pair assignments."""
-    batch = get_object_or_404(IngestionBatch, batch_id=batch_id)
+    batch = IngestionBatch.objects.filter(batch_id=batch_id).first()
+    if not batch:
+        return JsonResponse({"success": False, "error": f"Batch '{batch_id}' not found."}, status=404)
     batch_images = list(batch.images.all())
     image_ids = [img.id for img in batch_images]
 

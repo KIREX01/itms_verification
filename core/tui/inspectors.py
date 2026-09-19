@@ -223,7 +223,8 @@ class InspectorPane(Static):
             EvidenceImage.Status.SUBMITTED: "blue",
         }.get(image.status, "white")
 
-        filename = os.path.basename(image.original_source_path or image.vault_file)
+        raw_path = image.original_source_path or image.vault_file or "unknown_photo"
+        filename = os.path.basename(raw_path) if raw_path else "unknown_photo"
         size_kb = round(image.file_size_bytes / 1024.0, 1) if image.file_size_bytes else 0
 
         # Ugandan syntax check
@@ -240,9 +241,12 @@ class InspectorPane(Static):
 
         # Bounding box details
         if image.bbox and len(image.bbox) == 4:
-            x1, y1, x2, y2 = [int(v) for v in image.bbox]
-            w_px, h_px = x2 - x1, y2 - y1
-            bbox_str = f"[{x1}, {y1}, {x2}, {y2}]  ({w_px}×{h_px} px)"
+            try:
+                x1, y1, x2, y2 = [int(float(v)) for v in image.bbox]
+                w_px, h_px = x2 - x1, y2 - y1
+                bbox_str = f"[{x1}, {y1}, {x2}, {y2}]  ({w_px}×{h_px} px)"
+            except Exception:
+                bbox_str = f"{image.bbox}"
         else:
             bbox_str = "[dim]None (No plate candidate localized)[/dim]"
 
@@ -317,7 +321,8 @@ class InspectorPane(Static):
         warehouse = order.get("warehouse", "N/A")
         sales_order = order.get("sales_order", "N/A")
 
-        status_color = "bold green" if "installed" in status.lower() else "yellow"
+        status_str = str(status or "N/A")
+        status_color = "bold green" if "installed" in status_str.lower() else "yellow"
 
         vault_root = getattr(settings, "VAULT_ROOT", "media/vault")
         order_dir = os.path.join(vault_root, "itms_photos", order_num)
@@ -330,11 +335,11 @@ class InspectorPane(Static):
             f"[b]Registration:[/b]   [bold green]{plate}[/bold green]",
             f"[b]Chassis / VIN:[/b]  {vin}",
             f"[b]Linked Account:[/b] [bold green]{order.get('account_email') or 'Active Session'}[/bold green]",
-            f"[b]Order Status:[/b]   [{status_color}]{status}[/{status_color}]",
+            f"[b]Order Status:[/b]   [{status_color}]{status_str}[/{status_color}]",
             f"[b]Reg Status:[/b]     {reg_status}",
             f"[b]Officer:[/b]        {officer}",
             f"[b]Install Date:[/b]   {date_str}",
-            f"[b]Warehouse:[/b]      {warehouse[:32]}",
+            f"[b]Warehouse:[/b]      {str(warehouse or 'N/A')[:32]}",
             f"[b]Sales Order:[/b]    {sales_order}",
             "",
             "[b underline]Photographic Evidence & Vault[/b underline]:",

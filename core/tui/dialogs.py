@@ -199,8 +199,8 @@ class PlateQuickEntryModal(ModalScreen[Optional[Dict]]):
 
     def compose(self) -> ComposeResult:
         p = self.pair
-        f_file = os.path.basename(p.front_image.vault_file) if p.front_image else "None"
-        r_file = os.path.basename(p.rear_image.vault_file) if p.rear_image else "None"
+        f_file = os.path.basename(p.front_image.vault_file) if (p.front_image and p.front_image.vault_file) else "None"
+        r_file = os.path.basename(p.rear_image.vault_file) if (p.rear_image and p.rear_image.vault_file) else "None"
         current_tag = p.registration_number_detected or "NO_PLATE"
 
         header_lines = [
@@ -578,8 +578,8 @@ class SingleOrderSubmissionModal(ModalScreen[Optional[Dict]]):
 
         front = p.front_image
         rear = p.rear_image
-        front_file = os.path.basename(front.vault_file) if front else "[red]Missing[/red]"
-        rear_file = os.path.basename(rear.vault_file) if rear else "[red]Missing[/red]"
+        front_file = os.path.basename(front.vault_file) if (front and front.vault_file) else "[red]Missing[/red]"
+        rear_file = os.path.basename(rear.vault_file) if (rear and rear.vault_file) else "[red]Missing[/red]"
 
         front_conf = f"{round(front.ocr_confidence, 2)}" if front and front.ocr_confidence else "—"
         rear_conf = f"{round(rear.ocr_confidence, 2)}" if rear and rear.ocr_confidence else "—"
@@ -844,8 +844,8 @@ class BatchSubmissionModal(ModalScreen[Optional[Dict]]):
         table.cursor_type = "row"
 
         for idx, p in enumerate(self.pairs, 1):
-            f_file = os.path.basename(p.front_image.vault_file) if p.front_image else "Missing"
-            r_file = os.path.basename(p.rear_image.vault_file) if p.rear_image else "Missing"
+            f_file = os.path.basename(p.front_image.vault_file) if (p.front_image and p.front_image.vault_file) else "Missing"
+            r_file = os.path.basename(p.rear_image.vault_file) if (p.rear_image and p.rear_image.vault_file) else "Missing"
             comp_badge = "[bold green]✓ Ready[/bold green]" if p.is_complete else "[bold red]✗ Incomplete[/bold red]"
             method = getattr(p, "matched_via", "VISION")
 

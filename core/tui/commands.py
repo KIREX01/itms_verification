@@ -81,11 +81,12 @@ class ITMSCommandProvider(Provider):
             ("Upload: Open Web Upload UI [W]", app.action_open_upload_ui, "Launch browser-based photo uploader"),
             
             # 5. Tabs & Navigation
-            ("Navigate: Review Queue (Tab 1)", app.action_tab_queue, "Switch to Review Queue tab"),
-            ("Navigate: History & Audit (Tab 2)", app.action_tab_history, "Switch to History & Audit tab"),
+            ("Navigate: Dashboard (Tab 1)", app.action_tab_dashboard, "Switch to Executive Dashboard & System Health"),
+            ("Navigate: ITMS WebApp Connection (Tab 2)", app.action_tab_itms, "Switch to ITMS WebApp live connection tab"),
             ("Navigate: Ingestion Batches (Tab 3)", app.action_tab_batches, "Switch to Ingestion Batches tab"),
-            ("Navigate: ITMS WebApp Connection (Tab 4)", app.action_tab_itms, "Switch to ITMS WebApp live connection tab"),
-            ("Navigate: System Settings & Config (Tab 5)", app.action_tab_settings, "Open configuration pane for safety, OCR, and storage settings"),
+            ("Navigate: Review Queue (Tab 4)", app.action_tab_queue, "Switch to Review Queue tab"),
+            ("Navigate: History & Audit (Tab 5)", app.action_tab_history, "Switch to History & Audit tab"),
+            ("Navigate: System Settings & Config (Tab 6)", app.action_tab_settings, "Open configuration pane for safety, OCR, and storage settings"),
             
             # 6. Filters & Storage
             ("Filter: Cycle History Status Filter [F]", app.action_cycle_filter, "Toggle between All, Submitted, Failed, and Audit Logs"),

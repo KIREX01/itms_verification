@@ -61,6 +61,8 @@ document.addEventListener("DOMContentLoaded", () => {
             if (selectedPairId) executePairAction("approve");
         } else if (key === "s" && activeNavTab === 4) {
             if (selectedPairId) executePairAction("swap");
+        } else if (key === "q") {
+            window.location.href = "/logout/";
         } else if ((key === "t" || key === "e" || key === "l") && activeNavTab === 4) {
             if (selectedPairId) openEditPlateModal();
         } else if (e.key === "Enter") {

@@ -204,10 +204,24 @@ def start_daemon(extra_args=None, port=8000):
         webbrowser.open(url)
 
 
-def stop_server():
+def stop_server(extra_args=None):
     """Stops any running background Web Console server."""
     pid_file = PROJECT_ROOT / ".itms_web.pid"
     stopped = False
+
+    port = 8000
+    if extra_args:
+        for idx, a in enumerate(extra_args):
+            if a in ("--port", "-p") and idx + 1 < len(extra_args):
+                try:
+                    port = int(extra_args[idx + 1])
+                except ValueError:
+                    pass
+            elif a.startswith("--port="):
+                try:
+                    port = int(a.split("=")[1])
+                except ValueError:
+                    pass
 
     if pid_file.is_file():
         try:
@@ -233,11 +247,9 @@ def stop_server():
     if sys.platform == "win32":
         import subprocess
         try:
-            wmic_res = subprocess.run(
-                'wmic process where "commandline like \'%run_web%\' and not commandline like \'%wmic%\'" get processid',
-                shell=True, capture_output=True, text=True
-            )
-            for line in wmic_res.stdout.splitlines():
+            ps_cmd = 'powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like \'*run_web*\' } | Select-Object -ExpandProperty ProcessId"'
+            ps_res = subprocess.run(ps_cmd, shell=True, capture_output=True, text=True)
+            for line in ps_res.stdout.splitlines():
                 line = line.strip()
                 if line.isdigit() and int(line) != os.getpid():
                     subprocess.run(["taskkill", "/F", "/T", "/PID", line], capture_output=True, check=False)
@@ -245,12 +257,12 @@ def stop_server():
         except Exception:
             pass
 
-    # Verify if port 8000 is still listening
-    if is_port_in_use(8000):
-        print("[*] Releasing port 8000...")
+    # Verify if target port is still listening
+    if is_port_in_use(port):
+        print(f"[*] Releasing port {port}...")
         if sys.platform == "win32":
             import subprocess
-            res = subprocess.run('netstat -ano | findstr :8000', shell=True, capture_output=True, text=True)
+            res = subprocess.run(f'netstat -ano | findstr :{port}', shell=True, capture_output=True, text=True)
             for line in res.stdout.splitlines():
                 parts = line.strip().split()
                 if len(parts) >= 5 and "LISTENING" in parts:
@@ -258,7 +270,7 @@ def stop_server():
                     if proc_pid.isdigit() and int(proc_pid) != os.getpid():
                         subprocess.run(["taskkill", "/F", "/T", "/PID", proc_pid], capture_output=True, check=False)
                         stopped = True
-        print("[+] Port 8000 released.")
+        print(f"[+] Port {port} released.")
     elif stopped:
         print("[+] ITMS Web server stopped cleanly.")
     else:
@@ -401,11 +413,11 @@ def main():
         return
 
     if first in ("stop", "kill", "shutdown"):
-        stop_server()
+        stop_server(args[1:])
         return
 
     if first in ("restart", "reboot"):
-        stop_server()
+        stop_server(args[1:])
         import time
         time.sleep(1.0)
         start_daemon(args[1:])

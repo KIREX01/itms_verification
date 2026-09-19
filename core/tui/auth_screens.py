@@ -195,8 +195,6 @@ class LandingAuthScreen(Screen[Optional[User]]):
             self._handle_login()
         elif input_id in ("input-reg-username", "input-reg-password", "input-reg-confirm"):
             self._handle_register()
-        elif input_id in ("input-auth-pg-host", "input-auth-pg-port", "input-auth-pg-db", "input-auth-pg-user", "input-auth-pg-password"):
-            self._handle_apply_pg()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         btn_id = event.button.id
@@ -204,12 +202,6 @@ class LandingAuthScreen(Screen[Optional[User]]):
             self._handle_login()
         elif btn_id == "btn-reg-submit":
             self._handle_register()
-        elif btn_id == "btn-auth-switch-sqlite":
-            self._handle_switch_sqlite()
-        elif btn_id in ("btn-auth-switch-pg", "btn-auth-apply-pg"):
-            self._handle_apply_pg()
-        elif btn_id == "btn-auth-test-pg":
-            self._handle_test_pg()
 
     def _handle_login(self) -> None:
         username = self.query_one("#input-login-username", Input).value.strip()
@@ -257,74 +249,6 @@ class LandingAuthScreen(Screen[Optional[User]]):
         err_label.update("[bold green]✓ Account created successfully! Launching Copilot...[/bold green]")
         auth_service.save_remembered_session(user, remember=True)
         self.dismiss(user)
-
-    def _handle_switch_sqlite(self) -> None:
-        from core.services import config_service
-        fb_label = self.query_one("#auth-db-feedback", Static)
-        fb_label.update("[yellow]Switching to local SQLite 3...[/yellow]")
-        res = config_service.switch_database("sqlite", persist_config=True)
-        if res.get("success"):
-            fb_label.update(f"[bold green]✓ {res['message']}[/bold green]")
-            self._refresh_db_views()
-            # If user accounts exist in SQLite, switch directly to login tab
-            if User.objects.count() > 0:
-                tabs = self.query_one("#auth-tabs", TabbedContent)
-                tabs.active = "tab-login"
-                self.query_one("#input-login-username", Input).focus()
-            self.notify("Switched to SQLite database successfully!", severity="information")
-        else:
-            fb_label.update(f"[bold red]✗ {res.get('error', 'Switch failed')}[/bold red]")
-
-    def _handle_test_pg(self) -> None:
-        from core.services import config_service
-        host = self.query_one("#input-auth-pg-host", Input).value.strip() or "localhost"
-        port = self.query_one("#input-auth-pg-port", Input).value.strip() or "5432"
-        db = self.query_one("#input-auth-pg-db", Input).value.strip() or "num"
-        user = self.query_one("#input-auth-pg-user", Input).value.strip() or "postgres"
-        pwd = self.query_one("#input-auth-pg-password", Input).value
-        fb_label = self.query_one("#auth-db-feedback", Static)
-
-        fb_label.update(f"[yellow]Testing connection to {user}@{host}:{port}/{db}...[/yellow]")
-        res = config_service.test_postgres_connection(
-            host=host, port=port, dbname=db, user=user, password=pwd, timeout=5
-        )
-        if res.get("success"):
-            fb_label.update(f"[bold green]✓ {res['message']}[/bold green]")
-        else:
-            fb_label.update(f"[bold red]✗ {res.get('error', 'Connection failed')}[/bold red]")
-
-    def _handle_apply_pg(self) -> None:
-        from core.services import config_service
-        host = self.query_one("#input-auth-pg-host", Input).value.strip() or "localhost"
-        port = self.query_one("#input-auth-pg-port", Input).value.strip() or "5432"
-        db = self.query_one("#input-auth-pg-db", Input).value.strip() or "num"
-        user = self.query_one("#input-auth-pg-user", Input).value.strip() or "postgres"
-        pwd = self.query_one("#input-auth-pg-password", Input).value
-        fb_label = self.query_one("#auth-db-feedback", Static)
-
-        fb_label.update(f"[yellow]Connecting and migrating PostgreSQL ({db}@{host}:{port})...[/yellow]")
-        res = config_service.switch_database(
-            engine="postgresql",
-            host=host,
-            port=port,
-            dbname=db,
-            user=user,
-            password=pwd,
-            run_migrations=True,
-            persist_config=True,
-        )
-        if res.get("success"):
-            synced = res.get("synced_users", 0)
-            sync_note = f" ({synced} operator account(s) synced)" if synced > 0 else ""
-            fb_label.update(f"[bold green]✓ {res['message']}{sync_note}[/bold green]")
-            self._refresh_db_views()
-            if User.objects.count() > 0:
-                tabs = self.query_one("#auth-tabs", TabbedContent)
-                tabs.active = "tab-login"
-                self.query_one("#input-login-username", Input).focus()
-            self.notify(f"Connected to PostgreSQL ({db})!", severity="information")
-        else:
-            fb_label.update(f"[bold red]✗ {res.get('error', 'Switch failed')}[/bold red]")
 
     def action_quit(self) -> None:
         self.dismiss(None)

@@ -310,7 +310,7 @@ function renderFullScaleBatchPhotos(batchId, images) {
                 return `
                     <div class="batch-photo-card-large">
                         <div class="batch-photo-full-wrap" onclick="openLightbox('${escapeHtml(img.url)}')">
-                            <img class="batch-photo-full-img" src="${escapeHtml(img.url)}" alt="${escapeHtml(img.file_name)}" onerror="this.src='/static/core/placeholder.svg';">
+                            <img class="batch-photo-full-img" src="${escapeHtml(img.url)}" alt="${escapeHtml(img.file_name)}" onerror="this.onerror=null; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'100\' height=\'100\' viewBox=\'0 0 100 100\'><rect fill=\'%23222\' width=\'100\' height=\'100\'/><text fill=\'%23888\' x=\'50\' y=\'55\' text-anchor=\'middle\' font-size=\'11\'>Photo Missing</text></svg>';">
                             <span class="batch-photo-orient-badge ${orientTag}">${img.orientation}</span>
                             ${plateHtml}
                             <span class="batch-photo-zoom-hint">🔍 Click to zoom</span>

@@ -83,12 +83,13 @@ class Command(BaseCommand):
                     password=options["password"],
                     login_endpoint=options["endpoint"],
                 )
+                ref_info = f"{tokens.refresh_token[:15]}... ({len(tokens.refresh_token)} chars)" if tokens.refresh_token else "None"
                 self.stdout.write(
                     self.style.SUCCESS(
                         f"LOGIN SUCCESSFUL!\n"
                         f"  User email     : {tokens.user_email or 'N/A'}\n"
                         f"  Access token   : {tokens.access_token[:15]}... ({len(tokens.access_token)} chars)\n"
-                        f"  Refresh token  : {tokens.refresh_token[:15]}... ({len(tokens.refresh_token)} chars) if tokens.refresh_token else 'None'\n"
+                        f"  Refresh token  : {ref_info}\n"
                         f"  Token type     : {tokens.token_type}\n"
                         f"  Tokens saved to: {client.token_store.storage_path}"
                     )

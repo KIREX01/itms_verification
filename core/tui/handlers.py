@@ -114,8 +114,9 @@ class NavigationHandlersMixin:
         except Exception:
             return
         pair = None
-        if row_key and row_key.value:
-            pair = VehicleInstallationPair.objects.filter(id=row_key.value).select_related(
+        key_val = getattr(row_key, "value", row_key) if row_key else None
+        if key_val:
+            pair = VehicleInstallationPair.objects.filter(id=key_val).select_related(
                 "order", "front_image", "rear_image"
             ).first()
         else:
@@ -132,8 +133,9 @@ class NavigationHandlersMixin:
             return
 
         pair = None
-        if row_key and row_key.value:
-            pair = VehicleInstallationPair.objects.filter(id=row_key.value).select_related(
+        key_val = getattr(row_key, "value", row_key) if row_key else None
+        if key_val:
+            pair = VehicleInstallationPair.objects.filter(id=key_val).select_related(
                 "order", "front_image", "rear_image"
             ).first()
         else:
@@ -146,9 +148,8 @@ class NavigationHandlersMixin:
         except Exception:
             return
         batch = None
-        batch_id = row_key.value if row_key and row_key.value else None
-        if not batch_id:
-            batch_id = self._selected_batch_id
+        key_val = getattr(row_key, "value", row_key) if row_key else None
+        batch_id = key_val or self._selected_batch_id
 
         if batch_id:
             batch = IngestionBatch.objects.filter(batch_id=batch_id).first()
@@ -160,8 +161,9 @@ class NavigationHandlersMixin:
         except Exception:
             return
         img = None
-        if row_key and row_key.value:
-            img = EvidenceImage.objects.filter(id=row_key.value).first()
+        key_val = getattr(row_key, "value", row_key) if row_key else None
+        if key_val:
+            img = EvidenceImage.objects.filter(id=key_val).first()
         else:
             img = self._get_active_batch_image()
         if img:

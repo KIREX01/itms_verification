@@ -312,11 +312,12 @@ async function selectPair(pairId) {
             // Comparison table
             setText("qcomp-detected", p.registration_number_detected || "---");
             setText("qcomp-order-plate", p.order ? p.order.registration_number : "---");
-            setText("qcomp-score", p.match_score !== null && p.match_score !== undefined ? `${p.match_score.toFixed(0)}% (${p.match_type})` : "N/A");
+            setText("qcomp-score", p.match_score !== null && p.match_score !== undefined ? `${p.match_score.toFixed(0)}% (${p.match_type || p.matched_via || "Vision"})` : "N/A");
             setText("qcomp-vin", p.order ? (p.order.vin || "—") : "---");
             setText("qcomp-warehouse", p.order ? (p.order.warehouse_name || "Uganda Hub") : "Uganda Hub");
             setText("qcomp-officer", p.order ? (p.order.installation_officer || "Station Officer") : "Station Officer");
             setText("qcomp-complete", p.is_complete ? "1:1 Symmetric" : "Missing Angle");
+            setText("qcomp-batch", p.batch_id || (p.batch ? p.batch.batch_id : "---"));
             setText("qcomp-strategy", p.matched_via || "Joint Vision OCR");
         }
     } catch (err) {
@@ -468,26 +469,28 @@ function openUnifiedLinkModal() {
         visionTag.innerText = currentPlate || "—";
     }
 
-    if (selectedPairDetail.front_image && selectedPairDetail.front_image.url) {
+    const frontData = selectedPairDetail.front || selectedPairDetail.front_image;
+    if (frontData && frontData.url) {
         if (thumbFront) {
-            thumbFront.src = selectedPairDetail.front_image.url;
+            thumbFront.src = frontData.url;
             thumbFront.style.display = "block";
         }
         if (emptyFront) emptyFront.style.display = "none";
-        if (tagFront) tagFront.innerText = selectedPairDetail.front_image.detected_plate ? `Plate: ${selectedPairDetail.front_image.detected_plate}` : "Front Photo";
+        if (tagFront) tagFront.innerText = frontData.detected_plate ? `Plate: ${frontData.detected_plate}` : "Front Photo";
     } else {
         if (thumbFront) thumbFront.style.display = "none";
         if (emptyFront) emptyFront.style.display = "block";
         if (tagFront) tagFront.innerText = "—";
     }
 
-    if (selectedPairDetail.rear_image && selectedPairDetail.rear_image.url) {
+    const rearData = selectedPairDetail.rear || selectedPairDetail.rear_image;
+    if (rearData && rearData.url) {
         if (thumbRear) {
-            thumbRear.src = selectedPairDetail.rear_image.url;
+            thumbRear.src = rearData.url;
             thumbRear.style.display = "block";
         }
         if (emptyRear) emptyRear.style.display = "none";
-        if (tagRear) tagRear.innerText = selectedPairDetail.rear_image.detected_plate ? `Plate: ${selectedPairDetail.rear_image.detected_plate}` : "Rear Photo";
+        if (tagRear) tagRear.innerText = rearData.detected_plate ? `Plate: ${rearData.detected_plate}` : "Rear Photo";
     } else {
         if (thumbRear) thumbRear.style.display = "none";
         if (emptyRear) emptyRear.style.display = "block";

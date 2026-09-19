@@ -368,6 +368,8 @@ class ITMSConnectionPane(Vertical):
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         table_id = event.data_table.id
+        if not event.row_key or event.row_key.value is None:
+            return
         row_key = str(event.row_key.value)
         if table_id == "table-itms-orders":
             order = self._active_orders_map.get(row_key)
@@ -842,7 +844,8 @@ class ITMSConnectionPane(Vertical):
                     table.clear()
                     if archive:
                         for i, o in enumerate(orders):
-                            st_text = "[bold green]Installed[/bold green]" if o.get("order_status", "").lower() == "installed" else o.get("order_status", "")
+                            st_val = o.get("order_status") or ""
+                            st_text = "[bold green]Installed[/bold green]" if str(st_val).lower() == "installed" else str(st_val)
                             table.add_row(
                                 o.get("order_number", ""),
                                 o.get("registration_number", ""),
@@ -855,13 +858,14 @@ class ITMSConnectionPane(Vertical):
                             )
                     else:
                         for i, o in enumerate(orders):
+                            wh_val = str(o.get("warehouse") or "")[:30]
                             table.add_row(
                                 o.get("order_number", ""),
                                 o.get("registration_number", ""),
                                 o.get("vin", ""),
                                 o.get("status", ""),
                                 o.get("sales_order", ""),
-                                o.get("warehouse", "")[:30],
+                                wh_val,
                                 key=str(i),
                             )
                     if orders:
@@ -1015,26 +1019,3 @@ class ITMSConnectionPane(Vertical):
             curr = 1
         page_input.value = str(curr + 1)
         self.action_fetch_orders(archive=is_archive)
-
-    @work(thread=True)
-    def action_itms_logout(self) -> None:
-        """Terminates active ITMS WebApp session and clears cookies from vault (local system session preserved)."""
-        self.app.call_from_thread(self._set_feedback, "Terminating ITMS session...", "yellow")
-        ok, msg = self.client.logout()
-        self.app.call_from_thread(self._set_feedback, "✓ ITMS session cleared.", "white")
-        self.app.call_from_thread(
-            self._log_preview,
-            f"[bold yellow]ITMS Session Terminated:[/bold yellow] Stored cookies deleted from media/vault/.itms_web_session.json. Local system operator session remains active.",
-        )
-        self.app.call_from_thread(self._refresh_status_card)
-        self.app.call_from_thread(self.app.reload_data)
-        self.app.call_from_thread(
-            self.app.notify,
-            "ITMS WebApp session signed out. System operator session is preserved.",
-            severity="information",
-        )
-        self.app.call_from_thread(
-            self.app.log_message,
-            "ITMS WebApp session signed out and cleared from vault. System operator session remains active.",
-            level="ITMS",
-        )

@@ -44,6 +44,7 @@ class OrderSyncService:
         """Returns metadata on when the last sync took place and active orders count."""
         global _LAST_SYNC_TIMESTAMP, _LAST_SYNC_RESULT
         elapsed = time.time() - _LAST_SYNC_TIMESTAMP if _LAST_SYNC_TIMESTAMP > 0 else None
+        cooldown_remaining = max(0, int(SYNC_COOLDOWN_SECONDS - elapsed)) if (elapsed is not None and elapsed < SYNC_COOLDOWN_SECONDS) else 0
         session_obj = getattr(getattr(self.client, "session_store", None), "session", None)
         email_val = getattr(session_obj, "user_email", "")
         curr_email = email_val.strip().lower() if isinstance(email_val, str) else ""

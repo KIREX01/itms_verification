@@ -2249,6 +2249,13 @@ class ITMSWebClient:
         def resolve_file_path(p: Any) -> Optional[Path]:
             if not p:
                 return None
+            try:
+                from core.services.vault_service import resolve_vault_path
+                resolved = resolve_vault_path(p)
+                if resolved.is_file():
+                    return resolved
+            except Exception:
+                pass
             path_obj = Path(p)
             if not path_obj.is_absolute() and settings.configured:
                 cand = Path(settings.MEDIA_ROOT) / path_obj
@@ -2718,6 +2725,13 @@ class ITMSWebClient:
         def resolve_file_path(p: Any) -> Optional[Path]:
             if not p:
                 return None
+            try:
+                from core.services.vault_service import resolve_vault_path
+                resolved = resolve_vault_path(p)
+                if resolved.is_file():
+                    return resolved
+            except Exception:
+                pass
             path_obj = Path(p)
             if not path_obj.is_absolute() and settings.configured:
                 cand = Path(settings.MEDIA_ROOT) / path_obj

@@ -288,8 +288,17 @@ def show_pair_evidence(pair, window_title: Optional[str] = None, block: bool = F
     front_img = getattr(pair, "front_image", None)
     rear_img = getattr(pair, "rear_image", None)
 
-    front_path = os.path.join(settings.MEDIA_ROOT, front_img.vault_file) if front_img and front_img.vault_file else ""
-    rear_path = os.path.join(settings.MEDIA_ROOT, rear_img.vault_file) if rear_img and rear_img.vault_file else ""
+    from core.services.vault_service import resolve_vault_path
+    front_path = str(resolve_vault_path(front_img.vault_file)) if front_img and front_img.vault_file else ""
+    rear_path = str(resolve_vault_path(rear_img.vault_file)) if rear_img and rear_img.vault_file else ""
+    if front_path and not os.path.isfile(front_path) and settings.configured:
+        fallback_front = os.path.join(settings.MEDIA_ROOT, front_img.vault_file)
+        if os.path.isfile(fallback_front):
+            front_path = fallback_front
+    if rear_path and not os.path.isfile(rear_path) and settings.configured:
+        fallback_rear = os.path.join(settings.MEDIA_ROOT, rear_img.vault_file)
+        if os.path.isfile(fallback_rear):
+            rear_path = fallback_rear
 
     has_front = bool(front_path and os.path.isfile(front_path))
     has_rear = bool(rear_path and os.path.isfile(rear_path))

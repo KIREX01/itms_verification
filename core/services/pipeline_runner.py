@@ -157,6 +157,13 @@ class PipelineRunner:
 
             self._append_log(f"Execution failed: {exc}", "ERROR")
 
+        finally:
+            try:
+                from django.db import connection
+                connection.close()
+            except Exception:
+                pass
+
 
 # Global singleton instance
 runner = PipelineRunner()

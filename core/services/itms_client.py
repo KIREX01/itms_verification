@@ -497,9 +497,15 @@ class ITMSClient:
 
     def _upload_photo(self, order_number: str, vault_path: str, orientation: str) -> StepResult:
         """Internal helper for multipart photo uploads."""
-        abs_path = os.path.join(settings.MEDIA_ROOT, vault_path)
+        from core.services.vault_service import resolve_vault_path
+        resolved = resolve_vault_path(vault_path)
+        abs_path = str(resolved)
         if not os.path.isfile(abs_path):
-            raise ITMSError(f"UPLOAD_{orientation} failed: evidence file not found at {abs_path}")
+            fallback_path = os.path.join(settings.MEDIA_ROOT, vault_path)
+            if os.path.isfile(fallback_path):
+                abs_path = fallback_path
+            else:
+                raise ITMSError(f"UPLOAD_{orientation} failed: evidence file not found at {abs_path}")
 
         endpoint_setting = (
             "ITMS_UPLOAD_FRONT_ENDPOINT" if orientation == "FRONT" else "ITMS_UPLOAD_REAR_ENDPOINT"

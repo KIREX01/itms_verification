@@ -501,14 +501,17 @@ function startPipelinePolling() {
 }
 
 function appendConsoleLog(message, type = "info") {
-    const stream = document.getElementById("activity-stream");
-    if (!stream) return;
     const timeStr = new Date().toTimeString().split(" ")[0];
-    const div = document.createElement("div");
-    div.className = "stream-line";
-    div.innerHTML = `<span class="stream-time">[${timeStr}]</span> <span class="stream-${type}">${escapeHtml(message)}</span>`;
-    stream.appendChild(div);
-    stream.scrollTop = stream.scrollHeight;
+    const stream = document.getElementById("activity-stream");
+    if (stream) {
+        const div = document.createElement("div");
+        div.className = "stream-line";
+        div.innerHTML = `<span class="stream-time">[${timeStr}]</span> <span class="stream-${type}">${escapeHtml(message)}</span>`;
+        stream.appendChild(div);
+        stream.scrollTop = stream.scrollHeight;
+    } else {
+        console.log(`[${timeStr}] [${type.toUpperCase()}] ${message}`);
+    }
 }
 
 function toggleActivityConsole() {

@@ -9,11 +9,14 @@ Runs as a lightweight standalone Tkinter subprocess so that:
 - It returns JSON-encoded records [{"path": str, "orientation": str}] on stdout.
 """
 import json
+import logging
 import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+
+logger = logging.getLogger(__name__)
 
 VALID_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
 

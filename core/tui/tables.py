@@ -239,6 +239,12 @@ class TableLoaderMixin:
                 except Exception:
                     pass
             self._update_queue_inspector()
+        else:
+            try:
+                from core.tui.inspectors import InspectorPane
+                self.query_one("#inspector-queue", InspectorPane).show_pair(None)
+            except Exception:
+                pass
 
     def _reload_history_table(self):
         from core.services.itms_web_client import get_current_itms_account
@@ -315,6 +321,12 @@ class TableLoaderMixin:
                 except Exception:
                     pass
             self._update_history_inspector()
+        else:
+            try:
+                from core.tui.inspectors import InspectorPane
+                self.query_one("#inspector-history", InspectorPane).show_audit_history(None)
+            except Exception:
+                pass
 
     def _reload_batches_table(self):
         table = self.query_one("#table-batches", DataTable)

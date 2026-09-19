@@ -167,11 +167,15 @@ class UpdateService:
     def apply_update(download_url: Optional[str] = None) -> Dict[str, Any]:
         """
         Executes a safe in-place upgrade.
-        1. If .git is present, pulls changes via git.
-        2. If standalone/zip, downloads release asset and extracts non-protected files.
-        3. Runs pip install and Django migrations.
-        4. Verifies system integrity.
+        1. If explicit download_url is provided, downloads and applies release archive.
+        2. If .git is present, pulls changes via git.
+        3. If standalone/zip, downloads release asset or main branch archive.
+        4. Runs pip install and Django migrations.
+        5. Verifies system integrity.
         """
+        if download_url:
+            return UpdateService._apply_zip_update(download_url)
+
         is_git = (PROJECT_ROOT / ".git").is_dir()
 
         if is_git:
@@ -238,14 +242,14 @@ class UpdateService:
             return {"success": False, "error": f"Git update error: {exc}"}
 
     @staticmethod
-    def _apply_zip_update(download_url: Optional[str]) -> Dict[str, Any]:
+    def _apply_zip_update(download_url: Optional[str] = None) -> Dict[str, Any]:
         """Downloads release zip from GitHub and unpacks preserving operator data."""
         if not download_url:
             check = UpdateService.check_for_updates(force=True)
             download_url = check.get("download_url")
 
         if not download_url:
-            return {"success": False, "error": "No download URL available for release archive."}
+            download_url = f"https://github.com/{GITHUB_REPO}/archive/refs/heads/main.zip"
 
         temp_dir = Path(tempfile.mkdtemp(prefix="itms_update_"))
         zip_path = temp_dir / "release.zip"
@@ -299,10 +303,7 @@ class UpdateService:
 
                 dest_file = (PROJECT_ROOT / rel_path).resolve()
                 if not dest_file.is_relative_to(project_root_resolved):
-<<<<<<< HEAD
                     logger.warning("Skipping file attempting to escape project root: %s", rel_path)
-=======
->>>>>>> origin/main
                     continue
 
                 dest_file.parent.mkdir(parents=True, exist_ok=True)

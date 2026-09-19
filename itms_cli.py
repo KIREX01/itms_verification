@@ -272,17 +272,26 @@ def run_bootstrap(extra_args=None):
     bootstrap.main()
 
 
-def run_update():
+def run_update(extra_args=None):
     """Triggers system update directly via Django check_updates command or git pull."""
     print("====================================================================")
     print("  ITMS VERIFICATION COPILOT - SYSTEM UPDATE MANAGER")
     print("====================================================================")
     print()
+    url = None
+    if extra_args:
+        for a in extra_args:
+            if a.startswith("http://") or a.startswith("https://"):
+                url = a
+                break
     try:
         import django
         django.setup()
         from django.core.management import call_command
-        call_command("check_updates", apply=True)
+        if url:
+            call_command("check_updates", apply=True, download_url=url)
+        else:
+            call_command("check_updates", apply=True)
     except Exception as exc:
         print(f"[*] Checking updates via git pull: {exc}")
         import subprocess
@@ -381,7 +390,7 @@ def main():
         return
 
     if first in ("update", "upgrade"):
-        run_update()
+        run_update(args[1:])
         return
 
     if first in ("uninstall", "remove"):

@@ -25,17 +25,24 @@ class Command(BaseCommand):
             action="store_true",
             help="Download, apply migrations, and update the application to the latest release.",
         )
+        parser.add_argument(
+            "--url",
+            dest="download_url",
+            default=None,
+            help="Direct URL to a GitHub release ZIP or archive.",
+        )
 
     def handle(self, *args, **options):
         force = options["force"]
         apply_update = options["apply"]
+        download_url = options.get("download_url")
 
         self.stdout.write(self.style.SUCCESS("=" * 65))
         self.stdout.write(self.style.SUCCESS("  ITMS VERIFICATION COPILOT - SYSTEM UPDATE MANAGER"))
         self.stdout.write(self.style.SUCCESS("=" * 65))
         self.stdout.write(f"  Current Version: v{__version__}")
 
-        if not apply_update:
+        if not apply_update and not download_url:
             self.stdout.write("  Checking GitHub Releases API...")
             info = update_service.check_for_updates(force=force)
 
@@ -65,7 +72,7 @@ class Command(BaseCommand):
                     self.stdout.write("  (Result loaded from local cache. Use --force to check live)")
         else:
             self.stdout.write(self.style.WARNING("  Applying update from GitHub..."))
-            outcome = update_service.apply_update()
+            outcome = update_service.apply_update(download_url=download_url)
             if outcome.get("success"):
                 self.stdout.write(self.style.SUCCESS(f"\n  [+] {outcome.get('message')}"))
             else:

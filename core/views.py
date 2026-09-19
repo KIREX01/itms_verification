@@ -1317,15 +1317,6 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
     succeeded = 0
     failed = 0
     for p in approved_pairs:
-<<<<<<< HEAD
-        try:
-            p.refresh_from_db()
-        except VehicleInstallationPair.DoesNotExist:
-            continue
-        if p.verification_status != VehicleInstallationPair.VerificationStatus.APPROVED:
-            continue
-        outcome = submission_worker.submit_pair(p, dry_run=is_dry_run)
-=======
         # Check that pair is still APPROVED to prevent concurrent race condition submissions
         refreshed = VehicleInstallationPair.objects.filter(
             id=p.id,
@@ -1334,7 +1325,6 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
         if not refreshed:
             continue
         outcome = submission_worker.submit_pair(refreshed, dry_run=is_dry_run)
->>>>>>> origin/main
         if outcome.success:
             succeeded += 1
         else:
@@ -2037,17 +2027,10 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
         if flt in ("FAILED", "ISSUES") and l.result not in (SubmissionAuditLog.ResultStatus.FAILURE, "FAILED"):
             continue
 
-<<<<<<< HEAD
         front_file = str(pair.front_image.vault_file).replace("\\", "/") if (pair and pair.front_image) else None
         front_url = f"/media/{front_file}" if front_file else None
         rear_file = str(pair.rear_image.vault_file).replace("\\", "/") if (pair and pair.rear_image) else None
         rear_url = f"/media/{rear_file}" if rear_file else None
-=======
-        front_vault = str(pair.front_image.vault_file).replace("\\", "/") if (pair and pair.front_image) else None
-        rear_vault = str(pair.rear_image.vault_file).replace("\\", "/") if (pair and pair.rear_image) else None
-        front_url = f"/media/{front_vault}" if front_vault else None
-        rear_url = f"/media/{rear_vault}" if rear_vault else None
->>>>>>> origin/main
 
         is_item_today = bool(l.timestamp and l.timestamp.date() == today)
 
@@ -2095,17 +2078,10 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
     for p in pairs_qs[:150]:
         sub_time = p.submitted_at or p.updated_at
         is_item_today = bool(sub_time and sub_time.date() == today)
-<<<<<<< HEAD
         front_file = str(p.front_image.vault_file).replace("\\", "/") if (p.front_image and p.front_image.vault_file) else None
         front_url = f"/media/{front_file}" if front_file else None
         rear_file = str(p.rear_image.vault_file).replace("\\", "/") if (p.rear_image and p.rear_image.vault_file) else None
         rear_url = f"/media/{rear_file}" if rear_file else None
-=======
-        front_vault = str(p.front_image.vault_file).replace('\\', '/') if (p.front_image and p.front_image.vault_file) else None
-        rear_vault = str(p.rear_image.vault_file).replace('\\', '/') if (p.rear_image and p.rear_image.vault_file) else None
-        front_url = f"/media/{front_vault}" if front_vault else None
-        rear_url = f"/media/{rear_vault}" if rear_vault else None
->>>>>>> origin/main
 
         action_name = "VERIFY_PAIR"
         if p.verification_status == VehicleInstallationPair.VerificationStatus.SUBMITTED:

@@ -259,7 +259,7 @@ class UpdateService:
             with urllib.request.urlopen(req, timeout=60) as response, open(zip_path, "wb") as f:
                 shutil.copyfileobj(response, f)
 
-            # 2. Extract to temp directory with ZipSlip validation
+            # 2. Extract to temp directory with strict ZipSlip validation
             extract_dir = (temp_dir / "extracted").resolve()
             extract_dir.mkdir()
             with zipfile.ZipFile(zip_path, "r") as zf:
@@ -274,7 +274,12 @@ class UpdateService:
                     if (member.external_attr >> 16) & 0o120000 == 0o120000:
                         logger.warning("Skipping symlink in zip: %s", member.filename)
                         continue
-                    zf.extract(member, extract_dir)
+                    if member.is_dir():
+                        target_dest.mkdir(parents=True, exist_ok=True)
+                    else:
+                        target_dest.parent.mkdir(parents=True, exist_ok=True)
+                        with zf.open(member) as src_file, open(target_dest, "wb") as dst_file:
+                            shutil.copyfileobj(src_file, dst_file)
 
             # Locate root folder inside extracted zip (GitHub zips usually have a single root folder)
             extracted_items = list(extract_dir.iterdir())
@@ -294,7 +299,10 @@ class UpdateService:
 
                 dest_file = (PROJECT_ROOT / rel_path).resolve()
                 if not dest_file.is_relative_to(project_root_resolved):
+<<<<<<< HEAD
                     logger.warning("Skipping file attempting to escape project root: %s", rel_path)
+=======
+>>>>>>> origin/main
                     continue
 
                 dest_file.parent.mkdir(parents=True, exist_ok=True)

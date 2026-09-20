@@ -4,6 +4,7 @@ import os
 from typing import Any, Dict, Optional
 
 from django.conf import settings
+from rich.markup import escape
 from textual.widgets import Static
 from core.models import (
     EvidenceImage,
@@ -32,38 +33,42 @@ class InspectorPane(Static):
             return
 
         order_line = (
-            f"[green]{pair.order.order_number}[/green] (expects [b]{pair.order.registration_number}[/b])"
+            f"[green]{escape(pair.order.order_number)}[/green] (expects [b]{escape(pair.order.registration_number)}[/b])"
             if pair.order
             else "[yellow]— unmatched —[/yellow]"
         )
-        serial_line = (
-            pair.order.plate_serial
-            or pair.order.front_plate_serial
-            or pair.order.rear_plate_serial
-            or "—"
-        ) if pair.order else "—"
-        tracker_line = (
-            pair.order.tracker_id
-            or pair.order.gps_tracker_id
-            or "—"
-        ) if pair.order else "—"
+        serial_line = escape(
+            (
+                pair.order.plate_serial
+                or pair.order.front_plate_serial
+                or pair.order.rear_plate_serial
+                or "—"
+            ) if pair.order else "—"
+        )
+        tracker_line = escape(
+            (
+                pair.order.tracker_id
+                or pair.order.gps_tracker_id
+                or "—"
+            ) if pair.order else "—"
+        )
         front = pair.front_image
         rear = pair.rear_image
         status_color = STATUS_STYLE.get(pair.verification_status, "white")
 
         from core.services.camera_naming import parse_camera_filename
 
-        front_file = front.vault_file if front else "[red]MISSING[/red]"
+        front_file = escape(front.vault_file) if front else "[red]MISSING[/red]"
         front_ocr = round(front.ocr_confidence, 3) if front and front.ocr_confidence is not None else "N/A"
         front_orient = front.orientation if front else "—"
         front_conf = f"({round(front.orientation_confidence, 2)})" if front and front.orientation_confidence is not None else ""
-        front_cam = f" [cyan]({parse_camera_filename(front.original_source_path or front.vault_file).display_tag})[/cyan]" if front else ""
+        front_cam = f" [cyan]({escape(parse_camera_filename(front.original_source_path or front.vault_file).display_tag)})[/cyan]" if front else ""
 
-        rear_file = rear.vault_file if rear else "[red]MISSING[/red]"
+        rear_file = escape(rear.vault_file) if rear else "[red]MISSING[/red]"
         rear_ocr = round(rear.ocr_confidence, 3) if rear and rear.ocr_confidence is not None else "N/A"
         rear_orient = rear.orientation if rear else "—"
         rear_conf = f"({round(rear.orientation_confidence, 2)})" if rear and rear.orientation_confidence is not None else ""
-        rear_cam = f" [cyan]({parse_camera_filename(rear.original_source_path or rear.vault_file).display_tag})[/cyan]" if rear else ""
+        rear_cam = f" [cyan]({escape(parse_camera_filename(rear.original_source_path or rear.vault_file).display_tag)})[/cyan]" if rear else ""
 
         category_badge = "—"
         latest_audit = pair.audit_logs.filter(message__icontains="Category:").first()
@@ -78,7 +83,7 @@ class InspectorPane(Static):
         matched_via_tag = getattr(pair, "matched_via", "VISION")
         override_tag = " [bold cyan](Manual Operator Override)[/bold cyan]" if getattr(pair, "is_manual_override", False) else ""
 
-        account_str = pair.account_email or (pair.order.account_email if pair.order else "") or "[dim]Unassigned[/dim]"
+        account_str = escape(pair.account_email or (pair.order.account_email if pair.order else "") or "Unassigned")
 
         batch = (
             getattr(front, "batch", None)
@@ -96,13 +101,13 @@ class InspectorPane(Static):
                 tag = "[green]● TODAY (Shift)[/green]"
             else:
                 tag = f"[yellow]⏳ PRIOR DAY ({batch.created_at.strftime('%Y-%m-%d')})[/yellow]"
-            batch_line = f"{batch.batch_id} ({batch.source_label or 'Batch'}) — {tag}"
+            batch_line = f"{escape(batch.batch_id)} ({escape(batch.source_label or 'Batch')}) — {tag}"
         else:
             batch_line = "[dim]No batch associated[/dim]"
 
         lines = [
             f"[b cyan]═══ Pair Inspector ═══[/b cyan]",
-            f"[b]Detected Plate:[/b] [bold yellow]{pair.registration_number_detected}[/bold yellow]{override_tag}",
+            f"[b]Detected Plate:[/b] [bold yellow]{escape(pair.registration_number_detected or '—')}[/bold yellow]{override_tag}",
             f"[b]Batch Origin:[/b]   {batch_line}",
             f"[b]ITMS Account:[/b]   [bold green]{account_str}[/bold green]",
             f"[b]Vehicle Class:[/b]  {category_badge}",
@@ -112,12 +117,12 @@ class InspectorPane(Static):
         if pair.verification_status == VehicleInstallationPair.VerificationStatus.FAILED:
             latest_fail = pair.audit_logs.filter(result=SubmissionAuditLog.ResultStatus.FAILURE).first()
             if latest_fail:
-                fail_msg = latest_fail.message[:75] + ("..." if len(latest_fail.message) > 75 else "")
+                fail_msg = escape(latest_fail.message[:75] + ("..." if len(latest_fail.message) > 75 else ""))
                 lines.append(f"[b]Failure Reason:[/b] [bold red]{fail_msg}[/bold red]")
 
         lines.extend([
-            f"[b]Match Quality:[/b]  {pair.match_type} (score: {pair.match_score if pair.match_score is not None else 'N/A'}, via: [cyan]{matched_via_tag}[/cyan])",
-            f"[b]Pairing Reason:[/b] [cyan]{pair.operator_note or '—'}[/cyan]",
+            f"[b]Match Quality:[/b]  {escape(str(pair.match_type))} (score: {pair.match_score if pair.match_score is not None else 'N/A'}, via: [cyan]{escape(str(matched_via_tag))}[/cyan])",
+            f"[b]Pairing Reason:[/b] [cyan]{escape(pair.operator_note or '—')}[/cyan]",
             f"[b]Matched Order:[/b]  {order_line}",
             f"[b]Plate Serial:[/b]   {serial_line}  │  [b]Tracker ID:[/b] {tracker_line}",
             "",
@@ -149,8 +154,8 @@ class InspectorPane(Static):
 
         logs = list(pair.audit_logs.all().order_by("-timestamp")[:10])
         lines = [
-            f"[b cyan]═══ Audit Trail: {pair.registration_number_detected} ═══[/b cyan]",
-            f"[b]Status:[/b] {pair.verification_status}  │  [b]Order:[/b] {pair.order.order_number if pair.order else '—'}",
+            f"[b cyan]═══ Audit Trail: {escape(pair.registration_number_detected or '—')} ═══[/b cyan]",
+            f"[b]Status:[/b] {pair.verification_status}  │  [b]Order:[/b] {escape(pair.order.order_number) if pair.order else '—'}",
             f"[b]Submitted At:[/b] {pair.submitted_at.strftime('%Y-%m-%d %H:%M:%S') if pair.submitted_at else 'Not Submitted'}",
             "",
             "[b underline]Recent Audit Log Entries:[/b underline]",
@@ -162,10 +167,10 @@ class InspectorPane(Static):
             for log in logs:
                 result_color = "green" if log.result == "SUCCESS" else "red" if log.result == "FAILURE" else "cyan"
                 time_str = log.timestamp.strftime("%H:%M:%S")
-                token_str = f" (token: {log.simulated_token[:10]}...)" if log.simulated_token else ""
-                lines.append(f"• [{time_str}] [b]{log.action}[/b] -> [{result_color}]{log.result}[/{result_color}]{token_str}")
+                token_str = f" (token: {escape(log.simulated_token[:10])}...)" if log.simulated_token else ""
+                lines.append(f"• \\[{time_str}\\] [b]{escape(log.action)}[/b] -> [{result_color}]{escape(log.result)}[/{result_color}]{token_str}")
                 if log.message:
-                    lines.append(f"  [dim]{log.message}[/dim]")
+                    lines.append(f"  [dim]{escape(log.message)}[/dim]")
 
         self.update("\n".join(lines))
 
@@ -184,8 +189,8 @@ class InspectorPane(Static):
 
         lines = [
             f"[b cyan]═══ Batch Overview ═══[/b cyan]",
-            f"[b]Batch ID:[/b]        [bold yellow]{batch.batch_id}[/bold yellow]",
-            f"[b]Source Channel:[/b]   {batch.source_type} ({batch.source_label or 'None'})",
+            f"[b]Batch ID:[/b]        [bold yellow]{escape(batch.batch_id)}[/bold yellow]",
+            f"[b]Source Channel:[/b]   {escape(batch.source_type)} ({escape(batch.source_label or 'None')})",
             f"[b]Created At:[/b]       {batch.created_at.strftime('%Y-%m-%d %H:%M:%S')}",
             f"[b]Files Ingested:[/b]   {batch.ingested_count} / {batch.total_files} ({batch.duplicate_count} skipped, {batch.failed_count} failed)",
             "",
@@ -224,7 +229,7 @@ class InspectorPane(Static):
         }.get(image.status, "white")
 
         raw_path = image.original_source_path or image.vault_file or "unknown_photo"
-        filename = os.path.basename(raw_path) if raw_path else "unknown_photo"
+        filename = escape(os.path.basename(raw_path) if raw_path else "unknown_photo")
         size_kb = round(image.file_size_bytes / 1024.0, 1) if image.file_size_bytes else 0
 
         # Ugandan syntax check
@@ -244,9 +249,9 @@ class InspectorPane(Static):
             try:
                 x1, y1, x2, y2 = [int(float(v)) for v in image.bbox]
                 w_px, h_px = x2 - x1, y2 - y1
-                bbox_str = f"[{x1}, {y1}, {x2}, {y2}]  ({w_px}×{h_px} px)"
+                bbox_str = f"\\[{x1}, {y1}, {x2}, {y2}\\]  ({w_px}×{h_px} px)"
             except Exception:
-                bbox_str = f"{image.bbox}"
+                bbox_str = escape(str(image.bbox))
         else:
             bbox_str = "[dim]None (No plate candidate localized)[/dim]"
 
@@ -257,7 +262,7 @@ class InspectorPane(Static):
         lines = [
             f"[b cyan]═══ Vision Analysis: {filename[:28]} ═══[/b cyan]",
             f"[b]Status:[/b]         [{status_style}]{image.status}[/{status_style}]",
-            f"[b]Detected Plate:[/b] [bold yellow]{image.detected_plate or '—'}[/bold yellow]{syntax_info}",
+            f"[b]Detected Plate:[/b] [bold yellow]{escape(image.detected_plate or '—')}[/bold yellow]{syntax_info}",
             "",
             "[b underline]Vision Pipeline Breakdown[/b underline]:",
             f" [b]OCR Confidence:[/b]     {ocr_str}",
@@ -271,7 +276,7 @@ class InspectorPane(Static):
         ]
 
         if image.error_message:
-            lines.append(f" [yellow]{image.error_message}[/yellow]")
+            lines.append(f" [yellow]{escape(image.error_message)}[/yellow]")
         elif image.status == EvidenceImage.Status.PLATE_DETECTED:
             if is_syntax_valid:
                 lines.append(" [green]Plate recognized and validated against Uganda plate grammar.[/green]")
@@ -290,8 +295,8 @@ class InspectorPane(Static):
             "",
             "[b underline]File Information[/b underline]:",
             f" [b]Image ID:[/b]   {str(image.id)[:16]}...",
-            f" [b]Vault File:[/b] {image.vault_file}",
-            f" [b]Camera Origin:[/b] [cyan]{cam_str}[/cyan]",
+            f" [b]Vault File:[/b] {escape(image.vault_file or '—')}",
+            f" [b]Camera Origin:[/b] [cyan]{escape(cam_str)}[/cyan]",
             f" [b]File Size:[/b]  {size_kb} KB" + (" [red](PRUNED)[/red]" if image.is_file_pruned else ""),
             "",
             "[b]Quick Actions:[/b]",
@@ -311,21 +316,22 @@ class InspectorPane(Static):
             )
             return
 
-        order_num = order.get("order_number", "N/A")
-        plate = order.get("registration_number", "N/A")
-        vin = order.get("vin", "N/A")
+        order_num = escape(str(order.get("order_number", "N/A")))
+        plate = escape(str(order.get("registration_number", "N/A")))
+        vin = escape(str(order.get("vin", "N/A")))
         status = order.get("order_status") or order.get("status", "N/A")
-        reg_status = order.get("registration_status", "Active" if is_archive else "—")
-        officer = order.get("officer") or order.get("installation_officer", "N/A")
-        date_str = order.get("installation_date", "N/A")
-        warehouse = order.get("warehouse", "N/A")
-        sales_order = order.get("sales_order", "N/A")
+        reg_status = escape(str(order.get("registration_status", "Active" if is_archive else "—")))
+        officer = escape(str(order.get("officer") or order.get("installation_officer", "N/A")))
+        date_str = escape(str(order.get("installation_date", "N/A")))
+        warehouse = escape(str(order.get("warehouse", "N/A")))
+        sales_order = escape(str(order.get("sales_order", "N/A")))
+        account_email = escape(str(order.get('account_email') or 'Active Session'))
 
-        status_str = str(status or "N/A")
+        status_str = escape(str(status or "N/A"))
         status_color = "bold green" if "installed" in status_str.lower() else "yellow"
 
         vault_root = getattr(settings, "VAULT_ROOT", "media/vault")
-        order_dir = os.path.join(vault_root, "itms_photos", order_num)
+        order_dir = os.path.join(vault_root, "itms_photos", str(order.get("order_number", "")))
         has_local_vault = os.path.isdir(order_dir)
         vault_status = "[bold green]✓ Downloaded in Vault[/bold green]" if has_local_vault else "[dim]Not downloaded[/dim]"
 
@@ -334,12 +340,12 @@ class InspectorPane(Static):
             f"[b]Order #:[/b]        [bold white]#{order_num}[/bold white]",
             f"[b]Registration:[/b]   [bold green]{plate}[/bold green]",
             f"[b]Chassis / VIN:[/b]  {vin}",
-            f"[b]Linked Account:[/b] [bold green]{order.get('account_email') or 'Active Session'}[/bold green]",
+            f"[b]Linked Account:[/b] [bold green]{account_email}[/bold green]",
             f"[b]Order Status:[/b]   [{status_color}]{status_str}[/{status_color}]",
             f"[b]Reg Status:[/b]     {reg_status}",
             f"[b]Officer:[/b]        {officer}",
             f"[b]Install Date:[/b]   {date_str}",
-            f"[b]Warehouse:[/b]      {str(warehouse or 'N/A')[:32]}",
+            f"[b]Warehouse:[/b]      {warehouse[:32]}",
             f"[b]Sales Order:[/b]    {sales_order}",
             "",
             "[b underline]Photographic Evidence & Vault[/b underline]:",

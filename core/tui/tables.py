@@ -1,5 +1,6 @@
 import os
 from typing import Optional
+from rich.markup import escape
 from textual.widgets import DataTable, Static
 from core.models import (
     EvidenceImage,
@@ -221,8 +222,8 @@ class TableLoaderMixin:
             table.add_row(
                 str(pair.id)[:8],
                 batch_display,
-                pair.registration_number_detected,
-                pair.order.order_number if pair.order else "—",
+                escape(pair.registration_number_detected or "—"),
+                escape(pair.order.order_number) if pair.order else "—",
                 match_display,
                 score_str,
                 f"[{style}]{pair.verification_status}[/{style}]",
@@ -267,15 +268,15 @@ class TableLoaderMixin:
                 logs = logs.filter(timestamp__date=today)
 
             for log in logs[:100]:
-                plate = log.pair.registration_number_detected if log.pair else "—"
+                plate = escape(log.pair.registration_number_detected) if log.pair else "—"
                 res_color = "green" if log.result == "SUCCESS" else "red" if log.result == "FAILURE" else "yellow"
                 table.add_row(
                     log.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
                     plate,
-                    log.action,
-                    f"[{res_color}]{log.result}[/{res_color}]",
-                    (log.message[:45] + "...") if len(log.message) > 45 else log.message,
-                    (log.simulated_token[:12] + "...") if log.simulated_token else "—",
+                    escape(log.action),
+                    f"[{res_color}]{escape(log.result)}[/{res_color}]",
+                    escape((log.message[:45] + "...") if len(log.message) > 45 else log.message),
+                    escape((log.simulated_token[:12] + "...") if log.simulated_token else "—"),
                     key=str(log.id),
                 )
         else:
@@ -306,8 +307,8 @@ class TableLoaderMixin:
 
                 table.add_row(
                     str(pair.id)[:8],
-                    pair.registration_number_detected,
-                    pair.order.order_number if pair.order else "—",
+                    escape(pair.registration_number_detected or "—"),
+                    escape(pair.order.order_number) if pair.order else "—",
                     f"[{style}]{pair.verification_status}[/{style}]",
                     sub_at,
                     upd_at,
@@ -353,9 +354,9 @@ class TableLoaderMixin:
                 created_display = f"[yellow]{b.created_at.strftime('%Y-%m-%d %H:%M')}[/yellow]"
 
             table.add_row(
-                b.batch_id,
-                b.source_type,
-                b.source_label or "—",
+                escape(b.batch_id),
+                escape(b.source_type),
+                escape(b.source_label or "—"),
                 str(b.total_files),
                 f"[green]{b.ingested_count}[/green]",
                 f"[yellow]{b.duplicate_count}[/yellow]",
@@ -393,8 +394,8 @@ class TableLoaderMixin:
                 EvidenceImage.Status.SUBMITTED: "blue",
             }.get(img.status, "white")
 
-            filename = os.path.basename(img.original_source_path or img.vault_file)
-            plate_disp = f"[bold yellow]{img.detected_plate}[/bold yellow]" if img.detected_plate else "[dim]—[/dim]"
+            filename = escape(os.path.basename(img.original_source_path or img.vault_file))
+            plate_disp = f"[bold yellow]{escape(img.detected_plate)}[/bold yellow]" if img.detected_plate else "[dim]—[/dim]"
             ocr_disp = f"{round(img.ocr_confidence, 2)}" if img.ocr_confidence is not None else "—"
             det_disp = f"{round(img.detector_confidence, 2)}" if img.detector_confidence is not None else "—"
 
@@ -403,7 +404,7 @@ class TableLoaderMixin:
             orient_conf_disp = f"{round(img.orientation_confidence, 2)}" if img.orientation_confidence is not None else "—"
 
             if img.bbox and len(img.bbox) == 4:
-                bbox_disp = f"[{img.bbox[0]},{img.bbox[1]},{img.bbox[2]},{img.bbox[3]}]"
+                bbox_disp = f"\\[{img.bbox[0]},{img.bbox[1]},{img.bbox[2]},{img.bbox[3]}\\]"
             else:
                 bbox_disp = "—"
 

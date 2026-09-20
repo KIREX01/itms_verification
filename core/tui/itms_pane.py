@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -934,25 +935,25 @@ class ITMSConnectionPane(Vertical):
             photos = res.get("photos", [])
 
             # Rich Table formatting
-            table = Table(title=f"📋 ITMS Order Details: #{order_num}", show_header=True, header_style="bold cyan")
+            table = Table(title=f"📋 ITMS Order Details: #{escape(str(order_num))}", show_header=True, header_style="bold cyan")
             table.add_column("Category", style="bold white", width=22)
             table.add_column("Details / Inventory", style="green")
 
-            table.add_row("Order Number", f"[bold white]#{order_num}[/bold white]")
-            table.add_row("Registration Plate", f"[bold green]{res.get('registration_number', 'N/A')}[/bold green]")
-            table.add_row("Chassis / VIN", res.get("vin", "N/A"))
-            table.add_row("Installed By", res.get("installed_by", "N/A"))
-            table.add_row("Warehouse", res.get("warehouse", "N/A"))
-            table.add_row("Front Plate", f"Type: {front_p.get('type', 'N/A')} │ Barcode/Serial: [bold yellow]{front_p.get('serial', 'N/A')}[/bold yellow]")
-            table.add_row("Rear Plate", f"Type: {rear_p.get('type', 'N/A')} │ Barcode/Serial: [bold yellow]{rear_p.get('serial', 'N/A')}[/bold yellow]")
-            table.add_row("GPS Tracker", f"Type: {gps_t.get('type', 'GPS')} │ ID: [cyan]{gps_t.get('device_id', 'N/A')}[/cyan]")
-            table.add_row("Front Beacon", f"Type: {front_b.get('type', 'BLE')} │ ID: [cyan]{front_b.get('device_id', 'N/A')}[/cyan]")
-            table.add_row("Rear Beacon", f"Type: {rear_b.get('type', 'BLE')} │ ID: [cyan]{rear_b.get('device_id', 'N/A')}[/cyan]")
+            table.add_row("Order Number", f"[bold white]#{escape(str(order_num))}[/bold white]")
+            table.add_row("Registration Plate", f"[bold green]{escape(str(res.get('registration_number', 'N/A')))}[/bold green]")
+            table.add_row("Chassis / VIN", escape(str(res.get("vin", "N/A"))))
+            table.add_row("Installed By", escape(str(res.get("installed_by", "N/A"))))
+            table.add_row("Warehouse", escape(str(res.get("warehouse", "N/A"))))
+            table.add_row("Front Plate", f"Type: {escape(str(front_p.get('type', 'N/A')))} │ Barcode/Serial: [bold yellow]{escape(str(front_p.get('serial', 'N/A')))}[/bold yellow]")
+            table.add_row("Rear Plate", f"Type: {escape(str(rear_p.get('type', 'N/A')))} │ Barcode/Serial: [bold yellow]{escape(str(rear_p.get('serial', 'N/A')))}[/bold yellow]")
+            table.add_row("GPS Tracker", f"Type: {escape(str(gps_t.get('type', 'GPS')))} │ ID: [cyan]{escape(str(gps_t.get('device_id', 'N/A')))}[/cyan]")
+            table.add_row("Front Beacon", f"Type: {escape(str(front_b.get('type', 'BLE')))} │ ID: [cyan]{escape(str(front_b.get('device_id', 'N/A')))}[/cyan]")
+            table.add_row("Rear Beacon", f"Type: {escape(str(rear_b.get('type', 'BLE')))} │ ID: [cyan]{escape(str(rear_b.get('device_id', 'N/A')))}[/cyan]")
 
             if photos:
                 for idx, p in enumerate(photos, 1):
-                    loc = f"\n  ↳ [bold green]Saved locally:[/bold green] {p['local_path']} ({p.get('bytes', 0)} bytes, SHA-256: {p.get('sha256', '')[:12]}...)" if p.get("local_path") else ""
-                    table.add_row(f"Photo [{idx}] {p.get('label')}", f"{p.get('url')}{loc}")
+                    loc = f"\n  ↳ [bold green]Saved locally:[/bold green] {escape(str(p['local_path']))} ({p.get('bytes', 0)} bytes, SHA-256: {escape(str(p.get('sha256', '')[:12]))}...)" if p.get("local_path") else ""
+                    table.add_row(f"Photo \\[{idx}\\] {escape(str(p.get('label', '')))}", f"{escape(str(p.get('url', '')))}{loc}")
             else:
                 table.add_row("Photos", "[dim]No photos attached to this order[/dim]")
 

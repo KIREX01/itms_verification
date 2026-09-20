@@ -4,6 +4,7 @@ Modal dialog screens for the ITMS Operator TUI.
 import os
 from typing import Dict, List, Optional
 from django.conf import settings
+from rich.markup import escape
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -69,8 +70,8 @@ class PhotoLinkerModal(ModalScreen[Optional[Dict]]):
 
         header_lines = [
             f"[bold cyan]═══ Closest Photo Linker ═══[/bold cyan]",
-            f"[b]Active Pair:[/b] [bold yellow]{self.pair.registration_number_detected}[/bold yellow]  │  "
-            f"[b]Anchor Photo:[/b] [b]{t_file}[/b] ([bold green]{t_orient}[/bold green], Plate: {t_plate}, [cyan]{t_sig.display_tag}[/cyan])  │  "
+            f"[b]Active Pair:[/b] [bold yellow]{escape(self.pair.registration_number_detected or '—')}[/bold yellow]  │  "
+            f"[b]Anchor Photo:[/b] [b]{escape(t_file)}[/b] ([bold green]{t_orient}[/bold green], Plate: {escape(t_plate)}, [cyan]{escape(t_sig.display_tag)}[/cyan])  │  "
             f"[b]Captured:[/b] {t_time}",
             "[dim]Select a candidate photo to link with this motorcycle. "
             "Press [b green]Enter[/b green] to link, [b cyan]V[/b cyan] to preview candidate photo, or [1-9] for quick select.[/dim]",
@@ -98,11 +99,11 @@ class PhotoLinkerModal(ModalScreen[Optional[Dict]]):
         for idx, cand in enumerate(self.candidates):
             table.add_row(
                 f"#{idx + 1}",
-                cand["filename"],
-                cand.get("camera_tag", "—"),
-                cand["plate"],
+                escape(cand["filename"]),
+                escape(cand.get("camera_tag", "—")),
+                escape(cand["plate"]),
                 cand["orientation"],
-                cand["time_diff_display"],
+                escape(cand["time_diff_display"]),
                 f"{cand['similarity_pct']}%",
                 str(cand["score"]),
             )
@@ -206,8 +207,8 @@ class PlateQuickEntryModal(ModalScreen[Optional[Dict]]):
         header_lines = [
             "[bold cyan]═══ Quick Plate & Order Matcher ═══[/bold cyan]",
             f"[b]Pair ID:[/b] [bold yellow]{str(p.id)[:8]}[/bold yellow]  │  "
-            f"[b]Current Tag:[/b] [bold white]{current_tag}[/bold white]  │  "
-            f"[b]Front:[/b] [green]{f_file}[/green]  │  [b]Rear:[/b] [green]{r_file}[/green]",
+            f"[b]Current Tag:[/b] [bold white]{escape(current_tag)}[/bold white]  │  "
+            f"[b]Front:[/b] [green]{escape(f_file)}[/green]  │  [b]Rear:[/b] [green]{escape(r_file)}[/green]",
             "[dim]Type the plate number below, or select from active ITMS orders. "
             "Press [bold green]Enter[/bold green] to apply & approve, [bold cyan]Tab[/bold cyan] to auto-complete, [bold cyan]V[/bold cyan] to preview photos side-by-side, or [bold red]Esc[/bold red] to cancel.[/dim]",
         ]
@@ -264,11 +265,11 @@ class PlateQuickEntryModal(ModalScreen[Optional[Dict]]):
         for idx, o in enumerate(self._filtered_orders):
             stage_str = o.itms_stage or o.order_status or "Pending"
             table.add_row(
-                o.order_number,
-                f"[bold green]{o.registration_number}[/bold green]",
-                o.vin or "—",
-                stage_str,
-                o.warehouse_name[:25] if o.warehouse_name else "—",
+                escape(o.order_number),
+                f"[bold green]{escape(o.registration_number)}[/bold green]",
+                escape(o.vin or "—"),
+                escape(stage_str),
+                escape(o.warehouse_name[:25] if o.warehouse_name else "—"),
                 key=str(idx),
             )
         if self._filtered_orders and len(self._filtered_orders) > 0:
@@ -288,8 +289,8 @@ class PlateQuickEntryModal(ModalScreen[Optional[Dict]]):
             stage_str = top.itms_stage or top.order_status or "Active"
             label.update(
                 f"[bold white]Active ITMS Orders:[/bold white] "
-                f"[bold green]Top Match → {top.registration_number}[/bold green] "
-                f"[cyan]({top.order_number} │ {stage_str})[/cyan] "
+                f"[bold green]Top Match → {escape(top.registration_number)}[/bold green] "
+                f"[cyan]({escape(top.order_number)} │ {escape(stage_str)})[/cyan] "
                 f"[dim]— Press [bold green]Enter[/bold green] or [bold cyan]Tab[/bold cyan] to select[/dim]"
             )
         else:
@@ -578,18 +579,18 @@ class SingleOrderSubmissionModal(ModalScreen[Optional[Dict]]):
 
         front = p.front_image
         rear = p.rear_image
-        front_file = os.path.basename(front.vault_file) if (front and front.vault_file) else "[red]Missing[/red]"
-        rear_file = os.path.basename(rear.vault_file) if (rear and rear.vault_file) else "[red]Missing[/red]"
+        front_file = escape(os.path.basename(front.vault_file)) if (front and front.vault_file) else "[red]Missing[/red]"
+        rear_file = escape(os.path.basename(rear.vault_file)) if (rear and rear.vault_file) else "[red]Missing[/red]"
 
         front_conf = f"{round(front.ocr_confidence, 2)}" if front and front.ocr_confidence else "—"
         rear_conf = f"{round(rear.ocr_confidence, 2)}" if rear and rear.ocr_confidence else "—"
 
         return (
             f"[bold white]Vehicle & Order Identification:[/bold white]\n"
-            f"  • [b]Confirmed Plate:[/b]     [bold yellow]{plate}[/bold yellow] ([cyan]Matched via {matched_via}[/cyan])\n"
-            f"  • [b]ITMS Order #:[/b]        [bold cyan]{order_num}[/bold cyan]\n"
-            f"  • [b]Chassis / VIN:[/b]       {vin}\n"
-            f"  • [b]Current ITMS Stage:[/b]  [green]{stage}[/green]\n\n"
+            f"  • [b]Confirmed Plate:[/b]     [bold yellow]{escape(plate)}[/bold yellow] ([cyan]Matched via {escape(str(matched_via))}[/cyan])\n"
+            f"  • [b]ITMS Order #:[/b]        [bold cyan]{escape(order_num)}[/bold cyan]\n"
+            f"  • [b]Chassis / VIN:[/b]       {escape(vin)}\n"
+            f"  • [b]Current ITMS Stage:[/b]  [green]{escape(stage)}[/green]\n\n"
             f"[bold white]Photographic Evidence Confirmation:[/bold white]\n"
             f"  • [b]Front Plate Photo:[/b]   [green]{front_file}[/green] (OCR Conf: {front_conf}, Orient: {front.orientation if front else '—'})\n"
             f"  • [b]Rear Plate Photo:[/b]    [green]{rear_file}[/green] (OCR Conf: {rear_conf}, Orient: {rear.orientation if rear else '—'})\n"
@@ -844,19 +845,19 @@ class BatchSubmissionModal(ModalScreen[Optional[Dict]]):
         table.cursor_type = "row"
 
         for idx, p in enumerate(self.pairs, 1):
-            f_file = os.path.basename(p.front_image.vault_file) if (p.front_image and p.front_image.vault_file) else "Missing"
-            r_file = os.path.basename(p.rear_image.vault_file) if (p.rear_image and p.rear_image.vault_file) else "Missing"
+            f_file = escape(os.path.basename(p.front_image.vault_file)) if (p.front_image and p.front_image.vault_file) else "Missing"
+            r_file = escape(os.path.basename(p.rear_image.vault_file)) if (p.rear_image and p.rear_image.vault_file) else "Missing"
             comp_badge = "[bold green]✓ Ready[/bold green]" if p.is_complete else "[bold red]✗ Incomplete[/bold red]"
             method = getattr(p, "matched_via", "VISION")
 
             table.add_row(
                 f"#{idx}",
-                f"[bold yellow]{p.registration_number_detected}[/bold yellow]",
-                p.order.order_number if p.order else "—",
+                f"[bold yellow]{escape(p.registration_number_detected or '—')}[/bold yellow]",
+                escape(p.order.order_number) if p.order else "—",
                 f_file,
                 r_file,
                 comp_badge,
-                method,
+                escape(str(method)),
                 key=str(p.id),
             )
 
@@ -1009,11 +1010,11 @@ class BatchProgressModal(ModalScreen[None]):
             title = self.query_one("#batch-progress-title", Static)
             title.update(
                 f"[bold cyan][{current_idx}/{self.total_orders}][/bold cyan] "
-                f"Plate: [bold yellow]{plate}[/bold yellow]  (Order #{order_num})"
+                f"Plate: [bold yellow]{escape(plate)}[/bold yellow]  (Order #{escape(order_num)})"
             )
 
             step = self.query_one("#batch-progress-step", Static)
-            step.update(step_detail)
+            step.update(escape(step_detail))
 
             stats = self.query_one("#batch-progress-stats", Static)
             rem = max(0, self.total_orders - (succeeded + failed))
@@ -1035,7 +1036,7 @@ class BatchProgressModal(ModalScreen[None]):
             title.update("[bold green]═══ Batch ITMS Submission Complete ═══[/bold green]")
 
             step = self.query_one("#batch-progress-step", Static)
-            step.update(message or f"Completed {succeeded} of {self.total_orders} orders successfully.")
+            step.update(escape(message) if message else f"Completed {succeeded} of {self.total_orders} orders successfully.")
 
             stats = self.query_one("#batch-progress-stats", Static)
             stats.update(
@@ -1107,7 +1108,7 @@ class VaultLocationDialog(ModalScreen[Optional[str]]):
         header_lines = [
             "[bold cyan]═══ 📦 Evidence Vault Storage Location ═══[/bold cyan]",
             "The Evidence Vault stores all incoming motorcycle evidence photos, EXIF metadata, timestamps, and hashes.",
-            f"Active Vault Root: [bold yellow]{vault_service.get_vault_root()}[/bold yellow]",
+            f"Active Vault Root: [bold yellow]{escape(str(vault_service.get_vault_root()))}[/bold yellow]",
             "[dim]Choose your desired vault folder below, or keep the default (media/vault).[/dim]",
         ]
 

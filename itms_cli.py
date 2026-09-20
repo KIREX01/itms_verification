@@ -15,6 +15,7 @@ Usage:
   itms --help, -h     Show this command guide
 """
 import os
+import signal
 import sys
 from pathlib import Path
 
@@ -230,7 +231,6 @@ def stop_server(extra_args=None):
                 import subprocess
                 subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, check=False)
             else:
-                import os, signal
                 try:
                     os.kill(pid, signal.SIGTERM)
                 except ProcessLookupError:
@@ -405,7 +405,7 @@ def main():
             from core.version import __version__
             print(f"ITMS Verification Copilot v{__version__}")
         except Exception:
-            print("ITMS Verification Copilot v1.0.4")
+            print("ITMS Verification Copilot v1.0.5")
         return
 
     if first in ("start", "--daemon", "--bg", "-bg", "bg", "daemon"):

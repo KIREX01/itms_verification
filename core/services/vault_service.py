@@ -8,6 +8,7 @@ Handles:
 - Tracking batch-level metrics (total, ingested, duplicate, failed)
 """
 import hashlib
+import logging
 import os
 import shutil
 import uuid
@@ -20,6 +21,8 @@ from django.utils import timezone
 
 from core.models import EvidenceImage, IngestionBatch
 from core.vision.plate_enhancer import enhance_whole_image
+
+logger = logging.getLogger(__name__)
 
 VALID_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
 HASH_CHUNK_SIZE = 1024 * 1024
@@ -52,7 +55,7 @@ def get_vault_root() -> Path:
     """
     from core.services import config_service
     configured_path = config_service.get_setting("storage.vault_path", None)
-    if configured_path and configured_path not in ("media/vault", "media\\vault"):
+    if configured_path and isinstance(configured_path, (str, Path)) and configured_path not in ("media/vault", "media\\vault"):
         p = Path(configured_path)
         if not p.is_absolute():
             base = getattr(settings, "BASE_DIR", None) or Path(__file__).resolve().parent.parent.parent
@@ -229,6 +232,75 @@ def extract_exif_timestamp(path: Union[str, Path]) -> Optional[datetime]:
         return None
 
 
+def generate_thumbnails(vault_abs_path: Union[str, Path]) -> Tuple[str, str]:
+    """Generates small (160x120) and medium (640x480) WebP thumbnails for an image in the vault.
+    Returns: (thumb_relative_path, preview_relative_path)
+    """
+    from PIL import Image
+    src_path = Path(vault_abs_path)
+    if not src_path.is_file():
+        return "", ""
+
+    target_dir = src_path.parent
+    stem = src_path.stem
+    thumb_path = target_dir / f"{stem}_sm.webp"
+    preview_path = target_dir / f"{stem}_md.webp"
+
+    try:
+        with Image.open(src_path) as img:
+            if img.mode in ("RGBA", "LA", "P"):
+                rgb_img = img.convert("RGB")
+            else:
+                rgb_img = img
+
+            # 1. Medium Preview (640x480 max bounds)
+            if not preview_path.exists():
+                preview = rgb_img.copy()
+                preview.thumbnail((640, 480), Image.Resampling.LANCZOS)
+                preview.save(preview_path, format="WEBP", quality=80, method=4)
+
+            # 2. Small Thumbnail (160x120 max bounds)
+            if not thumb_path.exists():
+                thumb = rgb_img.copy()
+                thumb.thumbnail((160, 120), Image.Resampling.BILINEAR)
+                thumb.save(thumb_path, format="WEBP", quality=75, method=2)
+
+        try:
+            thumb_rel = str(thumb_path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
+        except ValueError:
+            thumb_rel = str(thumb_path.resolve()).replace("\\", "/")
+
+        try:
+            preview_rel = str(preview_path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
+        except ValueError:
+            preview_rel = str(preview_path.resolve()).replace("\\", "/")
+
+        return thumb_rel, preview_rel
+    except Exception as exc:
+        logger.warning("Failed to generate thumbnails for %s: %s", src_path, exc)
+        return "", ""
+
+
+def ensure_image_thumbnails(image: EvidenceImage) -> Tuple[str, str]:
+    """Ensures thumbnail_file and preview_file exist for the given EvidenceImage. Generates if missing."""
+    if image.thumbnail_file and image.preview_file:
+        return image.thumbnail_file, image.preview_file
+    abs_path = resolve_vault_path(image.vault_file)
+    if not abs_path.is_file():
+        return "", ""
+    thumb_rel, preview_rel = generate_thumbnails(abs_path)
+    update_fields = []
+    if thumb_rel and not image.thumbnail_file:
+        image.thumbnail_file = thumb_rel
+        update_fields.append("thumbnail_file")
+    if preview_rel and not image.preview_file:
+        image.preview_file = preview_rel
+        update_fields.append("preview_file")
+    if update_fields:
+        image.save(update_fields=update_fields)
+    return image.thumbnail_file, image.preview_file
+
+
 def ingest_from_disk(
     path: Union[str, Path],
     batch: Optional[IngestionBatch] = None,
@@ -282,6 +354,10 @@ def ingest_from_disk(
     # saturation boost, sharpness, brightness normalization.
     enhance_whole_image(str(vault_abs_path))
 
+    # Compute final SHA-256 cryptographic hash and file size of the immutable vault file
+    final_file_hash = hash_file_path(vault_abs_path)
+    final_size_bytes = vault_abs_path.stat().st_size
+
     try:
         vault_relative = str(vault_abs_path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
     except ValueError:
@@ -298,13 +374,16 @@ def ingest_from_disk(
         initial_orient_conf = 1.0 if folder_orient else None
 
     captured_at = extract_exif_timestamp(path)
+    thumb_rel, preview_rel = generate_thumbnails(vault_abs_path)
 
     image = EvidenceImage.objects.create(
         batch=batch,
-        file_hash=file_hash,
+        file_hash=final_file_hash,
         original_source_path=str(path),
         vault_file=vault_relative,
-        file_size_bytes=path.stat().st_size,
+        thumbnail_file=thumb_rel,
+        preview_file=preview_rel,
+        file_size_bytes=final_size_bytes,
         status=EvidenceImage.Status.NEW,
         folder_orientation=folder_orient,
         orientation=initial_orient,
@@ -376,6 +455,10 @@ def ingest_uploaded_file(
     # saturation boost, sharpness, brightness normalization.
     enhance_whole_image(str(vault_abs_path))
 
+    # Compute final SHA-256 cryptographic hash and file size of the immutable vault file
+    final_file_hash = hash_file_path(vault_abs_path)
+    final_size_bytes = vault_abs_path.stat().st_size
+
     try:
         vault_relative = str(vault_abs_path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
     except ValueError:
@@ -393,13 +476,16 @@ def ingest_uploaded_file(
 
     # Extract EXIF timestamp from the vaulted file
     captured_at = extract_exif_timestamp(vault_abs_path)
+    thumb_rel, preview_rel = generate_thumbnails(vault_abs_path)
 
     image = EvidenceImage.objects.create(
         batch=batch,
-        file_hash=file_hash,
+        file_hash=final_file_hash,
         original_source_path=name,
         vault_file=vault_relative,
-        file_size_bytes=vault_abs_path.stat().st_size,
+        thumbnail_file=thumb_rel,
+        preview_file=preview_rel,
+        file_size_bytes=final_size_bytes,
         status=EvidenceImage.Status.NEW,
         folder_orientation=folder_orient,
         orientation=initial_orient,

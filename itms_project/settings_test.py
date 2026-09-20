@@ -17,3 +17,4 @@ DATABASES = {
 # Failure injection off by default for deterministic tests
 ITMS_FAILURE_INJECTION_RATE = 0.0
 ITMS_SIMULATED_LATENCY_MS = 0
+TESTING = False

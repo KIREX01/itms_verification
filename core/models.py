@@ -12,6 +12,7 @@ Design notes
 """
 import uuid
 
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -180,6 +181,18 @@ class EvidenceImage(models.Model):
     vault_file = models.CharField(
         max_length=1024,
         help_text="Path (relative to MEDIA_ROOT) of the immutable vault copy.",
+    )
+    thumbnail_file = models.CharField(
+        max_length=1024,
+        blank=True,
+        default="",
+        help_text="Path (relative to MEDIA_ROOT) of 160x120 WebP thumbnail.",
+    )
+    preview_file = models.CharField(
+        max_length=1024,
+        blank=True,
+        default="",
+        help_text="Path (relative to MEDIA_ROOT) of 640x480 WebP preview.",
     )
     file_size_bytes = models.BigIntegerField(default=0)
 
@@ -367,8 +380,20 @@ class SubmissionAuditLog(models.Model):
         INFO = "INFO", "Info"
 
     pair = models.ForeignKey(
-        VehicleInstallationPair, on_delete=models.CASCADE, related_name="audit_logs"
+        VehicleInstallationPair,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="audit_logs",
     )
+    operator = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="audit_logs",
+    )
+    operator_username = models.CharField(max_length=150, blank=True, default="System")
     action = models.CharField(max_length=32, choices=Action.choices)
     result = models.CharField(max_length=8, choices=ResultStatus.choices)
     message = models.TextField(blank=True)

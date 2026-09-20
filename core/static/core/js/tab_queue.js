@@ -349,53 +349,146 @@ async function executePairAction(action) {
     }
 
     if (action === "approve") {
+        const pairIdToApprove = selectedPairId;
+        const pairObj = pairsData.find(p => p.id === pairIdToApprove);
+        const prevStatus = pairObj ? pairObj.verification_status : "PENDING_REVIEW";
         const plate = (selectedPairDetail ? selectedPairDetail.registration_number_detected : "") || "Pair";
-        const btnApprove = document.getElementById("btn-action-approve");
-        if (btnApprove) btnApprove.disabled = true;
 
         // Determine next pair to inspect before approving
         const currentFiltered = getFilteredQueuePairs();
-        const currentIdx = currentFiltered.findIndex(p => p.id === selectedPairId);
+        const currentIdx = currentFiltered.findIndex(p => p.id === pairIdToApprove);
         let nextPair = null;
         if (currentIdx !== -1 && currentIdx + 1 < currentFiltered.length) {
             nextPair = currentFiltered[currentIdx + 1];
-        } else if (currentFiltered.length > 1) {
+        } else if (currentFiltered.length > 1 && currentFiltered[0].id !== pairIdToApprove) {
             nextPair = currentFiltered[0];
         }
 
+        // --- Phase 5.1: Optimistic UI Auto-Advance (<10ms) ---
+        if (pairObj) {
+            pairObj.verification_status = "APPROVED";
+        }
+        if (selectedPairDetail && selectedPairDetail.id === pairIdToApprove) {
+            selectedPairDetail.verification_status = "APPROVED";
+            setText("qdetail-status", "APPROVED");
+        }
+
+        // Update queue approved counter & quick batch submit button optimistically
+        const approvedCount = pairsData.filter(p => p.verification_status === "APPROVED").length;
+        const approvedBtn = document.getElementById("btn-queue-batch-submit");
+        const approvedText = document.getElementById("queue-approved-count-text");
+        if (approvedBtn) {
+            approvedBtn.innerHTML = `🚀 Submit Approved (${approvedCount}) <span class="hotkey">B</span>`;
+            approvedBtn.disabled = (approvedCount === 0);
+            approvedBtn.style.opacity = approvedCount === 0 ? "0.6" : "1";
+            approvedBtn.style.cursor = approvedCount === 0 ? "not-allowed" : "pointer";
+        }
+        if (approvedText) {
+            approvedText.innerText = `${approvedCount} approved ready (${currentQueueDateScope || "TODAY"})`;
+        }
+        setText("kpi-approved", approvedCount);
+
+        // Immediate DOM update and auto-advance
+        renderQueueCards();
+        if (nextPair && nextPair.id !== pairIdToApprove) {
+            selectPair(nextPair.id);
+        } else {
+            const remaining = getFilteredQueuePairs();
+            if (remaining.length > 0) {
+                selectPair(remaining[0].id);
+            } else {
+                const approvedReady = pairsData.filter(p => p.verification_status === "APPROVED" && (p.order || p.order_number)).length;
+                if (approvedReady > 0) {
+                    showToast(`🎉 All pairs in queue approved! Ready to submit ${approvedReady} pair(s) to ITMS.`, "info");
+                }
+            }
+        }
+        showToast(`✓ Approved ${plate}.`, "success");
+
+        // Background fetch to backend
         try {
-            const res = await fetch(`/api/pairs/${selectedPairId}/action/`, {
+            const res = await fetch(`/api/pairs/${pairIdToApprove}/action/`, {
                 method: "POST",
                 headers: { "Content-Type": "application/x-www-form-urlencoded" },
                 body: "action=approve",
             });
             const data = await res.json();
-            if (data.success) {
-                showToast(`✓ Approved ${plate}.`, "success");
-                await fetchStats();
-                await fetchPairs();
-
-                if (nextPair && nextPair.id !== selectedPairId) {
-                    selectPair(nextPair.id);
-                } else {
-                    const remainingPending = pairsData.filter(p => p.verification_status === "PENDING_REVIEW");
-                    if (remainingPending.length > 0) {
-                        selectPair(remainingPending[0].id);
-                    } else {
-                        // All pending pairs approved
-                        const approvedReady = pairsData.filter(p => p.verification_status === "APPROVED" && (p.order || p.order_number)).length;
-                        if (approvedReady > 0) {
-                            showToast(`🎉 All pairs in queue approved! Ready to submit ${approvedReady} pair(s) to ITMS.`, "info");
-                        }
-                    }
+            if (!data.success) {
+                // Rollback on server failure
+                if (pairObj) pairObj.verification_status = prevStatus;
+                if (selectedPairDetail && selectedPairDetail.id === pairIdToApprove) {
+                    selectedPairDetail.verification_status = prevStatus;
                 }
+                renderQueueCards();
+                showToast(data.error || "Failed to approve pair on server.", "error");
+                selectPair(pairIdToApprove);
             } else {
-                showToast(data.error || "Failed to approve pair", "error");
+                fetchStats();
             }
         } catch (err) {
-            showToast("Approve error: " + err, "error");
-        } finally {
-            if (btnApprove) btnApprove.disabled = false;
+            // Rollback on network error
+            if (pairObj) pairObj.verification_status = prevStatus;
+            if (selectedPairDetail && selectedPairDetail.id === pairIdToApprove) {
+                selectedPairDetail.verification_status = prevStatus;
+            }
+            renderQueueCards();
+            showToast("Network error approving pair: " + err, "error");
+            selectPair(pairIdToApprove);
+        }
+        return;
+    }
+
+    if (action === "swap") {
+        if (!selectedPairDetail) return;
+        const pairIdToSwap = selectedPairId;
+
+        // Optimistic DOM and memory swap
+        const origFront = selectedPairDetail.front || selectedPairDetail.front_image;
+        const origRear = selectedPairDetail.rear || selectedPairDetail.rear_image;
+
+        selectedPairDetail.front = origRear;
+        selectedPairDetail.front_image = origRear;
+        selectedPairDetail.rear = origFront;
+        selectedPairDetail.rear_image = origFront;
+
+        const imgFront = document.getElementById("qimg-front");
+        const imgRear = document.getElementById("qimg-rear");
+        if (imgFront && imgRear && origFront && origRear) {
+            const tmpSrc = imgFront.src;
+            imgFront.src = imgRear.src;
+            imgRear.src = tmpSrc;
+        }
+        setText("qfront-ocr-text", origRear ? (origRear.detected_plate || "---") : "---");
+        setText("qrear-ocr-text", origFront ? (origFront.detected_plate || "---") : "---");
+        setText("qfront-timestamp", origRear && origRear.captured_at ? origRear.captured_at : "--:--:--");
+        setText("qrear-timestamp", origFront && origFront.captured_at ? origFront.captured_at : "--:--:--");
+        showToast("Swapped front and rear photos.", "info");
+
+        try {
+            const res = await fetch(`/api/pairs/${pairIdToSwap}/action/`, {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: "action=swap",
+            });
+            const data = await res.json();
+            if (!data.success) {
+                // Rollback swap
+                selectedPairDetail.front = origFront;
+                selectedPairDetail.front_image = origFront;
+                selectedPairDetail.rear = origRear;
+                selectedPairDetail.rear_image = origRear;
+                selectPair(pairIdToSwap);
+                showToast(data.error || "Swap failed on server.", "error");
+            } else {
+                fetchPairs();
+            }
+        } catch (err) {
+            selectedPairDetail.front = origFront;
+            selectedPairDetail.front_image = origFront;
+            selectedPairDetail.rear = origRear;
+            selectedPairDetail.rear_image = origRear;
+            selectPair(pairIdToSwap);
+            showToast("Swap network error: " + err, "error");
         }
         return;
     }

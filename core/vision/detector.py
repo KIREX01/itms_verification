@@ -135,6 +135,73 @@ def _get_yolo_model():
         return None
 
 
+@lru_cache(maxsize=1)
+def _get_onnx_session():
+    """Lazily load ONNX Runtime session with DirectML / OpenVINO / CPU providers if available."""
+    try:
+        import onnxruntime as ort
+    except ImportError:
+        return None
+
+    weights_path = _resolve_weights_path(_YOLO_WEIGHTS)
+    onnx_path = Path(weights_path).with_suffix(".onnx")
+    if not onnx_path.exists():
+        return None
+
+    try:
+        available_providers = ort.get_available_providers()
+        preferred_providers = []
+        if "DirectMLExecutionProvider" in available_providers:
+            preferred_providers.append("DirectMLExecutionProvider")
+        if "OpenVINOExecutionProvider" in available_providers:
+            preferred_providers.append("OpenVINOExecutionProvider")
+        preferred_providers.append("CPUExecutionProvider")
+        session = ort.InferenceSession(str(onnx_path), providers=preferred_providers)
+        return session
+    except Exception:
+        return None
+
+
+def _detect_with_onnx(image: np.ndarray) -> Optional[Detection]:
+    session = _get_onnx_session()
+    if session is None:
+        return None
+    try:
+        # Preprocess image to model input (640x640 letterbox)
+        h, w = image.shape[:2]
+        scale = min(640.0 / h, 640.0 / w)
+        nh, nw = int(h * scale), int(w * scale)
+        resized = cv2.resize(image, (nw, nh), interpolation=cv2.INTER_LINEAR)
+        padded = np.full((640, 640, 3), 114, dtype=np.uint8)
+        padded[:nh, :nw] = resized
+        blob = padded.transpose(2, 0, 1).astype(np.float32) / 255.0
+        blob = np.expand_dims(blob, axis=0)
+
+        input_name = session.get_inputs()[0].name
+        outs = session.run(None, {input_name: blob})
+        # Parse standard YOLOv8/v11 ONNX output: shape [1, 5, 8400] -> [x, y, w, h, conf]
+        preds = outs[0]
+        if preds.shape[1] == 5:
+            preds = preds.transpose(0, 2, 1)
+        best_box, best_conf = None, 0.0
+        for p in preds[0]:
+            conf = float(p[4])
+            if conf > best_conf and conf >= _CONF_THRESHOLD:
+                cx, cy, bw, bh = p[0], p[1], p[2], p[3]
+                x1 = int((cx - bw / 2) / scale)
+                y1 = int((cy - bh / 2) / scale)
+                x2 = int((cx + bw / 2) / scale)
+                y2 = int((cy + bh / 2) / scale)
+                if (x2 - x1) >= 25 and (y2 - y1) >= 10:
+                    best_conf = conf
+                    best_box = [max(0, x1), max(0, y1), min(w, x2), min(h, y2)]
+        if best_box is not None:
+            return Detection(bbox=best_box, confidence=float(best_conf), backend="onnx")
+    except Exception:
+        pass
+    return None
+
+
 def _detect_with_yolo(image: np.ndarray) -> Optional[Detection]:
     model = _get_yolo_model()
     if model is None:
@@ -289,12 +356,54 @@ def _detect_with_heuristic(image: np.ndarray) -> Optional[Detection]:
 def detect_plate(image: np.ndarray) -> Optional[Detection]:
     """
     Detect the most likely license-plate bounding box in `image`.
-    Tries YOLO first; transparently falls back to the OpenCV heuristic.
+    Tries ONNX / YOLO first; transparently falls back to the OpenCV heuristic.
     """
+    onnx_det = _detect_with_onnx(image)
+    if onnx_det is not None:
+        return onnx_det
     detection = _detect_with_yolo(image)
     if detection is not None:
         return detection
     return _detect_with_heuristic(image)
+
+
+def detect_plates_batch(images: List[np.ndarray]) -> List[Optional[Detection]]:
+    """Performs batched plate detection across multiple images.
+    Leverages batched YOLO tensor evaluation when available, falling back to heuristic for any misses.
+    """
+    if not images:
+        return []
+    results: List[Optional[Detection]] = [None] * len(images)
+    model = _get_yolo_model()
+    if model is not None:
+        try:
+            import torch
+            with torch.inference_mode():
+                batch_outs = model.predict(source=images, conf=_CONF_THRESHOLD, verbose=False)
+            for idx, r in enumerate(batch_outs):
+                boxes = getattr(r, "boxes", None)
+                if boxes is None or len(boxes) == 0:
+                    continue
+                best_box, best_conf = None, 0.0
+                for box, conf in zip(boxes.xyxy.tolist(), boxes.conf.tolist()):
+                    x1, y1, x2, y2 = [int(v) for v in box]
+                    w_box, h_box = x2 - x1, y2 - y1
+                    if w_box < 25 or h_box < 10:
+                        continue
+                    if conf > best_conf:
+                        best_conf = conf
+                        best_box = [x1, y1, x2, y2]
+                if best_box is not None and best_conf >= _CONF_THRESHOLD:
+                    results[idx] = Detection(bbox=best_box, confidence=float(best_conf), backend="yolo")
+        except Exception:
+            pass
+
+    # Fallback to single/heuristic detection for any image that didn't get a YOLO detection
+    for idx, img in enumerate(images):
+        if results[idx] is None:
+            results[idx] = detect_plate(img)
+
+    return results
 
 
 def crop_detection(image: np.ndarray, detection: Detection, padding: int = 4) -> np.ndarray:

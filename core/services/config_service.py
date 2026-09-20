@@ -251,6 +251,7 @@ def get_database_config(base_dir: Path) -> Dict[str, Any]:
             "PASSWORD": pg_pwd,
             "HOST": pg_host,
             "PORT": str(pg_port),
+            "CONN_MAX_AGE": 600,
         }
     else:
         sqlite_file = db_cfg.get("sqlite_file", "db.sqlite3")

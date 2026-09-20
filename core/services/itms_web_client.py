@@ -365,14 +365,21 @@ class ITMSWebClient:
         self,
         method: str,
         url: str,
-        max_attempts: int = 3,
+        max_attempts: int = 4,
+        idempotency_key: Optional[str] = None,
         **kwargs
     ) -> requests.Response:
         """
-        Executes an HTTP request with automatic recovery against TCP resets
-        (such as ConnectionResetError / WinError 10054) and transient network drops.
+        Executes an HTTP request with automatic exponential backoff + jitter
+        against TCP resets, transient network drops, and server errors (502, 503, 504, 429).
+        Optionally attaches a deterministic X-Idempotency-Key header.
         """
+        import random
         last_exc = None
+        headers = kwargs.setdefault("headers", {})
+        if idempotency_key:
+            headers.setdefault("X-Idempotency-Key", idempotency_key)
+
         for attempt in range(1, max_attempts + 1):
             s = self._create_requests_session()
             try:
@@ -384,15 +391,27 @@ class ITMSWebClient:
                     resp = caller(url, **kwargs)
                 else:
                     resp = s.request(method, url, **kwargs)
+
+                # Retry on transient server errors or rate limits
+                if resp.status_code in (429, 502, 503, 504) and attempt < max_attempts:
+                    sleep_time = min(10.0, (2 ** (attempt - 1)) + random.uniform(0.1, 0.5))
+                    logger.warning(
+                        "ITMS WebApp server error HTTP %d on %s (attempt %d/%d). Retrying in %.2fs...",
+                        resp.status_code, url, attempt, max_attempts, sleep_time
+                    )
+                    time.sleep(sleep_time)
+                    continue
+
                 return resp
-            except (requests.exceptions.ConnectionError, ConnectionResetError, requests.exceptions.ChunkedEncodingError) as exc:
+            except (requests.exceptions.ConnectionError, ConnectionResetError, requests.exceptions.ChunkedEncodingError, requests.exceptions.Timeout) as exc:
                 last_exc = exc
+                sleep_time = min(10.0, (2 ** (attempt - 1)) + random.uniform(0.1, 0.5))
                 logger.warning(
-                    "ITMS WebApp connection reset (attempt %d/%d) on %s: %s",
-                    attempt, max_attempts, url, exc
+                    "ITMS WebApp connection issue (attempt %d/%d) on %s: %s. Retrying in %.2fs...",
+                    attempt, max_attempts, url, exc, sleep_time
                 )
                 if attempt < max_attempts:
-                    time.sleep(0.6 * attempt)
+                    time.sleep(sleep_time)
                     continue
                 raise
             except requests.exceptions.RequestException:

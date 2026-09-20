@@ -407,6 +407,8 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
     for p in qs[:limit]:
         front_url = f"/media/{str(p.front_image.vault_file).replace(chr(92), '/')}" if p.front_image and p.front_image.vault_file else None
         rear_url = f"/media/{str(p.rear_image.vault_file).replace(chr(92), '/')}" if p.rear_image and p.rear_image.vault_file else None
+        front_thumb_url = f"/media/{str(p.front_image.thumbnail_file or p.front_image.vault_file).replace(chr(92), '/')}" if p.front_image and p.front_image.vault_file else None
+        rear_thumb_url = f"/media/{str(p.rear_image.thumbnail_file or p.rear_image.vault_file).replace(chr(92), '/')}" if p.rear_image and p.rear_image.vault_file else None
 
         batch_obj = (p.front_image.batch if p.front_image and p.front_image.batch else None) or (
             p.rear_image.batch if p.rear_image and p.rear_image.batch else None
@@ -428,6 +430,8 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
             "has_rear": bool(p.rear_image_id),
             "front_url": front_url,
             "rear_url": rear_url,
+            "front_thumb_url": front_thumb_url,
+            "rear_thumb_url": rear_thumb_url,
             "batch_id": batch_obj.batch_id if batch_obj else "Carryover",
             "batch_label": batch_obj.batch_id if batch_obj else "Carryover Batch",
             "batch_created_at": batch_obj.created_at.strftime("%Y-%m-%d %H:%M") if (batch_obj and batch_obj.created_at) else "",
@@ -490,9 +494,13 @@ def api_pair_detail(request: HttpRequest, pair_id: int) -> JsonResponse:
     front = None
     if pair.front_image:
         vault_path = str(pair.front_image.vault_file).replace("\\", "/")
+        thumb_path = str(pair.front_image.thumbnail_file or pair.front_image.vault_file).replace("\\", "/")
+        preview_path = str(pair.front_image.preview_file or pair.front_image.vault_file).replace("\\", "/")
         front = {
             "id": str(pair.front_image.id),
             "url": f"/media/{vault_path}",
+            "preview_url": f"/media/{preview_path}",
+            "thumb_url": f"/media/{thumb_path}",
             "detected_plate": pair.front_image.detected_plate,
             "ocr_confidence": round(pair.front_image.ocr_confidence * 100, 1) if pair.front_image.ocr_confidence is not None else None,
             "detector_confidence": round(pair.front_image.detector_confidence * 100, 1) if pair.front_image.detector_confidence is not None else None,
@@ -502,9 +510,13 @@ def api_pair_detail(request: HttpRequest, pair_id: int) -> JsonResponse:
     rear = None
     if pair.rear_image:
         vault_path = str(pair.rear_image.vault_file).replace("\\", "/")
+        thumb_path = str(pair.rear_image.thumbnail_file or pair.rear_image.vault_file).replace("\\", "/")
+        preview_path = str(pair.rear_image.preview_file or pair.rear_image.vault_file).replace("\\", "/")
         rear = {
             "id": str(pair.rear_image.id),
             "url": f"/media/{vault_path}",
+            "preview_url": f"/media/{preview_path}",
+            "thumb_url": f"/media/{thumb_path}",
             "detected_plate": pair.rear_image.detected_plate,
             "ocr_confidence": round(pair.rear_image.ocr_confidence * 100, 1) if pair.rear_image.ocr_confidence is not None else None,
             "detector_confidence": round(pair.rear_image.detector_confidence * 100, 1) if pair.rear_image.detector_confidence is not None else None,
@@ -577,6 +589,8 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
         return JsonResponse({"success": False, "error": "No action specified"}, status=400)
 
     action = action.lower().strip()
+    operator_user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
+    operator_name = operator_user.username if operator_user else (request.headers.get("X-Operator-Username") or "operator")
 
     if action == "approve":
         # Attempt auto-linking if order is missing (matches TUI parity)
@@ -604,6 +618,8 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
 
         SubmissionAuditLog.objects.create(
             pair=pair,
+            operator=operator_user,
+            operator_username=operator_name,
             action=SubmissionAuditLog.Action.OPERATOR_APPROVE,
             result=SubmissionAuditLog.ResultStatus.SUCCESS,
             message="Pair approved by operator via Web Console." if not was_failed else "Pair reset from FAILED to APPROVED for retry via Web Console.",
@@ -622,6 +638,8 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
         pair.save(update_fields=["front_image", "rear_image"])
         SubmissionAuditLog.objects.create(
             pair=pair,
+            operator=operator_user,
+            operator_username=operator_name,
             action=SubmissionAuditLog.Action.OPERATOR_SWAP,
             result=SubmissionAuditLog.ResultStatus.SUCCESS,
             message="Operator swapped front and rear image assignments via Web Console.",
@@ -728,6 +746,8 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
         order_desc = f"linked to order #{target_order.order_number}" if target_order else "no matching order; plate updated directly"
         SubmissionAuditLog.objects.create(
             pair=pair,
+            operator=operator_user,
+            operator_username=operator_name,
             action=SubmissionAuditLog.Action.MANUAL_PLATE_ASSIGN,
             result=SubmissionAuditLog.ResultStatus.SUCCESS,
             message=f"Operator Link/Override: plate='{pair.registration_number_detected}' ({order_desc}), status='{pair.verification_status}'.",
@@ -763,6 +783,8 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
 
         SubmissionAuditLog.objects.create(
             pair=pair,
+            operator=operator_user,
+            operator_username=operator_name,
             action=SubmissionAuditLog.Action.OPERATOR_OVERRIDE,
             result=SubmissionAuditLog.ResultStatus.SUCCESS,
             message=f"Operator unlinked order #{prev_order.order_number if prev_order else 'N/A'} via Web Console.",
@@ -802,7 +824,7 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
             pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
             pair.save(update_fields=["verification_status"])
 
-        outcome = submission_worker.submit_pair(pair, dry_run=is_dry_run)
+        outcome = submission_worker.submit_pair(pair, dry_run=is_dry_run, operator=operator_user)
         return JsonResponse({
             "success": outcome.success,
             "status": pair.verification_status,
@@ -1270,6 +1292,28 @@ def api_pipeline_status(request: HttpRequest) -> JsonResponse:
     return JsonResponse(status)
 
 
+@require_GET
+def api_stream_events(request: HttpRequest) -> HttpResponse:
+    """Streams real-time pipeline events and stats via Server-Sent Events (SSE)."""
+    import time
+    from django.http import StreamingHttpResponse
+
+    def event_stream():
+        for _ in range(25):  # Stream for up to ~25 seconds per connection
+            status_data = pipeline_runner.get_status()
+            payload = {
+                "timestamp": timezone.now().isoformat(),
+                "pipeline": status_data,
+            }
+            yield f"data: {json.dumps(payload)}\n\n"
+            time.sleep(1)
+
+    response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+    return response
+
+
 # ============================================================================
 # Batch Submissions & Shift Reporting
 # ============================================================================
@@ -1339,6 +1383,7 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
 
     succeeded = 0
     failed = 0
+    operator_user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
     for p in approved_pairs:
         # Check that pair is still APPROVED to prevent concurrent race condition submissions
         refreshed = VehicleInstallationPair.objects.filter(
@@ -1347,7 +1392,7 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
         ).first()
         if not refreshed:
             continue
-        outcome = submission_worker.submit_pair(refreshed, dry_run=is_dry_run)
+        outcome = submission_worker.submit_pair(refreshed, dry_run=is_dry_run, operator=operator_user)
         if outcome.success:
             succeeded += 1
         else:

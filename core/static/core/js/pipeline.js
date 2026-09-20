@@ -15,7 +15,7 @@ async function triggerPipeline(taskType = "full_pipeline") {
         const data = await res.json();
         if (data.success) {
             showToast(data.message, "info");
-            startPipelinePolling();
+            startPipelineSSE();
         } else {
             showToast(data.message || "Failed to start pipeline", "warning");
         }
@@ -35,7 +35,7 @@ async function triggerSyncOrders() {
         const data = await res.json();
         if (data.success) {
             showToast(data.message, "info");
-            startPipelinePolling();
+            startPipelineSSE();
         }
     } catch (err) {
         showToast("Sync error: " + err, "error");
@@ -473,6 +473,60 @@ function appendSubmissionLog(msg, type = "info") {
     stream.scrollTop = stream.scrollHeight;
 }
 
+let pipelineEventSource = null;
+
+function handlePipelineStatusUpdate(st) {
+    const qInd = document.getElementById("queue-processing-indicator");
+    const qTxt = document.getElementById("queue-processing-text");
+    if (st.running) {
+        if (qInd) qInd.style.display = "flex";
+        if (qTxt) qTxt.innerText = `Vision: ${st.stage || 'Processing'} (${st.progress || 0}%)`;
+        appendConsoleLog(`Stage: ${st.stage || 'Processing'} (${st.progress || 0}%) - ${st.message || ''}`, "info");
+    } else {
+        if (qInd) qInd.style.display = "none";
+        appendConsoleLog(`Pipeline task finished: ${st.message || 'Complete'}`, st.success ? "success" : "error");
+        fetchStats();
+        fetchPairs();
+    }
+}
+
+function startPipelineSSE() {
+    if (!window.EventSource) {
+        startPipelinePolling();
+        return;
+    }
+    if (pipelineEventSource) {
+        pipelineEventSource.close();
+        pipelineEventSource = null;
+    }
+    try {
+        pipelineEventSource = new EventSource("/api/stream/events/");
+        pipelineEventSource.onmessage = function (event) {
+            try {
+                const data = JSON.parse(event.data);
+                if (data && data.pipeline) {
+                    handlePipelineStatusUpdate(data.pipeline);
+                    if (!data.pipeline.running && pipelineEventSource) {
+                        pipelineEventSource.close();
+                        pipelineEventSource = null;
+                    }
+                }
+            } catch (e) {
+                console.warn("Error parsing SSE data:", e);
+            }
+        };
+        pipelineEventSource.onerror = function () {
+            if (pipelineEventSource) {
+                pipelineEventSource.close();
+                pipelineEventSource = null;
+            }
+            startPipelinePolling();
+        };
+    } catch (e) {
+        startPipelinePolling();
+    }
+}
+
 function startPipelinePolling() {
     if (pipelinePollInterval) clearInterval(pipelinePollInterval);
     const qInd = document.getElementById("queue-processing-indicator");
@@ -482,17 +536,10 @@ function startPipelinePolling() {
         try {
             const res = await fetch("/api/pipeline/status/");
             const st = await res.json();
-            if (st.running) {
-                if (qInd) qInd.style.display = "flex";
-                if (qTxt) qTxt.innerText = `Vision: ${st.stage || 'Processing'} (${st.progress || 0}%)`;
-                appendConsoleLog(`Stage: ${st.stage || 'Processing'} (${st.progress || 0}%) - ${st.message || ''}`, "info");
-            } else {
+            handlePipelineStatusUpdate(st);
+            if (!st.running) {
                 clearInterval(pipelinePollInterval);
                 pipelinePollInterval = null;
-                if (qInd) qInd.style.display = "none";
-                appendConsoleLog(`Pipeline task finished: ${st.message || 'Complete'}`, st.success ? "success" : "error");
-                fetchStats();
-                fetchPairs();
             }
         } catch (err) {
             console.warn("Polling error:", err);

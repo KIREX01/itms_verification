@@ -118,6 +118,15 @@ def match_pair_to_order(
         pair.save()
         return pair
 
+    if registry is None:
+        registry = _active_registry()
+    if active_orders is None:
+        from core.matcher.prior_guided import get_active_orders_cache
+        active_orders = get_active_orders_cache()
+
+    if not registry and not active_orders:
+        return pair
+
     outcome = find_best_match(pair.registration_number_detected, active_orders=active_orders, registry=registry, order_map=order_map)
     pair.match_score = outcome.score
     pair.match_type = outcome.match_type

@@ -30,9 +30,24 @@ class SubmissionOutcome:
     dry_run: bool = True
 
 
-def _log(pair: VehicleInstallationPair, action: str, result: str, message: str, token: str = ""):
-    SubmissionAuditLog.objects.create(
-        pair=pair, action=action, result=result, message=message, simulated_token=token,
+def _log(
+    pair: VehicleInstallationPair,
+    action: str,
+    result: str,
+    message: str,
+    token: str = "",
+    operator: Optional[Any] = None,
+):
+    op_user = operator if (operator and getattr(operator, "is_authenticated", False)) else None
+    op_name = getattr(op_user, "username", str(operator)) if operator else "System"
+    return SubmissionAuditLog.objects.create(
+        pair=pair,
+        action=action,
+        result=result,
+        message=message,
+        simulated_token=token,
+        operator=op_user,
+        operator_username=op_name,
     )
 
 
@@ -42,9 +57,10 @@ def submit_pair(
     dry_run: Optional[bool] = None,
     submit_step3: Optional[bool] = None,
     log_callback: Optional[Any] = None,
+    operator: Optional[Any] = None,
 ) -> SubmissionOutcome:
     """Drive a single pair through the ITMS workflow (mock, live API, or live_web) with full audit logging."""
-    from core.services import config_service
+    from core.services import config_service, vault_service
     backend_mode = (backend or getattr(settings, "ITMS_SUBMISSION_BACKEND", "web")).lower()
     
     if dry_run is not None:
@@ -59,26 +75,25 @@ def submit_pair(
 
     if not pair.order:
         _log(pair, SubmissionAuditLog.Action.ORDER_LOOKUP, SubmissionAuditLog.ResultStatus.FAILURE,
-             f"[{backend_mode.upper()}] No matched InstallationOrder on this pair; cannot submit.")
+             f"[{backend_mode.upper()}] No matched InstallationOrder on this pair; cannot submit.", operator=operator)
         pair.verification_status = VehicleInstallationPair.VerificationStatus.FAILED
         pair.save(update_fields=["verification_status"])
         return SubmissionOutcome(pair_id=pair.id, success=False, error="No matched order", backend=backend_mode, dry_run=is_dry_run)
 
     if not (pair.front_image and pair.rear_image):
         _log(pair, SubmissionAuditLog.Action.VALIDATE, SubmissionAuditLog.ResultStatus.FAILURE,
-             f"[{backend_mode.upper()}] Pair is missing front or rear evidence; cannot submit.")
+             f"[{backend_mode.upper()}] Pair is missing front or rear evidence; cannot submit.", operator=operator)
         pair.verification_status = VehicleInstallationPair.VerificationStatus.FAILED
         pair.save(update_fields=["verification_status"])
         return SubmissionOutcome(pair_id=pair.id, success=False, error="Incomplete evidence", backend=backend_mode, dry_run=is_dry_run)
 
     order = pair.order
 
-    # Live Web Wizard Backend (Yii2 WebApp stock.itms.ug)
+    # Cross-Account Safety Check: ensure session matches order account ownership
     if backend_mode in ("live_web", "web", "live"):
         from core.services.itms_web_client import get_web_client
         web_client = get_web_client()
 
-        # Cross-Account Safety Check: ensure session matches order account ownership
         active_session_email = (web_client.session_store.session.user_email or "").strip().lower()
         order_acc = (order.account_email or "").strip().lower()
         if active_session_email and order_acc and active_session_email != order_acc:
@@ -86,10 +101,39 @@ def submit_pair(
                 f"Cross-account submission blocked: Order #{order.order_number} is linked to "
                 f"'{order.account_email}', but active ITMS session is '{active_session_email}'."
             )
-            _log(pair, SubmissionAuditLog.Action.SUBMIT, SubmissionAuditLog.ResultStatus.FAILURE, err_msg)
+            _log(pair, SubmissionAuditLog.Action.SUBMIT, SubmissionAuditLog.ResultStatus.FAILURE, err_msg, operator=operator)
             pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
             pair.save(update_fields=["verification_status"])
             return SubmissionOutcome(pair_id=pair.id, success=False, error=err_msg, backend=backend_mode, dry_run=is_dry_run)
+
+    # Phase 4.1: Pre-Submission SHA-256 Tamper & Integrity Verification
+    front_path = vault_service.resolve_vault_path(pair.front_image.vault_file)
+    rear_path = vault_service.resolve_vault_path(pair.rear_image.vault_file)
+
+    if front_path.is_file() and rear_path.is_file():
+        front_hash = vault_service.hash_file_path(front_path)
+        rear_hash = vault_service.hash_file_path(rear_path)
+        if front_hash != pair.front_image.file_hash or rear_hash != pair.rear_image.file_hash:
+            err_msg = (
+                f"Tamper detection failed! Photo SHA-256 mismatch: "
+                f"Front ({front_hash[:8]} vs {pair.front_image.file_hash[:8]}), "
+                f"Rear ({rear_hash[:8]} vs {pair.rear_image.file_hash[:8]})."
+            )
+            _log(pair, SubmissionAuditLog.Action.VALIDATE, SubmissionAuditLog.ResultStatus.FAILURE, err_msg, operator=operator)
+            pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
+            pair.save(update_fields=["verification_status"])
+            return SubmissionOutcome(pair_id=pair.id, success=False, error=err_msg, backend=backend_mode, dry_run=is_dry_run)
+    elif not getattr(settings, "TESTING", False) and not is_dry_run and backend_mode != "mock":
+        err_msg = f"Evidence file missing on disk: Front={front_path.exists()}, Rear={rear_path.exists()}"
+        _log(pair, SubmissionAuditLog.Action.VALIDATE, SubmissionAuditLog.ResultStatus.FAILURE, err_msg, operator=operator)
+        pair.verification_status = VehicleInstallationPair.VerificationStatus.FAILED
+        pair.save(update_fields=["verification_status"])
+        return SubmissionOutcome(pair_id=pair.id, success=False, error=err_msg, backend=backend_mode, dry_run=is_dry_run)
+
+    # Live Web Wizard Backend (Yii2 WebApp stock.itms.ug)
+    if backend_mode in ("live_web", "web", "live"):
+        from core.services.itms_web_client import get_web_client
+        web_client = get_web_client()
 
         res = web_client.execute_installation_order_workflow(
             order_identifier=order.order_number,
@@ -110,7 +154,7 @@ def submit_pair(
                     pair.verification_status = VehicleInstallationPair.VerificationStatus.OFFLINE_OUTBOX
                     pair.save(update_fields=["verification_status"])
                     _log(pair, SubmissionAuditLog.Action.OUTBOX_QUEUE, SubmissionAuditLog.ResultStatus.INFO,
-                         f"Network dropped during upload. Queued into Offline Outbox for automatic synchronization: {err_msg}")
+                         f"Network dropped during upload. Queued into Offline Outbox for automatic synchronization: {err_msg}", operator=operator)
                     if log_callback:
                         try:
                             log_callback(f"📦 [bold magenta][OFFLINE OUTBOX][/bold magenta] Queued {pair.registration_number_detected} for auto-sync.")
@@ -118,13 +162,13 @@ def submit_pair(
                             pass
                     return SubmissionOutcome(pair_id=pair.id, success=False, error=f"Queued to Offline Outbox: {err_msg}", backend="live_web", dry_run=is_dry_run)
                 else:
-                    _log(pair, SubmissionAuditLog.Action.SUBMIT, SubmissionAuditLog.ResultStatus.FAILURE, f"[WEB NETWORK DROP] {err_msg}")
+                    _log(pair, SubmissionAuditLog.Action.SUBMIT, SubmissionAuditLog.ResultStatus.FAILURE, f"[WEB NETWORK DROP] {err_msg}", operator=operator)
                     _log(pair, SubmissionAuditLog.Action.FALLBACK, SubmissionAuditLog.ResultStatus.INFO,
-                         "Network dropped during upload. Vehicle pair preserved in APPROVED status for retry once connection is restored.")
+                         "Network dropped during upload. Vehicle pair preserved in APPROVED status for retry once connection is restored.", operator=operator)
             else:
-                _log(pair, SubmissionAuditLog.Action.SUBMIT, SubmissionAuditLog.ResultStatus.FAILURE, f"[WEB] {err_msg}")
+                _log(pair, SubmissionAuditLog.Action.SUBMIT, SubmissionAuditLog.ResultStatus.FAILURE, f"[WEB] {err_msg}", operator=operator)
                 _log(pair, SubmissionAuditLog.Action.FALLBACK, SubmissionAuditLog.ResultStatus.INFO,
-                     "Automation halted. Manual operator fallback required for this order.")
+                     "Automation halted. Manual operator fallback required for this order.", operator=operator)
                 pair.verification_status = VehicleInstallationPair.VerificationStatus.FAILED
                 pair.save(update_fields=["verification_status"])
                 order.status = InstallationOrder.Status.FAILED
@@ -134,7 +178,7 @@ def submit_pair(
         token = res.get("redirect_url", res.get("order_uuid", ""))
         dry_run_tag = " [DRY-RUN]" if is_dry_run else ""
         _log(pair, SubmissionAuditLog.Action.SUBMIT, SubmissionAuditLog.ResultStatus.SUCCESS,
-             f"[WEB]{dry_run_tag} Successfully completed ITMS installation wizard ({res.get('message', '')})", token=token)
+             f"[WEB]{dry_run_tag} Successfully completed ITMS installation wizard ({res.get('message', '')})", token=token, operator=operator)
 
         now = timezone.now()
         with transaction.atomic():
@@ -207,6 +251,7 @@ def submit_approved_pairs(
     submit_step3: Optional[bool] = None,
     progress_callback: Optional[Any] = None,
     log_callback: Optional[Any] = None,
+    operator: Optional[Any] = None,
 ) -> List[SubmissionOutcome]:
     """
     Submits every pair currently APPROVED. If auto_approve=True, also
@@ -227,7 +272,7 @@ def submit_approved_pairs(
                 pair.order.status = InstallationOrder.Status.PENDING
                 pair.order.save(update_fields=["status"])
             _log(pair, SubmissionAuditLog.Action.OPERATOR_APPROVE, SubmissionAuditLog.ResultStatus.INFO,
-                 "Reset from FAILED to APPROVED for retry submission.")
+                 "Reset from FAILED to APPROVED for retry submission.", operator=operator)
 
     if auto_approve:
         candidates = VehicleInstallationPair.objects.filter(
@@ -240,7 +285,7 @@ def submit_approved_pairs(
             pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
             pair.save(update_fields=["verification_status"])
             _log(pair, SubmissionAuditLog.Action.OPERATOR_APPROVE, SubmissionAuditLog.ResultStatus.INFO,
-                 "Auto-approved by --auto-approve batch run (high-confidence match).")
+                 "Auto-approved by --auto-approve batch run (high-confidence match).", operator=operator)
 
     outcomes = []
     approved_qs = list(
@@ -257,6 +302,7 @@ def submit_approved_pairs(
             dry_run=dry_run,
             submit_step3=submit_step3,
             log_callback=log_callback,
+            operator=operator,
         )
         outcomes.append(outcome)
         if progress_callback:
@@ -274,6 +320,7 @@ def drain_offline_outbox(
     submit_step3: Optional[bool] = None,
     progress_callback: Optional[Any] = None,
     log_callback: Optional[Any] = None,
+    operator: Optional[Any] = None,
 ) -> List[SubmissionOutcome]:
     """
     Submits every pair currently in OFFLINE_OUTBOX status when network connection is restored.
@@ -299,6 +346,7 @@ def drain_offline_outbox(
             SubmissionAuditLog.Action.OUTBOX_DRAIN,
             SubmissionAuditLog.ResultStatus.INFO,
             f"Draining Offline Outbox [{idx}/{total}] for {pair.registration_number_detected}: Auto-sync initiated.",
+            operator=operator,
         )
         if log_callback:
             try:
@@ -312,6 +360,7 @@ def drain_offline_outbox(
             dry_run=dry_run,
             submit_step3=submit_step3,
             log_callback=log_callback,
+            operator=operator,
         )
         outcomes.append(outcome)
         if progress_callback:

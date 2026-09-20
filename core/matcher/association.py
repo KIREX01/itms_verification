@@ -54,11 +54,18 @@ def _group_eligible_images() -> Dict[str, List[EvidenceImage]]:
     return groups
 
 
-def _resolve_group(plate: str, images: List[EvidenceImage]) -> VehicleInstallationPair:
+def _resolve_group(
+    plate: str,
+    images: List[EvidenceImage],
+    active_orders: Optional[List[Dict]] = None,
+    registry: Optional[List] = None,
+    order_map: Optional[Dict[int, "InstallationOrder"]] = None,
+) -> VehicleInstallationPair:
     fronts = [img for img in images if img.orientation == EvidenceImage.Orientation.FRONT]
     rears = [img for img in images if img.orientation == EvidenceImage.Orientation.REAR]
 
     from core.services.itms_web_client import get_current_itms_account
+    from core.matcher.order_matcher import match_pair_to_order
     curr_acc = get_current_itms_account()
 
     pair, _created = VehicleInstallationPair.objects.get_or_create(
@@ -85,6 +92,7 @@ def _resolve_group(plate: str, images: List[EvidenceImage]) -> VehicleInstallati
         for img in (fronts[0], rears[0]):
             img.status = EvidenceImage.Status.MATCHED
             img.save(update_fields=["status"])
+        match_pair_to_order(pair, active_orders=active_orders, registry=registry, order_map=order_map)
 
     elif len(fronts) + len(rears) == 1:
         pair.is_complete = False
@@ -98,6 +106,7 @@ def _resolve_group(plate: str, images: List[EvidenceImage]) -> VehicleInstallati
             pair.operator_note = f"Incomplete Pair: Only 1 REAR photo detected for plate '{plate}' (Front photo missing)"
         only.status = EvidenceImage.Status.INCOMPLETE
         only.save(update_fields=["status"])
+        match_pair_to_order(pair, active_orders=active_orders, registry=registry, order_map=order_map)
 
     else:
         # 2+ fronts, 2+ rears, or some other ambiguous mix
@@ -125,7 +134,8 @@ def _plate_similarity(p1: str, p2: str) -> float:
     p2_clean = "".join(c for c in p2.upper() if c.isalnum())
     if p1_clean == p2_clean:
         return 1.0
-    if p1_clean in p2_clean or p2_clean in p1_clean:
+    # Guard against short prefixes (like 'UMA') matching every plate via substring
+    if (p1_clean in p2_clean or p2_clean in p1_clean) and min(len(p1_clean), len(p2_clean)) >= 6:
         return 0.85
     return SequenceMatcher(None, p1_clean, p2_clean).ratio()
 
@@ -157,19 +167,24 @@ def _align_and_pair_candidates(
     summary: AssociationSummary,
     paired_image_ids: set,
     label_prefix: str = "",
+    active_orders: Optional[List[Dict]] = None,
+    registry: Optional[List] = None,
+    order_map: Optional[Dict[int, "InstallationOrder"]] = None,
 ) -> Tuple[List[EvidenceImage], List[EvidenceImage]]:
     """Runs multi-tier association on candidate front and rear image sets.
 
     Tiers:
       Tier 1: Filename Synergy (Matching stems & camera shutter sequence counters)
-      Tier 2: Temporal Trajectory Alignment (U-Turn Walk based on turnaround intervals)
-      Tier 3: Plate OCR Direct Match (High-confidence character similarity)
-      Tier 4: Temporal Proximity Alignment (Parallel Walk)
+      Tier 2: Plate OCR Direct Match (Anchor matching for high-confidence plates)
+      [Clock Drift Calibration]: Computes relative clock skew Δt between field cameras from anchor pairs
+      Tier 3: Temporal Trajectory Alignment (U-Turn Walk with calibrated camera timestamps)
+      Tier 4: Temporal Proximity Alignment (Parallel Walk with calibrated camera timestamps)
 
     Returns:
       (surplus_fronts, surplus_rears)
     """
     import os
+    import statistics
     from django.db.models import Q
     from core.matcher.order_matcher import match_pair_to_order
 
@@ -224,48 +239,7 @@ def _align_and_pair_candidates(
     unpaired_fronts = [f for f in unpaired_fronts if f.id not in matched_f_ids]
     unpaired_rears = [r for r in unpaired_rears if r.id not in matched_r_ids]
 
-    # --- Tier 2: Temporal Trajectory Alignment (U-Turn Walk Detection) ---
-    if unpaired_fronts and unpaired_rears and len(unpaired_fronts) > 1 and len(unpaired_rears) > 1:
-        from core.services import config_service
-        uturn_threshold = int(config_service.get_setting("matcher.uturn_threshold_seconds", 1800))
-
-        unpaired_rears.sort(key=lambda img: extract_chronological_sort_key(img.original_source_path or img.vault_file, img.captured_at, img.ingested_at))
-        unpaired_fronts.sort(key=lambda img: extract_chronological_sort_key(img.original_source_path or img.vault_file, img.captured_at, img.ingested_at))
-
-        r_first_time = (unpaired_rears[0].captured_at or unpaired_rears[0].ingested_at).timestamp()
-        r_last_time = (unpaired_rears[-1].captured_at or unpaired_rears[-1].ingested_at).timestamp()
-        f_first_time = (unpaired_fronts[0].captured_at or unpaired_fronts[0].ingested_at).timestamp()
-        f_last_time = (unpaired_fronts[-1].captured_at or unpaired_fronts[-1].ingested_at).timestamp()
-
-        gap_uturn = min(abs(f_first_time - r_last_time), abs(r_first_time - f_last_time))
-        gap_parallel = abs(f_first_time - r_first_time)
-        is_uturn = (gap_uturn <= gap_parallel) and (gap_uturn <= uturn_threshold)
-
-        if is_uturn:
-            if f_first_time >= r_first_time:
-                aligned_rears = list(unpaired_rears)
-                aligned_fronts = list(reversed(unpaired_fronts))
-            else:
-                aligned_rears = list(reversed(unpaired_rears))
-                aligned_fronts = list(unpaired_fronts)
-            walk_desc = f"Temporal Trajectory (U-Turn Walk, Δt turnaround = {int(gap_uturn)}s [threshold: {uturn_threshold}s])"
-
-            t_pair_count = min(len(aligned_rears), len(aligned_fronts))
-            for i in range(t_pair_count):
-                r_img = aligned_rears[i]
-                f_img = aligned_fronts[i]
-                canonical_plate = r_img.detected_plate or f_img.detected_plate
-                if not canonical_plate:
-                    batch_tag = batch.batch_id.split("-")[-1] if batch else "SEQ"
-                    pair_num = summary.complete_pairs + len(resolved_pairs) + 1
-                    canonical_plate = f"PAIR-{batch_tag.upper()}-{pair_num:02d}"
-                note = f"Auto-paired via {walk_desc} | Walk Step #{i+1}"
-                resolved_pairs.append((f_img, r_img, canonical_plate, note))
-
-            unpaired_fronts = aligned_fronts[t_pair_count:]
-            unpaired_rears = aligned_rears[t_pair_count:]
-
-    # --- Tier 3: Plate OCR Direct Match ---
+    # --- Tier 2: Plate OCR Direct Match (High-Confidence Anchors) ---
     matched_f_ids = set()
     matched_r_ids = set()
     for f_img in unpaired_fronts:
@@ -291,18 +265,79 @@ def _align_and_pair_candidates(
     unpaired_fronts = [f for f in unpaired_fronts if f.id not in matched_f_ids]
     unpaired_rears = [r for r in unpaired_rears if r.id not in matched_r_ids]
 
+    # --- Clock Drift Calibration for Multi-Camera Setups ---
+    # Calculate relative time offset Δt = t_front - t_rear from confirmed anchor pairs
+    clock_offsets = []
+    for f_img, r_img, _, _ in resolved_pairs:
+        f_t = (f_img.captured_at or f_img.ingested_at).timestamp()
+        r_t = (r_img.captured_at or r_img.ingested_at).timestamp()
+        clock_offsets.append(f_t - r_t)
+
+    estimated_skew = statistics.median(clock_offsets) if clock_offsets else 0.0
+
+    def _get_f_time(img: EvidenceImage) -> float:
+        return (img.captured_at or img.ingested_at).timestamp()
+
+    def _get_r_time(img: EvidenceImage) -> float:
+        # Apply camera clock drift calibration if detected
+        return (img.captured_at or img.ingested_at).timestamp() + estimated_skew
+
+    # --- Tier 3: Temporal Trajectory Alignment (U-Turn Walk Detection) ---
+    if unpaired_fronts and unpaired_rears and len(unpaired_fronts) > 1 and len(unpaired_rears) > 1:
+        from core.services import config_service
+        uturn_threshold = int(config_service.get_setting("matcher.uturn_threshold_seconds", 1800))
+
+        unpaired_rears.sort(key=lambda img: extract_chronological_sort_key(img.original_source_path or img.vault_file, img.captured_at, img.ingested_at))
+        unpaired_fronts.sort(key=lambda img: extract_chronological_sort_key(img.original_source_path or img.vault_file, img.captured_at, img.ingested_at))
+
+        r_first_time = _get_r_time(unpaired_rears[0])
+        r_last_time = _get_r_time(unpaired_rears[-1])
+        f_first_time = _get_f_time(unpaired_fronts[0])
+        f_last_time = _get_f_time(unpaired_fronts[-1])
+
+        gap_uturn = min(abs(f_first_time - r_last_time), abs(r_first_time - f_last_time))
+        gap_parallel = abs(f_first_time - r_first_time)
+        is_uturn = (gap_uturn <= gap_parallel) and (gap_uturn <= uturn_threshold)
+
+        if is_uturn:
+            if f_first_time >= r_first_time:
+                aligned_rears = list(unpaired_rears)
+                aligned_fronts = list(reversed(unpaired_fronts))
+            else:
+                aligned_rears = list(reversed(unpaired_rears))
+                aligned_fronts = list(unpaired_fronts)
+
+            skew_desc = f" [Clock Skew Calibrated: Δt={int(estimated_skew)}s]" if abs(estimated_skew) >= 1.0 else ""
+            walk_desc = f"Temporal Trajectory (U-Turn Walk, Δt turnaround = {int(gap_uturn)}s{skew_desc})"
+
+            t_pair_count = min(len(aligned_rears), len(aligned_fronts))
+            for i in range(t_pair_count):
+                r_img = aligned_rears[i]
+                f_img = aligned_fronts[i]
+                canonical_plate = r_img.detected_plate or f_img.detected_plate
+                if not canonical_plate:
+                    batch_tag = batch.batch_id.split("-")[-1] if batch else "SEQ"
+                    pair_num = summary.complete_pairs + len(resolved_pairs) + 1
+                    canonical_plate = f"PAIR-{batch_tag.upper()}-{pair_num:02d}"
+                note = f"Auto-paired via {walk_desc} | Walk Step #{i+1}"
+                resolved_pairs.append((f_img, r_img, canonical_plate, note))
+
+            unpaired_fronts = aligned_fronts[t_pair_count:]
+            unpaired_rears = aligned_rears[t_pair_count:]
+
     # --- Tier 4: Temporal Proximity Alignment (Parallel Walk) ---
     if unpaired_fronts and unpaired_rears:
         unpaired_rears.sort(key=lambda img: extract_chronological_sort_key(img.original_source_path or img.vault_file, img.captured_at, img.ingested_at))
         unpaired_fronts.sort(key=lambda img: extract_chronological_sort_key(img.original_source_path or img.vault_file, img.captured_at, img.ingested_at))
 
-        r_first_time = (unpaired_rears[0].captured_at or unpaired_rears[0].ingested_at).timestamp()
-        f_first_time = (unpaired_fronts[0].captured_at or unpaired_fronts[0].ingested_at).timestamp()
+        r_first_time = _get_r_time(unpaired_rears[0])
+        f_first_time = _get_f_time(unpaired_fronts[0])
         gap_parallel = abs(f_first_time - r_first_time)
 
         aligned_rears = list(unpaired_rears)
         aligned_fronts = list(unpaired_fronts)
-        walk_desc = f"Temporal Proximity (Parallel Walk, Δt = {int(gap_parallel)}s)"
+        skew_desc = f" [Clock Skew Calibrated: Δt={int(estimated_skew)}s]" if abs(estimated_skew) >= 1.0 else ""
+        walk_desc = f"Temporal Proximity (Parallel Walk, Δt = {int(gap_parallel)}s{skew_desc})"
 
         t_pair_count = min(len(aligned_rears), len(aligned_fronts))
         for i in range(t_pair_count):
@@ -323,6 +358,7 @@ def _align_and_pair_candidates(
         surplus_rears = list(unpaired_rears)
 
     # Commit resolved complete pairs
+    matched_image_ids = set()
     for f_img, r_img, canonical_plate, note in resolved_pairs:
         full_note = f"{label_prefix}{note}" if label_prefix else note
         VehicleInstallationPair.objects.filter(
@@ -340,20 +376,29 @@ def _align_and_pair_candidates(
 
         r_img.status = EvidenceImage.Status.MATCHED
         f_img.status = EvidenceImage.Status.MATCHED
-        r_img.save(update_fields=["status"])
-        f_img.save(update_fields=["status"])
+        matched_image_ids.add(r_img.id)
+        matched_image_ids.add(f_img.id)
 
-        match_pair_to_order(pair)
+        match_pair_to_order(pair, active_orders=active_orders, registry=registry, order_map=order_map)
 
         paired_image_ids.add(r_img.id)
         paired_image_ids.add(f_img.id)
         summary.complete_pairs += 1
         summary.details.append(f"✓ Pair [{canonical_plate}]: {full_note}")
 
+    if matched_image_ids:
+        EvidenceImage.objects.filter(id__in=matched_image_ids).update(status=EvidenceImage.Status.MATCHED)
+
     return surplus_fronts, surplus_rears
 
 
-def _associate_batch_sequences(batch, summary: AssociationSummary) -> set:
+def _associate_batch_sequences(
+    batch,
+    summary: AssociationSummary,
+    active_orders: Optional[List[Dict]] = None,
+    registry: Optional[List] = None,
+    order_map: Optional[Dict[int, "InstallationOrder"]] = None,
+) -> set:
     """Associates photos within a batch using camera timestamp sequences.
 
     Handles:
@@ -438,7 +483,8 @@ def _associate_batch_sequences(batch, summary: AssociationSummary) -> set:
         # Align and pair within session
         if fronts and rears:
             s_fronts, s_rears = _align_and_pair_candidates(
-                fronts, rears, batch, summary, paired_image_ids, label_prefix=""
+                fronts, rears, batch, summary, paired_image_ids, label_prefix="",
+                active_orders=active_orders, registry=registry, order_map=order_map,
             )
             batch_surplus_fronts.extend(s_fronts)
             batch_surplus_rears.extend(s_rears)
@@ -450,7 +496,8 @@ def _associate_batch_sequences(batch, summary: AssociationSummary) -> set:
     # 3. Cross-Session Batch Reconciliation
     if batch_surplus_fronts and batch_surplus_rears:
         final_surplus_fronts, final_surplus_rears = _align_and_pair_candidates(
-            batch_surplus_fronts, batch_surplus_rears, batch, summary, paired_image_ids, label_prefix="Cross-Session "
+            batch_surplus_fronts, batch_surplus_rears, batch, summary, paired_image_ids, label_prefix="Cross-Session ",
+            active_orders=active_orders, registry=registry, order_map=order_map,
         )
     else:
         final_surplus_fronts = batch_surplus_fronts
@@ -505,7 +552,7 @@ def _associate_batch_sequences(batch, summary: AssociationSummary) -> set:
         )
         f_img.status = EvidenceImage.Status.INCOMPLETE
         f_img.save(update_fields=["status"])
-        match_pair_to_order(pair)
+        match_pair_to_order(pair, active_orders=active_orders, registry=registry, order_map=order_map)
         paired_image_ids.add(f_img.id)
         summary.incomplete += 1
         fname = os.path.basename(f_img.original_source_path or f_img.vault_file)
@@ -534,7 +581,7 @@ def _associate_batch_sequences(batch, summary: AssociationSummary) -> set:
         )
         r_img.status = EvidenceImage.Status.INCOMPLETE
         r_img.save(update_fields=["status"])
-        match_pair_to_order(pair)
+        match_pair_to_order(pair, active_orders=active_orders, registry=registry, order_map=order_map)
         paired_image_ids.add(r_img.id)
         summary.incomplete += 1
         fname = os.path.basename(r_img.original_source_path or r_img.vault_file)
@@ -609,10 +656,19 @@ def get_closest_candidates(target_image: EvidenceImage, top_n: int = 10) -> List
                 seq_bonus = max(0.0, 15.0 - (seq_diff * 1.0))
 
         # Ranking score: higher is better
-        time_score = max(0.0, 50.0 - (time_diff / 10.0))
-        text_score = sim * 40.0
-        batch_bonus = 10.0 if (target_image.batch_id and cand.batch_id == target_image.batch_id) else 0.0
-        total_score = time_score + text_score + batch_bonus + seq_bonus
+        # Score components:
+        # - Plate similarity: up to 100 pts
+        # - Sequential shutter counter proximity: up to 15 pts
+        # - Timestamp proximity: 10 pts if within 60s, decaying to 0 at 30 mins
+        time_score = 0.0
+        if time_diff <= 60:
+            time_score = 10.0
+        elif time_diff <= 1800:
+            time_score = max(0.0, 10.0 * (1.0 - (time_diff / 1800.0)))
+
+        batch_score = 5.0 if cand.batch_id == target_image.batch_id else 0.0
+
+        total_score = (sim * 100.0) + seq_bonus + time_score + batch_score
 
         # Format human-friendly time delta
         if time_diff < 60:
@@ -625,6 +681,7 @@ def get_closest_candidates(target_image: EvidenceImage, top_n: int = 10) -> List
             diff_str = f"{int(time_diff // 86400)}d away"
 
         fname = os.path.basename(cand.original_source_path or cand.vault_file)
+
         candidates.append({
             "image": cand,
             "id": str(cand.id),
@@ -637,13 +694,17 @@ def get_closest_candidates(target_image: EvidenceImage, top_n: int = 10) -> List
             "time_diff_display": diff_str,
             "similarity_pct": round(sim * 100, 1),
             "score": round(total_score, 1),
+            "sim": round(sim, 3),
+            "time_diff_s": int(time_diff),
+            "seq_diff": abs(cand_sig.sequence_number - target_sig.sequence_number) if (target_sig.sequence_number is not None and cand_sig.sequence_number is not None) else None,
+            "same_batch": cand.batch_id == target_image.batch_id,
         })
 
-    candidates.sort(key=lambda c: c["score"], reverse=True)
+    candidates.sort(key=lambda x: x["score"], reverse=True)
     return candidates[:top_n]
 
 
-def link_pair_manually(
+def manually_link_pair(
     front_image: EvidenceImage,
     rear_image: EvidenceImage,
     canonical_plate: Optional[str] = None,
@@ -699,6 +760,9 @@ def link_pair_manually(
     return pair
 
 
+link_pair_manually = manually_link_pair
+
+
 @transaction.atomic
 def run_association(batch_id: Optional[str] = None) -> AssociationSummary:
     """Runs full pairwise association:
@@ -707,12 +771,19 @@ def run_association(batch_id: Optional[str] = None) -> AssociationSummary:
     2. Plate-driven grouping for remaining unassociated photos.
     3. Residual unassociated photo sweep to register incomplete pairs for any orphan photos.
     """
-    from core.models import IngestionBatch
-    from core.matcher.order_matcher import match_pair_to_order
+    from core.models import IngestionBatch, InstallationOrder
+    from core.matcher.order_matcher import _active_registry, match_pair_to_order
+    from core.matcher.prior_guided import get_active_orders_cache
     from django.db.models import Q
 
     summary = AssociationSummary()
     already_paired = set()
+
+    # Preload active orders cache once per association run (Phase 2.2: eliminates N+1 DB queries)
+    active_orders = get_active_orders_cache()
+    registry = _active_registry()
+    order_ids = [r[0] for r in registry] if registry else []
+    order_map = {o.id: o for o in InstallationOrder.objects.filter(id__in=order_ids)}
 
     # Pass 1: U-Turn & Sequence Association across batches
     if batch_id:
@@ -721,7 +792,9 @@ def run_association(batch_id: Optional[str] = None) -> AssociationSummary:
         batches = list(IngestionBatch.objects.all())
 
     for batch in batches:
-        paired_in_batch = _associate_batch_sequences(batch, summary)
+        paired_in_batch = _associate_batch_sequences(
+            batch, summary, active_orders=active_orders, registry=registry, order_map=order_map
+        )
         already_paired.update(paired_in_batch)
 
     # Pass 2: Plate-driven grouping for remaining photos with detected plates
@@ -739,7 +812,9 @@ def run_association(batch_id: Optional[str] = None) -> AssociationSummary:
         groups[image.detected_plate].append(image)
 
     for plate, images in groups.items():
-        pair = _resolve_group(plate, images)
+        pair = _resolve_group(
+            plate, images, active_orders=active_orders, registry=registry, order_map=order_map
+        )
         summary.groups_processed += 1
         for img in images:
             already_paired.add(img.id)
@@ -788,7 +863,7 @@ def run_association(batch_id: Optional[str] = None) -> AssociationSummary:
             )
             res_img.status = EvidenceImage.Status.INCOMPLETE
             res_img.save(update_fields=["status"])
-            match_pair_to_order(new_pair)
+            match_pair_to_order(new_pair, active_orders=active_orders, registry=registry, order_map=order_map)
             summary.incomplete += 1
             fname = os.path.basename(res_img.original_source_path or res_img.vault_file)
             summary.missing_photos.append({

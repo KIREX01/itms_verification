@@ -4,8 +4,22 @@ import os
 from typing import Any, Dict, Optional
 
 from django.conf import settings
-from rich.markup import escape
+from rich.markup import escape as _rich_escape
 from textual.widgets import Static
+
+def escape_markup(text: Any) -> str:
+    """
+    Safely escapes text for Textual/Rich markup rendering.
+    Textual's markup parser treats bracketed expressions with colons, signs,
+    or uppercase letters (e.g. [Clock Skew Calibrated: ...]) as tags.
+    Escaping '[' to r'\\[' guarantees literal rendering with zero MarkupError crashes.
+    """
+    if text is None:
+        return ""
+    return str(text).replace(r"\[", "[").replace("[", r"\[")
+
+escape = escape_markup
+
 from core.models import (
     EvidenceImage,
     IngestionBatch,

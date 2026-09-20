@@ -1,6 +1,5 @@
 import os
 from typing import Optional
-from rich.markup import escape
 from textual.widgets import DataTable, Static
 from core.models import (
     EvidenceImage,
@@ -8,7 +7,7 @@ from core.models import (
     SubmissionAuditLog,
     VehicleInstallationPair,
 )
-from core.tui.inspectors import STATUS_STYLE
+from core.tui.inspectors import STATUS_STYLE, escape_markup, escape
 
 from django.db.models import Q
 from django.utils import timezone

@@ -4,13 +4,13 @@ Modal dialog screens for the ITMS Operator TUI.
 import os
 from typing import Dict, List, Optional
 from django.conf import settings
-from rich.markup import escape
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, DataTable, Input, ProgressBar, RichLog, Static
 
+from core.tui.inspectors import escape_markup, escape
 from core.models import EvidenceImage, InstallationOrder, SubmissionAuditLog, VehicleInstallationPair
 from core.matcher.association import get_closest_candidates
 from core.services import viewer

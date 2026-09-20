@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from rich.markup import escape
+from core.tui.inspectors import InspectorPane, escape_markup, escape
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -34,7 +34,6 @@ from textual.widgets import (
 from core.services.itms_web_client import ITMSWebClient, get_web_client
 from core.services import viewer
 from core.services.config_service import get_config_service
-from core.tui.inspectors import InspectorPane
 
 ITMS_SUBVIEWS = ["CONNECT", "ORDERS", "ARCHIVE"]
 SUBVIEW_LABELS = {

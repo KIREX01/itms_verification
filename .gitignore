@@ -29,3 +29,5 @@ config.json
 stock.itms.ug
 exports
 scratch/
+.agents
+.vscode/

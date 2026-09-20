@@ -513,6 +513,8 @@ async function executePairAction(action) {
     }
 }
 
+let currentFilteredOrders = [];
+
 function updateLinkerBanner() {
     const currentText = document.getElementById("linker-current-order-text");
     const unlinkBtn = document.getElementById("btn-modal-unlink");
@@ -541,58 +543,13 @@ function openUnifiedLinkModal() {
     }
     const input = document.getElementById("input-edit-plate");
     const currentPlate = selectedPairDetail.registration_number_detected || "";
+    const cleanPlate = (currentPlate.startsWith("PAIR-") || currentPlate.startsWith("MISSING-")) ? "" : currentPlate;
     if (input) {
-        input.value = (currentPlate.startsWith("PAIR-") || currentPlate.startsWith("MISSING-")) ? "" : currentPlate;
-    }
-    const statusSelect = document.getElementById("select-edit-status");
-    if (statusSelect) statusSelect.value = "APPROVED";
-    const noteInput = document.getElementById("input-edit-note");
-    if (noteInput) noteInput.value = selectedPairDetail.operator_note || "";
-
-    // Populate photographic evidence preview strip (TUI Parity)
-    const thumbFront = document.getElementById("linker-thumb-front");
-    const emptyFront = document.getElementById("linker-empty-front");
-    const tagFront = document.getElementById("linker-tag-front");
-    const thumbRear = document.getElementById("linker-thumb-rear");
-    const emptyRear = document.getElementById("linker-empty-rear");
-    const tagRear = document.getElementById("linker-tag-rear");
-    const visionTag = document.getElementById("linker-vision-tag");
-
-    if (visionTag) {
-        visionTag.innerText = currentPlate || "—";
+        input.value = cleanPlate;
     }
 
-    const frontData = selectedPairDetail.front || selectedPairDetail.front_image;
-    if (frontData && frontData.url) {
-        if (thumbFront) {
-            thumbFront.src = frontData.url;
-            thumbFront.style.display = "block";
-        }
-        if (emptyFront) emptyFront.style.display = "none";
-        if (tagFront) tagFront.innerText = frontData.detected_plate ? `Plate: ${frontData.detected_plate}` : "Front Photo";
-    } else {
-        if (thumbFront) thumbFront.style.display = "none";
-        if (emptyFront) emptyFront.style.display = "block";
-        if (tagFront) tagFront.innerText = "—";
-    }
-
-    const rearData = selectedPairDetail.rear || selectedPairDetail.rear_image;
-    if (rearData && rearData.url) {
-        if (thumbRear) {
-            thumbRear.src = rearData.url;
-            thumbRear.style.display = "block";
-        }
-        if (emptyRear) emptyRear.style.display = "none";
-        if (tagRear) tagRear.innerText = rearData.detected_plate ? `Plate: ${rearData.detected_plate}` : "Rear Photo";
-    } else {
-        if (thumbRear) thumbRear.style.display = "none";
-        if (emptyRear) emptyRear.style.display = "block";
-        if (tagRear) tagRear.innerText = "—";
-    }
-
-    updateLinkerBanner();
     openModal("modal-edit-plate");
-    searchOrdersForLinking(currentPlate.startsWith("PAIR-") ? "" : currentPlate);
+    searchOrdersForLinking(cleanPlate);
     setTimeout(() => {
         if (input) {
             input.focus();
@@ -613,8 +570,6 @@ async function submitUnifiedLinkOrder() {
     if (!selectedPairId) return;
     const input = document.getElementById("input-edit-plate");
     const query = input ? input.value.trim() : "";
-    const status = document.getElementById("select-edit-status") ? document.getElementById("select-edit-status").value : "";
-    const note = document.getElementById("input-edit-note") ? document.getElementById("input-edit-note").value.trim() : "";
 
     if (!query) {
         showToast("Please enter a plate or order number.", "warning");
@@ -625,8 +580,18 @@ async function submitUnifiedLinkOrder() {
         const bodyParams = new URLSearchParams();
         bodyParams.append("action", "link_order");
         bodyParams.append("query", query);
-        if (status) bodyParams.append("verification_status", status);
-        if (note) bodyParams.append("operator_note", note);
+
+        // If query matches any order in the currently filtered list, pass order_id for immediate linking
+        const cleanQ = query.replace(/\s+/g, "").toUpperCase();
+        const matched = currentFilteredOrders.find(o => {
+            const cleanPlate = (o.registration_number || "").replace(/\s+/g, "").toUpperCase();
+            const cleanOrder = (o.order_number || "").replace(/\s+/g, "").toUpperCase();
+            const cleanVin = (o.vin || "").replace(/\s+/g, "").toUpperCase();
+            return cleanPlate === cleanQ || cleanOrder === cleanQ || cleanVin === cleanQ;
+        });
+        if (matched) {
+            bodyParams.append("order_id", matched.id);
+        }
 
         const res = await fetch(`/api/pairs/${selectedPairId}/action/`, {
             method: "POST",
@@ -682,13 +647,14 @@ async function searchOrdersForLinking(q) {
         const res = await fetch(`/api/orders/?search=${encodeURIComponent(q)}&limit=50`);
         const data = await res.json();
         if (data.success && data.orders) {
+            currentFilteredOrders = data.orders;
             if (countEl) countEl.innerText = `${data.orders.length} order(s) found`;
             if (data.orders.length === 0) {
                 container.innerHTML = `
                     <div style="padding:22px 16px; text-align:center; color:var(--ug-text-dim); font-size:0.78rem;">
                         <div>No orders in local database matching '<strong>${escapeHtml(q || 'all')}</strong>'.</div>
                         <div style="margin-top:6px; color:var(--ug-text-muted); font-size:0.73rem;">
-                            Press <strong style="color:var(--ug-green);">Enter</strong> to apply plate &amp; query live ITMS, or sync orders in Tab 2.
+                            Press <strong style="color:var(--ug-green);">Enter</strong> to update plate directly (will also query live ITMS).
                         </div>
                     </div>`;
                 return;
@@ -707,14 +673,14 @@ async function searchOrdersForLinking(q) {
                     </thead>
                     <tbody>
                         ${data.orders.map(o => `
-                            <tr>
+                            <tr style="cursor:pointer;" onclick="linkOrderToPair(${o.id})" title="Click to link Order #${escapeHtml(o.order_number)}">
                                 <td><strong style="color:var(--ug-yellow); font-family:var(--font-mono);">${escapeHtml(o.order_number)}</strong></td>
                                 <td><strong style="color:#fff;">${escapeHtml(o.registration_number)}</strong></td>
                                 <td style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${escapeHtml(o.vin || '—')}</td>
                                 <td><span class="badge badge-muted">${escapeHtml(o.status || 'Active')}</span></td>
                                 <td style="font-size:0.78rem; color:var(--ug-text-dim);">${escapeHtml(o.warehouse_name || '—')}</td>
                                 <td style="text-align:right;">
-                                    <button class="btn btn-primary" style="padding:3px 10px; font-size:0.75rem;" onclick="linkOrderToPair(${o.id})">
+                                    <button class="btn btn-primary" style="padding:3px 10px; font-size:0.75rem;" onclick="event.stopPropagation(); linkOrderToPair(${o.id})">
                                         Link ➜
                                     </button>
                                 </td>

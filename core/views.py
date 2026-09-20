@@ -673,6 +673,8 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
                 Q(registration_number__iexact=raw_val) |
                 Q(order_number__iexact=raw_val) |
                 Q(order_number__iexact=clean_val) |
+                Q(order_number__icontains=raw_val) |
+                Q(order_number__icontains=clean_val) |
                 Q(vin__iexact=raw_val)
             ).first()
 
@@ -710,6 +712,7 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
             pair.matched_via = VehicleInstallationPair.MatchedVia.MANUAL
         elif raw_val:
             canonical_plate = normalizer.canonicalize(raw_val) or raw_val.strip().upper()
+            pair.order = None
             pair.match_type = VehicleInstallationPair.MatchType.NONE
             pair.match_score = None
             pair.matched_via = VehicleInstallationPair.MatchedVia.MANUAL
@@ -740,6 +743,8 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
             pair.operator_note = str(operator_note).strip()
         elif target_order:
             pair.operator_note = f"Linked to Order #{target_order.order_number} ({target_order.registration_number})"
+        elif canonical_plate:
+            pair.operator_note = f"Manual plate updated: {canonical_plate}"
 
         pair.save()
 

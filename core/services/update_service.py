@@ -199,6 +199,21 @@ class UpdateService:
             if dirty_files:
                 logger.warning("Local code modifications detected before update: %s", dirty_files)
 
+            # If untracked media/itms_web.log or other transient log files exist, temporarily move them
+            # to avoid merge conflicts with older tracked versions
+            log_candidates = [
+                PROJECT_ROOT / "media" / "itms_web.log",
+            ]
+            for log_f in log_candidates:
+                if log_f.is_file():
+                    try:
+                        bak = log_f.with_suffix(".log.bak")
+                        if bak.is_file():
+                            bak.unlink()
+                        shutil.move(str(log_f), str(bak))
+                    except Exception as log_exc:
+                        logger.debug("Could not move %s before git update: %s", log_f, log_exc)
+
             # Fetch and rebase
             fetch_proc = subprocess.run(
                 ["git", "fetch", "origin", "main"],

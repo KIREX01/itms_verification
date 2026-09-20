@@ -10,6 +10,8 @@ db.sqlite3-*
 .itms_web.pid
 media/vault/
 media/crops/
+media/*.log
+*.log
 *.pt
 .pytest_cache/
 .DS_Store

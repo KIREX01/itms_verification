@@ -19,6 +19,16 @@ def get_active_bond() -> Dict[str, str]:
     return config_service.get_active_bond()
 
 
+def get_active_bond_code() -> str:
+    """Returns active operating bond code (e.g. 'AGM')."""
+    return config_service.get_active_bond().get("code", "AGM")
+
+
+def get_active_bond_name() -> str:
+    """Returns active operating bond name."""
+    return config_service.get_active_bond().get("name", "AGM Bonded Warehouse")
+
+
 def set_active_bond(code: str, name: Optional[str] = None) -> bool:
     """Sets active operating bond facility code and name."""
     return config_service.set_active_bond(code, name)

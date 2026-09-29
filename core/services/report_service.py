@@ -226,63 +226,41 @@ def get_date_driven_plate_totals(target_date: Optional[str] = None) -> Dict[str,
             if not clean_code.startswith("IK-"):
                 kit_by_code[f"IK-{clean_code}"] = k
 
-    # Source A: Pairs where linking was attempted and failed (neither in orders nor archive)
-    # Exclude already submitted pairs because they have been finalized
-    unlinked_pairs = (
-        VehicleInstallationPair.objects.filter(order__isnull=True)
-        .exclude(verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED)
-        .select_related("front_image", "rear_image")
-        .order_by("-updated_at")
-    )
-    failed_linking_count = 0
-    for p in unlinked_pairs:
-        raw_plate = p.registration_number_detected or p.manual_plate_override
-        c_plate = normalizer.canonicalize(raw_plate)
-        if (
-            c_plate
-            and not c_plate.startswith("PAIR")
-            and not c_plate.startswith("MISSING")
-            and c_plate not in all_order_plates
-        ):
-            if c_plate not in seen_unallocated_plates:
-                seen_unallocated_plates.add(c_plate)
-                failed_linking_count += 1
-                created_str = (
-                    p.created_at.strftime("%d.%m.%Y %H:%M")
-                    if p.created_at
-                    else "—"
-                )
-                matching_kit = kit_by_reg.get(c_plate) or kit_by_code.get(f"IK-{c_plate}") or kit_by_code.get(c_plate)
-
-                if matching_kit:
-                    src_label = f"Pair #{p.id} ({matching_kit.kit_code})"
-                    reason = f"Kit {matching_kit.kit_code} is 'New' in stock; no active order or archive in ITMS"
-                    wh = matching_kit.warehouse or "Warehouse Stock"
-                    serials = {
-                        "front_plate": matching_kit.front_plate or "—",
-                        "rear_plate": matching_kit.rear_plate or "—",
-                        "gps": matching_kit.gps_tracker or "—",
-                    }
-                else:
-                    src_label = f"Pair #{p.id}"
-                    reason = "Attempted linking to ITMS order; not found in active orders or archive"
-                    wh = "—"
-                    serials = {}
-
+    # Source A: Dispatched Plates from Warehouse (Taken Out for Shift via Physical Scans)
+    # Ground truth: Plates scanned out from warehouse safe to installation line.
+    # If a plate was scanned as dispatched for this work date, but is neither installed,
+    # nor pending in an active order, nor returned uninstalled -> physical floor unallocated discrepancy!
+    dispatched_unallocated_count = 0
+    try:
+        from core.services import stock_monitoring_service
+        stock_recon = stock_monitoring_service.compute_daily_reconciliation(selected_suffix)
+        for u_plate in stock_recon.get("unallocated_plates", []):
+            c_u = normalizer.canonicalize(u_plate)
+            if c_u and c_u not in seen_unallocated_plates:
+                seen_unallocated_plates.add(c_u)
+                dispatched_unallocated_count += 1
+                matching_kit = kit_by_reg.get(c_u) or kit_by_code.get(f"IK-{c_u}") or kit_by_code.get(c_u)
                 unallocated_items.append({
-                    "plate": c_plate,
-                    "display_plate": format_display_plate(c_plate),
-                    "source": "PAIR_LINK_FAILED",
-                    "source_type_label": "Photo Pair (Unallocated)",
-                    "source_id": src_label,
-                    "reason": reason,
-                    "status": "New in Stock" if matching_kit else p.verification_status,
-                    "warehouse": wh,
-                    "date": created_str,
-                    "serials": serials,
+                    "plate": c_u,
+                    "display_plate": format_display_plate(c_u),
+                    "source": "DISPATCH_UNALLOCATED",
+                    "source_type_label": "Floor Dispatched (Unallocated)",
+                    "source_id": f"Shift Out ({selected_suffix})",
+                    "reason": "Plates taken out to installation line; no active ITMS order and not archived",
+                    "status": "Taken Out to Line",
+                    "warehouse": matching_kit.warehouse if matching_kit else "Line Floor",
+                    "date": formatted_date,
+                    "serials": {
+                        "front_plate": matching_kit.front_plate if matching_kit else "—",
+                        "rear_plate": matching_kit.rear_plate if matching_kit else "—",
+                        "gps": matching_kit.gps_tracker if matching_kit else "—",
+                    },
                 })
+    except Exception as stock_err:
+        logger.warning("Error calculating stock reconciliation in report_service: %s", stock_err)
+        stock_recon = {}
 
-    # Source B: Stock kits marked 'New' (not yet allocated to an order)
+    # Source B: Stock kits marked 'New' (in warehouse stock, not yet allocated to an order)
     new_kits = [k for k in all_kits if (k.status or "").strip().lower() == "new"]
     stock_kits_count = 0
     for k in sorted(new_kits, key=lambda x: (x.created_date or "", x.id), reverse=True):
@@ -310,37 +288,55 @@ def get_date_driven_plate_totals(target_date: Optional[str] = None) -> Dict[str,
                     },
                 })
 
-    # Source C: Dispatched Plates from Warehouse (Taken Out for Shift)
-    # If a plate was scanned as dispatched for this work date, but is neither installed,
-    # nor pending in an order, nor returned uninstalled -> physical floor unallocated discrepancy!
-    dispatched_unallocated_count = 0
-    try:
-        from core.services import stock_monitoring_service
-        stock_recon = stock_monitoring_service.compute_daily_reconciliation(selected_suffix)
-        for u_plate in stock_recon.get("unallocated_plates", []):
-            if u_plate not in seen_unallocated_plates:
-                seen_unallocated_plates.add(u_plate)
-                dispatched_unallocated_count += 1
-                matching_kit = kit_by_reg.get(u_plate) or kit_by_code.get(f"IK-{u_plate}") or kit_by_code.get(u_plate)
-                unallocated_items.insert(0, {
-                    "plate": u_plate,
-                    "display_plate": format_display_plate(u_plate),
-                    "source": "DISPATCH_UNALLOCATED",
-                    "source_type_label": "Floor Dispatched (Unallocated)",
-                    "source_id": f"Shift Out ({selected_suffix})",
-                    "reason": "Plates taken out to installation line; no active ITMS order and not archived",
-                    "status": "Taken Out to Line",
-                    "warehouse": matching_kit.warehouse if matching_kit else "Line Floor",
-                    "date": formatted_date,
-                    "serials": {
-                        "front_plate": matching_kit.front_plate if matching_kit else "—",
-                        "rear_plate": matching_kit.rear_plate if matching_kit else "—",
-                        "gps": matching_kit.gps_tracker if matching_kit else "—",
-                    },
+    # Source C: Photo Pairs with verified physical kit in stock
+    # Strictly requires that the plate matches an actual InstallationKit to avoid OCR noise
+    unlinked_pairs = (
+        VehicleInstallationPair.objects.filter(order__isnull=True)
+        .exclude(verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED)
+        .select_related("front_image", "rear_image")
+        .order_by("-updated_at")
+    )
+    failed_linking_count = 0
+    for p in unlinked_pairs:
+        raw_plate = p.registration_number_detected or p.manual_plate_override
+        c_plate = normalizer.canonicalize(raw_plate)
+        if (
+            c_plate
+            and not c_plate.startswith("PAIR")
+            and not c_plate.startswith("MISSING")
+            and c_plate not in all_order_plates
+        ):
+            # Only include if it matches a known real kit in stock or valid plate
+            matching_kit = kit_by_reg.get(c_plate) or kit_by_code.get(f"IK-{c_plate}") or kit_by_code.get(c_plate)
+            if matching_kit and c_plate not in seen_unallocated_plates:
+                seen_unallocated_plates.add(c_plate)
+                failed_linking_count += 1
+                created_str = (
+                    p.created_at.strftime("%d.%m.%Y %H:%M")
+                    if p.created_at
+                    else "—"
+                )
+                src_label = f"Pair #{p.id} ({matching_kit.kit_code})"
+                reason = f"Kit {matching_kit.kit_code} is 'New' in stock; photo pair unlinked to ITMS order"
+                wh = matching_kit.warehouse or "Warehouse Stock"
+                serials = {
+                    "front_plate": matching_kit.front_plate or "—",
+                    "rear_plate": matching_kit.rear_plate or "—",
+                    "gps": matching_kit.gps_tracker or "—",
+                }
+                unallocated_items.append({
+                    "plate": c_plate,
+                    "display_plate": format_display_plate(c_plate),
+                    "source": "PAIR_LINK_FAILED",
+                    "source_type_label": "Photo Pair (Verified Kit)",
+                    "source_id": src_label,
+                    "reason": reason,
+                    "status": "New in Stock",
+                    "warehouse": wh,
+                    "date": created_str,
+                    "serials": serials,
                 })
-    except Exception as stock_err:
-        logger.warning("Error calculating stock reconciliation in report_service: %s", stock_err)
-        stock_recon = {}
+
 
     return {
         "selected_date_suffix": selected_suffix,

@@ -294,4 +294,68 @@ class TUIAppTests(TransactionTestCase):
 
         asyncio.run(run_pilot())
 
+    def test_date_select_modal_behavior(self):
+        """Verifies DateSelectModal shortcuts and manual date suffix submission."""
+        from unittest.mock import MagicMock
+        from core.tui.dialogs import DateSelectModal
+
+        sample_dates = [
+            {"suffix": "260929", "formatted_date": "29.09.2026", "order_count": 42},
+            {"suffix": "260928", "formatted_date": "28.09.2026", "order_count": 35},
+        ]
+        modal = DateSelectModal(current_suffix="260929", available_dates=sample_dates)
+        modal.dismiss = MagicMock()
+
+        # 1. Test typing 6-digit suffix manually
+        mock_input = MagicMock()
+        mock_input.value = "260928"
+        modal.query_one = MagicMock(return_value=mock_input)
+        modal._handle_manual_submit()
+        modal.dismiss.assert_called_with("260928")
+
+        # 2. Test ALL keyword
+        mock_input.value = "ALL"
+        modal._handle_manual_submit()
+        modal.dismiss.assert_called_with("ALL")
+
+    def test_stock_manager_modal_stocktake_audit_tab(self):
+        """Verifies rapid USB scanner handling and audit saving in StockManagerModal Tab 7."""
+        from unittest.mock import MagicMock
+        from core.tui.dialogs import StockManagerModal
+
+        modal = StockManagerModal(target_date_suffix="260929")
+        modal.notify = MagicMock()
+
+        # Test rapid scanning single plate adds to bulk text with duplicate prevention
+        mock_area = MagicMock()
+        mock_area.text = "UMA100PW"
+        mock_single = MagicMock()
+        mock_single.value = "UMA101PW"
+        mock_badge = MagicMock()
+
+        def mock_query(selector, expected_type=None):
+            if "bulk" in selector:
+                return mock_area
+            elif "single" in selector:
+                return mock_single
+            elif "staged" in selector or "summary" in selector:
+                return mock_badge
+            return MagicMock()
+
+        modal.query_one = mock_query
+
+        # Simulate USB scanner Enter event
+        event = MagicMock()
+        event.input.id = "input-stocktake-single"
+        event.input.value = "UMA101PW"
+        event.value = "UMA101PW"
+
+        modal.on_input_submitted(event)
+        self.assertIn("UMA101PW", mock_area.text)
+
+        # Test duplicate scan ignored
+        modal.on_input_submitted(event)
+        self.assertTrue(modal.notify.called)
+
+
 

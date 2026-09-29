@@ -194,15 +194,23 @@ def set_setting(key_path: str, value: Any, base_dir: Optional[Path] = None) -> b
 
 def get_active_bond(base_dir: Optional[Path] = None) -> Dict[str, str]:
     """Returns active bond code and human-readable bond name."""
-    code = get_setting("bond.active_bond_code", "AGM", base_dir)
-    name = get_setting("bond.active_bond_name", "AGM Bonded Warehouse", base_dir)
-    return {"code": str(code), "name": str(name)}
+    raw_code = get_setting("bond.active_bond_code", "AGM", base_dir)
+    raw_name = get_setting("bond.active_bond_name", "AGM Bonded Warehouse", base_dir)
+    code_str = str(raw_code or "").strip().upper()
+    if not code_str or "<" in code_str or "mock" in code_str.lower():
+        code_str = "AGM"
+    name_str = str(raw_name or "").strip()
+    if not name_str or "<" in name_str or "mock" in name_str.lower():
+        name_str = "AGM Bonded Warehouse"
+    return {"code": code_str, "name": name_str}
 
 
 def set_active_bond(code: str, name: Optional[str] = None, base_dir: Optional[Path] = None) -> bool:
     """Updates active operating bond warehouse in config.json."""
-    code_clean = (code or "AGM").strip().upper()
-    name_clean = (name or "").strip()
+    if not code or "<" in str(code) or "mock" in str(code).lower():
+        return False
+    code_clean = str(code).strip().upper()
+    name_clean = str(name or "").strip()
     if not name_clean:
         bonds = get_available_bonds(base_dir)
         for b in bonds:

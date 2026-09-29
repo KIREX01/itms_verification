@@ -585,6 +585,124 @@ def set_opening_balances(
     }
 
 
+def set_physical_count(
+    physical_count: int,
+    target_date_suffix: Optional[str] = None,
+    notes: str = "",
+) -> Dict[str, Any]:
+    """
+    Manually sets the physical count audit for the safe room/storage box and updates variance.
+    """
+    work_d, suffix = resolve_date_and_suffix(target_date_suffix)
+    with transaction.atomic():
+        ledger, _ = DailyStockLedger.objects.get_or_create(
+            work_date=work_d,
+            defaults={"work_date_suffix": suffix},
+        )
+        ledger.physical_count = max(0, int(physical_count))
+        ledger.variance = ledger.physical_count - ledger.closing_stock
+        if notes:
+            ledger.notes = notes
+        ledger.save()
+
+        recon = compute_daily_reconciliation(suffix)
+
+    return {
+        "success": True,
+        "physical_count": ledger.physical_count,
+        "variance": ledger.variance,
+        "closing_stock": ledger.closing_stock,
+        "reconciliation": recon,
+    }
+
+
+def record_stock_taking_audit(
+    scanned_plates: Iterable[str],
+    target_date_suffix: Optional[str] = None,
+    operator_name: str = "Operator",
+    notes: str = "",
+) -> Dict[str, Any]:
+    """
+    Performs full safe room physical stock-taking / retaking by scanning all physical
+    plates currently inside the safe room or storage box.
+
+    Reconciles scanned plates against the calculated closing stock balance:
+    - Physical Scanned Count
+    - Book Closing Stock
+    - Variance = Physical Scanned Count - Book Closing Stock
+    """
+    work_d, suffix = resolve_date_and_suffix(target_date_suffix)
+    clean_plates, dup_count, dup_plates = parse_plate_input_with_stats(scanned_plates)
+
+    recon = compute_daily_reconciliation(suffix)
+    book_closing = recon.get("report_table", {}).get("rows", [])
+    closing_row = next((r for r in book_closing if r["metric"] == "Closing Balance"), {})
+    book_closing_total = closing_row.get("total", 0)
+    book_closing_psv = closing_row.get("psv", 0)
+    book_closing_pmo = closing_row.get("pmo", 0)
+
+    # Classify scanned plates into PSV vs PMO
+    pmo_plates_set = {
+        normalizer.canonicalize(p)
+        for p in StockDispatchScan.objects.filter(plate_category=PlateCategory.PMO).values_list("registration_number", flat=True)
+    }
+    pmo_plates_set.update(
+        normalizer.canonicalize(p)
+        for p in StockDeliveryItem.objects.filter(plate_category=PlateCategory.PMO).values_list("registration_number", flat=True)
+    )
+
+    scanned_psv_count = 0
+    scanned_pmo_count = 0
+    clean_plates_canonical = set()
+    for p in clean_plates:
+        c = normalizer.canonicalize(p)
+        clean_plates_canonical.add(c)
+        if c in pmo_plates_set:
+            scanned_pmo_count += 1
+        else:
+            scanned_psv_count += 1
+
+    total_scanned = len(clean_plates)
+    total_variance = total_scanned - book_closing_total
+    variance_psv = scanned_psv_count - book_closing_psv
+    variance_pmo = scanned_pmo_count - book_closing_pmo
+
+    with transaction.atomic():
+        ledger, _ = DailyStockLedger.objects.get_or_create(
+            work_date=work_d,
+            defaults={"work_date_suffix": suffix},
+        )
+        ledger.physical_count = total_scanned
+        ledger.variance = total_variance
+        if notes:
+            ledger.notes = notes
+        ledger.save()
+
+        updated_recon = compute_daily_reconciliation(suffix)
+
+    return {
+        "success": True,
+        "work_date": work_d.isoformat(),
+        "work_date_suffix": suffix,
+        "physical_count": total_scanned,
+        "total_scanned": total_scanned,
+        "physical_psv": scanned_psv_count,
+        "physical_pmo": scanned_pmo_count,
+        "book_closing_stock": book_closing_total,
+        "book_closing_total": book_closing_total,
+        "book_closing_psv": book_closing_psv,
+        "book_closing_pmo": book_closing_pmo,
+        "variance": total_variance,
+        "variance_psv": variance_psv,
+        "variance_pmo": variance_pmo,
+        "total_submitted": len(clean_plates) + dup_count,
+        "duplicate_scans_skipped": dup_count,
+        "duplicate_plates": dup_plates,
+        "scanned_plates": clean_plates,
+        "reconciliation": updated_recon,
+    }
+
+
 def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Dict[str, Any]:
     """
     Computes comprehensive daily plate and stock reconciliation report for target date,

@@ -585,4 +585,64 @@ class StockMonitoringTests(TestCase):
         self.assertTrue(post_data["success"])
         self.assertEqual(post_data["active_bond"]["code"], "AGM")
 
+    def test_record_stock_taking_audit_and_variance(self):
+        """Verifies safe room physical stock-taking audit balances against book closing stock."""
+        # 1. Setup opening stock & deliveries
+        stock_monitoring_service.set_opening_balances(
+            opening_psv=100,
+            opening_pmo=50,
+            target_date_suffix=self.test_suffix,
+        )
+        stock_monitoring_service.record_delivery(
+            delivery_number="DN-TEST-AUDIT",
+            supplier="Factory Depot",
+            plates="UMA801PW, UMA802PW",
+            plate_category="PSV",
+            target_date_suffix=self.test_suffix,
+        )
+
+        # 2. Perform safe room physical stock-taking scan (e.g. 152 physical plates in safe room)
+        # 150 opening + 2 delivered = 152 book closing balance
+        scanned_safe_plates = [f"UMA{i:03d}PW" for i in range(1, 153)]
+        res = stock_monitoring_service.record_stock_taking_audit(
+            scanned_plates=scanned_safe_plates,
+            target_date_suffix=self.test_suffix,
+            notes="Full safe room physical count audit",
+        )
+
+        self.assertTrue(res["success"])
+        self.assertEqual(res["total_scanned"], 152)
+        self.assertEqual(res["book_closing_total"], 152)
+        self.assertEqual(res["variance"], 0)  # Perfectly balanced!
+
+        # 3. Verify ledger persisted
+        ledger = DailyStockLedger.objects.get(work_date_suffix=self.test_suffix)
+        self.assertEqual(ledger.physical_count, 152)
+        self.assertEqual(ledger.variance, 0)
+
+        # 4. If fewer plates scanned (e.g. 150 scanned vs 152 book -> -2 variance)
+        res_short = stock_monitoring_service.record_stock_taking_audit(
+            scanned_plates=scanned_safe_plates[:150],
+            target_date_suffix=self.test_suffix,
+        )
+        self.assertEqual(res_short["total_scanned"], 150)
+        self.assertEqual(res_short["variance"], -2)
+
+    def test_set_physical_count_manual(self):
+        """Verifies setting manual physical count updates DailyStockLedger and variance."""
+        stock_monitoring_service.set_opening_balances(
+            opening_psv=200,
+            opening_pmo=0,
+            target_date_suffix=self.test_suffix,
+        )
+        res = stock_monitoring_service.set_physical_count(
+            physical_count=198,
+            target_date_suffix=self.test_suffix,
+            notes="Manual physical audit count",
+        )
+        self.assertTrue(res["success"])
+        self.assertEqual(res["physical_count"], 198)
+        self.assertEqual(res["variance"], -2)  # 198 - 200 = -2 missing
+
+
 

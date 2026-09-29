@@ -1378,6 +1378,215 @@ class VaultLocationDialog(ModalScreen[Optional[str]]):
             self.notify(f"Selected: {chosen}")
 
 
+
+# ============================================================================
+# Date Selection & Work Shift Modal
+# ============================================================================
+
+class DateSelectModal(ModalScreen[Optional[str]]):
+    """
+    Direct Date Selection Dialog for Reports & Shift Operations.
+    Allows operator to:
+    1. Select directly from recent active shift dates with counts and formatting.
+    2. Click quick shortcut buttons: 'Today', 'Latest Active Shift', 'All Dates'.
+    3. Type any 6-digit suffix (e.g. 260929) or full date (e.g. 29.09.2026 / 2026-09-29) in the input.
+    """
+    DEFAULT_CSS = """
+    DateSelectModal {
+        align: center middle;
+    }
+    DateSelectModal #modal-dialog {
+        width: 80%;
+        max-width: 90;
+        height: 75%;
+        max-height: 32;
+        background: #0d1117;
+        border: thick #0284c7;
+        padding: 1 2;
+    }
+    DateSelectModal #modal-header {
+        height: auto;
+        margin-bottom: 1;
+        background: #161b22;
+        padding: 0 1;
+        border-bottom: solid #30363d;
+    }
+    DateSelectModal #date-shortcuts-row {
+        height: 3;
+        margin-bottom: 1;
+        align-vertical: middle;
+    }
+    DateSelectModal #date-shortcuts-row Button {
+        margin-right: 1;
+    }
+    DateSelectModal #date-input-row {
+        height: 3;
+        margin-bottom: 1;
+        align-vertical: middle;
+    }
+    DateSelectModal #input-date-manual {
+        width: 1fr;
+        margin-right: 1;
+    }
+    DateSelectModal #table-modal-dates {
+        height: 1fr;
+        min-height: 8;
+        border: solid #30363d;
+        margin-bottom: 1;
+    }
+    DateSelectModal #modal-footer {
+        height: 3;
+        align: right middle;
+    }
+    DateSelectModal #modal-footer Button {
+        margin-left: 1;
+        min-width: 16;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss_modal", "Cancel", priority=True),
+        Binding("enter", "confirm_selection", "Select Date"),
+    ]
+
+    def __init__(
+        self,
+        current_suffix: Optional[str] = None,
+        available_dates: Optional[List[Dict[str, Any]]] = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.current_suffix = current_suffix
+        self.available_dates = available_dates or []
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="modal-dialog"):
+            yield Static(
+                "[bold cyan]🗓️ SELECT OPERATIONAL WORK SHIFT DATE[/bold cyan]\n"
+                "[dim]Double-click a date, select from list, or type a 6-digit suffix (DDMMYY) directly.[/dim]",
+                id="modal-header",
+            )
+            with Horizontal(id="date-shortcuts-row"):
+                yield Button("📅 Today's Date", variant="primary", id="btn-date-today")
+                yield Button("⚡ Latest Shift", variant="warning", id="btn-date-latest")
+                yield Button("🌐 All Dates Combined", variant="default", id="btn-date-all")
+
+            with Horizontal(id="date-input-row"):
+                yield Input(
+                    placeholder="Type 6-digit suffix (e.g. 260929) or date (e.g. 29.09.2026)...",
+                    id="input-date-manual",
+                )
+                yield Button("Apply Date", variant="success", id="btn-apply-manual-date")
+
+            yield DataTable(id="table-modal-dates")
+
+            with Horizontal(id="modal-footer"):
+                yield Button("Select Highlighted [Enter]", variant="primary", id="btn-select-highlighted")
+                yield Button("Cancel [Esc]", variant="error", id="btn-cancel-date")
+
+    def on_mount(self) -> None:
+        table = self.query_one("#table-modal-dates", DataTable)
+        table.add_columns("Shift Date", "Suffix (DDMMYY)", "Orders Recorded", "Status / Details")
+        table.cursor_type = "row"
+
+        from core.services import report_service
+        dates = self.available_dates or report_service.get_available_order_dates()
+
+        today_suf = timezone.localdate().strftime("%d%m%y")
+        today_fmt = timezone.localdate().strftime("%d.%m.%Y")
+
+        has_today = any(d.get("suffix") == today_suf for d in dates)
+        if not has_today:
+            table.add_row(
+                f"[bold green]{today_fmt} (Today)[/bold green]",
+                f"[cyan]{today_suf}[/cyan]",
+                "0 orders",
+                "[dim]Current shift (New / In Progress)[/dim]",
+                key=today_suf,
+            )
+
+        for d in dates:
+            suf = d.get("suffix", "")
+            fmt = d.get("formatted_date", suf)
+            cnt = d.get("order_count", 0)
+            is_active = (suf == self.current_suffix)
+            is_today = (suf == today_suf)
+
+            date_label = f"[bold green]{fmt} (Today)[/bold green]" if is_today else f"[bold white]{fmt}[/bold white]"
+            if is_active:
+                status_str = "[bold cyan]★ CURRENTLY SELECTED[/bold cyan]"
+            else:
+                status_str = "[dim]Completed shift[/dim]" if cnt > 0 else "[dim]No orders[/dim]"
+
+            table.add_row(
+                date_label,
+                f"[cyan]{suf}[/cyan]",
+                f"[bold yellow]{cnt:,}[/bold yellow] orders",
+                status_str,
+                key=suf,
+            )
+
+        self.query_one("#input-date-manual", Input).focus()
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        if event.row_key:
+            selected_suf = str(event.row_key.value)
+            self.dismiss(selected_suf)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        btn_id = event.button.id
+        today_suf = timezone.localdate().strftime("%d%m%y")
+
+        if btn_id == "btn-date-today":
+            self.dismiss(today_suf)
+        elif btn_id == "btn-date-latest":
+            if self.available_dates:
+                self.dismiss(self.available_dates[0].get("suffix", today_suf))
+            else:
+                self.dismiss(today_suf)
+        elif btn_id == "btn-date-all":
+            self.dismiss("ALL")
+        elif btn_id == "btn-apply-manual-date":
+            self._handle_manual_submit()
+        elif btn_id == "btn-select-highlighted":
+            table = self.query_one("#table-modal-dates", DataTable)
+            if table.cursor_row is not None and table.row_count > 0:
+                row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
+                if row_key and row_key.value:
+                    self.dismiss(str(row_key.value))
+                    return
+            self._handle_manual_submit()
+        elif btn_id == "btn-cancel-date":
+            self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "input-date-manual":
+            self._handle_manual_submit()
+
+    def _handle_manual_submit(self) -> None:
+        from core.services import report_service
+        raw_val = self.query_one("#input-date-manual", Input).value.strip()
+        if not raw_val:
+            self.dismiss(None)
+            return
+
+        parsed = report_service.parse_target_date_suffix(raw_val)
+        if parsed:
+            self.dismiss(parsed)
+        elif raw_val.upper() in ("ALL", "TOTAL", "*"):
+            self.dismiss("ALL")
+        elif len(raw_val) == 6 and raw_val.isdigit():
+            self.dismiss(raw_val)
+        else:
+            self.notify(f"⚠️ Unrecognized date format: '{raw_val}'. Please use DDMMYY (e.g. 260929) or DD.MM.YYYY.", severity="warning")
+
+    def action_dismiss_modal(self) -> None:
+        self.dismiss(None)
+
+    def action_confirm_selection(self) -> None:
+        self._handle_manual_submit()
+
+
 # ============================================================================
 # Stock Monitoring & Daily Plate Reconciliation Manager Modal
 # ============================================================================
@@ -1452,6 +1661,11 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
         min-height: 4;
         border: solid #30363d;
         margin-bottom: 1;
+    }
+    StockManagerModal #lbl-stocktake-summary {
+        height: auto;
+        margin-top: 1;
+        padding: 0 1;
     }
     StockManagerModal #modal-footer {
         height: 3;
@@ -1676,6 +1890,33 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                             yield Input(value="0", placeholder="Opening PMO count", id="input-open-pmo", classes="stock-input-field")
                         yield Button("💾 Save Scheduled Targets & Opening Balances", variant="success", id="btn-save-scheduled")
 
+                # TAB 7: Safe Room Stock Taking & Physical Audit
+                with TabPane("🔒 Safe Stock Taking", id="tab-stocktake-pane"):
+                    with Vertical(classes="stock-tab-pane"):
+                        yield Static(
+                            "[bold cyan]🔒 Physical Stock Taking & Safe Room Audit[/bold cyan]  │  "
+                            "[dim]Physically count/scan all number plates currently inside the safe room or storage box to reconcile with book stock[/dim]"
+                        )
+                        with Horizontal(classes="stock-row"):
+                            yield Input(
+                                placeholder="⚡ Rapid scan safe room plate QR [Enter to add]...",
+                                id="input-stocktake-single",
+                                classes="stock-input-field",
+                            )
+                            yield Static("[dim]Staged: 0 plates[/dim]", id="lbl-stocktake-staged", classes="stock-staged-badge")
+                        yield TextArea(
+                            id="text-stocktake-bulk",
+                            classes="stock-textarea",
+                        )
+                        with Horizontal(classes="stock-row"):
+                            yield Button("🔒 Perform Safe Stock Taking Audit", variant="primary", id="btn-save-stocktake")
+                            yield Button("Clear Scans", variant="default", id="btn-clear-stocktake")
+                        with Horizontal(classes="stock-row"):
+                            yield Static("[bold white]Or enter manual physical count:[/bold white] ", classes="stock-input-field")
+                            yield Input(value="0", placeholder="e.g. 850", id="input-stocktake-manual-count", classes="stock-input-field")
+                            yield Button("💾 Set Physical Count", variant="success", id="btn-stocktake-set-manual")
+                        yield Static(id="lbl-stocktake-summary")
+
             with Horizontal(id="modal-footer"):
                 yield Button("📑 Export CSV [E]", variant="default", id="btn-stock-export")
                 yield Button("🔄 Refresh [R]", variant="primary", id="btn-stock-refresh")
@@ -1798,6 +2039,10 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                 self.query_one("#input-sched-pmo", Input).value = str(ledger.scheduled_pmo)
                 self.query_one("#input-open-psv", Input).value = str(ledger.opening_balance_psv)
                 self.query_one("#input-open-pmo", Input).value = str(ledger.opening_balance_pmo)
+                try:
+                    self.query_one("#input-stocktake-manual-count", Input).value = str(ledger.physical_count)
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -1824,6 +2069,8 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
             self.query_one("#text-deliv-bulk", TextArea).text = ""
             try:
                 self.query_one("#input-deliv-single", Input).value = ""
+                self.query_one("#input-deliv-number", Input).value = ""
+                self.query_one("#input-deliv-paper-ref", Input).value = ""
                 self.query_one("#lbl-deliv-staged", Static).update("[dim]Staged: 0 plates[/dim]")
             except Exception:
                 pass
@@ -1847,6 +2094,17 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                 pass
         elif btn_id == "btn-save-scheduled":
             self._handle_save_scheduled()
+        elif btn_id == "btn-save-stocktake":
+            self._handle_save_stocktake()
+        elif btn_id == "btn-clear-stocktake":
+            self.query_one("#text-stocktake-bulk", TextArea).text = ""
+            try:
+                self.query_one("#input-stocktake-single", Input).value = ""
+                self.query_one("#lbl-stocktake-staged", Static).update("[dim]Staged: 0 plates[/dim]")
+            except Exception:
+                pass
+        elif btn_id == "btn-stocktake-set-manual":
+            self._handle_set_manual_physical_count()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Rapid USB barcode scanner handler with automatic deduplication."""
@@ -1884,6 +2142,9 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
             target_area_id = "#text-return-bulk"
             target_badge_id = "#lbl-return-staged"
             db_check = ("return", StockReturnScan.objects.filter(work_date_suffix=self.target_date_suffix, registration_number=plate).exists())
+        elif inp_id == "input-stocktake-single":
+            target_area_id = "#text-stocktake-bulk"
+            target_badge_id = "#lbl-stocktake-staged"
 
         if not target_area_id:
             return
@@ -2119,6 +2380,64 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
             self.action_refresh_stock()
         except Exception as exc:
             self.notify(f"Error saving scheduled values: {exc}", severity="error")
+
+    def _handle_save_stocktake(self) -> None:
+        from core.services import stock_monitoring_service
+        bulk_text = self.query_one("#text-stocktake-bulk", TextArea).text.strip()
+        single_text = ""
+        try:
+            single_text = self.query_one("#input-stocktake-single", Input).value.strip()
+        except Exception:
+            pass
+        combined = f"{bulk_text}\n{single_text}".strip()
+
+        if not combined:
+            self.notify("Please scan or paste safe room physical plates first.", severity="warning")
+            return
+
+        try:
+            res = stock_monitoring_service.record_stock_taking_audit(
+                scanned_plates=combined,
+                target_date_suffix=self.target_date_suffix,
+            )
+            scanned = res.get("total_scanned", 0)
+            book = res.get("book_closing_total", 0)
+            variance = res.get("variance", 0)
+            var_color = "green" if variance == 0 else ("yellow" if variance > 0 else "red")
+            summary_text = (
+                f"[bold cyan]Safe Audit Summary:[/bold cyan]  Physical Scanned: [bold white]{scanned:,}[/bold white]  │  "
+                f"Book Closing: [bold white]{book:,}[/bold white]  │  "
+                f"Variance: [bold {var_color}]{variance:+d}[/bold {var_color}]"
+            )
+            try:
+                self.query_one("#lbl-stocktake-summary", Static).update(summary_text)
+            except Exception:
+                pass
+
+            msg = f"✓ Safe stock taking complete: Scanned {scanned} plates. Variance: {variance:+d}."
+            self.notify(msg, severity="information" if variance >= 0 else "warning")
+            self.action_refresh_stock()
+        except Exception as exc:
+            self.notify(f"Error performing stock taking audit: {exc}", severity="error")
+
+    def _handle_set_manual_physical_count(self) -> None:
+        from core.services import stock_monitoring_service
+        cnt_val = self.query_one("#input-stocktake-manual-count", Input).value.strip()
+        if not cnt_val.isdigit():
+            self.notify("Please enter a valid numeric physical count.", severity="warning")
+            return
+
+        try:
+            res = stock_monitoring_service.set_physical_count(
+                physical_count=int(cnt_val),
+                target_date_suffix=self.target_date_suffix,
+            )
+            cnt = res.get("physical_count", 0)
+            variance = res.get("variance", 0)
+            self.notify(f"✓ Physical count set to {cnt}. Audit variance: {variance:+d}.", severity="information")
+            self.action_refresh_stock()
+        except Exception as exc:
+            self.notify(f"Error setting physical count: {exc}", severity="error")
 
     def action_export_csv(self) -> None:
         from core.services import stock_monitoring_service

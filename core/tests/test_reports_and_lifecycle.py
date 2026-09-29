@@ -269,6 +269,34 @@ class ReportsAndLifecycleTests(TestCase):
         unalloc_plates = [it["plate"] for it in unalloc["items"]]
         self.assertIn("UMA300PW", unalloc_plates)
 
+    def test_unallocated_plates_excludes_invalid_ocr_noise(self):
+        """Verifies unlinked photo pairs with OCR noise that do NOT match physical kits are excluded."""
+        from core.models import StockDispatchScan, PlateCategory
+
+        # Pair with OCR misread / noise
+        VehicleInstallationPair.objects.create(
+            registration_number_detected="BLURRY999",
+            verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW,
+        )
+
+        # Scanned floor dispatch
+        StockDispatchScan.objects.create(
+            registration_number="UMA 555PW",
+            work_date_suffix="260926",
+            plate_category=PlateCategory.PSV,
+        )
+
+        dd = report_service.get_date_driven_plate_totals(target_date="260926")
+        unalloc = dd["unallocated_plates"]
+        unalloc_plates = [it["plate"] for it in unalloc["items"]]
+
+        # Scanned floor dispatch must be present
+        self.assertIn("UMA555PW", unalloc_plates)
+
+        # Invalid OCR noise with no matching kit must NOT be present
+        self.assertNotIn("BLURRY999", unalloc_plates)
+
+
     def test_api_reports_totals_with_date_param(self):
         """Verifies GET /api/reports/totals/?date=260926 returns date_driven payload."""
         url = reverse("core:api_reports_totals")

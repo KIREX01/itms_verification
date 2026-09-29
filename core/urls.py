@@ -18,6 +18,7 @@ urlpatterns = [
     path("api/itms/status/", views.api_itms_status, name="api_itms_status"),
     path("api/itms/connect/", views.api_itms_connect, name="api_itms_connect"),
     path("api/itms/disconnect/", views.api_itms_disconnect, name="api_itms_disconnect"),
+    path("api/itms/warehouses/", views.api_itms_warehouses, name="api_itms_warehouses"),
 
     # ITMS WebApp Orders & Archive Explorer APIs
     path("api/itms/orders/", views.api_itms_orders_explorer, name="api_itms_orders_explorer"),

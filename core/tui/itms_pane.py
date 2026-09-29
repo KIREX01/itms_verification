@@ -28,11 +28,12 @@ from textual.widgets import (
     DataTable,
     Input,
     RichLog,
+    Select,
     Static,
 )
 
 from core.services.itms_web_client import ITMSWebClient, get_web_client
-from core.services import viewer
+from core.services import bond_service, viewer
 from core.services.config_service import get_config_service
 
 ITMS_SUBVIEWS = ["CONNECT", "ORDERS", "ARCHIVE", "KITS"]
@@ -87,6 +88,16 @@ class ITMSConnectionPane(Vertical):
             # Right Column: Authentication & Server Controls
             with Vertical(id="itms-controls-column"):
                 yield Static("[bold white]🔑 ITMS WebApp Session Credentials[/bold white]", classes="itms-section-title")
+                yield Static("[dim]🏢 Operating Facility / Bonded Warehouse:[/dim]")
+                active_bond = bond_service.get_active_bond()
+                warehouses = bond_service.get_all_discovered_warehouses()
+                bond_options = [(f"{w['name']} ({w['code']})", w["code"]) for w in warehouses]
+                yield Select(
+                    bond_options,
+                    value=active_bond.get("code", "AGM"),
+                    id="sel-itms-bond",
+                    prompt="Select Active Operating Bond",
+                )
                 yield Input(
                     placeholder="ITMS WebApp Base URL",
                     value=self.client.base_url,
@@ -306,13 +317,15 @@ class ITMSConnectionPane(Vertical):
         cfg = get_config_service()
         dry_run = cfg.get_setting("submission.dry_run_mode", True)
         base_url = cfg.get_setting("network.itms_base_url", "https://stock.itms.ug")
+        active_bond = bond_service.get_active_bond()
+        bond_tag = f"[bold yellow]🏢 {active_bond['name']} ({active_bond['code']})[/bold yellow]"
         if dry_run:
             badge = "[bold white on dark_green] 🔒 READ-ONLY AUDIT (DRY-RUN) [/bold white on dark_green]"
             desc = "[dim]Safe inspection mode │ Submissions simulated[/dim]"
         else:
             badge = "[bold white on dark_red] ⚡ LIVE SUBMISSION MODE [/bold white on dark_red]"
             desc = "[dim]Mutating fitment & evidence upload enabled[/dim]"
-        return f"🌐 [bold cyan]ITMS Hub[/bold cyan] [dim]({base_url})[/dim]  │  {badge}  {desc}"
+        return f"🌐 [bold cyan]ITMS Hub[/bold cyan] [dim]({base_url})[/dim]  │  {bond_tag}  │  {badge}  {desc}"
 
     def _render_safety_card(self) -> str:
         cfg = get_config_service()
@@ -364,11 +377,13 @@ class ITMSConnectionPane(Vertical):
 
         sys_user = getattr(self.app, "current_user", None)
         sys_username = sys_user.username if sys_user else "Guest (Local)"
+        active_bond = bond_service.get_active_bond()
 
         return (
             f"[bold]Session Roles & Account Status:[/bold]\n"
             f" • [bold white]System Operator:[/bold white] [bold green]● {sys_username}[/bold green] [dim](Verification Copilot DB & Audit)[/dim]\n"
             f" • [bold white]ITMS Web Session:[/bold white] [{auth_color}]● {user_email}[/{auth_color}] [dim](stock.itms.ug Sync)[/dim]\n"
+            f" • [bold white]Operating Facility:[/bold white] [bold yellow]🏢 {active_bond['name']} ({active_bond['code']})[/bold yellow] [dim](Safe Room / Physical Custody)[/dim]\n"
             f"\n"
             f"[bold]Target Endpoint:[/bold]  [cyan]{status['url']}[/cyan]\n"
             f"[bold]ITMS State:[/bold]       [{auth_color}]● {auth_tag}[/{auth_color}]\n"
@@ -528,6 +543,19 @@ class ITMSConnectionPane(Vertical):
         elif btn_id == "btn-itms-logout":
             self.action_itms_logout()
 
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "sel-itms-bond" and event.value:
+            code = str(event.value).strip()
+            bond_service.set_active_bond(code)
+            self._refresh_status_card()
+            try:
+                top_bar = self.query_one("#itms-top-bar", Static)
+                if top_bar:
+                    top_bar.update(self._render_top_bar())
+            except Exception:
+                pass
+            self.notify(f"Active Operating Facility set to {code}.", title="Operating Bond Changed")
+
     # ──────────────────────────────────────────────────────────────────────────
     # Side-by-Side Photographic Evidence Viewer (Keybinding [V])
     # ──────────────────────────────────────────────────────────────────────────
@@ -678,6 +706,13 @@ class ITMSConnectionPane(Vertical):
         email = self.query_one("#input-itms-email", Input).value.strip()
         password = self.query_one("#input-itms-password", Input).value
         remember = self.query_one("#chk-itms-remember", Checkbox).value
+
+        try:
+            sel_bond = self.query_one("#sel-itms-bond", Select)
+            if sel_bond and sel_bond.value:
+                bond_service.set_active_bond(str(sel_bond.value).strip())
+        except Exception:
+            pass
 
         if not email or not password:
             self.app.call_from_thread(

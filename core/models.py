@@ -626,13 +626,20 @@ class StockDispatchScan(models.Model):
     installation/assembly line for a given work date.
     """
     class Status(models.TextChoices):
+        RECONCILED_INSTALLED = "RECONCILED_INSTALLED", "Reconciled Installed (Archive)"
+        RETURNED_TO_SAFE = "RETURNED_TO_SAFE", "Returned to Safe Room"
+        ON_LINE_ACTIVE = "ON_LINE_ACTIVE", "On Line Active (Fitting in Progress)"
+        PENDING_SYSTEM_SYNC = "PENDING_SYSTEM_SYNC", "Pending ITMS Sync (Local Queue)"
+        UNRESOLVED_DISCREPANCY = "UNRESOLVED_DISCREPANCY", "Unresolved Discrepancy (MVR Review)"
+        # Legacy status values preserved for backward compatibility
         DISPATCHED = "DISPATCHED", "Dispatched to Line"
         INSTALLED = "INSTALLED", "Installed (Archived)"
         PENDING_ORDER = "PENDING_ORDER", "Pending in Order"
         RETURNED = "RETURNED", "Returned to Stock"
-        UNALLOCATED = "UNALLOCATED", "Unallocated / Missing"
+        UNALLOCATED = "UNALLOCATED", "Unallocated Discrepancy"
 
     registration_number = models.CharField(max_length=32, db_index=True)
+    bond_code = models.CharField(max_length=32, blank=True, default="AGM", db_index=True)
     plate_category = models.CharField(
         max_length=8,
         choices=PlateCategory.choices,

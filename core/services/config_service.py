@@ -71,6 +71,18 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "enabled": True,               # Auto-transition network failures to OFFLINE_OUTBOX
         "auto_sync_interval_seconds": 15, # Background heartbeat ping and drain interval
     },
+    "bond": {
+        "active_bond_code": "AGM",
+        "active_bond_name": "AGM Bonded Warehouse",
+        "strict_bond_scoping": True,
+        "available_bonds": [
+            {"code": "AGM", "name": "AGM Bonded Warehouse", "warehouse_id": "agm-bond"},
+            {"code": "KLA_CENTRAL", "name": "Kampala Central Bond", "warehouse_id": "kla-central"},
+            {"code": "JINJA", "name": "Jinja Regional Bond", "warehouse_id": "jinja-bond"},
+            {"code": "MBALE", "name": "Mbale Bond", "warehouse_id": "mbale-bond"},
+            {"code": "MBR", "name": "Mbarara Bond", "warehouse_id": "mbarara-bond"},
+        ],
+    },
 }
 
 
@@ -178,6 +190,38 @@ def set_setting(key_path: str, value: Any, base_dir: Optional[Path] = None) -> b
         curr = curr[k]
     curr[keys[-1]] = value
     return save_config(config, base_dir)
+
+
+def get_active_bond(base_dir: Optional[Path] = None) -> Dict[str, str]:
+    """Returns active bond code and human-readable bond name."""
+    code = get_setting("bond.active_bond_code", "AGM", base_dir)
+    name = get_setting("bond.active_bond_name", "AGM Bonded Warehouse", base_dir)
+    return {"code": str(code), "name": str(name)}
+
+
+def set_active_bond(code: str, name: Optional[str] = None, base_dir: Optional[Path] = None) -> bool:
+    """Updates active operating bond warehouse in config.json."""
+    code_clean = (code or "AGM").strip().upper()
+    name_clean = (name or "").strip()
+    if not name_clean:
+        bonds = get_available_bonds(base_dir)
+        for b in bonds:
+            if b.get("code") == code_clean:
+                name_clean = b.get("name", "")
+                break
+    if not name_clean:
+        name_clean = f"{code_clean} Bonded Warehouse"
+
+    set_setting("bond.active_bond_code", code_clean, base_dir)
+    return set_setting("bond.active_bond_name", name_clean, base_dir)
+
+
+def get_available_bonds(base_dir: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """Returns list of configured and available bonded warehouse facilities."""
+    bonds = get_setting("bond.available_bonds", None, base_dir)
+    if not bonds:
+        bonds = copy.deepcopy(DEFAULT_CONFIG["bond"]["available_bonds"])
+    return bonds
 
 
 def is_developer_mode(base_dir: Optional[Path] = None) -> bool:

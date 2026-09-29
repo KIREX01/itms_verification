@@ -43,7 +43,7 @@ from core.models import (
     SubmissionAuditLog,
     VehicleInstallationPair,
 )
-from core.services import auth_service, config_service, submission_worker, vault_service
+from core.services import auth_service, bond_service, config_service, submission_worker, vault_service
 from core.services.itms_web_client import get_web_client
 from core.services.pipeline_runner import runner as pipeline_runner
 from core.services.update_service import update_service
@@ -161,9 +161,50 @@ def logout_view(request: HttpRequest) -> HttpResponse:
 
 @require_GET
 def api_itms_status(request: HttpRequest) -> JsonResponse:
-    """Returns current ITMS WebApp connection status and active user identity."""
+    """Returns current ITMS WebApp connection status, active user identity, and operating bond."""
     status = auth_service.get_itms_status()
-    return JsonResponse({"success": True, "status": status})
+    return JsonResponse({
+        "success": True,
+        "status": status,
+        "active_bond": bond_service.get_active_bond(),
+    })
+
+
+@csrf_exempt
+def api_itms_warehouses(request: HttpRequest) -> JsonResponse:
+    """
+    GET: Returns active operating bond and all discovered warehouse facilities.
+    POST: Sets the active operating bond facility (code, name).
+    """
+    if request.method == "POST":
+        code = ""
+        name = ""
+        if request.content_type == "application/json" and request.body:
+            try:
+                body = json.loads(request.body.decode("utf-8"))
+                code = str(body.get("code", "")).strip()
+                name = str(body.get("name", "")).strip()
+            except Exception:
+                pass
+        if not code:
+            code = request.POST.get("code", "").strip()
+            name = request.POST.get("name", "").strip()
+
+        if not code:
+            return JsonResponse({"success": False, "error": "Warehouse/Bond code is required."}, status=400)
+
+        ok = bond_service.set_active_bond(code, name or None)
+        return JsonResponse({
+            "success": ok,
+            "active_bond": bond_service.get_active_bond(),
+            "message": f"Active bond set to {code}.",
+        })
+
+    return JsonResponse({
+        "success": True,
+        "active_bond": bond_service.get_active_bond(),
+        "warehouses": bond_service.get_all_discovered_warehouses(),
+    })
 
 
 @csrf_exempt
@@ -173,6 +214,8 @@ def api_itms_connect(request: HttpRequest) -> JsonResponse:
     email = request.POST.get("email")
     password = request.POST.get("password")
     base_url = request.POST.get("base_url")
+    bond_code = request.POST.get("bond_code")
+    bond_name = request.POST.get("bond_name")
 
     if not email and request.content_type == "application/json" and request.body:
         try:
@@ -180,11 +223,16 @@ def api_itms_connect(request: HttpRequest) -> JsonResponse:
             email = body.get("email")
             password = body.get("password")
             base_url = body.get("base_url")
+            bond_code = body.get("bond_code")
+            bond_name = body.get("bond_name")
         except Exception:
             pass
 
     if not email or not password:
         return JsonResponse({"success": False, "error": "ITMS email and password are required."}, status=400)
+
+    if bond_code:
+        bond_service.set_active_bond(str(bond_code).strip(), str(bond_name).strip() if bond_name else None)
 
     ok, msg = auth_service.connect_itms_account(email, password, base_url)
     status = auth_service.get_itms_status()
@@ -192,6 +240,7 @@ def api_itms_connect(request: HttpRequest) -> JsonResponse:
         "success": ok,
         "message": msg,
         "status": status,
+        "active_bond": bond_service.get_active_bond(),
     }, status=200 if ok else 401)
 
 
@@ -210,6 +259,7 @@ def api_itms_disconnect(request: HttpRequest) -> JsonResponse:
         "success": True,
         "message": "Disconnected from ITMS WebApp.",
         "status": auth_service.get_itms_status(),
+        "active_bond": bond_service.get_active_bond(),
     })
 
 

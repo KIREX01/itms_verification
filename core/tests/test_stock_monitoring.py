@@ -20,6 +20,7 @@ from django.utils import timezone
 
 from core.models import (
     DailyStockLedger,
+    EvidenceImage,
     InstallationKit,
     InstallationOrder,
     PlateCategory,
@@ -28,8 +29,9 @@ from core.models import (
     StockDeliveryItem,
     StockDispatchScan,
     StockReturnScan,
+    VehicleInstallationPair,
 )
-from core.services import stock_monitoring_service
+from core.services import bond_service, stock_monitoring_service
 
 
 class StockMonitoringTests(TestCase):
@@ -423,5 +425,164 @@ class StockMonitoringTests(TestCase):
         self.assertIn("raw_plates", docket_json["docket"])
         self.assertIn("formatted_docket", docket_json["docket"])
         self.assertIn("UMA950PW", docket_json["docket"]["unallocated_plates"])
+
+    def test_bond_service_discovery_and_active_switch(self):
+        # 1. Default active bond
+        bond_service.set_active_bond("AGM", "AGM Bonded Warehouse")
+        active = bond_service.get_active_bond()
+        self.assertEqual(active["code"], "AGM")
+        self.assertEqual(active["name"], "AGM Bonded Warehouse")
+
+        # 2. Discovered warehouse dynamically from kit/order
+        InstallationKit.objects.create(
+            kit_code="IK-TEST-ENT",
+            registration_number="UMA999ET",
+            warehouse="Entebbe Regional Depot",
+            status="New",
+        )
+        warehouses = bond_service.get_all_discovered_warehouses()
+        wh_names = [w["name"] for w in warehouses]
+        self.assertIn("Entebbe Regional Depot", wh_names)
+        # AGM must be sorted first
+        self.assertEqual(warehouses[0]["code"], "AGM")
+
+        # 3. Switching active bond
+        ok = bond_service.set_active_bond("JINJA", "Jinja Fitting Center")
+        self.assertTrue(ok)
+        curr = bond_service.get_active_bond()
+        self.assertEqual(curr["code"], "JINJA")
+
+        # Restore
+        bond_service.set_active_bond("AGM", "AGM Bonded Warehouse")
+
+    def test_cross_bond_order_isolation(self):
+        # Active bond: AGM
+        bond_service.set_active_bond("AGM", "AGM Bonded Warehouse")
+
+        # AGM order (local)
+        InstallationOrder.objects.create(
+            order_number=f"PO-UMA801PW-{self.test_suffix}",
+            registration_number="UMA801PW",
+            warehouse_name="AGM Bonded Warehouse",
+            order_status="Installed",
+            is_archived=True,
+        )
+
+        # Cross-bond order (external facility: Jinja)
+        InstallationOrder.objects.create(
+            order_number=f"PO-UMA802PW-{self.test_suffix}",
+            registration_number="UMA802PW",
+            warehouse_name="Jinja Regional Warehouse",
+            order_status="Installed",
+            is_archived=True,
+        )
+
+        stock_monitoring_service.record_dispatch_scans(
+            plates=["UMA801PW", "UMA802PW"],
+            plate_category="PSV",
+            target_date_suffix=self.test_suffix,
+        )
+
+        recon = stock_monitoring_service.compute_daily_reconciliation(self.test_suffix)
+        installed_row = next(r for r in recon["report_table"]["rows"] if r["metric"] == "Kits Installed (Actual)")
+        # Only AGM's order should count as installed for AGM bond!
+        self.assertEqual(installed_row["psv"], 1)
+
+        # Cross-bond order isolated and reported
+        floor = recon["floor_operations"]
+        self.assertEqual(floor["cross_bond_count"], 1)
+
+    def test_graduated_discrepancy_scale(self):
+        bond_service.set_active_bond("AGM", "AGM Bonded Warehouse")
+
+        # Plate 1: Reconciled Installed (in archived order)
+        InstallationOrder.objects.create(
+            order_number=f"PO-UMA201PW-{self.test_suffix}",
+            registration_number="UMA201PW",
+            warehouse_name="AGM Bonded Warehouse",
+            order_status="Installed",
+            is_archived=True,
+        )
+
+        # Plate 3: On Line / In Progress (in active non-archived order)
+        InstallationOrder.objects.create(
+            order_number=f"PO-UMA203PW-{self.test_suffix}",
+            registration_number="UMA203PW",
+            warehouse_name="AGM Bonded Warehouse",
+            order_status="Assigned",
+            is_archived=False,
+        )
+
+        # Plate 4: Pending System Sync (has photo evidence captured on floor, but ITMS order not yet created)
+        VehicleInstallationPair.objects.create(
+            registration_number_detected="UMA204PW",
+            verification_status=VehicleInstallationPair.VerificationStatus.APPROVED,
+        )
+
+        # Dispatch all 5 plates to the floor
+        dispatched_plates = ["UMA201PW", "UMA202PW", "UMA203PW", "UMA204PW", "UMA205PW"]
+        stock_monitoring_service.record_dispatch_scans(
+            plates=dispatched_plates,
+            plate_category="PSV",
+            target_date_suffix=self.test_suffix,
+        )
+
+        # Plate 2: Returned to Safe Room
+        stock_monitoring_service.record_return_scans(
+            plates=["UMA202PW"],
+            target_date_suffix=self.test_suffix,
+            reason=StockReturnScan.Reason.BIKE_NO_SHOW,
+        )
+
+        recon = stock_monitoring_service.compute_daily_reconciliation(self.test_suffix)
+        floor = recon["floor_operations"]
+        scale = floor["graduated_scale"]
+
+        # Verify all 5 tiers of the Graduated Discrepancy Scale
+        self.assertEqual(scale["reconciled_installed"]["count"], 1)
+        self.assertIn("UMA201PW", scale["reconciled_installed"]["plates"])
+
+        self.assertEqual(scale["returned_to_safe"]["count"], 1)
+        self.assertIn("UMA202PW", scale["returned_to_safe"]["plates"])
+
+        self.assertEqual(scale["on_line_active"]["count"], 1)
+        self.assertIn("UMA203PW", scale["on_line_active"]["plates"])
+
+        self.assertEqual(scale["pending_system_sync"]["count"], 1)
+        self.assertIn("UMA204PW", scale["pending_system_sync"]["plates"])
+
+        # Unresolved discrepancy must ONLY be UMA205PW (no order, no return, no photos)
+        self.assertEqual(scale["unresolved_discrepancy"]["count"], 1)
+        self.assertIn("UMA205PW", scale["unresolved_discrepancy"]["plates"])
+        self.assertEqual(floor["unallocated_discrepancy"], 1)
+
+        # Verify MVR Docket formatting
+        docket = stock_monitoring_service.get_mvr_unallocated_docket(self.test_suffix)
+        fmt = docket["formatted_docket"]
+        self.assertIn("GRADUATED DISCREPANCY AUDIT SCALE:", fmt)
+        self.assertIn("1. Reconciled Installed:", fmt)
+        self.assertIn("4. Pending System Sync:", fmt)
+        self.assertIn("5. UNRESOLVED DISCREPANCY:", fmt)
+        self.assertIn("UMA205PW", docket["raw_plates"])
+        self.assertIn("UMA204PW", fmt)  # Pending sync plate mentioned in notice
+
+    def test_itms_warehouses_rest_api(self):
+        # GET warehouses
+        resp = self.client.get("/api/itms/warehouses/")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        self.assertIn("active_bond", data)
+        self.assertIn("warehouses", data)
+
+        # POST set active bond
+        post_resp = self.client.post(
+            "/api/itms/warehouses/",
+            data={"code": "AGM", "name": "AGM Bonded Warehouse"},
+        )
+        self.assertEqual(post_resp.status_code, 200)
+        post_data = post_resp.json()
+        self.assertTrue(post_data["success"])
+        self.assertEqual(post_data["active_bond"]["code"], "AGM")
 
 

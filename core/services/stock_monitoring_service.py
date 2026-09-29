@@ -29,6 +29,7 @@ from django.utils import timezone
 
 from core.models import (
     DailyStockLedger,
+    EvidenceImage,
     InstallationKit,
     InstallationOrder,
     PlateCategory,
@@ -40,6 +41,7 @@ from core.models import (
     SubmissionAuditLog,
     VehicleInstallationPair,
 )
+from core.services import bond_service
 from core.services.plate_lifecycle_service import format_display_plate
 from core.services.report_service import (
     extract_order_date_suffix,
@@ -387,6 +389,7 @@ def record_dispatch_scans(
     plates: Iterable[str],
     plate_category: str = PlateCategory.PSV,
     target_date_suffix: Optional[str] = None,
+    bond_code: Optional[str] = None,
     operator_name: str = "Operator",
     dispatched_by: Optional[Any] = None,
     notes: str = "",
@@ -400,6 +403,9 @@ def record_dispatch_scans(
     clean_plates, dup_count, dup_plates = parse_plate_input_with_stats(plates)
     if not clean_plates:
         raise ValueError("No valid license plate numbers provided for dispatch.")
+
+    active_bond = bond_service.get_active_bond()
+    b_code = (bond_code or active_bond.get("code", "AGM")).strip().upper()
 
     with transaction.atomic():
         existing_dispatches = set(
@@ -418,9 +424,10 @@ def record_dispatch_scans(
                         plate_category=category,
                         work_date=work_d,
                         work_date_suffix=suffix,
+                        bond_code=b_code,
                         dispatched_by=dispatched_by,
                         operator_name=operator_name or "Operator",
-                        status=StockDispatchScan.Status.DISPATCHED,
+                        status=StockDispatchScan.Status.ON_LINE_ACTIVE,
                         notes=notes or "",
                     )
                 )
@@ -489,6 +496,12 @@ def record_return_scans(
 
         if new_returns:
             StockReturnScan.objects.bulk_create(new_returns)
+
+        # Update matching dispatch scans for this shift to RETURNED_TO_SAFE
+        StockDispatchScan.objects.filter(
+            work_date_suffix=suffix,
+            registration_number__in=clean_plates,
+        ).update(status=StockDispatchScan.Status.RETURNED_TO_SAFE)
 
         recon = compute_daily_reconciliation(suffix)
 
@@ -655,11 +668,28 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
     )
     total_transfer_out = transfer_out_psv + transfer_out_pmo
 
+    active_bond = bond_service.get_active_bond()
+    active_bond_code = active_bond.get("code", "AGM")
+    active_bond_name = active_bond.get("name", "AGM Bonded Warehouse")
+
+    if not ledger.warehouse_name or ledger.warehouse_name in ("Bond Warehouse", "AGM Bonded Warehouse", "Warehouse Stock / Bond", "Warehouse Stock"):
+        ledger.warehouse_name = active_bond_name
+
     # 3. Kits Installed (Orders & Archive for this day)
-    orders_qs = InstallationOrder.objects.filter(order_number__endswith=suffix)
-    installed_orders_qs = orders_qs.filter(
-        Q(is_archived=True) | Q(order_status__iexact="Installed")
-    )
+    orders_qs = list(InstallationOrder.objects.filter(order_number__endswith=suffix))
+    scoped_orders: List[InstallationOrder] = []
+    cross_bond_orders: List[InstallationOrder] = []
+
+    for o in orders_qs:
+        if bond_service.classify_order_bond_scope(o, active_code=active_bond_code) == "ACTIVE_BOND":
+            scoped_orders.append(o)
+        else:
+            cross_bond_orders.append(o)
+
+    installed_orders_qs = [
+        o for o in scoped_orders
+        if o.is_archived or (o.order_status or "").strip().lower() == "installed"
+    ]
 
     # Classify installed orders into PSV vs PMO
     # Check dispatches, inbound delivery items, and verification audit logs for PMO yellow
@@ -712,9 +742,11 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
     variance_pmo = installed_pmo_count - ledger.scheduled_pmo
     variance_total = total_installed - scheduled_total
 
-    # 6. Floor Dispatched & Returns Reconciliation
+    # 6. Floor Dispatched & Returns Reconciliation (Graduated Discrepancy Scale)
     dispatches_qs = StockDispatchScan.objects.filter(
         Q(work_date_suffix=suffix) | Q(work_date=work_d)
+    ).filter(
+        Q(bond_code__iexact=active_bond_code) | Q(bond_code="") | Q(bond_code__isnull=True)
     )
     dispatched_plates_map = {
         normalizer.canonicalize(s.registration_number): s
@@ -734,50 +766,73 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
     returned_count = len(returned_plates_map)
     net_dispatched = max(0, dispatched_count - returned_count)
 
-    order_by_plate = {
+    scoped_order_by_plate = {
         normalizer.canonicalize(o.registration_number): o
-        for o in orders_qs
+        for o in scoped_orders
         if o.registration_number
     }
 
-    installed_dispatched: List[str] = []
-    pending_dispatched: List[str] = []
-    unallocated_dispatched: List[str] = []
-    returned_dispatched: List[str] = []
+    # Query local companion verification pairs / evidence photos to identify physical fitments
+    evidence_plates_set: Set[str] = {
+        normalizer.canonicalize(p)
+        for p in VehicleInstallationPair.objects.exclude(registration_number_detected="").values_list(
+            "registration_number_detected", flat=True
+        )
+        if p
+    }
+    evidence_plates_set.update({
+        normalizer.canonicalize(p)
+        for p in EvidenceImage.objects.exclude(detected_plate="").values_list("detected_plate", flat=True)
+        if p
+    })
+
+    reconciled_installed: List[str] = []
+    returned_to_safe: List[str] = []
+    on_line_active: List[str] = []
+    pending_system_sync: List[str] = []
+    unresolved_discrepancy: List[str] = []
     scans_to_update: List[StockDispatchScan] = []
 
     for c_plate, scan in dispatched_plates_map.items():
+        orig_plate = scan.registration_number
         if c_plate in returned_plates_map:
-            returned_dispatched.append(c_plate)
-            if scan.status != StockDispatchScan.Status.RETURNED:
-                scan.status = StockDispatchScan.Status.RETURNED
+            returned_to_safe.append(orig_plate)
+            if scan.status != StockDispatchScan.Status.RETURNED_TO_SAFE:
+                scan.status = StockDispatchScan.Status.RETURNED_TO_SAFE
                 scans_to_update.append(scan)
             continue
 
-        matched_order = order_by_plate.get(c_plate)
+        matched_order = scoped_order_by_plate.get(c_plate)
         if matched_order:
             if matched_order.is_archived or (matched_order.order_status or "").strip().lower() == "installed":
-                installed_dispatched.append(c_plate)
-                if scan.status != StockDispatchScan.Status.INSTALLED:
-                    scan.status = StockDispatchScan.Status.INSTALLED
+                reconciled_installed.append(orig_plate)
+                if scan.status != StockDispatchScan.Status.RECONCILED_INSTALLED:
+                    scan.status = StockDispatchScan.Status.RECONCILED_INSTALLED
                     scans_to_update.append(scan)
             else:
-                pending_dispatched.append(c_plate)
-                if scan.status != StockDispatchScan.Status.PENDING_ORDER:
-                    scan.status = StockDispatchScan.Status.PENDING_ORDER
+                on_line_active.append(orig_plate)
+                if scan.status != StockDispatchScan.Status.ON_LINE_ACTIVE:
+                    scan.status = StockDispatchScan.Status.ON_LINE_ACTIVE
                     scans_to_update.append(scan)
         else:
-            unallocated_dispatched.append(c_plate)
-            if scan.status != StockDispatchScan.Status.UNALLOCATED:
-                scan.status = StockDispatchScan.Status.UNALLOCATED
-                scans_to_update.append(scan)
+            if c_plate in evidence_plates_set:
+                pending_system_sync.append(orig_plate)
+                if scan.status != StockDispatchScan.Status.PENDING_SYSTEM_SYNC:
+                    scan.status = StockDispatchScan.Status.PENDING_SYSTEM_SYNC
+                    scans_to_update.append(scan)
+            else:
+                unresolved_discrepancy.append(orig_plate)
+                if scan.status != StockDispatchScan.Status.UNRESOLVED_DISCREPANCY:
+                    scan.status = StockDispatchScan.Status.UNRESOLVED_DISCREPANCY
+                    scans_to_update.append(scan)
 
     if scans_to_update:
         StockDispatchScan.objects.bulk_update(scans_to_update, ["status"])
 
-    itms_pending_count = orders_qs.filter(is_archived=False).exclude(
-        order_status__iexact="Installed"
-    ).count()
+    itms_pending_count = len([
+        o for o in scoped_orders
+        if not o.is_archived and (o.order_status or "").strip().lower() != "installed"
+    ])
 
     # 7. Update DailyStockLedger with calculated snapshot
     ledger.opening_stock = ledger.opening_balance_psv + ledger.opening_balance_pmo
@@ -805,7 +860,7 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
     ledger.dispatched_count = dispatched_count
     ledger.returned_count = returned_count
     ledger.pending_count = itms_pending_count
-    ledger.unallocated_count = len(unallocated_dispatched)
+    ledger.unallocated_count = len(unresolved_discrepancy)
 
     if ledger.physical_count is not None:
         ledger.variance = ledger.physical_count - total_closing
@@ -822,6 +877,7 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         "work_date_suffix": suffix,
         "formatted_date": formatted_date,
         "warehouse_name": ledger.warehouse_name,
+        "active_bond_code": active_bond_code,
         # Structured report columns
         "report_table": {
             "columns": [
@@ -889,18 +945,51 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
                 },
             ],
         },
-        # Floor Operations & Unallocated Audit
+        # Floor Operations & Graduated Discrepancy Audit
         "floor_operations": {
             "dispatched_count": dispatched_count,
             "returned_count": returned_count,
             "net_dispatched": net_dispatched,
             "itms_pending_count": itms_pending_count,
-            "unallocated_discrepancy": len(unallocated_dispatched),
-            "unallocated_plates": unallocated_dispatched,
+            "cross_bond_count": len(cross_bond_orders),
+            "unallocated_discrepancy": len(unresolved_discrepancy),
+            "unallocated_plates": unresolved_discrepancy,
+            "graduated_scale": {
+                "reconciled_installed": {
+                    "count": len(reconciled_installed),
+                    "plates": reconciled_installed,
+                    "label": "Reconciled Installed (Verified in Order/Archive)",
+                    "badge": "success",
+                },
+                "returned_to_safe": {
+                    "count": len(returned_to_safe),
+                    "plates": returned_to_safe,
+                    "label": "Returned to Safe Room",
+                    "badge": "info",
+                },
+                "on_line_active": {
+                    "count": len(on_line_active),
+                    "plates": on_line_active,
+                    "label": "On Line / In Progress (Dispatched to Bay)",
+                    "badge": "warning",
+                },
+                "pending_system_sync": {
+                    "count": len(pending_system_sync),
+                    "plates": pending_system_sync,
+                    "label": "Pending System Sync (Local Evidence Captured)",
+                    "badge": "secondary",
+                },
+                "unresolved_discrepancy": {
+                    "count": len(unresolved_discrepancy),
+                    "plates": unresolved_discrepancy,
+                    "label": "Unresolved Discrepancy (Requires MVR Investigation)",
+                    "badge": "danger",
+                },
+            },
         },
         "is_closed": ledger.is_closed,
         "last_reconciled_at": ledger.last_reconciled_at.strftime("%Y-%m-%d %H:%M:%S") if ledger.last_reconciled_at else "",
-        "unallocated_plates": unallocated_dispatched,
+        "unallocated_plates": unresolved_discrepancy,
     }
 
 
@@ -1014,6 +1103,16 @@ def get_mvr_unallocated_docket(target_date_suffix: Optional[Any] = None) -> Dict
     unallocated_plates = floor.get("unallocated_plates", [])
     raw_plates = "\n".join(unallocated_plates)
 
+    graduated_scale = floor.get("graduated_scale", {})
+    reconciled_installed = graduated_scale.get("reconciled_installed", {}).get("count", 0)
+    returned_to_safe = graduated_scale.get("returned_to_safe", {}).get("count", 0)
+    on_line_active = graduated_scale.get("on_line_active", {}).get("count", 0)
+    pending_sync_data = graduated_scale.get("pending_system_sync", {})
+    pending_sync_count = pending_sync_data.get("count", 0)
+    pending_sync_plates = pending_sync_data.get("plates", [])
+    cross_bond_count = floor.get("cross_bond_count", 0)
+    active_code = recon.get("active_bond_code", "AGM")
+
     now_str = timezone.now().strftime("%Y-%m-%d %H:%M:%S")
     count = len(unallocated_plates)
 
@@ -1021,13 +1120,22 @@ def get_mvr_unallocated_docket(target_date_suffix: Optional[Any] = None) -> Dict
     if unallocated_plates:
         plates_block = "\n".join(f"  {idx:2d}. {p}" for idx, p in enumerate(unallocated_plates, start=1))
     else:
-        plates_block = "  [None - All physically fitted plates are matched to ITMS orders or archive]"
+        plates_block = "  [None - No unresolved discrepancies for this shift]"
+
+    pending_block_lines = []
+    if pending_sync_plates:
+        pending_block_lines.append("")
+        pending_block_lines.append(f"PENDING SYSTEM SYNC NOTICE ({pending_sync_count} Plate(s) with Local Camera Evidence):")
+        pending_block_lines.append("These plates were physically fitted and companion photos were ingested,")
+        pending_block_lines.append("but the order has not yet been synced or created in ITMS:")
+        for idx, p in enumerate(pending_sync_plates, start=1):
+            pending_block_lines.append(f"  • {p}")
 
     docket_lines = [
         "==================================================",
-        "AGM BONDED WAREHOUSE — MVR ALLOCATION EXCEPTION DOCKET",
+        f"{warehouse.upper()} — MVR ALLOCATION EXCEPTION DOCKET",
         f"Shift Date: {formatted_date} (Suffix: {suffix})",
-        f"Bond / Safe Room: {warehouse}",
+        f"Operating Facility: {warehouse} (Code: {active_code})",
         f"Generated At: {now_str}",
         "==================================================",
         "SHIFT PHYSICAL DISPATCH & ITMS SUMMARY:",
@@ -1035,20 +1143,31 @@ def get_mvr_unallocated_docket(target_date_suffix: Optional[Any] = None) -> Dict
         f"  • Evening Returned to Safe Room:  {floor.get('returned_count', 0):>4}",
         f"  • Net Physically Fitted on Line:  {floor.get('net_dispatched', 0):>4}",
         f"  • ITMS Active Orders Queue:       {floor.get('itms_pending_count', 0):>4}",
-        f"  • MVR UNALLOCATED DISCREPANCY:    {count:>4}",
+        f"  • Cross-Bond Orders Excluded:     {cross_bond_count:>4}",
+        "--------------------------------------------------",
+        "GRADUATED DISCREPANCY AUDIT SCALE:",
+        f"  🟢 1. Reconciled Installed:       {reconciled_installed:>4}",
+        f"  🟢 2. Returned to Safe Room:      {returned_to_safe:>4}",
+        f"  🟡 3. On-Line Active in ITMS:     {on_line_active:>4}",
+        f"  🟠 4. Pending System Sync:        {pending_sync_count:>4}",
+        f"  🔴 5. UNRESOLVED DISCREPANCY:     {count:>4}",
         "==================================================",
         "ACTION REQUIRED FOR MVR OFFICER:",
-        f"The following {count} plate(s) were physically fitted onto bikes",
-        "on the assembly floor during this shift, but have NOT been",
-        "allocated in ITMS (status may still be 'New' under Installation Kits).",
+        f"The following {count} plate(s) were physically issued to the line,",
+        "are NOT returned to safe room, and have NO matching ITMS order or archive.",
         "Please search and allocate these kits immediately in ITMS:",
         "",
         plates_block,
+    ]
+    if pending_block_lines:
+        docket_lines.extend(pending_block_lines)
+
+    docket_lines.extend([
         "",
         "==================================================",
         "ITMS Verification & Daily Stock Ledger Audit — v1.0.5",
         "==================================================",
-    ]
+    ])
     formatted_docket = "\n".join(docket_lines)
 
     return {
@@ -1057,8 +1176,11 @@ def get_mvr_unallocated_docket(target_date_suffix: Optional[Any] = None) -> Dict
         "work_date_suffix": suffix,
         "formatted_date": formatted_date,
         "warehouse_name": warehouse,
+        "active_bond_code": active_code,
         "unallocated_plates": unallocated_plates,
         "count": count,
+        "pending_sync_count": pending_sync_count,
+        "pending_sync_plates": pending_sync_plates,
         "raw_plates": raw_plates,
         "formatted_docket": formatted_docket,
         "floor_operations": floor,

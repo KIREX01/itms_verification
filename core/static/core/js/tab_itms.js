@@ -59,9 +59,80 @@ async function fetchItmsStatus() {
                 if (modalDetail) modalDetail.innerText = "Connect your ITMS portal credentials.";
                 if (modalBtnDisconnect) modalBtnDisconnect.style.display = "none";
             }
+
+            if (data.active_bond) {
+                const bondBadge = document.getElementById("itms-active-bond-badge");
+                if (bondBadge) bondBadge.innerText = `${data.active_bond.name} (${data.active_bond.code})`;
+                const sel = document.getElementById("itms-select-bond");
+                if (sel && sel.value !== data.active_bond.code) {
+                    sel.value = data.active_bond.code;
+                }
+            }
         }
     } catch (err) {
         console.warn("ITMS status fetch error:", err);
+    }
+}
+
+async function loadOperatingBonds() {
+    try {
+        const res = await fetch("/api/itms/warehouses/");
+        const data = await res.json();
+        if (data.success && data.warehouses) {
+            const sel = document.getElementById("itms-select-bond");
+            if (sel) {
+                sel.innerHTML = "";
+                data.warehouses.forEach(w => {
+                    const opt = document.createElement("option");
+                    opt.value = w.code;
+                    opt.innerText = `${w.name} (${w.code})`;
+                    if (data.active_bond && data.active_bond.code === w.code) {
+                        opt.selected = true;
+                    }
+                    sel.appendChild(opt);
+                });
+            }
+            const bondBadge = document.getElementById("itms-active-bond-badge");
+            if (bondBadge && data.active_bond) {
+                bondBadge.innerText = `${data.active_bond.name} (${data.active_bond.code})`;
+            }
+        }
+    } catch (err) {
+        console.warn("Failed to load operating warehouses:", err);
+    }
+}
+
+async function onBondSelectionChanged() {
+    const sel = document.getElementById("itms-select-bond");
+    if (!sel) return;
+    const code = sel.value;
+    const opt = sel.options[sel.selectedIndex];
+    const name = opt ? opt.text.replace(/\s*\([^)]*\)$/, "").trim() : "";
+
+    try {
+        const res = await fetch("/api/itms/warehouses/", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code: code, name: name }),
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Operating facility set to ${code}.`, "info");
+            const bondBadge = document.getElementById("itms-active-bond-badge");
+            if (bondBadge && data.active_bond) {
+                bondBadge.innerText = `${data.active_bond.name} (${data.active_bond.code})`;
+            }
+            if (typeof appendConsoleLog === "function") {
+                appendConsoleLog(`Operating bond switched to ${data.active_bond.name} (${data.active_bond.code})`, "info");
+            }
+            if (typeof fetchStockReconciliation === "function") {
+                fetchStockReconciliation();
+            }
+        } else {
+            showToast(data.error || "Failed to switch operating bond.", "error");
+        }
+    } catch (err) {
+        showToast("Error switching operating bond: " + err, "error");
     }
 }
 
@@ -88,6 +159,11 @@ async function submitItmsConnect() {
         showToast("ITMS Email and Password are required.", "error");
         return;
     }
+
+    const selBond = document.getElementById("itms-select-bond");
+    let bondCode = selBond ? selBond.value : "AGM";
+    let bondName = selBond && selBond.options[selBond.selectedIndex] ? selBond.options[selBond.selectedIndex].text.replace(/\s*\([^)]*\)$/, "").trim() : "";
+
     const btnModal = document.getElementById("btn-itms-connect");
     const btnPane = document.getElementById("btn-submit-itms-connect");
     if (btnModal) { btnModal.disabled = true; btnModal.innerText = "Connecting..."; }
@@ -97,12 +173,12 @@ async function submitItmsConnect() {
         const res = await fetch("/api/itms/connect/", {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: `email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`,
+            body: `email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}&bond_code=${encodeURIComponent(bondCode)}&bond_name=${encodeURIComponent(bondName)}`,
         });
         const data = await res.json();
         if (data.success) {
             showToast(data.message || "Connected to ITMS WebApp successfully.", "success");
-            if (typeof appendConsoleLog === "function") appendConsoleLog(`ITMS session authenticated as '${email}'.`, "success");
+            if (typeof appendConsoleLog === "function") appendConsoleLog(`ITMS session authenticated as '${email}' for ${bondCode}.`, "success");
             if (modalPass) modalPass.value = "";
             const inputPass = document.getElementById("itms-input-password");
             if (inputPass) inputPass.value = "";
@@ -362,3 +438,7 @@ async function syncCurrentItmsPage() {
         showToast("Sync error: " + err, "error");
     }
 }
+
+document.addEventListener("DOMContentLoaded", () => {
+    loadOperatingBonds();
+});

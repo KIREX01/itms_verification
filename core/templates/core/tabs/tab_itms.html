@@ -44,6 +44,10 @@
                 <div style="font-size:0.8rem; color:var(--ug-text-muted); line-height:1.5;" id="itms-account-details">
                     Connect your ITMS credentials to enable installation order lookup and evidence verification.
                 </div>
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-top:4px; padding:8px 12px; background:rgba(255,255,255,0.03); border:1px solid var(--ug-border); border-radius:var(--radius-md);">
+                    <div style="font-size:0.75rem; color:var(--ug-text-muted);">Active Operating Bond:</div>
+                    <span class="badge badge-blue" id="itms-active-bond-badge" style="font-weight:700;">AGM Bonded Warehouse (AGM)</span>
+                </div>
                 <div style="background-color:rgba(252,220,4,0.08); border:1px solid rgba(252,220,4,0.25); border-radius:var(--radius-md); padding:12px; font-size:0.8rem; color:var(--ug-yellow); line-height:1.4;">
                     🇺🇬 <strong>Official Ugandan Fitment Portal:</strong> All session tokens are encrypted locally and communication adheres to authenticated session protocols.
                 </div>
@@ -58,6 +62,16 @@
             <div class="itms-card">
                 <div class="itms-card-title">
                     <span>🔑 ITMS WebApp Session Credentials</span>
+                </div>
+                <div class="form-field">
+                    <label>Operating Facility / Bonded Warehouse</label>
+                    <div style="display:flex; gap:8px;">
+                        <select id="itms-select-bond" class="form-control" style="flex:1; background:var(--ug-card-bg); color:#fff; border:1px solid var(--ug-border); border-radius:var(--radius-sm); padding:8px 10px; font-size:0.85rem;" onchange="onBondSelectionChanged()">
+                            <option value="AGM">AGM Bonded Warehouse (AGM)</option>
+                        </select>
+                        <button class="btn btn-secondary" onclick="loadOperatingBonds()" style="padding:0 10px; font-size:0.8rem;" title="Refresh discovered warehouse list">🔄</button>
+                    </div>
+                    <span style="font-size:0.72rem; color:var(--ug-text-dim);">Orders from other facilities are strictly isolated to protect local floor counts.</span>
                 </div>
                 <div class="form-field">
                     <label>ITMS WebApp Base URL</label>

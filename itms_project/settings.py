@@ -153,4 +153,9 @@ MOBILE_DEVICE_SESSION_TTL_SECONDS = env.float("MOBILE_DEVICE_SESSION_TTL_SECONDS
 MAX_MOBILE_BATCH_PHOTOS = env.int("MAX_MOBILE_BATCH_PHOTOS", default=get_setting("mobile.max_batch_photos", 200))
 MAX_MOBILE_BATCH_PAIRS = MAX_MOBILE_BATCH_PHOTOS // 2
 
+# Active Bond Facility Configuration (Guarantees Strict Scoping to AGM Bonded Warehouse)
+ACTIVE_BOND_CODE = env("ACTIVE_BOND_CODE", default=get_setting("bond.active_bond_code", "AGM"))
+ACTIVE_BOND_NAME = env("ACTIVE_BOND_NAME", default=get_setting("bond.active_bond_name", "AGM Bonded Warehouse"))
+
+
 

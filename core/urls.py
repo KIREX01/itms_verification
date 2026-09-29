@@ -75,4 +75,7 @@ urlpatterns = [
     path("api/stock/opening/", views.api_stock_opening, name="api_stock_opening"),
     path("api/stock/physical/", views.api_stock_physical_count, name="api_stock_physical_count"),
     path("api/stock/export/", views.api_stock_export_csv, name="api_stock_export_csv"),
+    path("api/stock/delivery-notes/", views.api_stock_delivery_notes, name="api_stock_delivery_notes"),
+    path("api/stock/mvr-docket/", views.api_stock_mvr_docket, name="api_stock_mvr_docket"),
 ]
+

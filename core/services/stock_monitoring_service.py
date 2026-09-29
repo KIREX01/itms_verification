@@ -191,13 +191,29 @@ def resolve_date_and_suffix(target: Optional[Any] = None) -> Tuple[date, str]:
     return today, today.strftime("%d%m%y")
 
 
+def generate_delivery_note_reference(target_date: Optional[Any] = None) -> str:
+    """
+    Generates a standardized date-anchored delivery note reference:
+    e.g. DN-20260930-01, DN-20260930-02, etc.
+    """
+    d, _ = resolve_date_and_suffix(target_date)
+    prefix = f"DN-{d.strftime('%Y%m%d')}-"
+    existing_count = StockDelivery.objects.filter(
+        Q(delivery_date=d) | Q(delivery_number__startswith=prefix)
+    ).count()
+    next_idx = existing_count + 1
+    return f"{prefix}{next_idx:02d}"
+
+
 def record_delivery(
-    delivery_number: str,
-    plates: Iterable[str],
+    delivery_number: Optional[str] = None,
+    plates: Iterable[str] = (),
     supplier: str = "Factory / Central Depot",
     plate_category: str = PlateCategory.PSV,
     delivery_date: Optional[date] = None,
     target_date_suffix: Optional[str] = None,
+    paper_note_reference: str = "",
+    delivery_note_image: Optional[Any] = None,
     received_by: Optional[Any] = None,
     operator_name: str = "Operator",
     notes: str = "",
@@ -217,13 +233,17 @@ def record_delivery(
         raise ValueError("No valid license plate numbers provided for delivery.")
 
     deliv_no = (delivery_number or "").strip()
-    if not deliv_no:
-        deliv_no = f"DEL-{deliv_date.strftime('%Y%m%d')}-{len(clean_plates)}"
+    if not deliv_no or deliv_no.upper() == "AUTO":
+        deliv_no = generate_delivery_note_reference(deliv_date)
+
+    paper_ref = (paper_note_reference or "").strip()
 
     with transaction.atomic():
         delivery, created = StockDelivery.objects.get_or_create(
             delivery_number=deliv_no,
             defaults={
+                "paper_note_reference": paper_ref,
+                "delivery_note_image": delivery_note_image,
                 "supplier": supplier or "Factory / Central Depot",
                 "plate_category": category,
                 "delivery_date": deliv_date,
@@ -235,6 +255,10 @@ def record_delivery(
             },
         )
         if not created:
+            if paper_ref:
+                delivery.paper_note_reference = paper_ref
+            if delivery_note_image:
+                delivery.delivery_note_image = delivery_note_image
             delivery.supplier = supplier or delivery.supplier
             delivery.plate_category = category
             delivery.notes = notes or delivery.notes
@@ -280,6 +304,7 @@ def record_delivery(
     return {
         "success": True,
         "delivery_number": delivery.delivery_number,
+        "paper_note_reference": delivery.paper_note_reference or "",
         "plate_category": category,
         "plates_count": len(clean_plates),
         "total_submitted": len(clean_plates) + dup_count,
@@ -932,3 +957,110 @@ def export_stock_reconciliation_csv(target_date_suffix: Optional[str] = None) ->
         ])
 
     return out.getvalue()
+
+
+def get_delivery_notes_for_date(target_date_suffix: Optional[Any] = None) -> List[Dict[str, Any]]:
+    """
+    Returns all stored delivery notes for a specific date or suffix, with itemized
+    plate counts, paper note references, timestamps, and plate lists.
+    """
+    deliv_date, suffix = resolve_date_and_suffix(target_date_suffix)
+    deliveries_qs = (
+        StockDelivery.objects.filter(
+            Q(target_date_suffix=suffix) | Q(delivery_date=deliv_date)
+        )
+        .prefetch_related("items")
+        .order_by("-created_at")
+    )
+
+    results: List[Dict[str, Any]] = []
+    for d in deliveries_qs:
+        plates = list(d.items.values_list("registration_number", flat=True))
+        results.append({
+            "id": d.id,
+            "delivery_number": d.delivery_number,
+            "paper_note_reference": d.paper_note_reference or "",
+            "supplier": d.supplier,
+            "plate_category": d.plate_category,
+            "delivery_date": d.delivery_date.isoformat() if d.delivery_date else "",
+            "target_date_suffix": d.target_date_suffix,
+            "total_plates_count": d.total_plates_count or len(plates),
+            "operator_name": d.operator_name,
+            "notes": d.notes or "",
+            "created_at": d.created_at.strftime("%Y-%m-%d %H:%M:%S") if d.created_at else "",
+            "has_image": bool(d.delivery_note_image),
+            "image_url": d.delivery_note_image.url if d.delivery_note_image else None,
+            "plates": plates,
+        })
+
+    return results
+
+
+def get_mvr_unallocated_docket(target_date_suffix: Optional[Any] = None) -> Dict[str, Any]:
+    """
+    Generates the actionable MVR Allocation Discrepancy Docket for a specific shift date.
+    Returns:
+    - raw_plates: newline-separated plate strings for MVR officer to paste into ITMS search.
+    - formatted_docket: formal text docket for team leaders with AGM Bond header and shift metrics.
+    - unallocated_plates: array of unallocated plates.
+    - count: total unallocated count.
+    """
+    recon = compute_daily_reconciliation(target_date_suffix)
+    suffix = recon["work_date_suffix"]
+    formatted_date = recon["formatted_date"]
+    warehouse = recon.get("warehouse_name", "AGM Bonded Warehouse")
+    floor = recon.get("floor_operations", {})
+
+    unallocated_plates = floor.get("unallocated_plates", [])
+    raw_plates = "\n".join(unallocated_plates)
+
+    now_str = timezone.now().strftime("%Y-%m-%d %H:%M:%S")
+    count = len(unallocated_plates)
+
+    plates_block = ""
+    if unallocated_plates:
+        plates_block = "\n".join(f"  {idx:2d}. {p}" for idx, p in enumerate(unallocated_plates, start=1))
+    else:
+        plates_block = "  [None - All physically fitted plates are matched to ITMS orders or archive]"
+
+    docket_lines = [
+        "==================================================",
+        "AGM BONDED WAREHOUSE — MVR ALLOCATION EXCEPTION DOCKET",
+        f"Shift Date: {formatted_date} (Suffix: {suffix})",
+        f"Bond / Safe Room: {warehouse}",
+        f"Generated At: {now_str}",
+        "==================================================",
+        "SHIFT PHYSICAL DISPATCH & ITMS SUMMARY:",
+        f"  • Morning Dispatched to Line:     {floor.get('dispatched_count', 0):>4}",
+        f"  • Evening Returned to Safe Room:  {floor.get('returned_count', 0):>4}",
+        f"  • Net Physically Fitted on Line:  {floor.get('net_dispatched', 0):>4}",
+        f"  • ITMS Active Orders Queue:       {floor.get('itms_pending_count', 0):>4}",
+        f"  • MVR UNALLOCATED DISCREPANCY:    {count:>4}",
+        "==================================================",
+        "ACTION REQUIRED FOR MVR OFFICER:",
+        f"The following {count} plate(s) were physically fitted onto bikes",
+        "on the assembly floor during this shift, but have NOT been",
+        "allocated in ITMS (status may still be 'New' under Installation Kits).",
+        "Please search and allocate these kits immediately in ITMS:",
+        "",
+        plates_block,
+        "",
+        "==================================================",
+        "ITMS Verification & Daily Stock Ledger Audit — v1.0.5",
+        "==================================================",
+    ]
+    formatted_docket = "\n".join(docket_lines)
+
+    return {
+        "success": True,
+        "work_date": recon["work_date"],
+        "work_date_suffix": suffix,
+        "formatted_date": formatted_date,
+        "warehouse_name": warehouse,
+        "unallocated_plates": unallocated_plates,
+        "count": count,
+        "raw_plates": raw_plates,
+        "formatted_docket": formatted_docket,
+        "floor_operations": floor,
+    }
+

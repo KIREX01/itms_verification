@@ -951,4 +951,17 @@ DashboardPane {
     margin-bottom: 0;
 }
 
+.unallocated-actions-row {
+    height: 3;
+    margin-top: 1;
+    margin-bottom: 1;
+    align-vertical: middle;
+}
+
+.unallocated-actions-row Button {
+    margin-right: 1;
+    min-width: 20;
+}
+
+
 

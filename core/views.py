@@ -2379,6 +2379,8 @@ def api_stock_delivery(request: HttpRequest) -> JsonResponse:
     supplier = "Factory / Central Depot"
     plates_raw = None
     target_date = None
+    plate_category = "PSV"
+    paper_note_reference = ""
     operator_name = "Operator"
     notes = ""
     auto_create_kits = True
@@ -2390,6 +2392,8 @@ def api_stock_delivery(request: HttpRequest) -> JsonResponse:
             supplier = body.get("supplier", "Factory / Central Depot")
             plates_raw = body.get("plates")
             target_date = body.get("date") or body.get("date_suffix") or body.get("suffix")
+            plate_category = body.get("plate_category", "PSV")
+            paper_note_reference = body.get("paper_note_reference", "")
             operator_name = body.get("operator_name") or "Operator"
             notes = body.get("notes") or ""
             if "auto_create_kits" in body:
@@ -2407,10 +2411,14 @@ def api_stock_delivery(request: HttpRequest) -> JsonResponse:
             or request.POST.get("suffix")
             or target_date
         )
+        plate_category = request.POST.get("plate_category", plate_category)
+        paper_note_reference = request.POST.get("paper_note_reference", paper_note_reference)
         operator_name = request.POST.get("operator_name", operator_name)
         notes = request.POST.get("notes", notes)
         if "auto_create_kits" in request.POST:
             auto_create_kits = request.POST.get("auto_create_kits", "").lower() in ("true", "1", "yes")
+
+    delivery_note_image = request.FILES.get("delivery_note_image")
 
     if not plates_raw:
         return JsonResponse({"success": False, "error": "No plate numbers provided in 'plates'."}, status=400)
@@ -2421,7 +2429,10 @@ def api_stock_delivery(request: HttpRequest) -> JsonResponse:
             delivery_number=delivery_number,
             plates=plates_raw,
             supplier=supplier,
+            plate_category=plate_category,
             target_date_suffix=target_date,
+            paper_note_reference=paper_note_reference,
+            delivery_note_image=delivery_note_image,
             received_by=user,
             operator_name=operator_name,
             notes=notes,
@@ -2708,3 +2719,40 @@ def api_stock_export_csv(request: HttpRequest) -> HttpResponse:
     response = HttpResponse(csv_content, content_type="text/csv")
     response["Content-Disposition"] = f'attachment; filename="itms_stock_reconciliation_{suf}.csv"'
     return response
+
+
+@require_GET
+def api_stock_delivery_notes(request: HttpRequest) -> JsonResponse:
+    """Returns stored delivery notes for a specific date or suffix."""
+    from core.services import stock_monitoring_service
+    date_suffix = (
+        request.GET.get("date")
+        or request.GET.get("date_suffix")
+        or request.GET.get("suffix")
+        or None
+    )
+    try:
+        notes = stock_monitoring_service.get_delivery_notes_for_date(date_suffix)
+        return JsonResponse({"success": True, "delivery_notes": notes, "count": len(notes)})
+    except Exception as exc:
+        logger.error("api_stock_delivery_notes error: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
+@require_GET
+def api_stock_mvr_docket(request: HttpRequest) -> JsonResponse:
+    """Returns the MVR Allocation Exception Docket (raw plates list and formatted text)."""
+    from core.services import stock_monitoring_service
+    date_suffix = (
+        request.GET.get("date")
+        or request.GET.get("date_suffix")
+        or request.GET.get("suffix")
+        or None
+    )
+    try:
+        docket = stock_monitoring_service.get_mvr_unallocated_docket(date_suffix)
+        return JsonResponse({"success": True, "docket": docket})
+    except Exception as exc:
+        logger.error("api_stock_mvr_docket error: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+

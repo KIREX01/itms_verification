@@ -491,7 +491,22 @@ class StockDelivery(models.Model):
         max_length=64,
         unique=True,
         db_index=True,
-        help_text="Delivery manifest or shipment reference, e.g. DEL-20260929-01",
+        help_text="Delivery manifest or shipment reference, e.g. DN-20260930-01",
+    )
+    paper_note_reference = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Printed physical delivery note number from paper slip",
+    )
+    delivery_note_image = models.ForeignKey(
+        "EvidenceImage",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="delivery_notes",
+        help_text="Optional photo of paper delivery note in Evidence Vault",
     )
     supplier = models.CharField(
         max_length=128,

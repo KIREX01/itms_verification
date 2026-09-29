@@ -84,6 +84,9 @@ class ReportsPane(VerticalScroll):
             with Vertical(classes="report-card", id="card-report-unallocated"):
                 yield Static("[bold red]⚠️ Unallocated Plates Audit (Taken Out of Stock / No Order in ITMS)[/bold red]", classes="card-title")
                 yield Static(id="reports-unallocated-summary")
+                with Horizontal(classes="unallocated-actions-row"):
+                    yield Button("📋 Copy Raw Plates", variant="primary", id="btn-copy-unallocated-raw")
+                    yield Button("📑 Copy MVR Docket", variant="warning", id="btn-copy-mvr-docket")
                 yield DataTable(id="table-report-unallocated")
 
             # 5. ITMS Installation Kits & Warehouse Stock Breakdown
@@ -411,6 +414,10 @@ class ReportsPane(VerticalScroll):
             self.action_toggle_scope()
         elif btn_id == "btn-report-date":
             self.action_cycle_date()
+        elif btn_id == "btn-copy-unallocated-raw":
+            self.action_copy_unallocated_raw()
+        elif btn_id == "btn-copy-mvr-docket":
+            self.action_copy_mvr_docket()
 
     def action_open_stock_manager(self) -> None:
         """Opens the Bond Physical Stock & Reconciliation Manager Dialog."""
@@ -459,3 +466,78 @@ class ReportsPane(VerticalScroll):
     def action_refresh_totals(self) -> None:
         self.refresh_reports()
         self.notify("Reports & Totals refreshed from live database.")
+
+    def _copy_text_to_clipboard(self, text: str) -> bool:
+        """Copies text to system clipboard across Textual, Windows clip.exe, or pyperclip."""
+        # 1. Try Textual built-in app.copy_to_clipboard
+        try:
+            if hasattr(self.app, "copy_to_clipboard"):
+                self.app.copy_to_clipboard(text)
+                return True
+        except Exception:
+            pass
+
+        # 2. Windows clip.exe fallback
+        import platform
+        import subprocess
+        if platform.system() == "Windows":
+            try:
+                proc = subprocess.run(
+                    ["clip"],
+                    input=text.encode("utf-8"),
+                    check=False,
+                    capture_output=True,
+                )
+                if proc.returncode == 0:
+                    return True
+            except Exception:
+                pass
+
+        # 3. pyperclip fallback if available
+        try:
+            import pyperclip
+            pyperclip.copy(text)
+            return True
+        except Exception:
+            pass
+
+        return False
+
+    def action_copy_unallocated_raw(self) -> None:
+        """Copies raw newline-separated plate numbers to clipboard for MVR officer."""
+        from core.services import stock_monitoring_service
+        try:
+            docket = stock_monitoring_service.get_mvr_unallocated_docket(self.current_target_date)
+            raw = docket.get("raw_plates", "").strip()
+            count = docket.get("count", 0)
+            if not raw or count == 0:
+                self.notify("ℹ️ No unallocated plates found for this shift date.", severity="information")
+                return
+
+            copied = self._copy_text_to_clipboard(raw)
+            if copied:
+                self.notify(f"✓ Copied {count} raw plate numbers to clipboard for MVR!", severity="information")
+            else:
+                self.notify(f"⚠️ Could not access clipboard. {count} plates found.", severity="warning")
+        except Exception as exc:
+            self.notify(f"Error copying unallocated plates: {exc}", severity="error")
+
+    def action_copy_mvr_docket(self) -> None:
+        """Copies formatted MVR Allocation Exception Docket to clipboard."""
+        from core.services import stock_monitoring_service
+        try:
+            docket = stock_monitoring_service.get_mvr_unallocated_docket(self.current_target_date)
+            fmt = docket.get("formatted_docket", "").strip()
+            count = docket.get("count", 0)
+            if not fmt:
+                self.notify("ℹ️ No docket data available for this shift date.", severity="information")
+                return
+
+            copied = self._copy_text_to_clipboard(fmt)
+            if copied:
+                self.notify(f"✓ Copied formatted MVR Exception Docket ({count} unallocated) to clipboard!", severity="information")
+            else:
+                self.notify("⚠️ Could not access clipboard.", severity="warning")
+        except Exception as exc:
+            self.notify(f"Error generating MVR docket: {exc}", severity="error")
+

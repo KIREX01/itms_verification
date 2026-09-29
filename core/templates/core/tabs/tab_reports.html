@@ -101,11 +101,17 @@
 
                 <!-- Unallocated Plates Audit Table -->
                 <div style="margin-top:10px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
                         <div style="font-weight:600; font-size:0.85rem; color:#e2e8f0;">
                             Unallocated Plates Audit Table (Neither in Active Orders nor Archive):
                         </div>
-                        <div style="display:flex; gap:8px;">
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <button type="button" class="btn btn-secondary" onclick="copyUnallocatedRawPlates()" title="Copy raw plate numbers to clipboard for MVR officers (one per line)" style="padding:4px 10px; font-size:0.8rem;">
+                                📋 Copy Raw Plates
+                            </button>
+                            <button type="button" class="btn btn-primary" onclick="copyMvrDocket()" title="Copy formatted MVR Shift Docket to clipboard" style="padding:4px 10px; font-size:0.8rem;">
+                                📑 Copy MVR Docket
+                            </button>
                             <input type="text" id="report-unallocated-search" placeholder="Filter plate or source..." oninput="filterUnallocatedTable(this.value)" style="background:#0f172a; border:1px solid #334155; color:#f8fafc; padding:4px 8px; border-radius:4px; font-size:0.78rem;">
                         </div>
                     </div>

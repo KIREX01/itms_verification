@@ -836,21 +836,22 @@ class DryRunSafetyConfigurationAndLiveSubmissionTests(TestCase):
             "is_finalized": True,
         }
 
-        with patch.object(config_service, "get_setting", side_effect=lambda key, default=None: False if key == "submission.dry_run_mode" else True):
-            with patch("core.services.itms_web_client.get_web_client", return_value=mock_client):
-                # When dry_run is not explicitly provided, it must query config_service -> False
-                outcome = submit_pair(self.pair, backend="web")
-                self.assertTrue(outcome.success)
+        with self.settings(TESTING=True), \
+             patch.object(config_service, "get_setting", side_effect=lambda key, default=None: False if key == "submission.dry_run_mode" else True), \
+             patch("core.services.itms_web_client.get_web_client", return_value=mock_client):
+            # When dry_run is not explicitly provided, it must query config_service -> False
+            outcome = submit_pair(self.pair, backend="web")
+            self.assertTrue(outcome.success)
 
-                # Verify dry_run=False was passed to web_client workflow
-                mock_client.execute_installation_order_workflow.assert_called_once()
-                call_kwargs = mock_client.execute_installation_order_workflow.call_args[1]
-                self.assertFalse(call_kwargs["dry_run"])
+            # Verify dry_run=False was passed to web_client workflow
+            mock_client.execute_installation_order_workflow.assert_called_once()
+            call_kwargs = mock_client.execute_installation_order_workflow.call_args[1]
+            self.assertFalse(call_kwargs["dry_run"])
 
-                # Verify audit log does NOT contain [DRY-RUN] tag
-                audit = self.pair.audit_logs.filter(action=SubmissionAuditLog.Action.SUBMIT).first()
-                self.assertIsNotNone(audit)
-                self.assertNotIn("[DRY-RUN]", audit.message)
+            # Verify audit log does NOT contain [DRY-RUN] tag
+            audit = self.pair.audit_logs.filter(action=SubmissionAuditLog.Action.SUBMIT).first()
+            self.assertIsNotNone(audit)
+            self.assertNotIn("[DRY-RUN]", audit.message)
 
     def test_dry_run_submission_when_dry_run_enabled_in_config(self):
         """When submission.dry_run_mode is true, submit_pair executes simulation with [DRY-RUN] tag."""
@@ -1228,7 +1229,8 @@ class SmartCompressionAndOfflineOutboxTests(TestCase):
                 return True
             return default if default is not None else True
 
-        with patch("core.services.itms_web_client.get_web_client", return_value=mock_web_client), \
+        with self.settings(TESTING=True), \
+             patch("core.services.itms_web_client.get_web_client", return_value=mock_web_client), \
              patch("core.services.config_service.get_setting", side_effect=mock_get_setting):
             outcome = submit_pair(pair, backend="web", dry_run=False)
             self.assertFalse(outcome.success)

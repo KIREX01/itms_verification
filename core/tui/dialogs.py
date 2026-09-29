@@ -1447,6 +1447,12 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
         border: solid #30363d;
         margin-bottom: 1;
     }
+    StockManagerModal #table-modal-deliv-notes {
+        height: 6;
+        min-height: 4;
+        border: solid #30363d;
+        margin-bottom: 1;
+    }
     StockManagerModal #modal-footer {
         height: 3;
         align: right middle;
@@ -1522,8 +1528,13 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                         )
                         with Horizontal(classes="stock-row"):
                             yield Input(
-                                placeholder="Delivery Manifest # (e.g. DEL-20260929-01)",
+                                placeholder="Delivery Note # (e.g. DN-20260930-01 or leave AUTO)",
                                 id="input-deliv-number",
+                                classes="stock-input-field",
+                            )
+                            yield Input(
+                                placeholder="Paper Note Ref # (e.g. DN/FAC/8912)",
+                                id="input-deliv-paper-ref",
                                 classes="stock-input-field",
                             )
                             yield Input(
@@ -1556,6 +1567,8 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                             )
                             yield Button("📥 Ingest Delivery into Stock", variant="success", id="btn-save-delivery")
                             yield Button("Clear Delivery", variant="default", id="btn-clear-deliv")
+                        yield Static("[bold white]Stored Inbound Delivery Notes for Shift:[/bold white]")
+                        yield DataTable(id="table-modal-deliv-notes")
 
                 # TAB 4: Bond Transfers (In / Out)
                 with TabPane("🔄 Bond Transfers", id="tab-transfers-pane"):
@@ -1672,6 +1685,11 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
         table = self.query_one("#table-modal-stock-report", DataTable)
         table.add_columns("Description Metric", "Public White (PSV)", "Private Yellow (PMO)", "Total Combined (Bond)", "Formula / Note")
         table.cursor_type = "row"
+
+        table_deliv = self.query_one("#table-modal-deliv-notes", DataTable)
+        table_deliv.add_columns("Delivery Note #", "Paper Ref #", "Category", "Plates Count", "Supplier", "Logged At")
+        table_deliv.cursor_type = "row"
+
         self.action_refresh_stock()
 
     def action_refresh_stock(self) -> None:
@@ -1682,9 +1700,34 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
             self._cached_recon = recon
             self._render_header(recon)
             self._render_report_table(recon)
+            self._render_delivery_notes_table()
             self._load_inputs(recon)
         except Exception as exc:
             self.notify(f"Stock reconciliation error: {exc}", severity="error")
+
+    def _render_delivery_notes_table(self) -> None:
+        from core.services import stock_monitoring_service
+        try:
+            table = self.query_one("#table-modal-deliv-notes", DataTable)
+            table.clear()
+            notes = stock_monitoring_service.get_delivery_notes_for_date(self.target_date_suffix)
+            if not notes:
+                table.add_row("No delivery notes logged for this shift", "—", "—", "—", "—", "—")
+                return
+            for n in notes:
+                cat_badge = "[bold white on dark_blue] PSV [/]" if n["plate_category"] == "PSV" else "[bold black on gold1] PMO [/]"
+                paper_ref = n["paper_note_reference"] or "—"
+                table.add_row(
+                    f"[bold green]{n['delivery_number']}[/bold green]",
+                    f"[bold yellow]{paper_ref}[/bold yellow]",
+                    cat_badge,
+                    f"[bold cyan]{n['total_plates_count']:,}[/bold cyan]",
+                    n["supplier"][:25],
+                    f"[dim]{n['created_at']}[/dim]",
+                )
+        except Exception:
+            pass
+
 
     def _render_header(self, r: Dict[str, Any]) -> None:
         fmt_date = r.get("formatted_date", "")
@@ -1919,6 +1962,11 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
     def _handle_save_delivery(self) -> None:
         from core.services import stock_monitoring_service
         deliv_no = self.query_one("#input-deliv-number", Input).value.strip()
+        paper_ref = ""
+        try:
+            paper_ref = self.query_one("#input-deliv-paper-ref", Input).value.strip()
+        except Exception:
+            pass
         supplier = self.query_one("#input-deliv-supplier", Input).value.strip()
         cat_select = self.query_one("#sel-deliv-category", Select)
         category = str(cat_select.value or "PSV")
@@ -1938,6 +1986,7 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
         try:
             res = stock_monitoring_service.record_delivery(
                 delivery_number=deliv_no,
+                paper_note_reference=paper_ref,
                 supplier=supplier,
                 plates=combined,
                 plate_category=category,
@@ -1955,6 +2004,8 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
             self.query_one("#text-deliv-bulk", TextArea).text = ""
             try:
                 self.query_one("#input-deliv-single", Input).value = ""
+                self.query_one("#input-deliv-number", Input).value = ""
+                self.query_one("#input-deliv-paper-ref", Input).value = ""
                 self.query_one("#lbl-deliv-staged", Static).update("[dim]Staged: 0 plates[/dim]")
             except Exception:
                 pass

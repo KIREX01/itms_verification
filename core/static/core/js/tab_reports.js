@@ -326,3 +326,98 @@ function filterUnallocatedTable(query) {
 
     renderUnallocatedTable(filtered);
 }
+
+function copyTextToClipboard(text) {
+    if (!text) return Promise.resolve(false);
+    if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(text)
+            .then(() => true)
+            .catch(() => fallbackCopyText(text));
+    }
+    return Promise.resolve(fallbackCopyText(text));
+}
+
+function fallbackCopyText(text) {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-999999px";
+    textArea.style.top = "-999999px";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    let successful = false;
+    try {
+        successful = document.execCommand("copy");
+    } catch (err) {
+        successful = false;
+    }
+    document.body.removeChild(textArea);
+    return successful;
+}
+
+async function copyUnallocatedRawPlates() {
+    if (!cachedUnallocatedItems || cachedUnallocatedItems.length === 0) {
+        if (typeof showToast === "function") {
+            showToast("No unallocated plates found to copy.", "warning");
+        }
+        return;
+    }
+
+    const plates = cachedUnallocatedItems.map(item => item.plate || item.display_plate).filter(Boolean);
+    if (plates.length === 0) {
+        if (typeof showToast === "function") {
+            showToast("No valid plate numbers found in unallocated list.", "warning");
+        }
+        return;
+    }
+
+    const text = plates.join("\n");
+    const ok = await copyTextToClipboard(text);
+    if (ok) {
+        if (typeof showToast === "function") {
+            showToast(`✓ Copied ${plates.length} raw plate numbers to clipboard for MVR!`, "success");
+        }
+    } else {
+        if (typeof showToast === "function") {
+            showToast("Failed to copy plates to clipboard.", "error");
+        }
+    }
+}
+
+async function copyMvrDocket() {
+    try {
+        let url = "/api/stock/mvr-docket/";
+        if (reportCurrentDate) {
+            url += `?date=${encodeURIComponent(reportCurrentDate)}`;
+        }
+        const resp = await fetch(url);
+        const data = await resp.json();
+
+        if (!data.success || !data.docket) {
+            if (typeof showToast === "function") {
+                showToast("Could not generate MVR Docket: " + (data.error || "Unknown error"), "error");
+            }
+            return;
+        }
+
+        const docketText = data.docket.formatted_docket;
+        const count = data.docket.count || 0;
+        const ok = await copyTextToClipboard(docketText);
+        if (ok) {
+            if (typeof showToast === "function") {
+                showToast(`✓ Copied MVR Allocation Exception Docket (${count} unallocated) to clipboard!`, "success");
+            }
+        } else {
+            if (typeof showToast === "function") {
+                showToast("Failed to copy MVR Docket to clipboard.", "error");
+            }
+        }
+    } catch (err) {
+        console.error("Error copying MVR docket:", err);
+        if (typeof showToast === "function") {
+            showToast("Error generating MVR docket: " + err, "error");
+        }
+    }
+}
+

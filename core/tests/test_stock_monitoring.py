@@ -339,3 +339,89 @@ class StockMonitoringTests(TestCase):
         self.assertEqual(res["duplicate_scans_skipped"], 2)
         self.assertEqual(res["created_kits_count"], 2)
 
+    def test_delivery_notes_reference_and_query(self):
+        # 1. Test auto reference generation
+        ref1 = stock_monitoring_service.generate_delivery_note_reference(self.test_date)
+        self.assertTrue(ref1.startswith("DN-20260929-"))
+
+        # 2. Record delivery with AUTO delivery number and paper reference
+        res1 = stock_monitoring_service.record_delivery(
+            delivery_number="AUTO",
+            paper_note_reference="PAPER-DN-8891",
+            plates=["UMA801PW", "UMA802PW"],
+            plate_category="PSV",
+            target_date_suffix=self.test_suffix,
+        )
+        self.assertEqual(res1["delivery_number"], ref1)
+        self.assertEqual(res1["paper_note_reference"], "PAPER-DN-8891")
+
+        # 3. Query delivery notes for date
+        notes = stock_monitoring_service.get_delivery_notes_for_date(self.test_suffix)
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0]["delivery_number"], ref1)
+        self.assertEqual(notes[0]["paper_note_reference"], "PAPER-DN-8891")
+        self.assertEqual(notes[0]["total_plates_count"], 2)
+        self.assertIn("UMA801PW", notes[0]["plates"])
+
+    def test_mvr_unallocated_docket_generation(self):
+        # Dispatch 3 plates
+        stock_monitoring_service.record_dispatch_scans(
+            plates=["UMA901PW", "UMA902PW", "UMA903PW"],
+            plate_category="PSV",
+            target_date_suffix=self.test_suffix,
+        )
+        # 1 installed in ITMS
+        InstallationOrder.objects.create(
+            order_number=f"PO-UMA901PW-{self.test_suffix}",
+            registration_number="UMA901PW",
+            order_status="Installed",
+            is_archived=True,
+        )
+        # 1 returned to safe room
+        stock_monitoring_service.record_return_scans(
+            plates=["UMA902PW"],
+            target_date_suffix=self.test_suffix,
+        )
+
+        # 1 plate (UMA903PW) physically fitted but skipped by MVR
+        docket = stock_monitoring_service.get_mvr_unallocated_docket(self.test_suffix)
+        self.assertTrue(docket["success"])
+        self.assertEqual(docket["count"], 1)
+        self.assertEqual(docket["unallocated_plates"], ["UMA903PW"])
+        self.assertEqual(docket["raw_plates"], "UMA903PW")
+        self.assertIn("AGM BONDED WAREHOUSE — MVR ALLOCATION EXCEPTION DOCKET", docket["formatted_docket"])
+        self.assertIn("UMA903PW", docket["formatted_docket"])
+
+    def test_delivery_notes_and_mvr_docket_rest_apis(self):
+        # Record a delivery and dispatch a plate
+        stock_monitoring_service.record_delivery(
+            delivery_number="DN-API-TEST-01",
+            paper_note_reference="DN/TEST/991",
+            plates=["UMA950PW"],
+            plate_category="PSV",
+            target_date_suffix=self.test_suffix,
+        )
+        stock_monitoring_service.record_dispatch_scans(
+            plates=["UMA950PW"],
+            plate_category="PSV",
+            target_date_suffix=self.test_suffix,
+        )
+
+        # 1. API GET delivery notes
+        r_deliv = self.client.get(f"/api/stock/delivery-notes/?date={self.test_suffix}")
+        self.assertEqual(r_deliv.status_code, 200)
+        deliv_json = r_deliv.json()
+        self.assertTrue(deliv_json["success"])
+        self.assertGreaterEqual(deliv_json["count"], 1)
+        self.assertEqual(deliv_json["delivery_notes"][0]["paper_note_reference"], "DN/TEST/991")
+
+        # 2. API GET MVR docket
+        r_docket = self.client.get(f"/api/stock/mvr-docket/?date={self.test_suffix}")
+        self.assertEqual(r_docket.status_code, 200)
+        docket_json = r_docket.json()
+        self.assertTrue(docket_json["success"])
+        self.assertIn("raw_plates", docket_json["docket"])
+        self.assertIn("formatted_docket", docket_json["docket"])
+        self.assertIn("UMA950PW", docket_json["docket"]["unallocated_plates"])
+
+

@@ -68,6 +68,18 @@ class OperatorActionsMixin:
         except Exception:
             pass
 
+    def action_tab_reports(self):
+        tabs = self.query_one("#tabs-content", TabbedContent)
+        tabs.active = "tab-reports"
+        self._set_activity_visibility(False)
+        try:
+            reports_pane = self.query_one("#reports-pane")
+            if hasattr(reports_pane, "refresh_reports"):
+                reports_pane.refresh_reports()
+            self.set_focus(None)
+        except Exception:
+            pass
+
     @work(thread=True)
     def action_drain_outbox(self) -> None:
         """Drains any orders waiting in OFFLINE_OUTBOX status."""
@@ -1190,6 +1202,17 @@ class OperatorActionsMixin:
 
             plate = result["plate"]
             order = result.get("order")
+            is_unalloc = result.get("unallocated", False)
+            if is_unalloc:
+                kit_c = result.get("kit_code", "Kit")
+                self.notify(f"⚠️ Plate {plate} is UNALLOCATED in ITMS ({kit_c} is 'New').", severity="warning")
+                self.log_message(
+                    f"[bold yellow]⚠️ Unallocated Stock Kit Detected:[/bold yellow] {plate} ({kit_c}) → Flagged UNREGISTERED (No active order in ITMS)",
+                    level="WARNING",
+                )
+                self.reload_data()
+                return
+
             order_tag = f" (Order #{order.order_number})" if order else ""
             self.notify(f"Approved {plate}! Ready for submission [U]")
             self.log_message(
@@ -1252,18 +1275,30 @@ class OperatorActionsMixin:
         self.action_batch_submit()
 
     @work(thread=True)
-    def action_sync_itms_orders(self) -> None:
-        """Synchronizes active ITMS installation orders with PostgreSQL / local DB with rate-limit protection."""
+    def action_sync_itms_orders(self, target_date: Optional[str] = None) -> None:
+        """Synchronizes active ITMS orders, shift archive, and installation kits with rate-limit protection."""
         if getattr(self, "_order_sync_running", False):
             self.call_from_thread(self.notify, "Order sync is already in progress.", severity="warning")
             return
         self._order_sync_running = True
         from core.services.order_sync import OrderSyncService
-        self.call_from_thread(self.log_message, "Checking active ITMS orders (GET /installation-orders/index)...", level="ITMS")
+        self.call_from_thread(self.log_message, "Checking active ITMS orders & shift records...", level="ITMS")
 
         try:
             svc = OrderSyncService()
-            res = svc.sync_active_orders(force=False)
+            # If target_date is not passed, attempt to read from Reports pane
+            t_date = target_date
+            if not t_date:
+                try:
+                    pane = self.query_one("#reports-pane")
+                    t_date = getattr(pane, "current_target_date", None)
+                except Exception:
+                    pass
+
+            if t_date and t_date.upper() != "ALL":
+                res = svc.sync_shift_scoped(target_date=t_date, force=False)
+            else:
+                res = svc.sync_active_orders(force=False)
 
             if not res.get("success"):
                 err = res.get("error", "Sync failed.")
@@ -1281,10 +1316,46 @@ class OperatorActionsMixin:
             else:
                 self.call_from_thread(
                     self.log_message,
-                    f"[bold green]✓ ITMS Orders Synced:[/bold green] {res['message']}",
+                    f"[bold green]✓ ITMS Sync Completed:[/bold green] {res['message']}",
                     level="SUCCESS",
                 )
-                self.call_from_thread(self.notify, f"Synced {res['total_active_seen']} active orders.", severity="information")
+                self.call_from_thread(self.notify, res["message"], severity="information")
         finally:
             self._order_sync_running = False
             self.call_from_thread(self.reload_data)
+
+    def action_open_itms_kits(self) -> None:
+        """Navigates to ITMS Connect tab and switches subview directly to Installation Kits."""
+        self.action_tab_itms()
+        try:
+            pane = self.query_one("#itms-connection-pane")
+            pane.set_subview("KITS")
+        except Exception:
+            pass
+
+    def action_sync_itms_kits(self) -> None:
+        """Navigates to Installation Kits and triggers sync."""
+        self.action_open_itms_kits()
+        try:
+            pane = self.query_one("#itms-connection-pane")
+            pane.action_sync_kits()
+        except Exception:
+            pass
+
+    def action_open_stock_manager(self) -> None:
+        """Opens the Bond Physical Stock & Reconciliation Manager Dialog."""
+        from core.tui.dialogs import StockManagerModal
+        try:
+            reports_pane = self.query_one("#reports-pane")
+            target_date = getattr(reports_pane, "current_target_date", None)
+        except Exception:
+            target_date = None
+
+        def _on_close(result):
+            try:
+                p = self.query_one("#reports-pane")
+                p.refresh_reports()
+            except Exception:
+                pass
+
+        self.push_screen(StockManagerModal(target_date_suffix=target_date), _on_close)

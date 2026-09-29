@@ -38,6 +38,7 @@ from core.matcher import order_matcher
 from core.models import (
     EvidenceImage,
     IngestionBatch,
+    InstallationKit,
     InstallationOrder,
     SubmissionAuditLog,
     VehicleInstallationPair,
@@ -1264,6 +1265,87 @@ def api_itms_sync_now(request: HttpRequest) -> JsonResponse:
     })
 
 
+@require_GET
+def api_reports_totals(request: HttpRequest) -> JsonResponse:
+    """
+    Returns comprehensive system and shift totals across photos, batches,
+    pairs, orders, kits, hardware components, and date-driven category totals.
+    """
+    from core.services import report_service
+    scope = request.GET.get("scope", "ALL").strip().upper()
+    if scope not in ("ALL", "TODAY"):
+        scope = "ALL"
+
+    target_date = request.GET.get("date") or request.GET.get("date_suffix") or request.GET.get("suffix") or None
+
+    try:
+        totals = report_service.get_system_totals(scope=scope, target_date=target_date)
+        return JsonResponse({"success": True, "totals": totals})
+    except Exception as exc:
+        logger.error("api_reports_totals error: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
+
+@require_GET
+def api_itms_plate_lifecycle(request: HttpRequest) -> JsonResponse:
+    """
+    Detects and returns the ITMS plate lifecycle state for a given license plate
+    or kit code (UNALLOCATED_KIT, ALLOCATED_ORDER, INSTALLED_ARCHIVE, UNREGISTERED).
+    """
+    from core.services.plate_lifecycle_service import resolve_plate_lifecycle, format_lifecycle_card
+    plate_query = request.GET.get("plate") or request.GET.get("query") or request.GET.get("search") or ""
+    query_live = request.GET.get("live", "true").strip().lower() in ("true", "1", "yes")
+
+    result = resolve_plate_lifecycle(plate_query, query_live_if_missing=query_live)
+    return JsonResponse({
+        "success": True,
+        "result": result.to_dict(),
+        "card_markup": format_lifecycle_card(result),
+    })
+
+
+@csrf_exempt
+def api_itms_kits(request: HttpRequest) -> JsonResponse:
+    """
+    Lists or synchronizes ITMS Installation Kits stock inventory.
+    """
+    client = get_web_client()
+    if request.method == "POST" or request.GET.get("sync") == "true":
+        if not client.session_store.session.is_cookie_valid():
+            return JsonResponse({"success": False, "error": "ITMS session not authenticated."}, status=401)
+        res = client.sync_kits_to_local_db(max_pages=3)
+        return JsonResponse({"success": True, "sync": res})
+
+    q = request.GET.get("q", "").strip()
+    status_filter = request.GET.get("status", "").strip()
+    wh_filter = request.GET.get("warehouse", "").strip()
+
+    kits_qs = InstallationKit.objects.all().order_by("-created_date", "-id")
+    if q:
+        clean_q = normalizer.canonicalize(q) or q.upper()
+        kits_qs = kits_qs.filter(
+            Q(registration_number__icontains=clean_q) |
+            Q(kit_code__icontains=clean_q) |
+            Q(front_plate__icontains=q) |
+            Q(rear_plate__icontains=q) |
+            Q(gps_tracker__icontains=q)
+        )
+    if status_filter:
+        kits_qs = kits_qs.filter(status__iexact=status_filter)
+    if wh_filter:
+        kits_qs = kits_qs.filter(warehouse__icontains=wh_filter)
+
+    total = kits_qs.count()
+    kits_data = [k.to_dict() for k in kits_qs[:100]]
+
+    return JsonResponse({
+        "success": True,
+        "total": total,
+        "kits": kits_data,
+    })
+
+
 # ============================================================================
 # Background Pipeline Execution & Status Polling
 # ============================================================================
@@ -2205,3 +2287,424 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
         "total": len(history_items),
         "items": history_items[:150],
     })
+
+
+# ============================================================================
+# Stock Monitoring & Daily Plate Reconciliation REST APIs
+# ============================================================================
+
+@require_GET
+def api_stock_reconciliation(request: HttpRequest) -> JsonResponse:
+    """
+    Returns live daily stock reconciliation metrics, opening/closing balance,
+    inbound deliveries, dispatched plates, and floor unallocated discrepancies.
+    """
+    from core.services import stock_monitoring_service
+    date_suffix = (
+        request.GET.get("date")
+        or request.GET.get("date_suffix")
+        or request.GET.get("suffix")
+        or None
+    )
+    try:
+        recon = stock_monitoring_service.compute_daily_reconciliation(date_suffix)
+        return JsonResponse({"success": True, "reconciliation": recon})
+    except Exception as exc:
+        logger.error("api_stock_reconciliation error: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
+@csrf_exempt
+@require_POST
+def api_stock_dispatch(request: HttpRequest) -> JsonResponse:
+    """
+    Records plates scanned when taken out of stock and issued to the
+    installation/assembly floor for a shift.
+    Accepts JSON body or POST form data with 'plates' as newline/comma separated text or array.
+    """
+    from core.services import stock_monitoring_service
+    plates_raw = None
+    target_date = None
+    operator_name = "Operator"
+    notes = ""
+
+    if request.content_type == "application/json" and request.body:
+        try:
+            body = json.loads(request.body.decode("utf-8"))
+            plates_raw = body.get("plates")
+            target_date = body.get("date") or body.get("date_suffix") or body.get("suffix")
+            operator_name = body.get("operator_name") or "Operator"
+            notes = body.get("notes") or ""
+        except Exception:
+            pass
+
+    if not plates_raw:
+        plates_raw = request.POST.get("plates")
+        target_date = (
+            request.POST.get("date")
+            or request.POST.get("date_suffix")
+            or request.POST.get("suffix")
+            or target_date
+        )
+        operator_name = request.POST.get("operator_name", operator_name)
+        notes = request.POST.get("notes", notes)
+
+    if not plates_raw:
+        return JsonResponse({"success": False, "error": "No plate numbers provided in 'plates'."}, status=400)
+
+    try:
+        user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
+        res = stock_monitoring_service.record_dispatch_scans(
+            plates=plates_raw,
+            target_date_suffix=target_date,
+            operator_name=operator_name,
+            dispatched_by=user,
+            notes=notes,
+        )
+        return JsonResponse(res)
+    except Exception as exc:
+        logger.error("api_stock_dispatch error: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
+@csrf_exempt
+@require_POST
+def api_stock_delivery(request: HttpRequest) -> JsonResponse:
+    """
+    Records an inbound delivery of license plates into warehouse physical stock.
+    Auto-creates local InstallationKit records marked 'New' in stock.
+    """
+    from core.services import stock_monitoring_service
+    delivery_number = ""
+    supplier = "Factory / Central Depot"
+    plates_raw = None
+    target_date = None
+    operator_name = "Operator"
+    notes = ""
+    auto_create_kits = True
+
+    if request.content_type == "application/json" and request.body:
+        try:
+            body = json.loads(request.body.decode("utf-8"))
+            delivery_number = body.get("delivery_number", "")
+            supplier = body.get("supplier", "Factory / Central Depot")
+            plates_raw = body.get("plates")
+            target_date = body.get("date") or body.get("date_suffix") or body.get("suffix")
+            operator_name = body.get("operator_name") or "Operator"
+            notes = body.get("notes") or ""
+            if "auto_create_kits" in body:
+                auto_create_kits = bool(body["auto_create_kits"])
+        except Exception:
+            pass
+
+    if not plates_raw:
+        delivery_number = request.POST.get("delivery_number", delivery_number)
+        supplier = request.POST.get("supplier", supplier)
+        plates_raw = request.POST.get("plates")
+        target_date = (
+            request.POST.get("date")
+            or request.POST.get("date_suffix")
+            or request.POST.get("suffix")
+            or target_date
+        )
+        operator_name = request.POST.get("operator_name", operator_name)
+        notes = request.POST.get("notes", notes)
+        if "auto_create_kits" in request.POST:
+            auto_create_kits = request.POST.get("auto_create_kits", "").lower() in ("true", "1", "yes")
+
+    if not plates_raw:
+        return JsonResponse({"success": False, "error": "No plate numbers provided in 'plates'."}, status=400)
+
+    try:
+        user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
+        res = stock_monitoring_service.record_delivery(
+            delivery_number=delivery_number,
+            plates=plates_raw,
+            supplier=supplier,
+            target_date_suffix=target_date,
+            received_by=user,
+            operator_name=operator_name,
+            notes=notes,
+            auto_create_kits=auto_create_kits,
+        )
+        return JsonResponse(res)
+    except Exception as exc:
+        logger.error("api_stock_delivery error: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
+@csrf_exempt
+@require_POST
+def api_stock_return(request: HttpRequest) -> JsonResponse:
+    """
+    Records plates returned to stock uninstalled (motorcycle no-show, defect, cancellation).
+    Adds them back to warehouse stock.
+    """
+    from core.services import stock_monitoring_service
+    plates_raw = None
+    target_date = None
+    reason = "BIKE_NO_SHOW"
+    operator_name = "Operator"
+    notes = ""
+
+    if request.content_type == "application/json" and request.body:
+        try:
+            body = json.loads(request.body.decode("utf-8"))
+            plates_raw = body.get("plates")
+            target_date = body.get("date") or body.get("date_suffix") or body.get("suffix")
+            reason = body.get("reason", "BIKE_NO_SHOW")
+            operator_name = body.get("operator_name") or "Operator"
+            notes = body.get("notes") or ""
+        except Exception:
+            pass
+
+    if not plates_raw:
+        plates_raw = request.POST.get("plates")
+        target_date = (
+            request.POST.get("date")
+            or request.POST.get("date_suffix")
+            or request.POST.get("suffix")
+            or target_date
+        )
+        reason = request.POST.get("reason", reason)
+        operator_name = request.POST.get("operator_name", operator_name)
+        notes = request.POST.get("notes", notes)
+
+    if not plates_raw:
+        return JsonResponse({"success": False, "error": "No plate numbers provided in 'plates'."}, status=400)
+
+    try:
+        user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
+        res = stock_monitoring_service.record_return_scans(
+            plates=plates_raw,
+            target_date_suffix=target_date,
+            reason=reason,
+            operator_name=operator_name,
+            returned_by=user,
+            notes=notes,
+        )
+        return JsonResponse(res)
+    except Exception as exc:
+        logger.error("api_stock_return error: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
+@csrf_exempt
+@require_POST
+def api_stock_bond_transfer(request: HttpRequest) -> JsonResponse:
+    """
+    Records a bond transfer:
+    - TRANSFER_IN: kits transferred into our bond from other bonds (+Stock)
+    - TRANSFER_OUT: kits transferred from our bond to other bonds (-Stock)
+    Supports plate_category='PSV' or 'PMO'.
+    """
+    from core.services import stock_monitoring_service
+    transfer_type = "TRANSFER_IN"
+    plate_category = "PSV"
+    other_bond_name = "Other Bond"
+    plates_count = 0
+    plates_raw = None
+    target_date = None
+    operator_name = "Operator"
+    notes = ""
+
+    if request.content_type == "application/json" and request.body:
+        try:
+            body = json.loads(request.body.decode("utf-8"))
+            transfer_type = body.get("transfer_type", "TRANSFER_IN")
+            plate_category = body.get("plate_category", "PSV")
+            other_bond_name = body.get("other_bond_name", "Other Bond")
+            plates_count = int(body.get("plates_count", 0))
+            plates_raw = body.get("plates")
+            target_date = body.get("date") or body.get("date_suffix") or body.get("suffix")
+            operator_name = body.get("operator_name") or "Operator"
+            notes = body.get("notes") or ""
+        except Exception:
+            pass
+
+    if not plates_raw and not plates_count:
+        transfer_type = request.POST.get("transfer_type", transfer_type)
+        plate_category = request.POST.get("plate_category", plate_category)
+        other_bond_name = request.POST.get("other_bond_name", other_bond_name)
+        plates_count = int(request.POST.get("plates_count", 0) or 0)
+        plates_raw = request.POST.get("plates")
+        target_date = (
+            request.POST.get("date")
+            or request.POST.get("date_suffix")
+            or request.POST.get("suffix")
+            or target_date
+        )
+        operator_name = request.POST.get("operator_name", operator_name)
+        notes = request.POST.get("notes", notes)
+
+    try:
+        res = stock_monitoring_service.record_bond_transfer(
+            transfer_type=transfer_type,
+            plate_category=plate_category,
+            plates_count=plates_count,
+            other_bond_name=other_bond_name,
+            plates=plates_raw,
+            target_date_suffix=target_date,
+            operator_name=operator_name,
+            notes=notes,
+        )
+        return JsonResponse(res)
+    except Exception as exc:
+        logger.error("api_stock_bond_transfer error: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
+@csrf_exempt
+@require_POST
+def api_stock_scheduled(request: HttpRequest) -> JsonResponse:
+    """
+    Manually feeds in the target scheduled number of plates to be installed
+    under the bond for the day (PSV White and PMO Yellow).
+    """
+    from core.services import stock_monitoring_service
+    sched_psv = 0
+    sched_pmo = 0
+    target_date = None
+    notes = ""
+
+    if request.content_type == "application/json" and request.body:
+        try:
+            body = json.loads(request.body.decode("utf-8"))
+            sched_psv = int(body.get("scheduled_psv", 0) or 0)
+            sched_pmo = int(body.get("scheduled_pmo", 0) or 0)
+            target_date = body.get("date") or body.get("date_suffix") or body.get("suffix")
+            notes = body.get("notes") or ""
+        except Exception:
+            pass
+
+    if sched_psv == 0 and sched_pmo == 0:
+        sched_psv = int(request.POST.get("scheduled_psv", 0) or 0)
+        sched_pmo = int(request.POST.get("scheduled_pmo", 0) or 0)
+        target_date = (
+            request.POST.get("date")
+            or request.POST.get("date_suffix")
+            or request.POST.get("suffix")
+            or target_date
+        )
+        notes = request.POST.get("notes", notes)
+
+    try:
+        res = stock_monitoring_service.set_scheduled_target(
+            scheduled_psv=sched_psv,
+            scheduled_pmo=sched_pmo,
+            target_date_suffix=target_date,
+            notes=notes,
+        )
+        return JsonResponse(res)
+    except Exception as exc:
+        logger.error("api_stock_scheduled error: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
+@csrf_exempt
+@require_POST
+def api_stock_opening(request: HttpRequest) -> JsonResponse:
+    """Manually sets or adjusts Opening Balance for PSV (White) and PMO (Yellow)."""
+    from core.services import stock_monitoring_service
+    opening_psv = None
+    opening_pmo = 0
+    target_date = None
+    notes = ""
+
+    if request.content_type == "application/json" and request.body:
+        try:
+            body = json.loads(request.body.decode("utf-8"))
+            opening_psv = body.get("opening_psv") or body.get("opening_balance_psv") or body.get("opening_stock")
+            opening_pmo = body.get("opening_pmo") or body.get("opening_balance_pmo") or 0
+            target_date = body.get("date") or body.get("date_suffix") or body.get("suffix")
+            notes = body.get("notes") or ""
+        except Exception:
+            pass
+
+    if opening_psv is None:
+        opening_psv = request.POST.get("opening_psv") or request.POST.get("opening_balance_psv") or request.POST.get("opening_stock")
+        opening_pmo = request.POST.get("opening_pmo") or request.POST.get("opening_balance_pmo") or 0
+        target_date = (
+            request.POST.get("date")
+            or request.POST.get("date_suffix")
+            or request.POST.get("suffix")
+            or target_date
+        )
+        notes = request.POST.get("notes", notes)
+
+    if opening_psv is None:
+        return JsonResponse({"success": False, "error": "opening_psv or opening_stock value is required."}, status=400)
+
+    try:
+        res = stock_monitoring_service.set_opening_balances(
+            opening_psv=int(opening_psv),
+            opening_pmo=int(opening_pmo or 0),
+            target_date_suffix=target_date,
+            notes=notes,
+        )
+        return JsonResponse(res)
+    except Exception as exc:
+        logger.error("api_stock_opening error: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
+@csrf_exempt
+@require_POST
+def api_stock_physical_count(request: HttpRequest) -> JsonResponse:
+    """Records an end-of-shift physical stock count audit and computes variance."""
+    from core.services import stock_monitoring_service
+    physical_val = None
+    target_date = None
+    notes = ""
+
+    if request.content_type == "application/json" and request.body:
+        try:
+            body = json.loads(request.body.decode("utf-8"))
+            physical_val = body.get("physical_count")
+            target_date = body.get("date") or body.get("date_suffix") or body.get("suffix")
+            notes = body.get("notes") or ""
+        except Exception:
+            pass
+
+    if physical_val is None:
+        physical_val = request.POST.get("physical_count")
+        target_date = (
+            request.POST.get("date")
+            or request.POST.get("date_suffix")
+            or request.POST.get("suffix")
+            or target_date
+        )
+        notes = request.POST.get("notes", notes)
+
+    if physical_val is None:
+        return JsonResponse({"success": False, "error": "physical_count value is required."}, status=400)
+
+    try:
+        res = stock_monitoring_service.set_physical_count(
+            physical_count=int(physical_val),
+            target_date_suffix=target_date,
+            notes=notes,
+        )
+        return JsonResponse(res)
+    except Exception as exc:
+        logger.error("api_stock_physical_count error: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
+@require_GET
+def api_stock_export_csv(request: HttpRequest) -> HttpResponse:
+    """Exports shift stock reconciliation and dispatched plates as a downloadable CSV."""
+    from core.services import stock_monitoring_service
+    date_suffix = (
+        request.GET.get("date")
+        or request.GET.get("date_suffix")
+        or request.GET.get("suffix")
+        or None
+    )
+    csv_content = stock_monitoring_service.export_stock_reconciliation_csv(date_suffix)
+    recon = stock_monitoring_service.compute_daily_reconciliation(date_suffix)
+    suf = recon.get("work_date_suffix", "shift")
+
+    response = HttpResponse(csv_content, content_type="text/csv")
+    response["Content-Disposition"] = f'attachment; filename="itms_stock_reconciliation_{suf}.csv"'
+    return response

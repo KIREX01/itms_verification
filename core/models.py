@@ -103,6 +103,7 @@ class IngestionBatch(models.Model):
         CLI = "CLI", "Command Line Ingestion"
         WEB = "WEB", "Web Upload"
         API = "API", "REST API"
+        MOBILE = "MOBILE", "Mobile Direct Capture"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     batch_id = models.CharField(
@@ -309,6 +310,7 @@ class VehicleInstallationPair(models.Model):
         ORDER_PRIOR = "ORDER_PRIOR", "Order Prior Guided"
         MANUAL = "MANUAL", "Manual Operator Entry"
         REPAIR = "REPAIR", "Manual Re-Pair"
+        MOBILE_CONVEYOR = "MOBILE_CONVEYOR", "Mobile Conveyor Direct Pair"
 
     matched_via = models.CharField(
         max_length=16, choices=MatchedVia.choices, default=MatchedVia.VISION,
@@ -405,3 +407,353 @@ class SubmissionAuditLog(models.Model):
 
     def __str__(self):
         return f"[{self.timestamp:%Y-%m-%d %H:%M:%S}] {self.action} -> {self.result}"
+
+
+class InstallationKit(models.Model):
+    """
+    ITMS Installation Kit inventory record representing linked plates and trackers.
+    Mirrors https://stock.itms.ug/installation-kits.
+    """
+
+    kit_code = models.CharField(max_length=64, unique=True, db_index=True, help_text="e.g. IK-UMA300PW")
+    registration_number = models.CharField(max_length=32, db_index=True, help_text="e.g. UMA 300PW")
+    front_plate = models.CharField(max_length=64, blank=True, db_index=True)
+    rear_plate = models.CharField(max_length=64, blank=True, db_index=True)
+    front_tracker = models.CharField(max_length=64, blank=True, db_index=True)
+    rear_tracker = models.CharField(max_length=64, blank=True, db_index=True)
+    gps_tracker = models.CharField(max_length=64, blank=True, db_index=True)
+    warehouse = models.CharField(max_length=128, blank=True, default="")
+    status = models.CharField(max_length=64, blank=True, default="New")
+    created_date = models.CharField(max_length=64, blank=True, default="")
+    kit_uuid = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    detail_url = models.CharField(max_length=255, blank=True, default="")
+
+    # Extended Information from /installation-kit/<uuid>/main/information
+    created_by_user = models.CharField(max_length=128, blank=True, default="")
+    front_plate_article = models.CharField(max_length=64, blank=True, default="")
+    rear_plate_article = models.CharField(max_length=64, blank=True, default="")
+    gps_article = models.CharField(max_length=64, blank=True, default="")
+    sim_article = models.CharField(max_length=64, blank=True, default="")
+    sim_serial = models.CharField(max_length=64, blank=True, default="")
+    sim_mac = models.CharField(max_length=64, blank=True, default="")
+    front_tracker_article = models.CharField(max_length=64, blank=True, default="")
+    rear_tracker_article = models.CharField(max_length=64, blank=True, default="")
+    front_tracker_mac = models.CharField(max_length=64, blank=True, default="")
+    rear_tracker_mac = models.CharField(max_length=64, blank=True, default="")
+    details_json = models.JSONField(default=dict, blank=True)
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.kit_code} ({self.registration_number})"
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "kit_code": self.kit_code,
+            "registration_number": self.registration_number,
+            "status": self.status,
+            "warehouse": self.warehouse,
+            "front_plate": self.front_plate,
+            "rear_plate": self.rear_plate,
+            "front_tracker": self.front_tracker,
+            "rear_tracker": self.rear_tracker,
+            "gps_tracker": self.gps_tracker,
+            "sim_serial": self.sim_serial,
+            "sim_mac": self.sim_mac,
+            "created_date": self.created_date,
+            "created_by_user": self.created_by_user,
+            "kit_uuid": self.kit_uuid,
+            "detail_url": self.detail_url,
+        }
+
+
+# ============================================================================
+# Physical Inventory & Stock Monitoring Models
+# ============================================================================
+
+class PlateCategory(models.TextChoices):
+    PSV = "PSV", "Public White (PSV)"
+    PMO = "PMO", "Private Yellow (PMO)"
+
+
+class StockDelivery(models.Model):
+    """
+    Inbound shipment / delivery manifest of license plates or installation kits
+    received at the warehouse.
+    """
+    delivery_number = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        help_text="Delivery manifest or shipment reference, e.g. DEL-20260929-01",
+    )
+    supplier = models.CharField(
+        max_length=128,
+        blank=True,
+        default="Factory / Central Depot",
+        help_text="Origin supplier, factory or dispatching depot",
+    )
+    plate_category = models.CharField(
+        max_length=8,
+        choices=PlateCategory.choices,
+        default=PlateCategory.PSV,
+        db_index=True,
+        help_text="PSV (Public White) or PMO (Private Yellow)",
+    )
+    delivery_date = models.DateField(default=timezone.localdate, db_index=True)
+    target_date_suffix = models.CharField(
+        max_length=16,
+        blank=True,
+        db_index=True,
+        help_text="6-digit date suffix matching shift orders, e.g. 260926",
+    )
+    total_plates_count = models.PositiveIntegerField(default=0)
+    received_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="stock_deliveries",
+    )
+    operator_name = models.CharField(max_length=150, blank=True, default="Operator")
+    notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-delivery_date", "-created_at"]
+        verbose_name_plural = "Stock deliveries"
+
+    def __str__(self):
+        return f"{self.delivery_number} ({self.total_plates_count} {self.plate_category} plates on {self.delivery_date})"
+
+
+class StockDeliveryItem(models.Model):
+    """Individual plate scanned or recorded as part of an inbound delivery."""
+    delivery = models.ForeignKey(
+        StockDelivery,
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+    registration_number = models.CharField(max_length=32, db_index=True)
+    plate_category = models.CharField(
+        max_length=8,
+        choices=PlateCategory.choices,
+        default=PlateCategory.PSV,
+        db_index=True,
+    )
+    plate_serial = models.CharField(max_length=64, blank=True, default="")
+    kit_code = models.CharField(max_length=64, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"{self.registration_number} ({self.plate_category}) [Delivery #{self.delivery.delivery_number}]"
+
+
+class StockBondTransfer(models.Model):
+    """
+    Transfers of installation kits/plates between bonds:
+    - TRANSFER_IN: kits transferred into our bond from other bonds (+Stock)
+    - TRANSFER_OUT: kits transferred from our bond to other bonds (-Stock)
+    """
+    class TransferType(models.TextChoices):
+        TRANSFER_IN = "TRANSFER_IN", "Bond Transfer In (Received from another bond)"
+        TRANSFER_OUT = "TRANSFER_OUT", "Bond Transfer Out (Sent to another bond)"
+
+    transfer_number = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        help_text="Transfer reference e.g. TRF-IN-20260929-01",
+    )
+    transfer_type = models.CharField(max_length=16, choices=TransferType.choices, db_index=True)
+    plate_category = models.CharField(
+        max_length=8,
+        choices=PlateCategory.choices,
+        default=PlateCategory.PSV,
+        db_index=True,
+        help_text="PSV (Public White) or PMO (Private Yellow)",
+    )
+    other_bond_name = models.CharField(
+        max_length=128,
+        blank=True,
+        default="Other Bond",
+        help_text="Name of external bond transferred to/from",
+    )
+    transfer_date = models.DateField(default=timezone.localdate, db_index=True)
+    target_date_suffix = models.CharField(max_length=16, blank=True, db_index=True)
+    plates_count = models.PositiveIntegerField(default=0)
+    operator_name = models.CharField(max_length=150, blank=True, default="Operator")
+    notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-transfer_date", "-created_at"]
+        verbose_name_plural = "Stock bond transfers"
+
+    def __str__(self):
+        return f"{self.transfer_number} ({self.transfer_type} {self.plates_count} {self.plate_category} plates - {self.other_bond_name})"
+
+
+class StockDispatchScan(models.Model):
+    """
+    Log of plates scanned when taken out of warehouse stock and issued to the
+    installation/assembly line for a given work date.
+    """
+    class Status(models.TextChoices):
+        DISPATCHED = "DISPATCHED", "Dispatched to Line"
+        INSTALLED = "INSTALLED", "Installed (Archived)"
+        PENDING_ORDER = "PENDING_ORDER", "Pending in Order"
+        RETURNED = "RETURNED", "Returned to Stock"
+        UNALLOCATED = "UNALLOCATED", "Unallocated / Missing"
+
+    registration_number = models.CharField(max_length=32, db_index=True)
+    plate_category = models.CharField(
+        max_length=8,
+        choices=PlateCategory.choices,
+        default=PlateCategory.PSV,
+        db_index=True,
+    )
+    work_date = models.DateField(default=timezone.localdate, db_index=True)
+    work_date_suffix = models.CharField(
+        max_length=16,
+        db_index=True,
+        help_text="6-digit date suffix, e.g. 260926",
+    )
+    dispatched_at = models.DateTimeField(default=timezone.now, db_index=True)
+    dispatched_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="dispatch_scans",
+    )
+    operator_name = models.CharField(max_length=150, blank=True, default="Operator")
+    status = models.CharField(max_length=32, choices=Status.choices, default=Status.DISPATCHED, db_index=True)
+    notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-dispatched_at"]
+        verbose_name_plural = "Stock dispatch scans"
+
+    def __str__(self):
+        return f"{self.registration_number} ({self.plate_category}) Dispatched {self.work_date_suffix}"
+
+
+class StockReturnScan(models.Model):
+    """
+    Log of plates returned to stock uninstalled (motorcycle no-show, defect, cancellation).
+    """
+    class Reason(models.TextChoices):
+        BIKE_NO_SHOW = "BIKE_NO_SHOW", "Motorcycle No-Show"
+        DEFECTIVE_PLATE = "DEFECTIVE_PLATE", "Defective Plate / Hardware"
+        CANCELLED_ORDER = "CANCELLED_ORDER", "Cancelled Order"
+        LINE_ROLLOVER = "LINE_ROLLOVER", "End of Shift Line Return"
+        OTHER = "OTHER", "Other"
+
+    registration_number = models.CharField(max_length=32, db_index=True)
+    plate_category = models.CharField(
+        max_length=8,
+        choices=PlateCategory.choices,
+        default=PlateCategory.PSV,
+        db_index=True,
+    )
+    work_date = models.DateField(default=timezone.localdate, db_index=True)
+    work_date_suffix = models.CharField(
+        max_length=16,
+        db_index=True,
+        help_text="6-digit date suffix, e.g. 260926",
+    )
+    returned_at = models.DateTimeField(default=timezone.now, db_index=True)
+    returned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="return_scans",
+    )
+    operator_name = models.CharField(max_length=150, blank=True, default="Operator")
+    reason = models.CharField(max_length=64, choices=Reason.choices, default=Reason.BIKE_NO_SHOW)
+    notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-returned_at"]
+        verbose_name_plural = "Stock return scans"
+
+    def __str__(self):
+        return f"{self.registration_number} ({self.plate_category}) Returned: {self.reason}"
+
+
+class DailyStockLedger(models.Model):
+    """
+    Daily stock reconciliation snapshot and accounting ledger per work date.
+    Differentiates between Public White (PSV) and Private Yellow (PMO):
+    Opening Balance + Kits Received + Bond Transfer In - Bond Transfer Out - Kits Installed = Closing Balance
+    """
+    work_date = models.DateField(unique=True, db_index=True)
+    work_date_suffix = models.CharField(max_length=16, db_index=True)
+    warehouse_name = models.CharField(max_length=128, blank=True, default="Warehouse Stock / Bond")
+
+    # 1. Public White (PSV) Category
+    opening_balance_psv = models.IntegerField(default=0, help_text="PSV stock at start of shift")
+    kits_received_psv = models.IntegerField(default=0, help_text="PSV kits received from supplier/central depot")
+    bond_transfer_in_psv = models.IntegerField(default=0, help_text="PSV kits transferred into our bond from other bonds")
+    bond_transfer_out_psv = models.IntegerField(default=0, help_text="PSV kits transferred out from our bond to other bonds")
+    scheduled_psv = models.IntegerField(default=0, help_text="Target PSV plates scheduled for installation under the bond (manually entered)")
+    kits_installed_psv = models.IntegerField(default=0, help_text="PSV kits installed in orders & archive for that day")
+    closing_balance_psv = models.IntegerField(default=0, help_text="PSV calculated closing stock balance")
+
+    # 2. Private Yellow (PMO) Category
+    opening_balance_pmo = models.IntegerField(default=0, help_text="PMO stock at start of shift")
+    kits_received_pmo = models.IntegerField(default=0, help_text="PMO kits received from supplier/central depot")
+    bond_transfer_in_pmo = models.IntegerField(default=0, help_text="PMO kits transferred into our bond from other bonds")
+    bond_transfer_out_pmo = models.IntegerField(default=0, help_text="PMO kits transferred out from our bond to other bonds")
+    scheduled_pmo = models.IntegerField(default=0, help_text="Target PMO plates scheduled for installation under the bond (manually entered)")
+    kits_installed_pmo = models.IntegerField(default=0, help_text="PMO kits installed in orders & archive for that day")
+    closing_balance_pmo = models.IntegerField(default=0, help_text="PMO calculated closing stock balance")
+
+    # 3. Overall Totals
+    opening_stock = models.IntegerField(default=0, help_text="Combined opening stock")
+    delivered_count = models.IntegerField(default=0, help_text="Combined kits received")
+    bond_transfer_in_total = models.IntegerField(default=0, help_text="Combined bond transfer in")
+    bond_transfer_out_total = models.IntegerField(default=0, help_text="Combined bond transfer out")
+    scheduled_total = models.IntegerField(default=0, help_text="Combined scheduled installation target")
+    installed_count = models.IntegerField(default=0, help_text="Combined kits installed")
+    closing_stock = models.IntegerField(default=0, help_text="Combined calculated closing stock balance")
+
+    # Floor operations tracking
+    dispatched_count = models.IntegerField(default=0, help_text="Total plates taken out to line")
+    pending_count = models.IntegerField(default=0, help_text="Plates active in orders")
+    returned_count = models.IntegerField(default=0, help_text="Plates returned uninstalled to stock")
+    unallocated_count = models.IntegerField(default=0, help_text="Discrepancy: Dispatched - Returned - Installed - Pending")
+
+    physical_count = models.IntegerField(null=True, blank=True, help_text="Optional manual physical count audit")
+    variance = models.IntegerField(default=0, help_text="Variance between physical count and closing stock")
+    is_closed = models.BooleanField(default=False, help_text="True if shift stock has been locked/closed")
+    notes = models.TextField(blank=True, default="")
+    last_reconciled_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-work_date"]
+        verbose_name_plural = "Daily stock ledgers"
+
+    def __str__(self):
+        return (
+            f"Stock Ledger {self.work_date} ({self.work_date_suffix}): "
+            f"PSV [Open {self.opening_balance_psv} -> Close {self.closing_balance_psv}], "
+            f"PMO [Open {self.opening_balance_pmo} -> Close {self.closing_balance_pmo}]"
+        )

@@ -467,5 +467,90 @@
     </div>
 </div>
 
+<!-- 7. Wireless Mobile Camera Connect Modal (QR Code & Hotspot Pairing) -->
+<div class="modal-overlay" id="modal-mobile-connect">
+    <div class="modal-box" style="width: 740px; max-width: 95vw;">
+        <div class="modal-header">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span class="modal-title">📱 Wireless Mobile Camera Connect</span>
+                <span class="badge badge-yellow" id="mobile-modal-hotspot-badge">Zero-Install Web App</span>
+            </div>
+            <button class="modal-close" onclick="closeModal('modal-mobile-connect')">&times;</button>
+        </div>
+        <div class="modal-body" style="gap: 16px;">
+            <div style="display:grid; grid-template-columns: 240px 1fr; gap: 20px; align-items: start;">
+                <!-- QR Code Box -->
+                <div style="display:flex; flex-direction:column; align-items:center; gap:10px; background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:16px;">
+                    <div style="font-size:0.75rem; font-weight:800; color:var(--ug-text-dim); text-transform:uppercase;">Scan with Phone Camera</div>
+                    <div id="mobile-qr-container" style="background:#ffffff; padding:12px; border-radius:8px; display:flex; align-items:center; justify-content:center; width:180px; height:180px; box-shadow:0 4px 14px rgba(0,0,0,0.5);">
+                        <!-- Dynamic Canvas rendered by qrcode.min.js -->
+                    </div>
+                    <span style="font-size:0.72rem; color:var(--ug-text-muted); text-align:center;">Instant pair &bull; Android or iOS</span>
+                </div>
+
+                <!-- Network Discovery & Instructions -->
+                <div style="display:flex; flex-direction:column; gap:12px;">
+                    <!-- Active Direct URL & Copy Button -->
+                    <div class="form-field">
+                        <label style="display:flex; justify-content:space-between; align-items:center;">
+                            <span>Direct Mobile Companion URL</span>
+                            <span id="mobile-copy-status" style="font-size:0.72rem; color:var(--ug-green); display:none;">✓ Copied to clipboard!</span>
+                        </label>
+                        <div style="display:flex; gap:8px;">
+                            <input type="text" id="mobile-url-input" readonly
+                                   style="font-family:var(--font-mono); font-size:0.88rem; font-weight:700; color:var(--ug-yellow); background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:8px 12px; width:100%;"
+                                   value="Loading...">
+                            <button class="btn btn-secondary" onclick="copyMobileUrl()" style="white-space:nowrap; padding:6px 14px; font-size:0.8rem;">
+                                📋 Copy
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Interface Selector -->
+                    <div class="form-field">
+                        <label>Select Network Interface / Wi-Fi IP</label>
+                        <select id="mobile-ip-select" onchange="onMobileIpChanged(this.value)"
+                                style="width:100%; box-sizing:border-box; padding:8px 12px; font-family:var(--font-mono); font-size:0.85rem; background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); color:#ffffff;">
+                            <option value="">Detecting network adapters...</option>
+                        </select>
+                    </div>
+
+                    <!-- Two Connection Methods Card -->
+                    <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:12px; display:flex; flex-direction:column; gap:8px; font-size:0.78rem;">
+                        <div style="display:flex; align-items:center; gap:6px; color:#fff; font-weight:800;">
+                            <span>📶 Connection Options</span>
+                        </div>
+                        <div style="color:var(--ug-text-muted); line-height:1.4;">
+                            <strong style="color:var(--ug-yellow);">Option 1 (Recommended): Windows Mobile Hotspot</strong><br>
+                            In Windows 10/11, enable <em>Settings &gt; Network &gt; Mobile hotspot</em>. Connect phone to the hotspot Wi-Fi.<br><br>
+                            <strong style="color:#38bdf8;">Option 2: Shared Local Wi-Fi</strong><br>
+                            Ensure laptop and phone are both connected to the same factory or warehouse Wi-Fi network.
+                        </div>
+                    </div>
+
+                    <!-- Live Mobile Stream Status & Connected Phones -->
+                    <div style="display:flex; flex-direction:column; gap:8px; background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 14px; font-size:0.78rem;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <span id="modal-connected-devices-badge" style="color:var(--ug-yellow); font-weight:800;">📱 0/2 Phones Connected</span>
+                            <span id="modal-batch-capacity-badge" style="color:var(--ug-text-muted); font-family:var(--font-mono); font-weight:700;">Active Batch: 0/200 photos</span>
+                        </div>
+                        <div id="modal-connected-devices-detail" style="font-size:0.72rem; color:var(--ug-text-dim); line-height:1.4;">
+                            Ready for pairing. Point phone camera at QR code to open Mobile Companion.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:0.74rem; color:var(--ug-text-dim);">
+                Server listening on all local interfaces (0.0.0.0:8000)
+            </span>
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-secondary" onclick="closeModal('modal-mobile-connect')">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Toast Notifications Container -->
 <div class="toast-container" id="toast-container"></div>

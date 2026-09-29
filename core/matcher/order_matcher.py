@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from django.conf import settings
+from django.db.models import Q
 from rapidfuzz import fuzz, process
 
 from core.models import InstallationOrder, VehicleInstallationPair
@@ -109,6 +110,10 @@ def match_pair_to_order(
     Run fuzzy matching for a single pair and update its order/match_type/
     match_score/verification_status fields (does not save related images).
     """
+    # Once a pair is SUBMITTED, it must ALWAYS remain SUBMITTED (never demote or alter)
+    if pair.verification_status == VehicleInstallationPair.VerificationStatus.SUBMITTED:
+        return pair
+
     # If pair is incomplete, keep INCOMPLETE status
     if not pair.is_complete:
         pair.verification_status = VehicleInstallationPair.VerificationStatus.INCOMPLETE
@@ -149,6 +154,22 @@ def match_pair_to_order(
         # Don't mark UNREGISTERED if plate is a provisional tag
         if not pair.registration_number_detected.startswith("PAIR-"):
             pair.verification_status = VehicleInstallationPair.VerificationStatus.UNREGISTERED
+            try:
+                from core.models import InstallationKit
+                from core.vision import normalizer
+                clean_plate = normalizer.canonicalize(pair.registration_number_detected)
+                kit = InstallationKit.objects.filter(
+                    Q(registration_number__iexact=pair.registration_number_detected)
+                    | Q(registration_number__iexact=clean_plate)
+                    | Q(kit_code__iexact=f"IK-{clean_plate}")
+                ).first()
+                if kit and (kit.status or "").strip().lower() == "new":
+                    pair.operator_note = (
+                        f"UNALLOCATED: Plate {clean_plate} has Kit {kit.kit_code} "
+                        f"with status 'New' in stock at {kit.warehouse or 'warehouse'}. No ITMS order."
+                    )
+            except Exception:
+                pass
     else:
         # In the ambiguous 75-85 band: leave for manual operator review, don't auto-link
         pair.order = None

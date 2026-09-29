@@ -35,11 +35,12 @@ from core.services.itms_web_client import ITMSWebClient, get_web_client
 from core.services import viewer
 from core.services.config_service import get_config_service
 
-ITMS_SUBVIEWS = ["CONNECT", "ORDERS", "ARCHIVE"]
+ITMS_SUBVIEWS = ["CONNECT", "ORDERS", "ARCHIVE", "KITS"]
 SUBVIEW_LABELS = {
     "CONNECT": "🔑 Connect to Account",
     "ORDERS": "📥 Active Orders",
     "ARCHIVE": "🏛️ Completed Archive",
+    "KITS": "📦 Installation Kits",
 }
 
 
@@ -53,10 +54,14 @@ class ITMSConnectionPane(Vertical):
         self._last_fetched_orders: List[Dict[str, Any]] = []
         self._last_active_orders: List[Dict[str, Any]] = []
         self._last_archive_orders: List[Dict[str, Any]] = []
+        self._last_kits: List[Dict[str, Any]] = []
         self._active_orders_map: Dict[str, Dict[str, Any]] = {}
         self._archive_orders_map: Dict[str, Dict[str, Any]] = {}
+        self._kits_map: Dict[str, Dict[str, Any]] = {}
         self._highlighted_order: Optional[Dict[str, Any]] = None
+        self._highlighted_kit: Optional[Dict[str, Any]] = None
         self._is_archive_mode: bool = False
+        self._is_fetching_kits: bool = False
 
     def compose(self) -> ComposeResult:
         # Top Banner (Dynamic mode badge based on loaded config)
@@ -157,13 +162,37 @@ class ITMSConnectionPane(Vertical):
 
             yield InspectorPane(id="inspector-itms-archive", classes="inspector-panel")
 
+        # ──────────────────────────────────────────────────────────────────────
+        # SUB-VIEW 4: Installation Kits (65% Table Panel / 35% Inspector Panel)
+        # ──────────────────────────────────────────────────────────────────────
+        with Horizontal(id="itms-view-kits", classes="itms-view-container tab-horizontal"):
+            with Vertical(classes="table-panel"):
+                yield Static("[bold white]📦 Installation Kits (GET /installation-kits)[/bold white]", classes="itms-section-title")
+                with Horizontal(classes="itms-toolbar-row"):
+                    yield Input(placeholder="Search kit (e.g. 235pv, UMA 300PW, 001198122) or paste URL", id="input-itms-kits-search", classes="itms-input-filter")
+                    yield Input(placeholder="Pg", value="1", id="input-itms-kits-page", classes="itms-input-page")
+                    yield Button("Fetch", variant="primary", id="btn-itms-kits-fetch", classes="itms-btn-fetch")
+                    yield Button("◄", variant="default", id="btn-itms-kits-prev", classes="itms-btn-nav")
+                    yield Button("►", variant="default", id="btn-itms-kits-next", classes="itms-btn-nav")
+
+                with Horizontal(classes="itms-actions-toolbar"):
+                    yield Button("🔍 Kit Details", variant="default", id="btn-itms-kits-info")
+                    yield Button("🔄 Sync to DB", variant="success", id="btn-itms-kits-sync")
+
+                yield DataTable(id="table-itms-kits", classes="itms-table")
+
+            yield InspectorPane(id="inspector-itms-kits", classes="inspector-panel")
+
     def on_mount(self) -> None:
         self._last_fetched_orders = []
         self._last_active_orders = []
         self._last_archive_orders = []
+        self._last_kits = []
         self._active_orders_map = {}
         self._archive_orders_map = {}
+        self._kits_map = {}
         self._highlighted_order = None
+        self._highlighted_kit = None
 
         # Setup Active Orders Table
         orders_table = self.query_one("#table-itms-orders", DataTable)
@@ -175,6 +204,22 @@ class ITMSConnectionPane(Vertical):
         archive_table.add_columns("# (Order)", "Plate", "VIN / Chassis", "Order Status", "Reg Status", "Officer", "Date")
         archive_table.cursor_type = "row"
 
+        # Setup Installation Kits Table
+        kits_table = self.query_one("#table-itms-kits", DataTable)
+        kits_table.add_columns(
+            "#",
+            "Registration number",
+            "Front Plate",
+            "Rear Plate",
+            "Front Tracker",
+            "Rear Tracker",
+            "GPS Tracker",
+            "Warehouse",
+            "Status",
+            "Created date",
+        )
+        kits_table.cursor_type = "row"
+
         # Pre-fill email if operator preferences or session exist
         status = self.client.get_status()
         if status.get("user_email"):
@@ -185,10 +230,11 @@ class ITMSConnectionPane(Vertical):
         # Initialize sub-view display
         self.set_subview(self.current_subview)
 
-        self._log_preview("[dim]🌐 ITMS Hub ready. Press [b yellow]F[/b yellow] to cycle views (Connect, Orders, Archive). Press [b yellow]V[/b yellow] to view photos side-by-side.[/dim]")
+        self._log_preview("[dim]🌐 ITMS Hub ready. Press [b yellow]F[/b yellow] to cycle views (Connect, Orders, Archive, Kits). Press [b yellow]V[/b yellow] to view photos side-by-side.[/dim]")
         try:
             self.query_one("#inspector-itms-orders", InspectorPane).show_itms_order(None, is_archive=False)
             self.query_one("#inspector-itms-archive", InspectorPane).show_itms_order(None, is_archive=True)
+            self.query_one("#inspector-itms-kits", InspectorPane).show_itms_kit(None)
         except Exception:
             pass
 
@@ -226,10 +272,12 @@ class ITMSConnectionPane(Vertical):
         connect_view = self.query_one("#itms-view-connect")
         orders_view = self.query_one("#itms-view-orders")
         archive_view = self.query_one("#itms-view-archive")
+        kits_view = self.query_one("#itms-view-kits")
 
         connect_view.display = (subview == "CONNECT")
         orders_view.display = (subview == "ORDERS")
         archive_view.display = (subview == "ARCHIVE")
+        kits_view.display = (subview == "KITS")
 
         if subview == "CONNECT":
             self._refresh_status_card()
@@ -244,6 +292,11 @@ class ITMSConnectionPane(Vertical):
             table = self.query_one("#table-itms-archive", DataTable)
             if table.row_count == 0 and self.client.session_store.session.is_cookie_valid() and not getattr(self, "_is_fetching_orders", False):
                 self.action_fetch_orders(archive=True)
+        elif subview == "KITS":
+            self._set_feedback("Sub-view: Installation Kits (↑/↓ select kit │ Enter/Details inspect)", "cyan")
+            table = self.query_one("#table-itms-kits", DataTable)
+            if table.row_count == 0 and not getattr(self, "_is_fetching_kits", False):
+                self.action_fetch_kits()
 
     # ──────────────────────────────────────────────────────────────────────────
     # Status & Feedback Helpers
@@ -387,9 +440,20 @@ class ITMSConnectionPane(Vertical):
                     self.query_one("#inspector-itms-archive", InspectorPane).show_itms_order(order, is_archive=True)
                 except Exception:
                     pass
+        elif table_id == "table-itms-kits":
+            kit = self._kits_map.get(row_key)
+            if kit:
+                self._highlighted_kit = kit
+                try:
+                    self.query_one("#inspector-itms-kits", InspectorPane).show_itms_kit(kit)
+                except Exception:
+                    pass
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        self.action_fetch_order_info(download_photos=False)
+        if self.current_subview == "KITS":
+            self.action_fetch_kit_info()
+        else:
+            self.action_fetch_order_info(download_photos=False)
 
     def _get_target_order_identifier(self) -> str:
         """Resolves order identifier from highlighted row, active inputs, or fallback order list."""
@@ -439,6 +503,16 @@ class ITMSConnectionPane(Vertical):
             self.action_fetch_orders(archive=False)
         elif btn_id in ("btn-itms-fetch-archive", "btn-itms-archive-fetch"):
             self.action_fetch_orders(archive=True)
+        elif btn_id in ("btn-itms-kits-fetch", "btn-itms-fetch-kits"):
+            self.action_fetch_kits()
+        elif btn_id == "btn-itms-kits-prev":
+            self.action_kits_prev_page()
+        elif btn_id == "btn-itms-kits-next":
+            self.action_kits_next_page()
+        elif btn_id in ("btn-itms-kits-info", "btn-itms-kit-info"):
+            self.action_fetch_kit_info()
+        elif btn_id in ("btn-itms-kits-sync", "btn-itms-sync-kits"):
+            self.action_sync_kits()
         elif btn_id in ("btn-itms-order-info", "btn-itms-orders-info", "btn-itms-archive-info"):
             self.action_fetch_order_info(download_photos=False)
         elif btn_id in ("btn-itms-view-photos", "btn-itms-orders-view-photos", "btn-itms-archive-view-photos"):
@@ -1019,3 +1093,196 @@ class ITMSConnectionPane(Vertical):
             curr = 1
         page_input.value = str(curr + 1)
         self.action_fetch_orders(archive=is_archive)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Installation Kits Threaded Actions & Pagination
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def action_kits_prev_page(self) -> None:
+        try:
+            page_input = self.query_one("#input-itms-kits-page", Input)
+            curr = int(page_input.value.strip() or "1")
+        except Exception:
+            curr = 1
+        new_page = max(1, curr - 1)
+        page_input.value = str(new_page)
+        self.action_fetch_kits()
+
+    def action_kits_next_page(self) -> None:
+        try:
+            page_input = self.query_one("#input-itms-kits-page", Input)
+            curr = int(page_input.value.strip() or "1")
+        except Exception:
+            curr = 1
+        page_input.value = str(curr + 1)
+        self.action_fetch_kits()
+
+    @work(thread=True)
+    def action_fetch_kits(self) -> None:
+        """Fetches installation kits for the specified page and search query."""
+        if getattr(self, "_is_fetching_kits", False):
+            self.app.call_from_thread(self._set_feedback, "Fetch already in progress...", "yellow")
+            return
+        self._is_fetching_kits = True
+        try:
+            try:
+                page_input = self.query_one("#input-itms-kits-page", Input)
+                page = max(1, int(page_input.value.strip() or "1"))
+            except Exception:
+                page = 1
+
+            try:
+                search_val = self.query_one("#input-itms-kits-search", Input).value.strip()
+            except Exception:
+                search_val = ""
+
+            self.app.call_from_thread(self._set_feedback, f"Fetching Installation Kits (Page {page})...", "yellow")
+            filter_tag = f" (search: {search_val})" if search_val else ""
+            self.app.call_from_thread(
+                self._log_preview,
+                f"[dim]Requesting /installation-kits/index?page={page}{filter_tag}...[/dim]",
+            )
+
+            res = self.client.fetch_installation_kits(page=page, search_params=search_val)
+
+            if res.get("success"):
+                kits = res.get("kits", [])
+                self._last_kits = kits
+                self._kits_map = {str(i): k for i, k in enumerate(kits)}
+
+                def update_table():
+                    table = self.query_one("#table-itms-kits", DataTable)
+                    table.clear()
+                    for i, k in enumerate(kits):
+                        st_val = k.get("status") or "New"
+                        st_text = "[bold green]New[/bold green]" if st_val.lower() == "new" else "[bold cyan]Installed[/bold cyan]" if "installed" in st_val.lower() else st_val
+                        wh_val = str(k.get("warehouse") or "")[:28]
+                        table.add_row(
+                            k.get("kit_code", ""),
+                            k.get("registration_number", ""),
+                            k.get("front_plate", ""),
+                            k.get("rear_plate", ""),
+                            k.get("front_tracker", ""),
+                            k.get("rear_tracker", ""),
+                            k.get("gps_tracker", ""),
+                            wh_val,
+                            st_text,
+                            k.get("created_date", ""),
+                            key=str(i),
+                        )
+                    if kits:
+                        self._highlighted_kit = kits[0]
+                        try:
+                            self.query_one("#inspector-itms-kits", InspectorPane).show_itms_kit(kits[0])
+                        except Exception:
+                            pass
+
+                self.app.call_from_thread(update_table)
+                summary_info = res.get("summary") or f"Found {len(kits)} kit(s)"
+                self.app.call_from_thread(self._set_feedback, f"✓ Retrieved {len(kits)} kit(s) (Page {page})", "bold green")
+                self.app.call_from_thread(
+                    self._log_preview,
+                    f"[bold green]✓ Retrieved {len(kits)} Installation Kit(s)[/bold green] (Page {page})\n"
+                    f"  • Summary: {summary_info}\n"
+                    f"  • Active Filter: {search_val or 'All'}",
+                )
+                self.app.call_from_thread(
+                    self.app.log_message,
+                    f"Retrieved {len(kits)} ITMS installation kits on Page {page}",
+                    level="ITMS",
+                )
+            else:
+                err = res.get("error", "Failed to fetch installation kits.")
+                self.app.call_from_thread(self._set_feedback, f"✗ {err}", "bold red")
+                self.app.call_from_thread(self._log_preview, f"[bold red]✗ Fetch Kits Failed:[/bold red] {err}")
+                self.app.call_from_thread(self.app.notify, f"Error: {err}", severity="error")
+        except Exception as exc:
+            self.app.call_from_thread(self._set_feedback, f"✗ Fetch error: {exc}", "bold red")
+            self.app.call_from_thread(self.app.notify, f"Fetch error: {exc}", severity="error")
+        finally:
+            self._is_fetching_kits = False
+
+    @work(thread=True)
+    def action_fetch_kit_info(self) -> None:
+        """Fetches full hardware breakdown from /installation-kit/<uuid>/main/information."""
+        kit = self._highlighted_kit
+        target_ident = ""
+        if kit:
+            target_ident = kit.get("kit_uuid") or kit.get("kit_code") or kit.get("registration_number", "")
+        if not target_ident:
+            try:
+                target_ident = self.query_one("#input-itms-kits-search", Input).value.strip()
+            except Exception:
+                pass
+        if not target_ident and self._last_kits:
+            target_ident = self._last_kits[0].get("kit_uuid") or self._last_kits[0].get("kit_code", "")
+
+        if not target_ident:
+            self.app.call_from_thread(self._set_feedback, "Select a kit row first to inspect details.", "yellow")
+            return
+
+        self.app.call_from_thread(self._set_feedback, f"Inspecting Kit Details for {target_ident}...", "yellow")
+        self.app.call_from_thread(
+            self._log_preview,
+            f"[dim]Requesting /installation-kit/{target_ident}/main/information...[/dim]",
+        )
+
+        res = self.client.fetch_installation_kit_detail(target_ident)
+
+        if res.get("success"):
+            if self._highlighted_kit:
+                self._highlighted_kit.update(res)
+            else:
+                self._highlighted_kit = res
+
+            def update_inspector():
+                try:
+                    self.query_one("#inspector-itms-kits", InspectorPane).show_itms_kit(self._highlighted_kit)
+                except Exception:
+                    pass
+
+            self.app.call_from_thread(update_inspector)
+            reg = res.get("registration_number", "N/A")
+            user = res.get("created_by_user", "N/A")
+            self.app.call_from_thread(self._set_feedback, f"✓ Inspected Kit {reg} (Created by {user})", "bold green")
+            self.app.call_from_thread(
+                self._log_preview,
+                f"[bold cyan]🔍 Installation Kit Hardware Breakdown:[/bold cyan] {reg}\n"
+                f"  • Status: [bold green]{res.get('status', 'New')}[/bold green]\n"
+                f"  • Created By: {user}\n"
+                f"  • Front Plate: {res.get('front_plate', {}).get('serial_number', '—')} ({res.get('front_plate', {}).get('article_name', '—')})\n"
+                f"  • Rear Plate: {res.get('rear_plate', {}).get('serial_number', '—')} ({res.get('rear_plate', {}).get('article_name', '—')})\n"
+                f"  • GPS Tracker: {res.get('gps_tracker', {}).get('serial_number', '—')}\n"
+                f"  • SIM Card: {res.get('sim_card', {}).get('serial_number', '—')} (MAC: {res.get('sim_card', {}).get('mac_address', '—')})\n"
+                f"  • Front Tracker (BLE): {res.get('front_tracker', {}).get('serial_number', '—')}\n"
+                f"  • Rear Tracker (BLE): {res.get('rear_tracker', {}).get('serial_number', '—')}",
+            )
+            self.app.call_from_thread(
+                self.app.notify,
+                f"Kit details loaded for {reg}!",
+            )
+        else:
+            err = res.get("error", "Failed to retrieve kit detail.")
+            self.app.call_from_thread(self._set_feedback, f"✗ {err}", "bold red")
+            self.app.call_from_thread(self._log_preview, f"[bold red]✗ Kit Inspection Failed:[/bold red] {err}")
+            self.app.call_from_thread(self.app.notify, f"Inspection error: {err}", severity="error")
+
+    @work(thread=True)
+    def action_sync_kits(self) -> None:
+        """Syncs all currently fetched installation kits into local database registry."""
+        if not self._last_kits:
+            self.app.call_from_thread(self._set_feedback, "Fetch kits first before syncing.", "yellow")
+            return
+
+        self.app.call_from_thread(self._set_feedback, "Syncing installation kits to local database...", "yellow")
+        sync_res = self.client.sync_kits_to_local_db(self._last_kits)
+
+        msg = f"Synced {sync_res['total']} kits: {sync_res['created']} created, {sync_res['updated']} updated."
+        self.app.call_from_thread(self._set_feedback, f"✓ {msg}", "bold green")
+        self.app.call_from_thread(self._log_preview, f"[bold green]✓ Installation Kits Synced to DB:[/bold green] {msg}")
+        self.app.call_from_thread(self.app.reload_data)
+        self.app.call_from_thread(
+            self.app.log_message,
+            f"Synced {sync_res['total']} ITMS installation kits to local database",
+            level="SUCCESS",
+        )

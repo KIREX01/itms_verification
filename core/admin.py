@@ -3,6 +3,7 @@ from django.contrib import admin
 from core.models import (
     EvidenceImage,
     IngestionBatch,
+    InstallationKit,
     InstallationOrder,
     SubmissionAuditLog,
     VehicleInstallationPair,
@@ -25,6 +26,13 @@ class InstallationOrderAdmin(admin.ModelAdmin):
     list_display = ("order_number", "registration_number", "plate_serial", "tracker_id", "status", "updated_at")
     list_filter = ("status",)
     search_fields = ("order_number", "registration_number", "plate_serial", "tracker_id")
+
+
+@admin.register(InstallationKit)
+class InstallationKitAdmin(admin.ModelAdmin):
+    list_display = ("kit_code", "registration_number", "front_plate", "rear_plate", "gps_tracker", "status", "created_date")
+    list_filter = ("status", "warehouse")
+    search_fields = ("kit_code", "registration_number", "front_plate", "rear_plate", "gps_tracker")
 
 
 @admin.register(EvidenceImage)

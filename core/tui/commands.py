@@ -75,6 +75,8 @@ class ITMSCommandProvider(Provider):
             ("ITMS: Batch Submit All Approved [B]", app.action_batch_submit, "Submit all approved pairs in unattended queue"),
             ("ITMS: Retry All Failed Orders [^R]", app.action_retry_failed, "Reset all failed orders to APPROVED and open batch submission modal"),
             ("ITMS: Sync Active Orders [Y]", app.action_sync_itms_orders, "Synchronize active installation orders from stock.itms.ug"),
+            ("ITMS: Installation Kits View", app.action_open_itms_kits, "Switch to ITMS Installation Kits stock inventory view"),
+            ("ITMS: Sync Installation Kits", app.action_sync_itms_kits, "Synchronize installation kits to local database"),
             
             # 4. Ingestion & Upload
             ("Upload: Native Add Photos Dialog [I]", app.action_native_ingest, "Open OS directory picker for photo ingestion"),
@@ -87,6 +89,7 @@ class ITMSCommandProvider(Provider):
             ("Navigate: Review Queue (Tab 4)", app.action_tab_queue, "Switch to Review Queue tab"),
             ("Navigate: History & Audit (Tab 5)", app.action_tab_history, "Switch to History & Audit tab"),
             ("Navigate: System Settings & Config (Tab 6)", app.action_tab_settings, "Open configuration pane for safety, OCR, and storage settings"),
+            ("Navigate: Reports & System Totals (Tab 7)", app.action_tab_reports, "Switch to Reports tab to inspect system totals, shift statistics, kit breakdowns, and export"),
             
             # 6. Filters & Storage
             ("Filter: Cycle History Status Filter [F]", app.action_cycle_filter, "Toggle between All, Submitted, Failed, and Audit Logs"),

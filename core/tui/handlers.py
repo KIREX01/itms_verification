@@ -28,15 +28,17 @@ class NavigationHandlersMixin:
         try:
             activity = self.query_one("#activity-container")
             pane_id = getattr(event.pane, "id", "")
-            if pane_id == "tab-settings":
+            if pane_id in ("tab-settings", "tab-reports"):
                 activity.display = False
-                try:
-                    self.query_one("#settings-scroll-body").focus()
-                except Exception:
+                if pane_id == "tab-reports":
                     try:
-                        self.set_focus(None)
+                        self.query_one("#reports-pane").refresh_reports()
                     except Exception:
                         pass
+                try:
+                    self.set_focus(None)
+                except Exception:
+                    pass
             else:
                 activity.display = True
                 target_focus_map = {

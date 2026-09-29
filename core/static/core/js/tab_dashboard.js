@@ -126,6 +126,7 @@ async function fetchStats() {
             }
 
             updateDashboardDisplay();
+            initDashboardMobileQr();
 
             // Real-time synchronization of dry-run mode from config.json
             if (data.dry_run !== undefined && typeof updateDryRunBadges === "function") {
@@ -136,3 +137,95 @@ async function fetchStats() {
         console.warn("Telemetry fetch error:", err);
     }
 }
+
+let dashMobileQrInstance = null;
+
+function renderDashQr(url) {
+    const canvasElem = document.getElementById("dash-qr-canvas");
+    if (!canvasElem || !window.QRCode) return;
+    canvasElem.innerHTML = "";
+    dashMobileQrInstance = new QRCode(canvasElem, {
+        text: url,
+        width: 140,
+        height: 140,
+        colorDark: "#000000",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.M
+    });
+}
+
+function onDashboardMobileIpChanged(selectedUrl) {
+    if (!selectedUrl) return;
+    const urlElem = document.getElementById("dash-mobile-direct-url");
+    if (urlElem) urlElem.textContent = selectedUrl;
+    renderDashQr(selectedUrl);
+}
+
+async function initDashboardMobileQr() {
+    try {
+        const resp = await fetch("/api/network/info/");
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        const urlElem = document.getElementById("dash-mobile-direct-url");
+        const pillElem = document.getElementById("dash-qr-hotspot-pill");
+        const selectElem = document.getElementById("dash-mobile-ip-select");
+
+        if (urlElem) urlElem.textContent = data.primary_url;
+
+        if (pillElem) {
+            if (data.connection_mode === "LAPTOP_HOTSPOT") {
+                pillElem.className = "badge badge-green";
+                pillElem.textContent = "💻 Laptop Hotspot Active";
+            } else if (data.connection_mode === "PHONE_HOTSPOT") {
+                pillElem.className = "badge badge-green";
+                pillElem.textContent = "📱 Phone Hotspot Active";
+            } else {
+                pillElem.className = "badge badge-yellow";
+                pillElem.textContent = `🌐 Wi-Fi LAN (${data.primary_ip})`;
+            }
+        }
+
+        if (selectElem && data.candidate_urls) {
+            // Only update dropdown options if they have changed or user hasn't overridden
+            const currentSelected = selectElem.value;
+            const newOptions = data.candidate_urls.map(c => 
+                `<option value="${c.url}" ${c.url === (currentSelected || data.primary_url) ? 'selected' : ''}>${c.ip} (${c.type})</option>`
+            ).join("");
+            if (selectElem.innerHTML !== newOptions) {
+                selectElem.innerHTML = newOptions;
+            }
+        }
+
+        if (!selectElem || !selectElem.value || selectElem.value === data.primary_url) {
+            renderDashQr(data.primary_url);
+        }
+
+        // Synchronize real-time mobile status and connected phones
+        if (typeof pollMobileCompanionStatus === "function") {
+            await pollMobileCompanionStatus();
+        }
+    } catch (err) {
+        console.warn("Dashboard mobile QR error:", err);
+    }
+}
+
+function copyDashMobileUrl() {
+    const urlElem = document.getElementById("dash-mobile-direct-url");
+    if (!urlElem) return;
+    const text = urlElem.textContent.trim();
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+            if (typeof showToast === "function") {
+                showToast("Mobile Companion URL copied to clipboard!", "success");
+            }
+        });
+    }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    initDashboardMobileQr();
+    // Live network poll every 10s so Wi-Fi changes auto-sync to QR and URL
+    setInterval(initDashboardMobileQr, 10000);
+});

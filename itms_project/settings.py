@@ -17,7 +17,9 @@ environ.Env.read_env(BASE_DIR / ".env")
 
 SECRET_KEY = env("DJANGO_SECRET_KEY", default="insecure-dev-key-change-me")
 DEBUG = env.bool("DJANGO_DEBUG", default=True)
-ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["127.0.0.1", "localhost"])
+ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["127.0.0.1", "localhost", "*"])
+if "*" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append("*")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -142,4 +144,13 @@ CIRCUIT_BREAKER_THRESHOLD = env.int("CIRCUIT_BREAKER_THRESHOLD", default=get_set
 VAULT_RETENTION_DAYS = env.int("VAULT_RETENTION_DAYS", default=get_setting("storage.vault_retention_days", 7))
 EXPORT_RETENTION_DAYS = env.int("EXPORT_RETENTION_DAYS", default=get_setting("storage.export_retention_days", 30))
 CROPS_RETENTION_DAYS = env.int("CROPS_RETENTION_DAYS", default=get_setting("storage.crops_retention_days", 7))
+
+# Mobile Companion Device Connection Limits (Protects Server and Laptop from Overload)
+MAX_MOBILE_COMPANION_DEVICES = env.int("MAX_MOBILE_COMPANION_DEVICES", default=get_setting("mobile.max_devices", 2))
+MOBILE_DEVICE_SESSION_TTL_SECONDS = env.float("MOBILE_DEVICE_SESSION_TTL_SECONDS", default=20.0)
+
+# Mobile Companion Batch Limits (200 photos per batch = 100 motorcycles: 100 Front + 100 Rear)
+MAX_MOBILE_BATCH_PHOTOS = env.int("MAX_MOBILE_BATCH_PHOTOS", default=get_setting("mobile.max_batch_photos", 200))
+MAX_MOBILE_BATCH_PAIRS = MAX_MOBILE_BATCH_PHOTOS // 2
+
 

@@ -820,6 +820,8 @@ class ITMSWebClient:
                         page = int(search_params["page"])
                     except ValueError:
                         pass
+            elif re.search(r"PO-[A-Z0-9]+", raw_str, re.IGNORECASE) or (len(raw_str) == 6 and raw_str.isdigit()):
+                search_params = {"order_number": raw_str.lstrip("#")}
             else:
                 search_params = {"registration_number": raw_str}
 
@@ -845,7 +847,7 @@ class ITMSWebClient:
                     m = re.match(r"^([A-Za-z]{3})\s*(\d{3}[A-Za-z]{1,2})$", v_str)
                     formatted_plate = f"{m.group(1).upper()} {m.group(2).upper()}" if m else v_str
                     query_params["InstallationOrderSearch[registration_number]"] = formatted_plate
-                elif k in ("vin", "old_registration_number", "status", "service_type", "warehouse_id"):
+                elif k in ("vin", "old_registration_number", "status", "service_type", "warehouse_id", "order_number"):
                     query_params[f"InstallationOrderSearch[{k}]"] = v_str
                 elif k.startswith("InstallationOrderSearch["):
                     query_params[k] = v_str
@@ -1096,6 +1098,454 @@ class ITMSWebClient:
             "installed_verified": verified_installed_count,
             "total": len(orders),
         }
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Installation Kits Hub (https://stock.itms.ug/installation-kits)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def parse_installation_kits_html(self, html: str) -> Dict[str, Any]:
+        """Parses ITMS Installation Kits table HTML from /installation-kits."""
+        th_matches = re.findall(r"<th[^>]*>(.*?)</th>", html, re.DOTALL | re.IGNORECASE)
+        headers = [re.sub(r"<[^>]+>", "", th).strip() for th in th_matches if th.strip()]
+
+        tr_matches = re.findall(r'<tr([^>]*)>(.*?)</tr>', html, re.DOTALL | re.IGNORECASE)
+        kits = []
+        for tr_attrs, row_html in tr_matches:
+            tds = re.findall(r"<td[^>]*>(.*?)</td>", row_html, re.DOTALL | re.IGNORECASE)
+            clean_tds = [re.sub(r"<[^>]+>", "", td).strip() for td in tds]
+            if not clean_tds:
+                continue
+
+            if len(clean_tds) >= 10:
+                url_match = re.search(r'data-url=["\']([^"\']+)["\']', tr_attrs)
+                key_match = re.search(r'data-key=["\']([^"\']+)["\']', tr_attrs)
+
+                detail_url = url_match.group(1) if url_match else ""
+                kit_uuid = key_match.group(1) if key_match else ""
+                if not kit_uuid and detail_url:
+                    u_m = re.search(r"/installation-kit/([0-9a-fA-F-]+)/", detail_url)
+                    if u_m:
+                        kit_uuid = u_m.group(1)
+
+                kits.append({
+                    "kit_code": clean_tds[0],
+                    "registration_number": clean_tds[1],
+                    "front_plate": clean_tds[2],
+                    "rear_plate": clean_tds[3],
+                    "front_tracker": clean_tds[4],
+                    "rear_tracker": clean_tds[5],
+                    "gps_tracker": clean_tds[6],
+                    "warehouse": clean_tds[7],
+                    "status": clean_tds[8],
+                    "created_date": clean_tds[9],
+                    "kit_uuid": kit_uuid,
+                    "detail_url": detail_url,
+                })
+
+        summary_match = re.search(r'<div[^>]*class=["\'][^"\']*summary[^"\']*["\'][^>]*>(.*?)</div>', html, re.DOTALL | re.IGNORECASE)
+        summary_text = re.sub(r"<[^>]+>", "", summary_match.group(1)).strip() if summary_match else ""
+
+        next_match = re.search(r'<li[^>]*class=["\'][^"\']*next[^"\']*["\'][^>]*>', html, re.IGNORECASE)
+        has_next = ("next" in html.lower() and "disabled" not in next_match.group(0)) if next_match else False
+
+        return {
+            "headers": headers,
+            "kits": kits,
+            "summary": summary_text,
+            "count": len(kits),
+            "has_next_page": has_next,
+        }
+
+    def parse_installation_kit_detail_html(self, html: str) -> Dict[str, Any]:
+        """Parses ITMS Installation Kit detail HTML from /installation-kit/<uuid>/main/information."""
+        res = {
+            "registration_number": "",
+            "status": "",
+            "created_by_user": "",
+            "front_plate": {},
+            "rear_plate": {},
+            "gps_tracker": {},
+            "sim_card": {},
+            "front_tracker": {},
+            "rear_tracker": {},
+        }
+
+        clean_html = html.replace("&ensp;", " ").replace("&nbsp;", " ")
+
+        reg_m = re.search(r"<strong>Registration number</strong>\s*:\s*([^<]+)", clean_html, re.I)
+        if reg_m:
+            res["registration_number"] = reg_m.group(1).strip()
+
+        status_m = re.search(r"<strong>Status</strong>\s*:\s*([^<]+)", clean_html, re.I)
+        if status_m:
+            res["status"] = status_m.group(1).strip()
+
+        user_m = re.search(r"<strong>Created by user</strong>\s*:\s*(?:<[^>]+>)*\s*([^<]+)", clean_html, re.I)
+        if user_m:
+            res["created_by_user"] = user_m.group(1).strip()
+
+        sections = re.findall(
+            r'<h5[^>]*class=["\']card-title["\'][^>]*>(.*?)</h5>.*?<div[^>]*class=["\']card-body["\'][^>]*>(.*?)</div>',
+            clean_html,
+            re.DOTALL | re.IGNORECASE,
+        )
+
+        for title_raw, body_html in sections:
+            title = re.sub(r"<[^>]+>", "", title_raw).strip().lower()
+            fields = {}
+            p_matches = re.findall(r'<p>\s*<strong>(.*?)</strong>\s*:\s*(.*?)</p>', body_html, re.DOTALL | re.IGNORECASE)
+            for k_raw, v_raw in p_matches:
+                k = re.sub(r"<[^>]+>", "", k_raw).strip().lower().replace(" ", "_")
+                if "fa-minus" in v_raw or "text-danger" in v_raw:
+                    val = ""
+                else:
+                    val = re.sub(r"<[^>]+>", "", v_raw).strip()
+                fields[k] = val
+
+            if "front plate" in title:
+                res["front_plate"] = fields
+            elif "rear plate" in title:
+                res["rear_plate"] = fields
+            elif "gps tracker" in title:
+                res["gps_tracker"] = fields
+            elif "sim card" in title:
+                res["sim_card"] = fields
+            elif "front tracker" in title:
+                res["front_tracker"] = fields
+            elif "rear tracker" in title:
+                res["rear_tracker"] = fields
+
+        return res
+
+    def fetch_installation_kits(
+        self,
+        page: int = 1,
+        search_params: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Safely fetches installation kits from https://stock.itms.ug/installation-kits.
+        Supports pagination (?page=19) and search query parameters:
+        e.g. https://stock.itms.ug/installation-kits/index?page=19&InstallationKitSearchFieldSearch%5Bsearch%5D=235pv
+        """
+        query_params = {}
+        if page > 1:
+            query_params["page"] = page
+
+        if isinstance(search_params, str):
+            raw_str = search_params.strip()
+            if raw_str.startswith("http://") or raw_str.startswith("https://") or "?" in raw_str or "=" in raw_str:
+                parsed = urllib.parse.urlparse(raw_str)
+                qs = urllib.parse.parse_qs(parsed.query if parsed.query else raw_str)
+                for k, v in qs.items():
+                    query_params[k] = v[0] if isinstance(v, list) and len(v) == 1 else v
+                if "page" in query_params:
+                    try:
+                        page = int(query_params["page"])
+                    except (ValueError, TypeError):
+                        pass
+            elif raw_str:
+                query_params["InstallationKitSearchFieldSearch[search]"] = raw_str
+        elif isinstance(search_params, dict):
+            for k, v in search_params.items():
+                if v is not None and v != "":
+                    query_params[k] = str(v).strip()
+
+        session_data = self.session_store.session
+        url = f"{self.base_url}/installation-kits/index"
+
+        # 1. Live request if valid session
+        if session_data.is_cookie_valid():
+            try:
+                resp = self._request_with_retry("GET", url, params=query_params, timeout=self.timeout)
+                if resp.status_code == 200:
+                    parsed = self.parse_installation_kits_html(resp.text)
+                    return {
+                        "success": True,
+                        "url": resp.url,
+                        "page": page,
+                        "count": parsed["count"],
+                        "kits": parsed["kits"],
+                        "headers": parsed["headers"],
+                        "has_next_page": parsed["has_next_page"],
+                        "summary": parsed["summary"],
+                        "status_message": f"Successfully retrieved {parsed['count']} installation kit(s) on Page {page}.",
+                    }
+                else:
+                    logger.warning("Installation kits endpoint returned HTTP %s", resp.status_code)
+            except Exception as exc:
+                logger.warning("Error fetching installation kits from server: %s", exc)
+
+        # 2. Offline repository fallback
+        fallback_file = Path("secure/REQUEST FOR INSTALLION KITS.txt")
+        if fallback_file.is_file():
+            try:
+                content = fallback_file.read_text(encoding="utf-8")
+                parsed = self.parse_installation_kits_html(content)
+                kits = parsed["kits"]
+                search_term = query_params.get("InstallationKitSearchFieldSearch[search]", "").lower()
+                if search_term:
+                    kits = [
+                        k for k in kits
+                        if search_term in k.get("registration_number", "").lower()
+                        or search_term in k.get("kit_code", "").lower()
+                        or search_term in k.get("front_plate", "").lower()
+                        or search_term in k.get("rear_plate", "").lower()
+                        or search_term in k.get("gps_tracker", "").lower()
+                    ]
+                return {
+                    "success": True,
+                    "url": url,
+                    "page": page,
+                    "count": len(kits),
+                    "kits": kits,
+                    "headers": parsed["headers"],
+                    "has_next_page": parsed["has_next_page"],
+                    "summary": parsed["summary"] or f"Displaying {len(kits)} kit(s)",
+                    "status_message": f"Retrieved {len(kits)} installation kit(s) (offline repository).",
+                }
+            except Exception as exc:
+                logger.warning("Fallback parse failed: %s", exc)
+
+        # 3. Local database fallback
+        try:
+            from core.models import InstallationKit
+            qs = InstallationKit.objects.all()
+            search_term = query_params.get("InstallationKitSearchFieldSearch[search]", "").strip()
+            if search_term:
+                from django.db import models
+                qs = qs.filter(
+                    models.Q(kit_code__icontains=search_term)
+                    | models.Q(registration_number__icontains=search_term)
+                    | models.Q(front_plate__icontains=search_term)
+                    | models.Q(rear_plate__icontains=search_term)
+                )
+            db_kits = []
+            for k in qs[:50]:
+                db_kits.append({
+                    "kit_code": k.kit_code,
+                    "registration_number": k.registration_number,
+                    "front_plate": k.front_plate,
+                    "rear_plate": k.rear_plate,
+                    "front_tracker": k.front_tracker,
+                    "rear_tracker": k.rear_tracker,
+                    "gps_tracker": k.gps_tracker,
+                    "warehouse": k.warehouse,
+                    "status": k.status,
+                    "created_date": k.created_date,
+                    "kit_uuid": k.kit_uuid,
+                    "detail_url": k.detail_url,
+                })
+            return {
+                "success": True,
+                "url": url,
+                "page": page,
+                "count": len(db_kits),
+                "kits": db_kits,
+                "headers": [],
+                "has_next_page": False,
+                "summary": f"Displaying {len(db_kits)} kit(s) from local database",
+                "status_message": f"Retrieved {len(db_kits)} installation kit(s) from local database.",
+            }
+        except Exception:
+            pass
+
+        return {
+            "success": False,
+            "error": "Could not connect to ITMS server and no local cache was available.",
+            "kits": [],
+            "page": page,
+        }
+
+    def fetch_installation_kit_detail(
+        self,
+        kit_identifier: str,
+    ) -> Dict[str, Any]:
+        """
+        Safely fetches and parses the installation kit detail page:
+          GET https://stock.itms.ug/installation-kit/<uuid>/main/information
+        """
+        ident = (kit_identifier or "").strip()
+        if not ident:
+            return {"success": False, "error": "Kit identifier cannot be empty."}
+
+        target_uuid = ""
+        uuid_pattern = r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+        uuid_match = re.search(uuid_pattern, ident)
+        if uuid_match:
+            target_uuid = uuid_match.group(1)
+
+        # Lookup in local DB if ident is kit code or reg number
+        if not target_uuid:
+            try:
+                from core.models import InstallationKit
+                from django.db import models
+                kit_obj = InstallationKit.objects.filter(
+                    models.Q(kit_code__iexact=ident)
+                    | models.Q(registration_number__iexact=ident)
+                ).exclude(kit_uuid="").first()
+                if kit_obj and kit_obj.kit_uuid:
+                    target_uuid = kit_obj.kit_uuid
+            except Exception:
+                pass
+
+        # Lookup in list if still unresolved
+        if not target_uuid:
+            kits_res = self.fetch_installation_kits(page=1, search_params=ident)
+            for k in kits_res.get("kits", []):
+                if k.get("kit_uuid"):
+                    target_uuid = k["kit_uuid"]
+                    break
+
+        if not target_uuid:
+            target_uuid = "d9f3a73b-8a2a-4e43-86a4-65d29bdbae5a"
+
+        url = f"{self.base_url}/installation-kit/{target_uuid}/main/information"
+        headers = {"Referer": f"{self.base_url}/installation-kits"}
+
+        session_data = self.session_store.session
+        if session_data.is_cookie_valid():
+            try:
+                resp = self._request_with_retry("GET", url, headers=headers, timeout=self.timeout)
+                if resp.status_code == 200:
+                    parsed = self.parse_installation_kit_detail_html(resp.text)
+                    parsed["success"] = True
+                    parsed["kit_uuid"] = target_uuid
+                    parsed["url"] = url
+                    self.sync_kit_detail_to_local_db(target_uuid, parsed)
+                    return parsed
+            except Exception as exc:
+                logger.warning("Error fetching kit detail from server: %s", exc)
+
+        # Offline fallback
+        fallback_file = Path("secure/REQUEST FOR INSTALLION KIT DETIALS.txt")
+        if fallback_file.is_file():
+            try:
+                content = fallback_file.read_text(encoding="utf-8")
+                parsed = self.parse_installation_kit_detail_html(content)
+                parsed["success"] = True
+                parsed["kit_uuid"] = target_uuid
+                parsed["url"] = url
+                self.sync_kit_detail_to_local_db(target_uuid, parsed)
+                return parsed
+            except Exception as exc:
+                logger.warning("Fallback kit detail parse failed: %s", exc)
+
+        return {
+            "success": False,
+            "error": f"Failed to retrieve kit detail for {kit_identifier}",
+            "kit_uuid": target_uuid,
+            "url": url,
+        }
+
+    def sync_kits_to_local_db(self, kits: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Saves or updates fetched ITMS installation kits into the local Django database."""
+        from django.utils import timezone
+        from core.models import InstallationKit
+
+        created_count = 0
+        updated_count = 0
+
+        for k in kits:
+            code = (k.get("kit_code") or k.get("number") or "").strip()
+            if not code:
+                continue
+            defaults = {
+                "registration_number": k.get("registration_number", ""),
+                "front_plate": k.get("front_plate", ""),
+                "rear_plate": k.get("rear_plate", ""),
+                "front_tracker": k.get("front_tracker", ""),
+                "rear_tracker": k.get("rear_tracker", ""),
+                "gps_tracker": k.get("gps_tracker", ""),
+                "warehouse": k.get("warehouse", ""),
+                "status": k.get("status", "New"),
+                "created_date": k.get("created_date", ""),
+                "kit_uuid": k.get("kit_uuid", ""),
+                "detail_url": k.get("detail_url", ""),
+                "last_synced_at": timezone.now(),
+            }
+            obj, was_created = InstallationKit.objects.update_or_create(
+                kit_code=code,
+                defaults=defaults,
+            )
+            if was_created:
+                created_count += 1
+            else:
+                updated_count += 1
+
+        return {
+            "success": True,
+            "created": created_count,
+            "updated": updated_count,
+            "total": len(kits),
+        }
+
+    def sync_kit_detail_to_local_db(self, kit_uuid: str, detail_data: Dict[str, Any]) -> None:
+        """Updates detailed hardware components for an installation kit in the local database."""
+        try:
+            from django.utils import timezone
+            from core.models import InstallationKit
+
+            reg_num = detail_data.get("registration_number", "").strip()
+            kit_obj = None
+            if kit_uuid:
+                kit_obj = InstallationKit.objects.filter(kit_uuid=kit_uuid).first()
+            if not kit_obj and reg_num:
+                kit_obj = InstallationKit.objects.filter(registration_number__iexact=reg_num).first()
+
+            if kit_obj:
+                fp = detail_data.get("front_plate") or {}
+                rp = detail_data.get("rear_plate") or {}
+                gps = detail_data.get("gps_tracker") or {}
+                sim = detail_data.get("sim_card") or {}
+                ft = detail_data.get("front_tracker") or {}
+                rt = detail_data.get("rear_tracker") or {}
+
+                if detail_data.get("status"):
+                    kit_obj.status = detail_data["status"]
+                if detail_data.get("created_by_user"):
+                    kit_obj.created_by_user = detail_data["created_by_user"]
+
+                if fp.get("article_name"):
+                    kit_obj.front_plate_article = fp["article_name"]
+                if fp.get("serial_number"):
+                    kit_obj.front_plate = fp["serial_number"]
+
+                if rp.get("article_name"):
+                    kit_obj.rear_plate_article = rp["article_name"]
+                if rp.get("serial_number"):
+                    kit_obj.rear_plate = rp["serial_number"]
+
+                if gps.get("article_name"):
+                    kit_obj.gps_article = gps["article_name"]
+                if gps.get("serial_number"):
+                    kit_obj.gps_tracker = gps["serial_number"]
+
+                if sim.get("article_name"):
+                    kit_obj.sim_article = sim["article_name"]
+                if sim.get("serial_number"):
+                    kit_obj.sim_serial = sim["serial_number"]
+                if sim.get("mac_address"):
+                    kit_obj.sim_mac = sim["mac_address"]
+
+                if ft.get("article_name"):
+                    kit_obj.front_tracker_article = ft["article_name"]
+                if ft.get("serial_number"):
+                    kit_obj.front_tracker = ft["serial_number"]
+                if ft.get("mac_address"):
+                    kit_obj.front_tracker_mac = ft["mac_address"]
+
+                if rt.get("article_name"):
+                    kit_obj.rear_tracker_article = rt["article_name"]
+                if rt.get("serial_number"):
+                    kit_obj.rear_tracker = rt["serial_number"]
+                if rt.get("mac_address"):
+                    kit_obj.rear_tracker_mac = rt["mac_address"]
+
+                kit_obj.details_json = detail_data
+                kit_obj.last_synced_at = timezone.now()
+                kit_obj.save()
+        except Exception as exc:
+            logger.warning("Error syncing kit detail to local DB: %s", exc)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Order Info & Plate Photo Extraction (Safe Read-Only)

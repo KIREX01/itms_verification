@@ -8,9 +8,13 @@ Provides:
     When an order has evidence photos uploaded and approved, it disappears
     from /installation-orders/index and moves to the completed archive.
     This service marks disappeared orders as inactive on the active index,
-    and updates their lifecycle status accordingly.
-- Archive request guard: NEVER performs full archive scans; only uses targeted
-    single-record lookups for specific plates when needed.
+    queries the archive to confirm the external officer and installation date,
+    and updates their lifecycle status and matching vehicle pairs accordingly.
+- Bounded Archive Sync: NEVER performs full archive scans; uses targeted
+    date-suffix searches (e.g. '260926') or single-record lookups for specific plates.
+- Bounded Installation Kits Sync: Fetches small recent windows (max 2-3 pages)
+    or targeted kit lookups, preventing runaway pagination across tens of thousands of records.
+- Unified Shift Synchronization: Synchronizes active fitment, shift archive, and recent stock kits in one safe pass.
 """
 import logging
 import time
@@ -18,7 +22,7 @@ from typing import Any, Dict, List, Optional, Set
 from django.utils import timezone
 from django.conf import settings
 
-from core.models import InstallationOrder, SubmissionAuditLog, VehicleInstallationPair
+from core.models import EvidenceImage, InstallationOrder, SubmissionAuditLog, VehicleInstallationPair
 from core.services.itms_web_client import ITMSWebClient, get_web_client
 from core.vision import normalizer
 
@@ -30,11 +34,14 @@ SYNC_COOLDOWN_SECONDS = getattr(settings, "ITMS_SYNC_COOLDOWN_SECONDS", 60)
 # Global in-memory cache tracking last sync time and summary
 _LAST_SYNC_TIMESTAMP: float = 0.0
 _LAST_SYNC_RESULT: Optional[Dict[str, Any]] = None
+_LAST_ARCHIVE_SYNC_TIMESTAMP: float = 0.0
+_LAST_KIT_SYNC_TIMESTAMP: float = 0.0
 
 
 class OrderSyncService:
     """
-    Coordinates synchronization between live ITMS installation orders and the local database.
+    Coordinates synchronization between live ITMS installation orders, archive,
+    installation kits, and the local database.
     """
 
     def __init__(self, client: Optional[ITMSWebClient] = None):
@@ -75,7 +82,7 @@ class OrderSyncService:
 
         If called within the cooldown window and not forced, returns the cached result.
         Detects orders that have disappeared from the active index (e.g. photos uploaded & finalized)
-        and marks them as inactive on ITMS.
+        and marks them as inactive on ITMS with external officer attribution.
         """
         global _LAST_SYNC_TIMESTAMP, _LAST_SYNC_RESULT
 
@@ -108,7 +115,6 @@ class OrderSyncService:
                 )
                 if fetch_res.get("success"):
                     break
-                # If network or connection reset, backoff and retry this page once
                 time.sleep(0.5 * attempt)
 
             if not fetch_res or not fetch_res.get("success"):
@@ -121,12 +127,10 @@ class OrderSyncService:
             orders = fetch_res.get("orders", [])
             all_active_orders.extend(orders)
 
-            # If no next page or fewer than 20 items, we have reached the end of active orders
             if not fetch_res.get("has_next_page") or len(orders) < 20:
                 break
 
             page += 1
-            # Gentle pacing between pages to prevent remote server connection resets (10054)
             time.sleep(0.35)
 
         # 3. Synchronize active orders to database
@@ -207,7 +211,7 @@ class OrderSyncService:
                 updated_count += 1
 
         # 4. Detect Orders that Disappeared from Active Index (Completed / Uploaded)
-        # Only run if we did a full unfiltered scan (page 1 to end)
+        # Handles scenario where an order was completed on ITMS (e.g. by another officer)
         disappeared_count = 0
         if not search_filter and seen_order_numbers:
             session_obj = getattr(getattr(self.client, "session_store", None), "session", None)
@@ -217,7 +221,6 @@ class OrderSyncService:
                 is_active_on_itms=True,
                 is_archived=False,
             )
-            # CRITICAL: Only mark disappeared orders within the currently active ITMS account!
             if curr_email:
                 disappeared_qs = disappeared_qs.filter(account_email=curr_email)
             disappeared_qs = disappeared_qs.exclude(
@@ -232,17 +235,65 @@ class OrderSyncService:
                 dis_order.status = InstallationOrder.Status.INSTALLED
                 dis_order.itms_stage = "ARCHIVED"
                 dis_order.last_synced_at = timezone.now()
-                dis_order.save(update_fields=["is_active_on_itms", "is_archived", "order_status", "status", "itms_stage", "last_synced_at"])
+
+                # Targeted check on ITMS Archive to identify who closed the order and the install date
+                officer_name = dis_order.installation_officer or ""
+                install_dt = dis_order.installation_date or ""
+                try:
+                    arch_check = self.verify_order_in_archive(dis_order.order_number)
+                    if arch_check.get("found") and arch_check.get("order"):
+                        ao = arch_check["order"]
+                        officer_name = ao.get("officer") or officer_name
+                        install_dt = ao.get("installation_date") or install_dt
+                        if officer_name:
+                            dis_order.installation_officer = officer_name
+                        if install_dt:
+                            dis_order.installation_date = install_dt
+                        if ao.get("registration_status"):
+                            dis_order.registration_status = ao.get("registration_status")
+                except Exception as exc:
+                    logger.debug("Archive check for disappeared order %s skipped: %s", dis_order.order_number, exc)
+
+                dis_order.save(update_fields=[
+                    "is_active_on_itms", "is_archived", "order_status", "status",
+                    "itms_stage", "installation_officer", "installation_date",
+                    "registration_status", "last_synced_at"
+                ])
 
                 # Cross-verify and mark any matching vehicle installation pairs as SUBMITTED
+                # Prevents local operators from attempting to submit photos to an already closed order!
                 pairs = VehicleInstallationPair.objects.filter(
                     Q(order=dis_order) | Q(registration_number_detected=dis_order.registration_number)
                 )
+                now = timezone.now()
                 for pair in pairs:
                     if pair.verification_status != VehicleInstallationPair.VerificationStatus.SUBMITTED:
                         pair.verification_status = VehicleInstallationPair.VerificationStatus.SUBMITTED
+                        pair.submitted_at = pair.submitted_at or now
                         pair.order = dis_order
-                        pair.save(update_fields=["verification_status", "order"])
+                        closer_str = f"by {officer_name} " if officer_name else ""
+                        dt_str = f"on {install_dt}" if install_dt else ""
+                        pair.operator_note = (
+                            f"Order #{dis_order.order_number} closed on ITMS {closer_str}{dt_str}. "
+                            f"Local evidence verified and finalized in archive."
+                        ).strip()
+                        pair.save(update_fields=["verification_status", "order", "submitted_at", "operator_note"])
+
+                        for img in (pair.front_image, pair.rear_image):
+                            if img and img.status != EvidenceImage.Status.SUBMITTED:
+                                img.status = EvidenceImage.Status.SUBMITTED
+                                img.submitted_at = img.submitted_at or now
+                                img.save(update_fields=["status", "submitted_at"])
+
+                        SubmissionAuditLog.objects.create(
+                            pair=pair,
+                            action=SubmissionAuditLog.Action.ARCHIVE_VERIFY,
+                            result=SubmissionAuditLog.ResultStatus.SUCCESS,
+                            message=(
+                                f"Order #{dis_order.order_number} verified completed in ITMS Archive "
+                                f"({closer_str}{dt_str}). Local pair marked SUBMITTED."
+                            ),
+                        )
 
                 disappeared_count += 1
 
@@ -272,6 +323,168 @@ class OrderSyncService:
             "message": (
                 f"Synced {len(seen_order_numbers)} active orders ({created_count} new, "
                 f"{updated_count} updated, {disappeared_count} finalized/removed from active) in {duration_ms}ms."
+            ),
+        }
+
+    def sync_archive_orders_scoped(
+        self,
+        target_date: Optional[str] = None,
+        max_pages: int = 2,
+        plate_or_order: Optional[str] = None,
+        force: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Safely synchronizes archive orders without unbounded scans:
+        - If plate_or_order: searches specifically for that plate or order (1 page max).
+        - If target_date: queries archive with 6-digit date suffix (e.g. '260926') up to max_pages.
+        - If general: fetches ONLY the first max_pages (default 2, = 40 orders).
+        - Enforces cache cooldown (default 60s) unless force=True.
+        """
+        global _LAST_ARCHIVE_SYNC_TIMESTAMP
+        now = time.time()
+        elapsed = now - _LAST_ARCHIVE_SYNC_TIMESTAMP
+        if not force and not plate_or_order and not target_date and _LAST_ARCHIVE_SYNC_TIMESTAMP > 0 and elapsed < SYNC_COOLDOWN_SECONDS:
+            remaining = int(SYNC_COOLDOWN_SECONDS - elapsed)
+            return {
+                "success": True,
+                "synced": False,
+                "from_cache": True,
+                "message": f"Archive sync cooldown active ({remaining}s remaining).",
+            }
+
+        start_time = time.time()
+        all_archived_orders: List[Dict[str, Any]] = []
+
+        search_val = plate_or_order or target_date or ""
+        page = 1
+        limit_pages = 1 if plate_or_order else max_pages
+
+        while page <= limit_pages:
+            fetch_res = self.client.fetch_installation_orders(
+                page=page, search_params=search_val, archive=True
+            )
+            if not fetch_res.get("success"):
+                if page == 1:
+                    return {"success": False, "error": fetch_res.get("error", "Archive fetch failed")}
+                break
+
+            orders = fetch_res.get("orders", [])
+            all_archived_orders.extend(orders)
+
+            if not fetch_res.get("has_next_page") or len(orders) < 20:
+                break
+            page += 1
+            time.sleep(0.35)
+
+        sync_res = self.client.sync_orders_to_local_db(all_archived_orders)
+        _LAST_ARCHIVE_SYNC_TIMESTAMP = time.time()
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        return {
+            "success": True,
+            "synced": True,
+            "total_fetched": len(all_archived_orders),
+            "created": sync_res.get("created", 0),
+            "updated": sync_res.get("updated", 0),
+            "pages_fetched": page,
+            "duration_ms": duration_ms,
+            "message": f"Synced {len(all_archived_orders)} archive orders ({sync_res.get('created', 0)} new, {sync_res.get('updated', 0)} updated) in {duration_ms}ms.",
+        }
+
+    def sync_installation_kits_scoped(
+        self,
+        max_pages: int = 2,
+        plate_or_code: Optional[str] = None,
+        force: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Safely synchronizes installation kits from https://stock.itms.ug/installation-kits
+        without crawling tens of thousands of records:
+        - If plate_or_code: searches specifically for that plate or kit code (1 page max).
+        - If general: fetches ONLY the first max_pages (default 2, = 40 kits).
+        - Enforces cache cooldown (default 60s) unless force=True.
+        """
+        global _LAST_KIT_SYNC_TIMESTAMP
+        now = time.time()
+        elapsed = now - _LAST_KIT_SYNC_TIMESTAMP
+        if not force and not plate_or_code and _LAST_KIT_SYNC_TIMESTAMP > 0 and elapsed < SYNC_COOLDOWN_SECONDS:
+            remaining = int(SYNC_COOLDOWN_SECONDS - elapsed)
+            return {
+                "success": True,
+                "synced": False,
+                "from_cache": True,
+                "message": f"Kit sync cooldown active ({remaining}s remaining).",
+            }
+
+        start_time = time.time()
+        all_kits: List[Dict[str, Any]] = []
+
+        search_val = plate_or_code or ""
+        page = 1
+        limit_pages = 1 if plate_or_code else max_pages
+
+        while page <= limit_pages:
+            fetch_res = self.client.fetch_installation_kits(
+                page=page, search_params=search_val
+            )
+            if not fetch_res.get("success"):
+                if page == 1:
+                    return {"success": False, "error": fetch_res.get("error", "Kits fetch failed")}
+                break
+
+            kits = fetch_res.get("kits", [])
+            all_kits.extend(kits)
+
+            if not fetch_res.get("has_next_page") or len(kits) < 20:
+                break
+            page += 1
+            time.sleep(0.35)
+
+        sync_res = self.client.sync_kits_to_local_db(all_kits)
+        _LAST_KIT_SYNC_TIMESTAMP = time.time()
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        return {
+            "success": True,
+            "synced": True,
+            "total_fetched": len(all_kits),
+            "created": sync_res.get("created", 0),
+            "updated": sync_res.get("updated", 0),
+            "pages_fetched": page,
+            "duration_ms": duration_ms,
+            "message": f"Synced {len(all_kits)} installation kits ({sync_res.get('created', 0)} new, {sync_res.get('updated', 0)} updated) in {duration_ms}ms.",
+        }
+
+    def sync_shift_scoped(
+        self,
+        target_date: Optional[str] = None,
+        force: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Coordinates full, safe shift synchronization:
+        1. Active orders (max 3 pages) with external disappearance/closure detection.
+        2. Archive orders scoped to target_date (e.g. '260926') (max 2 pages).
+        3. Installation kits (max 2 pages) to update 'New' stock status.
+        Finishes in seconds and guarantees zero runaway pagination!
+        """
+        # Step 1: Active orders
+        active_res = self.sync_active_orders(force=force, max_pages=3)
+
+        # Step 2: Archive orders for target_date
+        archive_res = self.sync_archive_orders_scoped(target_date=target_date, max_pages=2, force=force)
+
+        # Step 3: Installation kits
+        kits_res = self.sync_installation_kits_scoped(max_pages=2, force=force)
+
+        return {
+            "success": True,
+            "active": active_res,
+            "archive": archive_res,
+            "kits": kits_res,
+            "message": (
+                f"Shift Sync Complete: {active_res.get('total_active_seen', 0)} active orders, "
+                f"{archive_res.get('total_fetched', 0)} archive orders, "
+                f"{kits_res.get('total_fetched', 0)} kits."
             ),
         }
 

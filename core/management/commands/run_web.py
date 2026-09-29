@@ -21,6 +21,12 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
+            "--host",
+            type=str,
+            default="0.0.0.0",
+            help="IP address to bind the web server to (default: 0.0.0.0 for LAN/Hotspot mobile access).",
+        )
+        parser.add_argument(
             "--port",
             type=int,
             default=8000,
@@ -39,10 +45,10 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         port = options["port"]
+        bind_host = options.get("host", "0.0.0.0")
         no_browser = options["no_browser"]
         noreload = options["noreload"]
-        host = "127.0.0.1"
-        url = f"http://{host}:{port}/"
+        local_url = f"http://127.0.0.1:{port}/"
 
         self.stdout.write(self.style.SUCCESS("=" * 65))
         self.stdout.write(self.style.SUCCESS("  ITMS VERIFICATION COPILOT - WEB OPERATOR CONSOLE"))
@@ -56,8 +62,14 @@ class Command(BaseCommand):
         db_info = config_service.get_active_database_info()
         self.stdout.write(f"Active Database: {db_info.get('vendor', 'sqlite').upper()} ({db_info.get('name', 'db.sqlite3')})")
 
-        # 2. Timer to auto-launch browser once server is listening
-        # Guarded: only launch from the active child process (or when --noreload) to avoid dual instances
+        # 2. Network & Mobile Companion discovery
+        from core.services import network_service
+        net_info = network_service.get_mobile_connection_info(port=port)
+        self.stdout.write(self.style.SUCCESS(f"[Mobile] Mobile Companion: {net_info['primary_url']}"))
+        if net_info.get("hotspot_detected"):
+            self.stdout.write(self.style.NOTICE("   [+] Windows Mobile Hotspot detected (192.168.137.1)"))
+
+        # 3. Timer to auto-launch browser once server is listening
         is_reloader_child = os.environ.get("RUN_MAIN") == "true"
         is_noreload = noreload or ("--noreload" in sys.argv)
         should_open_browser = not no_browser and (is_reloader_child or is_noreload)
@@ -66,25 +78,25 @@ class Command(BaseCommand):
             def _launch_browser():
                 time.sleep(1.0)
                 try:
-                    webbrowser.open(url)
+                    webbrowser.open(local_url)
                 except Exception as exc:
                     print(f"Note: Could not open browser automatically: {exc}")
 
             threading.Thread(target=_launch_browser, daemon=True).start()
-            self.stdout.write(self.style.NOTICE(f"Opening browser at: {url}"))
+            self.stdout.write(self.style.NOTICE(f"Opening browser at: {local_url}"))
         elif not no_browser and not is_reloader_child:
-            self.stdout.write(self.style.NOTICE(f"Web server starting at: {url}"))
+            self.stdout.write(self.style.NOTICE(f"Web server starting at: {local_url}"))
         else:
-            self.stdout.write(f"Web server ready at: {url}")
+            self.stdout.write(f"Web server ready at: {local_url}")
 
         self.stdout.write("Press Ctrl+C to stop the web server.")
         self.stdout.write(self.style.SUCCESS("-" * 65))
 
-        # 3. Start Django Server
+        # 4. Start Django Server
         try:
             call_command(
                 "runserver",
-                f"{host}:{port}",
+                f"{bind_host}:{port}",
                 use_reloader=not is_noreload,
                 insecure_serving=True,
             )

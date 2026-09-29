@@ -25,8 +25,8 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        // Numbers 1 to 6 switch primary navigation tabs (TUI bindings)
-        if (e.key >= "1" && e.key <= "6") {
+        // Numbers 1 to 7 switch primary navigation tabs (TUI bindings)
+        if (e.key >= "1" && e.key <= "7") {
             switchNavTab(parseInt(e.key));
             return;
         }
@@ -42,7 +42,9 @@ document.addEventListener("DOMContentLoaded", () => {
         } else if (key === "b") {
             triggerBatchSubmit(typeof currentQueueDateScope !== "undefined" ? currentQueueDateScope : "TODAY");
         } else if (key === "d") {
-            if (activeNavTab === 4 && typeof cycleQueueDateScope === "function") {
+            if (activeNavTab === 7 && typeof toggleReportScope === "function") {
+                toggleReportScope();
+            } else if (activeNavTab === 4 && typeof cycleQueueDateScope === "function") {
                 cycleQueueDateScope();
             } else if (activeNavTab === 3 && typeof cycleBatchesDateScope === "function") {
                 cycleBatchesDateScope();
@@ -54,6 +56,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (typeof showToast === "function") {
                     showToast(`Dashboard View: ${nextMode === "SHIFT" ? "Today's Shift" : "All-Time"}`, "info");
                 }
+            }
+        } else if (key === "r" && activeNavTab === 7) {
+            if (typeof fetchReportTotals === "function") {
+                fetchReportTotals();
             }
         } else if (key === "i") {
             openBatchUploadModal();

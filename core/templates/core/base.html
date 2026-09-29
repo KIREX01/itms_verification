@@ -41,6 +41,9 @@
                 <span class="badge badge-yellow" id="header-itms-badge" onclick="switchNavTab(2)" style="cursor:pointer;" title="Click to open ITMS Hub">
                     ● Disconnected
                 </span>
+                <span class="badge" id="header-mobile-badge" onclick="openMobileConnectModal()" style="cursor:pointer; font-weight:800; background:rgba(2, 132, 199, 0.2); color:#7dd3fc; border:1px solid rgba(2, 132, 199, 0.4);" title="Connect phone camera via QR code or Hotspot">
+                    📱 Mobile (0/2)
+                </span>
                 <span class="badge {% if dry_run %}badge-yellow{% else %}badge-red{% endif %}" id="header-dryrun-badge" onclick="toggleDryRun()" style="cursor:pointer;" title="Click to toggle simulation mode">
                     {% if dry_run %}● Dry Run{% else %}● Live{% endif %}
                 </span>
@@ -74,6 +77,10 @@
                 <span>⚙️ Settings</span>
                 <span class="hotkey">6</span>
             </button>
+            <button class="nav-tab-item" id="nav-tab-7" onclick="switchNavTab(7)" title="Reports & System Totals">
+                <span>📑 Reports</span>
+                <span class="hotkey">7</span>
+            </button>
         </nav>
 
         <!-- User Profile & Sign Out -->
@@ -95,7 +102,7 @@
     <!-- Keyboard Shortcuts Footer Bar -->
     <footer class="app-footer">
         <div class="footer-hotkeys">
-            <span class="footer-hotkey-item"><span class="footer-key">1-6</span> Switch Tabs</span>
+            <span class="footer-hotkey-item"><span class="footer-key">1-7</span> Switch Tabs</span>
             <span class="footer-hotkey-item"><span class="footer-key">D</span> Date Scope</span>
             <span class="footer-hotkey-item"><span class="footer-key">P</span> Run Vision</span>
             <span class="footer-hotkey-item"><span class="footer-key">M</span> Match Pairs</span>
@@ -115,6 +122,7 @@
     {% include "core/modals.html" %}
 
     <!-- Client Application Modular JavaScript -->
+    <script src="{% static 'core/js/vendor/qrcode.min.js' %}"></script>
     <script src="{% static 'core/js/state.js' %}"></script>
     <script src="{% static 'core/js/utils.js' %}"></script>
     <script src="{% static 'core/js/navigation.js' %}"></script>
@@ -124,6 +132,7 @@
     <script src="{% static 'core/js/tab_queue.js' %}"></script>
     <script src="{% static 'core/js/tab_history.js' %}"></script>
     <script src="{% static 'core/js/tab_settings.js' %}"></script>
+    <script src="{% static 'core/js/tab_reports.js' %}"></script>
     <script src="{% static 'core/js/pipeline.js' %}"></script>
     <script src="{% static 'core/js/app.js' %}"></script>
     {% block extra_js %}{% endblock %}

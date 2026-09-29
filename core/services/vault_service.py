@@ -455,9 +455,18 @@ def ingest_uploaded_file(
     # saturation boost, sharpness, brightness normalization.
     enhance_whole_image(str(vault_abs_path))
 
-    # Compute final SHA-256 cryptographic hash and file size of the immutable vault file
     final_file_hash = hash_file_path(vault_abs_path)
     final_size_bytes = vault_abs_path.stat().st_size
+
+    # Deduplication guard: Check if the enhanced image matches an existing vault record
+    existing_final = EvidenceImage.objects.filter(file_hash=final_file_hash).first()
+    if existing_final:
+        vault_abs_path.unlink(missing_ok=True)
+        if batch:
+            batch.total_files += 1
+            batch.duplicate_count += 1
+            batch.save(update_fields=["total_files", "duplicate_count"])
+        return existing_final, "DUPLICATE_SKIPPED"
 
     try:
         vault_relative = str(vault_abs_path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
@@ -499,3 +508,148 @@ def ingest_uploaded_file(
         batch.save(update_fields=["total_files", "ingested_count"])
 
     return image, "INGESTED"
+
+
+def get_or_create_mobile_batch(
+    source_label: str = "",
+    bike_client_id: str = "",
+    force_new: bool = False,
+    max_photos: Optional[int] = None,
+) -> IngestionBatch:
+    """
+    Finds or creates today's active MOBILE batch with a 200-photo limit (100 pairs: 100 Front + 100 Rear).
+    
+    Guarantees:
+    1. Pair Affinity: If bike_client_id is provided and an existing partner image (Front or Rear)
+       was already ingested into a batch today, the complementary photo is assigned to that EXACT same batch
+       so pairs are NEVER split across batches.
+    2. Capacity Rollover: When an active batch reaches max_photos (default 200 photos), the system
+       automatically creates a new sequential batch (e.g. '#2', '#3') to keep memory and OCR inference fast.
+    3. Standard Naming & Status: Batches preserve standard BATCH-YYYYMMDD-HHMMSS-xxxxxx IDs and MOBILE source type.
+    """
+    import re
+    from core.models import VehicleInstallationPair
+
+    today = timezone.localdate()
+    limit = max_photos or getattr(settings, "MAX_MOBILE_BATCH_PHOTOS", 200)
+
+    # 1. Pair Affinity Guard: If this bike already has an image uploaded today, keep both in the SAME batch!
+    clean_bike_id = str(bike_client_id).strip()
+    if clean_bike_id and not force_new:
+        existing_pair = VehicleInstallationPair.objects.filter(
+            operator_note__contains=f"bike_id:{clean_bike_id}",
+            created_at__date=today,
+        ).first()
+        if existing_pair:
+            linked_img = existing_pair.front_image or existing_pair.rear_image
+            if linked_img and linked_img.batch and linked_img.batch.source_type == IngestionBatch.SourceType.MOBILE:
+                logger.info(
+                    "Pair affinity: Binding bike '%s' to existing batch %s (%d photos)",
+                    clean_bike_id, linked_img.batch.batch_id, linked_img.batch.ingested_count
+                )
+                return linked_img.batch
+
+    # Query all mobile batches created today, ordered by creation time
+    qs = IngestionBatch.objects.filter(
+        created_at__date=today,
+        source_type=IngestionBatch.SourceType.MOBILE,
+    ).order_by("created_at")
+
+    # If force_new is not requested, look for the latest batch that still has capacity (< limit)
+    if not force_new:
+        latest = qs.last()
+        if latest and latest.ingested_count < limit:
+            return latest
+
+    # If all existing batches today have reached capacity (>= limit), or force_new is True, or none exist:
+    num_existing = qs.count()
+    batch_index = num_existing + 1
+
+    if source_label:
+        clean_label = source_label.strip()
+        clean_label = re.sub(r"\s*#\d+$", "", clean_label)
+        clean_label = re.sub(r"\s*\(Batch\s*#?\d+\)$", "", clean_label, flags=re.IGNORECASE)
+        label = f"{clean_label} #{batch_index}"
+    else:
+        label = f"Mobile Camera Session {today.strftime('%Y-%m-%d')} #{batch_index}"
+
+    new_batch = create_ingestion_batch(
+        source_type=IngestionBatch.SourceType.MOBILE,
+        source_label=label,
+    )
+    logger.info("Created sequential mobile batch: %s (%s) [Limit: %d photos / %d pairs]", new_batch.batch_id, label, limit, limit // 2)
+    return new_batch
+
+
+def link_or_create_conveyor_pair(
+    bike_client_id: str,
+    image: EvidenceImage,
+    orientation: str,
+    sequence_num: int = 1,
+) -> Tuple["VehicleInstallationPair", bool]:
+    """
+    Directly associates Front and Rear photos belonging to the same motorcycle on the conveyor.
+    Guarantees pairwise symmetry (1 Front + 1 Rear) and preserves the source of truth.
+    Returns: (pair, is_now_complete)
+    """
+    from core.models import VehicleInstallationPair
+    from core.services.itms_web_client import get_current_itms_account
+
+    clean_id = str(bike_client_id).strip()
+    placeholder_plate = f"BIKE-{clean_id[-8:].upper()}" if len(clean_id) >= 4 else f"CONVEYOR-#{sequence_num:03d}"
+    curr_acc = get_current_itms_account()
+
+    # Search for an existing pair created under this bike_client_id or image reference
+    pair = None
+    if image.orientation == EvidenceImage.Orientation.FRONT:
+        pair = VehicleInstallationPair.objects.filter(front_image=image).first()
+    elif image.orientation == EvidenceImage.Orientation.REAR:
+        pair = VehicleInstallationPair.objects.filter(rear_image=image).first()
+
+    if not pair:
+        # Search for pair with this operator note or placeholder
+        pair = VehicleInstallationPair.objects.filter(
+            operator_note__contains=f"bike_id:{clean_id}"
+        ).first()
+
+    if not pair:
+        # If no pair exists yet for this bike, create one
+        pair = VehicleInstallationPair.objects.create(
+            registration_number_detected=image.detected_plate or placeholder_plate,
+            verification_status=VehicleInstallationPair.VerificationStatus.INCOMPLETE,
+            matched_via=VehicleInstallationPair.MatchedVia.MOBILE_CONVEYOR,
+            account_email=curr_acc,
+            operator_note=f"Mobile On-Conveyor (Bike #{sequence_num} | bike_id:{clean_id})",
+        )
+
+    # Attach the image to the appropriate orientation slot
+    is_front = (orientation.upper() == EvidenceImage.Orientation.FRONT)
+    if is_front:
+        pair.front_image = image
+    else:
+        pair.rear_image = image
+
+    # Update canonical detected plate if image has a detected plate
+    if image.detected_plate and (pair.registration_number_detected.startswith("BIKE-") or pair.registration_number_detected.startswith("CONVEYOR-")):
+        pair.registration_number_detected = image.detected_plate
+
+    pair.refresh_completeness()
+    if pair.is_complete:
+        pair.verification_status = VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
+        pair.operator_note = f"Auto-paired via Mobile On-Conveyor Direct Capture (Bike #{sequence_num} | 1F + 1R Complete | bike_id:{clean_id})"
+        image.status = EvidenceImage.Status.MATCHED
+        image.save(update_fields=["status"])
+        if is_front and pair.rear_image:
+            pair.rear_image.status = EvidenceImage.Status.MATCHED
+            pair.rear_image.save(update_fields=["status"])
+        elif not is_front and pair.front_image:
+            pair.front_image.status = EvidenceImage.Status.MATCHED
+            pair.front_image.save(update_fields=["status"])
+    else:
+        missing_side = "REAR" if is_front else "FRONT"
+        pair.operator_note = f"Mobile On-Conveyor: Bike #{sequence_num} awaiting {missing_side} photo (bike_id:{clean_id})"
+        image.status = EvidenceImage.Status.INCOMPLETE
+        image.save(update_fields=["status"])
+
+    pair.save()
+    return pair, pair.is_complete

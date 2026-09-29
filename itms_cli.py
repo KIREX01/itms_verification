@@ -139,7 +139,7 @@ def start_daemon(extra_args=None, port=8000):
         webbrowser.open(url)
         return
 
-    py_exe = get_python_exe(windowless=True)
+    py_exe = get_python_exe(windowless=False)
     log_dir = PROJECT_ROOT / "media"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "itms_web.log"

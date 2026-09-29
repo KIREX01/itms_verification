@@ -1,0 +1,459 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#0d0f12">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>ITMS Mobile Capture - Verification Copilot</title>
+
+    <link rel="stylesheet" href="{% static 'core/css/mobile_companion.css' %}">
+</head>
+<body>
+    <!-- Top National Flag Ribbon -->
+    <div class="uganda-flag-ribbon"></div>
+
+    <div class="mobile-app-wrapper">
+        <!-- App Header Bar -->
+        <header class="mobile-header">
+            <div class="header-branding">
+                <span class="brand-symbol">🏍️</span>
+                <div>
+                    <h1 class="brand-title">ITMS MOBILE CAPTURE</h1>
+                    <div class="brand-subtitle">VERIFICATION COPILOT • UGANDA</div>
+                </div>
+            </div>
+
+            <!-- Header Controls: Device Lease Info, Signal Pill & Disconnect Button -->
+            <div class="header-actions">
+                <div class="signal-pill" id="signal-pill" onclick="toggleOutboxDrawer()">
+                    <span class="signal-dot" id="signal-dot">●</span>
+                    <span class="signal-text" id="signal-text">Connecting...</span>
+                </div>
+                <button class="btn-disconnect-session" id="btn-disconnect-session" title="Release connection slot for another phone" onclick="disconnectDeviceSession()">
+                    ✕ Disconnect
+                </button>
+            </div>
+        </header>
+
+        <!-- Network / Signal Offline Alert Banner -->
+        <div class="network-alert-banner" id="network-alert-banner" style="display:none;">
+            <span class="alert-icon">📶</span>
+            <div class="alert-content">
+                <strong id="alert-title">Offline Buffering Active</strong>
+                <span id="alert-desc">Photos are saved locally on phone and will auto-sync when back in range.</span>
+            </div>
+        </div>
+
+        <!-- Active Batch Capacity & Phone Lease Bar -->
+        <div class="batch-capacity-bar" id="batch-capacity-bar">
+            <div class="batch-capacity-info">
+                <span class="batch-label-tag" id="mobile-batch-label">📦 {{ active_batch_label|default:"Mobile Batch #1" }}</span>
+                <span class="batch-limit-pill" id="mobile-batch-limit-pill">0/200 Photos (100 Bikes)</span>
+            </div>
+            <div class="batch-progress-track">
+                <div class="batch-progress-fill" id="mobile-batch-progress-fill" style="width: 0%;"></div>
+            </div>
+        </div>
+
+        <!-- Batch Complete / Rollover Banner -->
+        <div class="batch-rollover-banner" id="batch-rollover-banner" style="display:none;">
+            <span style="font-size:1.3rem;">🎉</span>
+            <div>
+                <strong style="display:block; color:var(--ug-green); font-size:0.85rem;">Batch Limit Reached (200 Photos / 100 Pairs)!</strong>
+                <span id="batch-rollover-desc" style="font-size:0.75rem; color:var(--ug-text-muted);">Next photo will automatically start a new batch.</span>
+            </div>
+        </div>
+
+        <!-- Mode Selector Switch -->
+        <div class="mode-selector-bar">
+            <button class="mode-btn active" id="btn-mode-conveyor" onclick="switchMobileMode('conveyor')">
+                <span class="mode-icon">🏭</span>
+                <span class="mode-label">Conveyor</span>
+            </button>
+            <button class="mode-btn" id="btn-mode-uturn" onclick="switchMobileMode('uturn')">
+                <span class="mode-icon">🚶</span>
+                <span class="mode-label">Off-Conveyor</span>
+            </button>
+            <button class="mode-btn" id="btn-mode-stock" onclick="switchMobileMode('stock')">
+                <span class="mode-icon">📦</span>
+                <span class="mode-label">Stock Scan</span>
+            </button>
+        </div>
+
+        <!-- ================================================================= -->
+        <!-- MODE 1: ON-CONVEYOR WORKFLOW (1-by-1 Motorcycle Inspection) -->
+        <!-- ================================================================= -->
+        <main class="mode-container active" id="container-conveyor">
+            <!-- Active Bike Number Badge & Stepper Card -->
+            <div class="bike-status-card">
+                <div class="bike-status-header">
+                    <div>
+                        <span class="card-eyebrow">ASSEMBLY CONVEYOR INSPECTION</span>
+                        <h2 class="bike-target-title" id="conveyor-bike-label">Motorcycle #1</h2>
+                    </div>
+                    <div class="bike-pair-state" id="conveyor-pair-badge">
+                        <span class="badge badge-yellow" id="badge-pair-progress">0 of 2 Captured</span>
+                    </div>
+                </div>
+
+                <!-- 2-Step Progress Indicator -->
+                <div class="step-progress-row">
+                    <div class="step-pill active" id="pill-step-front">
+                        <span class="step-num">1</span>
+                        <span class="step-name">Front Angle</span>
+                        <span class="step-check" id="check-step-front">⭕</span>
+                    </div>
+                    <div class="step-arrow">➔</div>
+                    <div class="step-pill" id="pill-step-rear">
+                        <span class="step-num">2</span>
+                        <span class="step-name">Rear Angle</span>
+                        <span class="step-check" id="check-step-rear">⭕</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Single Dynamic Primary Shutter Hero -->
+            <div class="smart-shutter-container">
+                <button class="smart-shutter-btn shutter-step-front" id="btn-conveyor-smart" onclick="handleConveyorSmartShutter()">
+                    <span class="smart-shutter-icon" id="conveyor-smart-icon">📸</span>
+                    <span class="smart-shutter-title" id="conveyor-smart-title">Take FRONT Photo</span>
+                    <span class="smart-shutter-subtitle" id="conveyor-smart-sub">Step 1: Headlamp &amp; Front Plate</span>
+                </button>
+            </div>
+
+            <!-- Live Side-by-Side Previews -->
+            <div class="conveyor-previews-row">
+                <!-- Front Thumbnail Card -->
+                <div class="preview-mini-card" id="card-front">
+                    <div class="mini-card-header">
+                        <span>1. FRONT</span>
+                        <div class="mini-card-actions">
+                            <span class="mini-status" id="status-tag-front">Empty</span>
+                            <button class="mini-btn-view" id="btn-view-front" style="display:none;" onclick="inspectConveyorPhoto(event, 'FRONT')">🔍 View</button>
+                        </div>
+                    </div>
+                    <div class="mini-preview-box" id="preview-box-front" onclick="handlePreviewCardClick('FRONT')">
+                        <span class="mini-placeholder" id="placeholder-front">🚘 Snap Front</span>
+                        <img id="img-preview-front" class="mini-image" style="display:none;" alt="Front Preview">
+                    </div>
+                </div>
+
+                <!-- Rear Thumbnail Card -->
+                <div class="preview-mini-card" id="card-rear">
+                    <div class="mini-card-header">
+                        <span>2. REAR</span>
+                        <div class="mini-card-actions">
+                            <span class="mini-status" id="status-tag-rear">Empty</span>
+                            <button class="mini-btn-view" id="btn-view-rear" style="display:none;" onclick="inspectConveyorPhoto(event, 'REAR')">🔍 View</button>
+                        </div>
+                    </div>
+                    <div class="mini-preview-box" id="preview-box-rear" onclick="handlePreviewCardClick('REAR')">
+                        <span class="mini-placeholder" id="placeholder-rear">🏍️ Snap Rear</span>
+                        <img id="img-preview-rear" class="mini-image" style="display:none;" alt="Rear Preview">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quality & Defocus Correction Card (Displayed when photo is blurry or dark) -->
+            <div class="quality-correction-card" id="quality-correction-card" style="display:none;">
+                <div class="quality-correction-header">
+                    <span class="quality-warn-icon">⚠️</span>
+                    <div class="quality-warn-title-group">
+                        <strong id="quality-warn-title">Photo Out of Focus / Blurry</strong>
+                        <span id="quality-warn-score" class="quality-score-pill">Sharpness: 34 / 100</span>
+                    </div>
+                </div>
+                <div class="quality-correction-body">
+                    <p id="quality-warn-desc">
+                        The camera was shaking or out of focus. Clear plate numbers are required for optical verification.
+                    </p>
+                    <div class="quality-tips-box">
+                        <span class="tip-title">💡 Correction Tips:</span>
+                        <ul class="tip-bullets">
+                            <li>Hold phone with two hands and tap plate on screen to autofocus.</li>
+                            <li>Stand 1.5 &ndash; 2 meters away from the motorcycle.</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="quality-correction-actions">
+                    <button class="btn-quality-retake" id="btn-quality-retake" onclick="handleQualityRetake()">
+                        📸 Retake Photo Now
+                    </button>
+                    <button class="btn-quality-keep" onclick="dismissQualityWarning()">
+                        Keep Photo Anyway ➔
+                    </button>
+                </div>
+            </div>
+
+            <!-- Advance to Next Bike Button -->
+            <div class="conveyor-footer-actions">
+                <button class="next-bike-btn" id="btn-next-bike" onclick="advanceToNextBike()" disabled>
+                    <span>✓ Pair Complete ➔ Advance to Next Bike</span>
+                    <span class="next-icon">➔</span>
+                </button>
+            </div>
+        </main>
+
+        <!-- ================================================================= -->
+        <!-- MODE 2: OFF-CONVEYOR WORKFLOW (U-Turn Yard Walk) -->
+        <!-- ================================================================= -->
+        <main class="mode-container" id="container-uturn">
+            <!-- Visual U-Turn Progress Road -->
+            <div class="uturn-flow-road">
+                <div class="road-step road-step-rear active" id="road-step-rear" onclick="if(MobileState.uturn.phase==='FRONT') toggleUturnTurnaround();">
+                    <div class="road-step-top">
+                        <span class="step-num">1</span>
+                        <span class="road-badge" id="road-rear-badge">0 Rears</span>
+                    </div>
+                    <span class="road-title">Going Out: REARS</span>
+                </div>
+
+                <div class="road-arrow" id="road-arrow-indicator">➔</div>
+
+                <div class="road-step road-step-front" id="road-step-front" onclick="if(MobileState.uturn.phase==='REAR' && MobileState.uturn.rearCount > 0) toggleUturnTurnaround();">
+                    <div class="road-step-top">
+                        <span class="step-num">2</span>
+                        <span class="road-badge" id="road-front-badge">0 Fronts</span>
+                    </div>
+                    <span class="road-title">Walking Back: FRONTS</span>
+                </div>
+            </div>
+
+            <!-- Active Phase Guidance Bar -->
+            <div class="uturn-guidance-bar" id="uturn-guidance-bar">
+                <span class="guidance-icon" id="uturn-guidance-icon">🚶</span>
+                <span class="guidance-text" id="uturn-instruction-text">
+                    Walk down row snapping <strong>REAR</strong> plates. Tap turnaround when reaching the end.
+                </span>
+            </div>
+
+            <!-- Giant Primary Shutter Button -->
+            <div class="big-shutter-container">
+                <button class="big-shutter-btn shutter-rear" id="btn-big-shutter" onclick="triggerUturnCapture()">
+                    <span class="shutter-icon" id="shutter-icon">📸</span>
+                    <span class="shutter-main-text" id="shutter-main-text">Capture REAR</span>
+                    <span class="shutter-counter" id="shutter-counter">Bike #1</span>
+                </button>
+            </div>
+
+            <!-- Prominent Turnaround Callout Card (Visible when rears >= 1) -->
+            <div class="turnaround-callout-card" id="turnaround-callout" style="display:none;">
+                <div class="turnaround-callout-content">
+                    <span class="turnaround-callout-icon">🔄</span>
+                    <div class="turnaround-callout-text">
+                        <strong id="turnaround-callout-title">Reached the end of the row?</strong>
+                        <span id="turnaround-callout-sub">Turn around to photograph FRONT plates walking back.</span>
+                    </div>
+                </div>
+                <button class="btn-turnaround-action" id="btn-turnaround" onclick="toggleUturnTurnaround()">
+                    <span id="turnaround-btn-label">TURN AROUND ➔ SWITCH TO FRONTS</span>
+                    <span class="turnaround-arrow">↩️</span>
+                </button>
+            </div>
+
+            <!-- Return Leg Match Tracking Banner (Visible during Fronts) -->
+            <div class="return-match-banner" id="return-match-banner" style="display:none;">
+                <div class="match-info">
+                    <span id="return-match-text">Matching 0 of 0 bikes</span>
+                    <span class="match-percent" id="return-match-percent">0%</span>
+                </div>
+                <div class="match-progress-bar">
+                    <div class="match-progress-fill" id="match-progress-fill" style="width: 0%;"></div>
+                </div>
+                <button class="btn-switch-back" onclick="toggleUturnTurnaround()">
+                    ↩️ Switch back to Rears
+                </button>
+            </div>
+
+            <!-- Recent Stream Mini Strip -->
+            <div class="recent-stream-container">
+                <div class="recent-stream-header">
+                    <span>RECENT CAPTURES (<span id="uturn-total-count">0</span>)</span>
+                    <button class="btn-undo-snap" id="btn-undo-snap" onclick="undoLastUturnSnap()" style="display:none;">
+                        ↩️ Retake Last
+                    </button>
+                </div>
+                <div class="uturn-recent-strip" id="uturn-recent-strip">
+                    <div class="empty-strip-msg">Snapped photos will appear here</div>
+                </div>
+            </div>
+
+            <!-- Finish U-Turn Batch Button -->
+            <div class="uturn-footer-actions">
+                <button class="finish-batch-btn" id="btn-finish-uturn" onclick="finishUturnBatch()" disabled>
+                    <span>🏁 Complete U-Turn Batch</span>
+                </button>
+            </div>
+        </main>
+
+        <!-- ================================================================= -->
+        <!-- MODE 3: STOCK QR SCAN WORKFLOW (Dispatches, Deliveries, Transfers) -->
+        <!-- ================================================================= -->
+        <main class="mode-container" id="container-stock" style="display:none;">
+            <div class="bike-status-card">
+                <div class="bike-status-header">
+                    <div>
+                        <span class="card-eyebrow">WAREHOUSE & BOND STOCK SCANNER</span>
+                        <h2 class="bike-target-title" id="stock-target-title">Plate QR Intake</h2>
+                    </div>
+                    <div class="bike-pair-state">
+                        <span class="badge badge-green" id="stock-scanned-count-badge">0 Scanned</span>
+                    </div>
+                </div>
+
+                <!-- Stock Sub-Mode Tabs -->
+                <div class="step-progress-row" style="margin-top:8px;">
+                    <button class="step-pill active" id="pill-stock-dispatch" onclick="setStockSubMode('DISPATCH')">
+                        <span class="step-num">1</span>
+                        <span class="step-text">Dispatch Line</span>
+                    </button>
+                    <button class="step-pill" id="pill-stock-delivery" onclick="setStockSubMode('DELIVERY')">
+                        <span class="step-num">2</span>
+                        <span class="step-text">New Delivery</span>
+                    </button>
+                    <button class="step-pill" id="pill-stock-return" onclick="setStockSubMode('RETURN')">
+                        <span class="step-num">3</span>
+                        <span class="step-text">Line Return</span>
+                    </button>
+                </div>
+
+                <!-- Category Switcher: PSV (Public White) vs PMO (Private Yellow) -->
+                <div style="display:flex; gap:8px; margin: 10px 0;">
+                    <button class="btn btn-sm" id="btn-cat-psv" style="flex:1; background:#0284c7; color:#fff; border-radius:6px; padding:8px;" onclick="setStockCategory('PSV')">
+                        ⚪ Public White (PSV)
+                    </button>
+                    <button class="btn btn-sm" id="btn-cat-pmo" style="flex:1; background:#374151; color:#cbd5e1; border-radius:6px; padding:8px;" onclick="setStockCategory('PMO')">
+                        🟡 Private Yellow (PMO)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Plate Entry Card -->
+            <div class="camera-card" style="margin-top:10px;">
+                <div style="padding:14px; background:#161b22; display:flex; flex-direction:column; gap:10px;">
+                    <label style="color:#94a3b8; font-size:0.75rem; text-transform:uppercase;">Quick Plate / Barcode Entry</label>
+                    <div style="display:flex; gap:8px;">
+                        <input type="text" id="input-stock-barcode" placeholder="Scan or enter plate (e.g. UMA711PW)..." style="flex:1; padding:12px; border-radius:6px; background:#0d1117; color:#fff; border:1px solid #30363d; font-size:1.1rem; font-weight:bold; text-transform:uppercase;" onkeydown="if(event.key==='Enter') submitSingleStockPlate();">
+                        <button class="btn btn-primary" onclick="submitSingleStockPlate()" style="min-width:60px; font-weight:bold;">+ Add</button>
+                    </div>
+                    <textarea id="text-stock-bulk" rows="3" placeholder="Or paste multiple plates (newline-separated)..." style="width:100%; padding:10px; border-radius:6px; background:#0d1117; color:#fff; border:1px solid #30363d; font-family:monospace; text-transform:uppercase;"></textarea>
+                    <button class="btn" style="background:#1e293b; color:#cbd5e1; border:1px solid #475569;" onclick="addBulkStockPlates()">Add Pasted Plates to Queue</button>
+                </div>
+            </div>
+
+            <!-- Scanned Batch List & Sync Button -->
+            <div class="recent-captures-tray" style="margin-top:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <strong style="color:var(--ug-yellow);">Staged Queue (<span id="stock-queue-count">0</span> plates)</strong>
+                    <button class="btn btn-sm btn-success" id="btn-sync-stock" onclick="syncStockScansToServer()" style="font-weight:bold;">
+                        📤 Sync to Server
+                    </button>
+                </div>
+                <div id="stock-scanned-list" style="max-height:160px; overflow-y:auto; font-family:monospace; font-size:0.85rem; color:#cbd5e1; background:#0d1117; padding:8px; border-radius:6px; border:1px solid #30363d;">
+                    <div style="color:#64748b; text-align:center; padding:12px;">No plates staged yet. Scan or paste above.</div>
+                </div>
+            </div>
+        </main>
+
+        <!-- ================================================================= -->
+        <!-- Persistent Bottom Outbox & Sync Tray -->
+        <!-- ================================================================= -->
+        <footer class="outbox-tray" id="outbox-tray">
+            <div class="outbox-summary-bar" onclick="toggleOutboxDrawer()">
+                <div class="outbox-info-left">
+                    <span class="outbox-icon" id="outbox-icon">📦</span>
+                    <span class="outbox-count-text" id="outbox-count-text">Outbox: 0 Pending (Synced)</span>
+                </div>
+                <div class="outbox-info-right">
+                    <button class="sync-now-btn" id="btn-sync-now" onclick="manualSyncOutbox(event)">Sync Now 🔄</button>
+                    <span class="drawer-caret" id="drawer-caret">▲</span>
+                </div>
+            </div>
+
+            <!-- Expandable Outbox Queue Drawer -->
+            <div class="outbox-drawer-content" id="outbox-drawer-content" style="display:none;">
+                <div class="drawer-header">
+                    <span>PHONE LOCAL STORAGE QUEUE (INDEXEDDB)</span>
+                    <span id="drawer-storage-status">Safe offline</span>
+                </div>
+                <div class="outbox-items-list" id="outbox-items-list">
+                    <div class="empty-outbox-message">No pending photos. All evidence synced to laptop!</div>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Hidden Native Camera Inputs (Full Megapixel Optical Hardware) -->
+    <input type="file" id="input-native-front" accept="image/*" capture="environment" style="display:none;" onchange="handleNativeFileCaptured(this, 'FRONT')">
+    <input type="file" id="input-native-rear" accept="image/*" capture="environment" style="display:none;" onchange="handleNativeFileCaptured(this, 'REAR')">
+    <input type="file" id="input-native-uturn" accept="image/*" capture="environment" style="display:none;" onchange="handleNativeUturnFileCaptured(this)">
+
+    <!-- Photo Inspector Lightbox Modal (Full photo review & retake) -->
+    <div class="photo-lightbox-modal" id="photo-lightbox-modal" style="display:none;" onclick="if(event.target===this) closePhotoInspector();">
+        <div class="lightbox-dialog">
+            <div class="lightbox-header">
+                <div>
+                    <span class="lightbox-eyebrow" id="lightbox-eyebrow">PHOTO INSPECTOR</span>
+                    <h3 class="lightbox-title" id="lightbox-title">FRONT Angle</h3>
+                </div>
+                <button class="lightbox-close-btn" onclick="closePhotoInspector()">✕</button>
+            </div>
+
+            <div class="lightbox-image-box">
+                <img id="lightbox-img" class="lightbox-img" src="" alt="Inspected Photo">
+            </div>
+
+            <!-- Quality & Focus Assessment Metrics -->
+            <div class="lightbox-metrics-bar" id="lightbox-metrics-bar">
+                <div class="metric-pill" id="lightbox-sharpness-pill">
+                    <span class="metric-icon">🔍</span>
+                    <span id="lightbox-sharpness-text">Sharpness: Checking...</span>
+                </div>
+                <div class="metric-pill" id="lightbox-exposure-pill">
+                    <span class="metric-icon">💡</span>
+                    <span id="lightbox-exposure-text">Exposure: Checking...</span>
+                </div>
+            </div>
+
+            <div class="lightbox-footer">
+                <button class="lightbox-retake-btn" id="lightbox-btn-retake" onclick="handleLightboxRetake()">
+                    📸 Retake Photo
+                </button>
+                <button class="lightbox-done-btn" onclick="closePhotoInspector()">
+                    Keep / Done ✓
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Server Load Protection: Device Limit Exceeded Modal -->
+    <div class="device-limit-overlay" id="device-limit-modal" style="display:none;">
+        <div class="device-limit-card">
+            <div class="device-limit-icon">🔒</div>
+            <h2 class="device-limit-title">Station In Use</h2>
+            <p class="device-limit-desc">
+                To prevent laptop and server overload, only <strong id="limit-max-count">1</strong> mobile camera device can be active at a time.
+            </p>
+            <div class="device-limit-active-box" id="device-limit-active-box">
+                <span class="active-device-label">Currently Connected Device:</span>
+                <div class="active-device-name" id="active-device-info">Another Phone (192.168.8.x)</div>
+            </div>
+            <p class="device-limit-sub">
+                Ask the other operator to disconnect or wait until their session concludes.
+            </p>
+            <div class="device-limit-actions">
+                <button class="btn-retry-limit" onclick="retryDeviceConnection()">
+                    Check Availability 🔄
+                </button>
+                <span class="auto-retry-text" id="auto-retry-countdown">Auto-checking in 5s...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Client-Side Engine -->
+    <script src="{% static 'core/js/mobile_companion.js' %}"></script>
+</body>
+</html>

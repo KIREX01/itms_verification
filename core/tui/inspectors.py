@@ -134,6 +134,35 @@ class InspectorPane(Static):
                 fail_msg = escape(latest_fail.message[:75] + ("..." if len(latest_fail.message) > 75 else ""))
                 lines.append(f"[b]Failure Reason:[/b] [bold red]{fail_msg}[/bold red]")
 
+        # Resolve ITMS plate lifecycle state
+        lifecycle_lines = []
+        det_plate = pair.registration_number_detected
+        if det_plate and not det_plate.startswith("PAIR-") and not det_plate.startswith("MISSING-"):
+            try:
+                from core.services.plate_lifecycle_service import resolve_plate_lifecycle
+                res = resolve_plate_lifecycle(det_plate, query_live_if_missing=False)
+                badge = f"[{res.badge_style}]  {res.badge_label}  [/{res.badge_style}]"
+                lifecycle_lines.append(f"[b]ITMS Lifecycle:[/b] {badge}")
+                if res.is_unallocated:
+                    lifecycle_lines.append(
+                        f"[b]Kit Stock:[/b]     [bold green]{escape(res.kit_code)}[/bold green] [dim]({escape(res.warehouse[:28])})[/dim]  │  "
+                        f"Serials: F: [cyan]{escape(res.front_plate_serial or '—')}[/cyan] R: [cyan]{escape(res.rear_plate_serial or '—')}[/cyan] GPS: [cyan]{escape(res.gps_tracker or '—')}[/cyan]"
+                    )
+                elif res.is_installed:
+                    lifecycle_lines.append(
+                        f"[b]Archive Order:[/b] [bold cyan]#{escape(res.order_number)}[/bold cyan]  │  "
+                        f"Officer: {escape(res.officer or 'Officer')}  │  Date: {escape(res.install_date or 'Recorded')}"
+                    )
+                elif res.is_allocated:
+                    lifecycle_lines.append(
+                        f"[b]Active Order:[/b]  [bold yellow]#{escape(res.order_number)}[/bold yellow]  │  "
+                        f"Stage: [bold yellow]{escape(res.order_status or 'Active')}[/bold yellow]  │  Wh: {escape(res.warehouse[:22])}"
+                    )
+            except Exception:
+                pass
+
+        lines.extend(lifecycle_lines)
+
         lines.extend([
             f"[b]Match Quality:[/b]  {escape(str(pair.match_type))} (score: {pair.match_score if pair.match_score is not None else 'N/A'}, via: [cyan]{escape(str(matched_via_tag))}[/cyan])",
             f"[b]Pairing Reason:[/b] [cyan]{escape(pair.operator_note or '—')}[/cyan]",
@@ -369,6 +398,88 @@ class InspectorPane(Static):
             "[b]Quick Actions:[/b]",
             " [b yellow]V[/b yellow]: View Side-by-Side Photos (GUI)",
             " [b cyan]Enter[/b cyan]: Inspect Full Hardware & Serials",
+            " [b green]F[/b green]: Cycle Navigation Sub-View",
+        ]
+        self.update("\n".join(lines))
+
+    def show_itms_kit(self, kit: Optional[Dict[str, Any]]):
+        """Displays rich hardware component breakdown and metadata for a selected ITMS installation kit."""
+        if not kit:
+            self.update(
+                "[dim]No Installation Kit selected.\n"
+                "Use ↑/↓ arrow keys to browse table.\n"
+                "Press [b cyan]Enter[/b cyan] or click [b]Kit Details[/b] to fetch full breakdown.\n"
+                "Press [b yellow]F[/b yellow] to cycle sub-views.[/dim]"
+            )
+            return
+
+        kit_code = escape(str(kit.get("kit_code") or kit.get("number") or "N/A"))
+        plate = escape(str(kit.get("registration_number", "N/A")))
+        status = str(kit.get("status", "New"))
+        created_date = escape(str(kit.get("created_date", "—")))
+        warehouse = escape(str(kit.get("warehouse", "—")))
+        created_by = escape(str(kit.get("created_by_user", "—")))
+
+        status_color = "bold green" if status.lower() == "new" else "bold cyan" if "installed" in status.lower() else "yellow"
+
+        # Hardware breakdown (from detail dictionary or list row fallback)
+        front_plate = kit.get("front_plate") or {}
+        rear_plate = kit.get("rear_plate") or {}
+        gps_tracker = kit.get("gps_tracker") or {}
+        sim_card = kit.get("sim_card") or {}
+        front_tracker = kit.get("front_tracker") or {}
+        rear_tracker = kit.get("rear_tracker") or {}
+
+        # Handle either dicts (from detail inspection) or string serials (from list row)
+        fp_serial = escape(front_plate.get("serial_number", "") if isinstance(front_plate, dict) else str(front_plate or ""))
+        if not fp_serial or fp_serial == "{}":
+            fp_serial = escape(str(kit.get("front_plate") or "—")) if not isinstance(kit.get("front_plate"), dict) else "—"
+        fp_article = escape(front_plate.get("article_name", "PN-PBL-M-UMA-SQR-BWW") if isinstance(front_plate, dict) else (kit.get("front_plate_article") or "PN-PBL-M-UMA-SQR-BWW"))
+
+        rp_serial = escape(rear_plate.get("serial_number", "") if isinstance(rear_plate, dict) else str(rear_plate or ""))
+        if not rp_serial or rp_serial == "{}":
+            rp_serial = escape(str(kit.get("rear_plate") or "—")) if not isinstance(kit.get("rear_plate"), dict) else "—"
+        rp_article = escape(rear_plate.get("article_name", "PN-PBL-M-UMA-SQR-BWW") if isinstance(rear_plate, dict) else (kit.get("rear_plate_article") or "PN-PBL-M-UMA-SQR-BWW"))
+
+        gps_serial = escape(gps_tracker.get("serial_number", "") if isinstance(gps_tracker, dict) else str(gps_tracker or ""))
+        if not gps_serial or gps_serial == "{}":
+            gps_serial = escape(str(kit.get("gps_tracker") or "—")) if not isinstance(kit.get("gps_tracker"), dict) else "—"
+        gps_article = escape(gps_tracker.get("article_name", "GPS") if isinstance(gps_tracker, dict) else (kit.get("gps_article") or "GPS"))
+        gps_mac = escape(gps_tracker.get("mac_address", "—") if isinstance(gps_tracker, dict) else "—") or "—"
+
+        sim_serial = escape(sim_card.get("serial_number", "") if isinstance(sim_card, dict) else str(kit.get("sim_serial") or "—")) or "—"
+        sim_article = escape(sim_card.get("article_name", "SIM chip") if isinstance(sim_card, dict) else (kit.get("sim_article") or "SIM chip"))
+        sim_mac = escape(sim_card.get("mac_address", "") if isinstance(sim_card, dict) else str(kit.get("sim_mac") or "—")) or "—"
+
+        ft_serial = escape(front_tracker.get("serial_number", "") if isinstance(front_tracker, dict) else str(front_tracker or ""))
+        if not ft_serial or ft_serial == "{}":
+            ft_serial = escape(str(kit.get("front_tracker") or "—")) if not isinstance(kit.get("front_tracker"), dict) else "—"
+        ft_article = escape(front_tracker.get("article_name", "BLE") if isinstance(front_tracker, dict) else (kit.get("front_tracker_article") or "BLE"))
+
+        rt_serial = escape(rear_tracker.get("serial_number", "") if isinstance(rear_tracker, dict) else str(rear_tracker or ""))
+        if not rt_serial or rt_serial == "{}":
+            rt_serial = escape(str(kit.get("rear_tracker") or "—")) if not isinstance(kit.get("rear_tracker"), dict) else "—"
+        rt_article = escape(rear_tracker.get("article_name", "BLE") if isinstance(rear_tracker, dict) else (kit.get("rear_tracker_article") or "BLE"))
+
+        lines = [
+            f"[b cyan]═══ Installation Kit Inspector ═══[/b cyan]",
+            f"[b]Kit Code:[/b]       [bold white]{kit_code}[/bold white]",
+            f"[b]Registration:[/b]   [bold green]{plate}[/bold green]",
+            f"[b]Status:[/b]         [{status_color}]{escape(status)}[/{status_color}]",
+            f"[b]Created By:[/b]     {created_by}",
+            f"[b]Created Date:[/b]   {created_date}",
+            f"[b]Warehouse:[/b]      {warehouse[:30]}",
+            "",
+            "[b underline]Component Inventory & Hardware[/b underline]:",
+            f" [bold white]Front Plate:[/bold white]    {fp_serial} [dim]({fp_article})[/dim]",
+            f" [bold white]Rear Plate:[/bold white]     {rp_serial} [dim]({rp_article})[/dim]",
+            f" [bold white]GPS Tracker:[/bold white]    {gps_serial} [dim]({gps_article})[/dim]",
+            f" [bold white]SIM Card:[/bold white]       {sim_serial} [cyan]MAC:[/cyan] {sim_mac}",
+            f" [bold white]Front BLE:[/bold white]      {ft_serial} [dim]({ft_article})[/dim]",
+            f" [bold white]Rear BLE:[/bold white]       {rt_serial} [dim]({rt_article})[/dim]",
+            "",
+            "[b]Quick Actions:[/b]",
+            " [b cyan]Enter[/b cyan]: Load Full Hardware Info from ITMS",
             " [b green]F[/b green]: Cycle Navigation Sub-View",
         ]
         self.update("\n".join(lines))

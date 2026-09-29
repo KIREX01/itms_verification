@@ -1,17 +1,32 @@
 """
 Modal dialog screens for the ITMS Operator TUI.
 """
+from datetime import date, datetime
 import os
-from typing import Dict, List, Optional
+import re
+from typing import Any, Dict, List, Optional, Set, Tuple
 from django.conf import settings
+from django.utils import timezone
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Checkbox, DataTable, Input, ProgressBar, RichLog, Static
+from textual.widgets import (
+    Button,
+    Checkbox,
+    DataTable,
+    Input,
+    ProgressBar,
+    RichLog,
+    Select,
+    Static,
+    TabbedContent,
+    TabPane,
+    TextArea,
+)
 
 from core.tui.inspectors import escape_markup, escape
-from core.models import EvidenceImage, InstallationOrder, SubmissionAuditLog, VehicleInstallationPair
+from core.models import EvidenceImage, InstallationKit, InstallationOrder, SubmissionAuditLog, VehicleInstallationPair
 from core.matcher.association import get_closest_candidates
 from core.services import viewer
 from core.vision import normalizer
@@ -194,8 +209,9 @@ class PlateQuickEntryModal(ModalScreen[Optional[Dict]]):
         super().__init__(**kwargs)
         self.pair = pair
         self.all_active_orders: List[InstallationOrder] = []
-        self._filtered_orders: List[InstallationOrder] = []
-        self._selected_order_override: Optional[InstallationOrder] = None
+        self.all_kits: List[InstallationKit] = []
+        self._filtered_items: List[Dict[str, Any]] = []
+        self._selected_item_override: Optional[Dict[str, Any]] = None
         self._updating_from_table: bool = False
 
     def compose(self) -> ComposeResult:
@@ -209,18 +225,19 @@ class PlateQuickEntryModal(ModalScreen[Optional[Dict]]):
             f"[b]Pair ID:[/b] [bold yellow]{str(p.id)[:8]}[/bold yellow]  │  "
             f"[b]Current Tag:[/b] [bold white]{escape(current_tag)}[/bold white]  │  "
             f"[b]Front:[/b] [green]{escape(f_file)}[/green]  │  [b]Rear:[/b] [green]{escape(r_file)}[/green]",
-            "[dim]Type the plate number below, or select from active ITMS orders. "
+            "[dim]Type the plate number below, or select from active ITMS orders or unallocated kits. "
             "Press [bold green]Enter[/bold green] to apply & approve, [bold cyan]Tab[/bold cyan] to auto-complete, [bold cyan]V[/bold cyan] to preview photos side-by-side, or [bold red]Esc[/bold red] to cancel.[/dim]",
         ]
 
         with Vertical(id="modal-dialog", classes="plate-entry-modal"):
             yield Static("\n".join(header_lines), id="modal-header")
             yield Input(
-                placeholder="Type plate (e.g. UMA 946DQ) or search Order # / VIN...",
+                placeholder="Type plate (e.g. UMA 300PW) or search Order # / Kit Code / VIN...",
                 value="" if current_tag.startswith("PAIR-") or current_tag.startswith("MISSING-") else current_tag,
                 id="input-plate",
             )
-            yield Static("[bold white]Active ITMS Orders (Live Filtered):[/bold white]", id="active-orders-label")
+            yield Static("", id="plate-lifecycle-card")
+            yield Static("[bold white]Active Orders & Unallocated Kits (Live Filtered):[/bold white]", id="active-orders-label")
             yield DataTable(id="table-active-orders")
             with Horizontal(id="modal-footer"):
                 yield Button("Preview Photos [V]", variant="default", id="btn-preview-photos")
@@ -230,7 +247,7 @@ class PlateQuickEntryModal(ModalScreen[Optional[Dict]]):
 
     def on_mount(self) -> None:
         table = self.query_one("#table-active-orders", DataTable)
-        table.add_columns("Order #", "Registration Plate", "VIN", "Stage / Status", "Warehouse")
+        table.add_columns("Type / Record #", "Registration Plate", "VIN / Hardware", "Lifecycle Status", "Warehouse")
         table.cursor_type = "row"
 
         # Load active / non-archived orders from DB
@@ -244,17 +261,190 @@ class PlateQuickEntryModal(ModalScreen[Optional[Dict]]):
                 InstallationOrder.objects.all().order_by("-updated_at")[:500]
             )
 
-        self._filtered_orders = list(self.all_active_orders)
-        self._populate_orders_table()
+        # Load installation kits from DB
+        self.all_kits = list(
+            InstallationKit.objects.all().order_by("-created_date", "-id")[:500]
+        )
 
-        # Focus input for immediate typing
         input_widget = self.query_one("#input-plate", Input)
         input_widget.focus()
 
-        # If input has an initial value, filter immediately
         init_val = input_widget.value.strip()
-        if init_val:
-            self._filter_orders_for_query(init_val)
+        self._update_lifecycle_card(init_val)
+        self._filter_items_for_query(init_val)
+
+    def _update_lifecycle_card(self, text: str) -> None:
+        try:
+            card = self.query_one("#plate-lifecycle-card", Static)
+        except Exception:
+            return
+        val = (text or "").strip()
+        if not val or val.startswith("PAIR-") or val.startswith("MISSING-"):
+            card.update(
+                "[dim]💡 Type a license plate above (e.g. [bold cyan]UMA 300PW[/bold cyan] or [bold cyan]UMA 696PU[/bold cyan]) "
+                "to inspect its ITMS stock, active order, or archive lifecycle.[/dim]"
+            )
+            return
+
+        from core.services.plate_lifecycle_service import resolve_plate_lifecycle, format_lifecycle_card
+        from core.services.report_service import parse_target_date_suffix, format_date_suffix_readable
+
+        date_suf = parse_target_date_suffix(val)
+        if date_suf and len(date_suf) == 6 and date_suf.isdigit() and not re.match(r"^[A-Za-z]{3}\s*\d{3}", val):
+            formatted = format_date_suffix_readable(date_suf)
+            archived_cnt = InstallationOrder.objects.filter(order_number__endswith=date_suf, is_archived=True).count()
+            active_cnt = InstallationOrder.objects.filter(order_number__endswith=date_suf, is_archived=False).count()
+            total_cnt = archived_cnt + active_cnt
+            card.update(
+                f"[bold cyan]📅 WORK DATE SEARCH:[/bold cyan] [bold yellow]{formatted} (Suffix: {date_suf})[/bold yellow]\n"
+                f" [b]Found {total_cnt} orders for this date:[/b]  "
+                f"[bold white on dark_blue] {archived_cnt} Installed (Archive) [/]  │  "
+                f"[bold black on gold1] {active_cnt} Pending / Active [/]\n"
+                f" [dim]Select an order from the table below or press [bold cyan]Tab[/bold cyan] to auto-complete.[/dim]"
+            )
+            return
+
+        res = resolve_plate_lifecycle(val, query_live_if_missing=False)
+        card.update(format_lifecycle_card(res))
+
+    def _filter_items_for_query(self, query: str) -> None:
+        q = (query or "").strip().lower()
+        clean_q = normalizer.canonicalize(q).lower() if q else ""
+        from core.services.report_service import parse_target_date_suffix
+        date_suf = parse_target_date_suffix(q)
+
+
+        all_candidates: List[Dict[str, Any]] = []
+
+        # 1. Orders
+        for o in self.all_active_orders:
+            stage_str = o.itms_stage or o.order_status or "Pending"
+            if o.is_archived:
+                status_styled = "[bold white on dark_blue] INSTALLED (ARCHIVE) [/]"
+                status_plain = "Installed (Archive)"
+            else:
+                status_styled = f"[bold black on gold1] {stage_str} [/]"
+                status_plain = stage_str
+
+            all_candidates.append({
+                "type": "ORDER",
+                "obj": o,
+                "code": f"#{o.order_number}",
+                "plate": o.registration_number,
+                "detail": o.vin or "—",
+                "status_styled": status_styled,
+                "status_plain": status_plain,
+                "warehouse": o.warehouse_name or "—",
+            })
+
+        # 2. Kits
+        for k in self.all_kits:
+            k_stat = (k.status or "").lower()
+            if k_stat == "new":
+                status_styled = "[bold white on dark_green] NEW (UNALLOCATED) [/]"
+                status_plain = "New (Unallocated Kit)"
+            elif "allocat" in k_stat:
+                status_styled = "[bold black on gold1] ALLOCATED [/]"
+                status_plain = "Allocated Kit"
+            elif "install" in k_stat:
+                status_styled = "[bold white on dark_blue] INSTALLED [/]"
+                status_plain = "Installed Kit"
+            else:
+                status_styled = f"[dim]{k.status}[/dim]"
+                status_plain = k.status or "Kit"
+
+            all_candidates.append({
+                "type": "KIT",
+                "obj": k,
+                "code": k.kit_code,
+                "plate": k.registration_number,
+                "detail": f"F: {k.front_plate or '—'} R: {k.rear_plate or '—'} GPS: {k.gps_tracker or '—'}",
+                "status_styled": status_styled,
+                "status_plain": status_plain,
+                "warehouse": k.warehouse or "—",
+            })
+
+        def _sort_key(item: Dict[str, Any]) -> int:
+            if item["type"] == "KIT" and "new" in item["status_plain"].lower():
+                return 0
+            if item["type"] == "ORDER" and not getattr(item["obj"], "is_archived", False):
+                return 1
+            return 2
+
+        if not q:
+            # Default sorting: New Kits first, then active orders
+            self._filtered_items = sorted(all_candidates, key=_sort_key)[:100]
+        else:
+            matches = []
+            for item in all_candidates:
+                plate_str = (item["plate"] or "").lower()
+                clean_plate = normalizer.canonicalize(item["plate"]).lower() if item["plate"] else ""
+                code_str = (item["code"] or "").lower()
+                detail_str = (item["detail"] or "").lower()
+
+                if (
+                    q in plate_str
+                    or (clean_q and clean_q in clean_plate)
+                    or q in code_str
+                    or (clean_q and clean_q in code_str)
+                    or (date_suf and date_suf in code_str)
+                    or q in detail_str
+                ):
+                    matches.append(item)
+
+            # If not in active memory list, query the local database directly
+            if not matches:
+                from django.db import models
+                order_filter = (
+                    models.Q(registration_number__icontains=clean_q or q) |
+                    models.Q(order_number__icontains=clean_q or q) |
+                    models.Q(vin__icontains=q)
+                )
+                if date_suf:
+                    order_filter = order_filter | models.Q(order_number__icontains=date_suf)
+
+                db_orders = list(
+                    InstallationOrder.objects.filter(order_filter)[:50]
+                )
+                for o in db_orders:
+                    stage_str = o.itms_stage or o.order_status or "Pending"
+                    matches.append({
+                        "type": "ORDER",
+                        "obj": o,
+                        "code": f"#{o.order_number}",
+                        "plate": o.registration_number,
+                        "detail": o.vin or "—",
+                        "status_styled": "[bold white on dark_blue] INSTALLED (ARCHIVE) [/]" if o.is_archived else f"[bold black on gold1] {stage_str} [/]",
+                        "status_plain": "Installed (Archive)" if o.is_archived else stage_str,
+                        "warehouse": o.warehouse_name or "—",
+                    })
+
+                db_kits = list(
+                    InstallationKit.objects.filter(
+                        models.Q(registration_number__icontains=clean_q or q) |
+                        models.Q(kit_code__icontains=clean_q or q) |
+                        models.Q(front_plate__icontains=q) |
+                        models.Q(rear_plate__icontains=q) |
+                        models.Q(gps_tracker__icontains=q)
+                    )[:25]
+                )
+                for k in db_kits:
+                    k_stat = (k.status or "").lower()
+                    status_styled = "[bold white on dark_green] NEW (UNALLOCATED) [/]" if k_stat == "new" else f"[bold black on gold1] {k.status} [/]"
+                    matches.append({
+                        "type": "KIT",
+                        "obj": k,
+                        "code": k.kit_code,
+                        "plate": k.registration_number,
+                        "detail": f"F: {k.front_plate or '—'} R: {k.rear_plate or '—'} GPS: {k.gps_tracker or '—'}",
+                        "status_styled": status_styled,
+                        "status_plain": f"Kit {k.status}",
+                        "warehouse": k.warehouse or "—",
+                    })
+
+            self._filtered_items = matches
+
+        self._populate_orders_table()
 
     def _populate_orders_table(self) -> None:
         try:
@@ -262,17 +452,17 @@ class PlateQuickEntryModal(ModalScreen[Optional[Dict]]):
         except Exception:
             return
         table.clear()
-        for idx, o in enumerate(self._filtered_orders):
-            stage_str = o.itms_stage or o.order_status or "Pending"
+        for idx, item in enumerate(self._filtered_items):
+            type_tag = "[bold green]KIT[/bold green]" if item["type"] == "KIT" else "[bold yellow]ORD[/bold yellow]"
             table.add_row(
-                escape(o.order_number),
-                f"[bold green]{escape(o.registration_number)}[/bold green]",
-                escape(o.vin or "—"),
-                escape(stage_str),
-                escape(o.warehouse_name[:25] if o.warehouse_name else "—"),
+                f"{type_tag} {escape(item['code'])}",
+                f"[bold green]{escape(item['plate'])}[/bold green]",
+                escape(item["detail"][:28]),
+                item["status_styled"],
+                escape(item["warehouse"][:25] if item["warehouse"] else "—"),
                 key=str(idx),
             )
-        if self._filtered_orders and len(self._filtered_orders) > 0:
+        if self._filtered_items and len(self._filtered_items) > 0:
             try:
                 table.move_cursor(row=0)
             except Exception:
@@ -284,89 +474,59 @@ class PlateQuickEntryModal(ModalScreen[Optional[Dict]]):
             label = self.query_one("#active-orders-label", Static)
         except Exception:
             return
-        if self._filtered_orders:
-            top = self._filtered_orders[0]
-            stage_str = top.itms_stage or top.order_status or "Active"
+        if self._filtered_items:
+            top = self._filtered_items[0]
             label.update(
-                f"[bold white]Active ITMS Orders:[/bold white] "
-                f"[bold green]Top Match → {escape(top.registration_number)}[/bold green] "
-                f"[cyan]({escape(top.order_number)} │ {escape(stage_str)})[/cyan] "
+                f"[bold white]ITMS Candidates:[/bold white] "
+                f"[bold green]Top Match → {escape(top['plate'])}[/bold green] "
+                f"[cyan]({escape(top['code'])} │ {escape(top['status_plain'])})[/cyan] "
                 f"[dim]— Press [bold green]Enter[/bold green] or [bold cyan]Tab[/bold cyan] to select[/dim]"
             )
         else:
             label.update(
-                "[bold yellow]Active ITMS Orders (0 local matches — will query ITMS live on Enter):[/bold yellow]"
+                "[bold yellow]ITMS Matches (0 local matches — will verify live on Enter):[/bold yellow]"
             )
-
-    def _filter_orders_for_query(self, query: str) -> None:
-        q = (query or "").strip().lower()
-        if not q:
-            self._filtered_orders = list(self.all_active_orders)
-        else:
-            clean_q = normalizer.canonicalize(q).lower() or q
-            self._filtered_orders = [
-                o for o in self.all_active_orders
-                if q in o.registration_number.lower()
-                or clean_q in normalizer.canonicalize(o.registration_number).lower()
-                or q in o.order_number.lower()
-                or q in (o.vin or "").lower()
-            ]
-            # If not in active memory list, query the local database directly
-            if not self._filtered_orders:
-                from django.db import models
-                db_matches = list(
-                    InstallationOrder.objects.filter(
-                        models.Q(registration_number__icontains=clean_q) |
-                        models.Q(registration_number__icontains=q) |
-                        models.Q(order_number__icontains=clean_q) |
-                        models.Q(order_number__icontains=q) |
-                        models.Q(vin__icontains=q)
-                    )[:50]
-                )
-                if db_matches:
-                    self._filtered_orders = db_matches
-                    for m in db_matches:
-                        if m not in self.all_active_orders:
-                            self.all_active_orders.append(m)
-        self._populate_orders_table()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if self._updating_from_table:
             return
-        self._selected_order_override = None
-        self._filter_orders_for_query(event.value)
+        self._selected_item_override = None
+        self._update_lifecycle_card(event.value)
+        self._filter_items_for_query(event.value)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.action_confirm_plate()
 
     def action_autocomplete_plate(self) -> None:
-        if self._filtered_orders:
-            top = self._filtered_orders[0]
-            self._selected_order_override = top
+        if self._filtered_items:
+            top = self._filtered_items[0]
+            self._selected_item_override = top
             input_widget = self.query_one("#input-plate", Input)
             self._updating_from_table = True
-            input_widget.value = top.registration_number
+            input_widget.value = top["plate"]
             self._updating_from_table = False
-            self.notify(f"Auto-completed plate: {top.registration_number} (Order #{top.order_number})")
+            self._update_lifecycle_card(top["plate"])
+            self.notify(f"Auto-completed plate: {top['plate']} ({top['code']})")
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         table = self.query_one("#table-active-orders", DataTable)
         row_idx = event.cursor_row
-        if row_idx is not None and 0 <= row_idx < len(self._filtered_orders):
-            selected_order = self._filtered_orders[row_idx]
-            self._selected_order_override = selected_order
+        if row_idx is not None and 0 <= row_idx < len(self._filtered_items):
+            selected_item = self._filtered_items[row_idx]
+            self._selected_item_override = selected_item
             if table.has_focus:
                 input_widget = self.query_one("#input-plate", Input)
                 self._updating_from_table = True
-                input_widget.value = selected_order.registration_number
+                input_widget.value = selected_item["plate"]
                 self._updating_from_table = False
+                self._update_lifecycle_card(selected_item["plate"])
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         row_idx = event.cursor_row
-        if row_idx is not None and 0 <= row_idx < len(self._filtered_orders):
-            self._selected_order_override = self._filtered_orders[row_idx]
+        if row_idx is not None and 0 <= row_idx < len(self._filtered_items):
+            self._selected_item_override = self._filtered_items[row_idx]
             input_widget = self.query_one("#input-plate", Input)
-            input_widget.value = self._selected_order_override.registration_number
+            input_widget.value = self._selected_item_override["plate"]
             self.action_confirm_plate()
 
     def action_preview_pair(self) -> None:
@@ -398,89 +558,126 @@ class PlateQuickEntryModal(ModalScreen[Optional[Dict]]):
         table = self.query_one("#table-active-orders", DataTable)
         raw_val = input_widget.value.strip()
 
-        selected_order = self._selected_order_override
+        selected_item = self._selected_item_override
 
         # 1. If table has focus and user has a row highlighted
-        if not selected_order and table.has_focus and table.cursor_row is not None and 0 <= table.cursor_row < len(self._filtered_orders):
-            selected_order = self._filtered_orders[table.cursor_row]
-            raw_val = selected_order.registration_number
+        if not selected_item and table.has_focus and table.cursor_row is not None and 0 <= table.cursor_row < len(self._filtered_items):
+            selected_item = self._filtered_items[table.cursor_row]
+            raw_val = selected_item["plate"]
 
-        # 2. If user typed a value, check exact match or prefix match against filtered orders
-        if not selected_order and raw_val:
+        # 2. Check candidate matches from filtered list
+        if not selected_item and raw_val:
             clean_val = normalizer.canonicalize(raw_val) or raw_val.replace(" ", "").upper()
-            if self._filtered_orders:
-                for o in self._filtered_orders:
-                    if normalizer.canonicalize(o.registration_number) == clean_val or o.order_number.upper() == clean_val:
-                        selected_order = o
-                        raw_val = o.registration_number
+            if self._filtered_items:
+                for itm in self._filtered_items:
+                    cand_plate = normalizer.canonicalize(itm["plate"]) or itm["plate"].replace(" ", "").upper()
+                    cand_code = itm["code"].replace("#", "").upper()
+                    if cand_plate == clean_val or cand_code == clean_val:
+                        selected_item = itm
+                        raw_val = itm["plate"]
                         break
-                # Prefix matching: if typed string is a prefix (>= 3 chars) of the top filtered candidate, select it!
-                if not selected_order and len(clean_val) >= 3:
-                    top_cand = self._filtered_orders[0]
-                    top_clean = normalizer.canonicalize(top_cand.registration_number)
-                    if top_clean.startswith(clean_val):
-                        selected_order = top_cand
-                        raw_val = top_cand.registration_number
-
-        # 3. Check all loaded active orders
-        if not selected_order and raw_val:
-            clean_val = normalizer.canonicalize(raw_val) or raw_val.replace(" ", "").upper()
-            for o in self.all_active_orders:
-                if normalizer.canonicalize(o.registration_number) == clean_val or o.registration_number.upper() == raw_val.upper():
-                    selected_order = o
-                    raw_val = o.registration_number
-                    break
-
-        # 4. Search local database directly
-        if not selected_order and raw_val:
-            clean_val = normalizer.canonicalize(raw_val) or raw_val.replace(" ", "").upper()
-            from django.db import models
-            selected_order = InstallationOrder.objects.filter(
-                models.Q(registration_number__iexact=clean_val) |
-                models.Q(registration_number__iexact=raw_val) |
-                models.Q(order_number__iexact=raw_val) |
-                models.Q(order_number__icontains=clean_val)
-            ).first()
-            if selected_order:
-                raw_val = selected_order.registration_number
-
-        # 5. Live lookup against ITMS server if order not in local DB
-        if not selected_order and raw_val:
-            clean_val = normalizer.canonicalize(raw_val) or raw_val.replace(" ", "").upper()
-            try:
-                from core.services.itms_web_client import get_web_client
-                client = get_web_client()
-                if client.session_store.session.is_cookie_valid():
-                    fetch_res = client.fetch_order_info(clean_val, download_photos=False)
-                    if fetch_res.get("success"):
-                        client.sync_order_info_to_local_db(fetch_res, order_uuid=fetch_res.get("order_uuid", ""))
-                        selected_order = InstallationOrder.objects.filter(
-                            order_number=fetch_res.get("order_number")
-                        ).first()
-                        if selected_order:
-                            raw_val = selected_order.registration_number
-            except Exception:
-                pass
 
         if not raw_val:
-            self.notify("Please enter a plate number or select an order.", severity="warning")
+            self.notify("Please enter a plate number or select an order/kit.", severity="warning")
             return
 
         canonical = normalizer.canonicalize(raw_val) or raw_val.upper()
 
-        # 6. Auto-fetch hardware details if matched order is missing serials or tracker
-        if selected_order and (not selected_order.front_plate_serial or not selected_order.gps_tracker_id):
-            try:
-                from core.services.itms_web_client import get_web_client
-                client = get_web_client()
-                if client.session_store.session.is_cookie_valid():
-                    info = client.fetch_order_info(selected_order.order_number, download_photos=False)
-                    if info.get("success"):
-                        client.sync_order_info_to_local_db(info, order_uuid=selected_order.itms_order_uuid)
-                        selected_order.refresh_from_db()
-            except Exception:
-                pass
+        # 3. Resolve Plate Lifecycle
+        from core.services.plate_lifecycle_service import resolve_plate_lifecycle
+        lifecycle_res = resolve_plate_lifecycle(canonical, query_live_if_missing=True)
 
+        selected_order = None
+        kit_linked = None
+
+        if lifecycle_res.is_unallocated:
+            # UNALLOCATED KIT: Physical plate taken from stock or detected, but kit status is 'New'
+            # and it has not been allocated to any active order or archive in ITMS.
+            kit = lifecycle_res.kit or InstallationKit.objects.filter(
+                models.Q(registration_number__iexact=canonical) | models.Q(kit_code__iexact=lifecycle_res.kit_code)
+            ).first()
+            kit_linked = kit
+            kit_code = kit.kit_code if kit else (lifecycle_res.kit_code or f"IK-{canonical}")
+            wh_name = (kit.warehouse if kit else lifecycle_res.warehouse) or "Warehouse Stock"
+
+            p = self.pair
+            old_plate = p.registration_number_detected
+            p.registration_number_detected = canonical
+            p.order = None
+            p.match_type = VehicleInstallationPair.MatchType.NONE
+            p.match_score = None
+            p.is_manual_override = True
+            p.matched_via = VehicleInstallationPair.MatchedVia.MANUAL
+            p.manual_plate_override = canonical
+            p.verification_status = VehicleInstallationPair.VerificationStatus.UNREGISTERED
+            p.operator_note = (
+                f"UNALLOCATED: Plate {canonical} belongs to Kit {kit_code} with status 'New' "
+                f"in stock at {wh_name}. No active ITMS installation order exists."
+            )
+            p.refresh_completeness()
+            p.save()
+
+            if p.front_image:
+                p.front_image.detected_plate = canonical
+                p.front_image.save(update_fields=["detected_plate"])
+            if p.rear_image:
+                p.rear_image.detected_plate = canonical
+                p.rear_image.save(update_fields=["detected_plate"])
+
+            hw_desc = []
+            if kit:
+                s_val = kit.front_plate or kit.rear_plate
+                t_val = kit.gps_tracker
+                if s_val:
+                    hw_desc.append(f"Plate Serial: {s_val}")
+                if t_val:
+                    hw_desc.append(f"Tracker: {t_val}")
+            hw_str = f" [{', '.join(hw_desc)}]" if hw_desc else ""
+
+            SubmissionAuditLog.objects.create(
+                pair=p,
+                action=SubmissionAuditLog.Action.MANUAL_PLATE_ASSIGN,
+                result=SubmissionAuditLog.ResultStatus.FAILURE,
+                message=(
+                    f"Operator checked plate '{canonical}' — Identified as UNALLOCATED stock kit "
+                    f"({kit_code}{hw_str}, Status: New at {wh_name}). No active ITMS order exists."
+                ),
+            )
+
+            self.notify(
+                f"⚠️ Plate {canonical} is UNALLOCATED in ITMS! Kit {kit_code} is 'New' in stock (not yet assigned to an order).",
+                severity="warning",
+                timeout=6,
+            )
+
+            self.dismiss({
+                "pair": p,
+                "plate": canonical,
+                "order": None,
+                "unallocated": True,
+                "kit_code": kit_code,
+                "success": True,
+            })
+            return
+        elif lifecycle_res.is_allocated:
+            # ACTIVE ORDER
+            selected_order = lifecycle_res.order or InstallationOrder.objects.filter(
+                order_number=lifecycle_res.order_number
+            ).first()
+        elif lifecycle_res.is_installed:
+            # COMPLETED ARCHIVE
+            selected_order = lifecycle_res.order or InstallationOrder.objects.filter(
+                order_number=lifecycle_res.order_number
+            ).first()
+            self.notify(f"Notice: Plate {canonical} is already verified in ITMS Archive (#{lifecycle_res.order_number}).", severity="warning")
+
+        # Fallback to local DB search if lifecycle check didn't bind an order
+        if not selected_order:
+            selected_order = InstallationOrder.objects.filter(
+                models.Q(registration_number__iexact=canonical) | models.Q(order_number__iexact=raw_val)
+            ).first()
+
+        # Update Pair
         p = self.pair
         old_plate = p.registration_number_detected
         p.registration_number_detected = canonical
@@ -488,14 +685,18 @@ class PlateQuickEntryModal(ModalScreen[Optional[Dict]]):
             p.order = selected_order
             p.match_type = VehicleInstallationPair.MatchType.EXACT
             p.match_score = 100.0
+            p.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
+            p.operator_note = f"Linked to ITMS order #{selected_order.order_number}"
         else:
+            p.order = None
             p.match_type = VehicleInstallationPair.MatchType.NONE
             p.match_score = None
+            p.verification_status = VehicleInstallationPair.VerificationStatus.UNREGISTERED
+            p.operator_note = f"Plate {canonical} not found in ITMS orders or kits stock."
 
         p.is_manual_override = True
         p.matched_via = VehicleInstallationPair.MatchedVia.MANUAL
         p.manual_plate_override = canonical
-        p.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
         p.refresh_completeness()
         p.save()
 
@@ -518,11 +719,15 @@ class PlateQuickEntryModal(ModalScreen[Optional[Dict]]):
                 hw_desc.append(f"Tracker: {t_val}")
         hw_str = f" [{', '.join(hw_desc)}]" if hw_desc else ""
 
-        order_msg = f"linked to order #{selected_order.order_number}{hw_str}" if selected_order else "no matching order found in local registry"
+        if selected_order:
+            order_msg = f"linked to order #{selected_order.order_number}{hw_str}"
+        else:
+            order_msg = "no matching order found in local registry"
+
         SubmissionAuditLog.objects.create(
             pair=p,
             action=SubmissionAuditLog.Action.MANUAL_PLATE_ASSIGN,
-            result=SubmissionAuditLog.ResultStatus.SUCCESS,
+            result=SubmissionAuditLog.ResultStatus.SUCCESS if selected_order else SubmissionAuditLog.ResultStatus.FAILURE,
             message=f"Operator manually confirmed plate '{canonical}' ({order_msg}) [was '{old_plate}'].",
         )
 
@@ -530,6 +735,7 @@ class PlateQuickEntryModal(ModalScreen[Optional[Dict]]):
             "pair": p,
             "plate": canonical,
             "order": selected_order,
+            "unallocated": False,
             "success": True,
         })
 
@@ -1170,6 +1376,714 @@ class VaultLocationDialog(ModalScreen[Optional[str]]):
         if chosen:
             input_w.value = chosen
             self.notify(f"Selected: {chosen}")
+
+
+# ============================================================================
+# Stock Monitoring & Daily Plate Reconciliation Manager Modal
+# ============================================================================
+
+class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
+    """
+    Interactive Stock Monitoring & Bond Reconciliation Modal Dialog.
+    Allows operators to:
+    1. Scan / paste plates dispatched to the installation line (PSV White & PMO Yellow) with instant duplicate prevention.
+    2. Record inbound deliveries received from supplier/factory with rapid scan and auto-kit creation.
+    3. Record Bond Transfers In and Bond Transfers Out.
+    4. Record uninstalled returned plates (bike no-show, defective plate, cancelled).
+    5. Feed in manual Scheduled targets and Opening Stock balances.
+    6. View the real-time PSV vs PMO Bond Reconciliation Table and export to CSV.
+    """
+    DEFAULT_CSS = """
+    StockManagerModal {
+        align: center middle;
+    }
+    StockManagerModal #modal-dialog {
+        width: 95%;
+        max-width: 122;
+        height: 92%;
+        max-height: 48;
+        background: #0d1117;
+        border: thick #0284c7;
+        padding: 1 2;
+    }
+    StockManagerModal #modal-header {
+        height: auto;
+        margin-bottom: 1;
+        background: #161b22;
+        padding: 0 1;
+        border-bottom: solid #30363d;
+    }
+    StockManagerModal #stock-tabbed-content {
+        height: 1fr;
+    }
+    StockManagerModal .stock-tab-pane {
+        height: 1fr;
+        padding: 1 0;
+    }
+    StockManagerModal .stock-row {
+        height: 3;
+        margin-bottom: 1;
+        align-vertical: middle;
+    }
+    StockManagerModal .stock-input-field {
+        width: 1fr;
+        margin-right: 1;
+    }
+    StockManagerModal .stock-staged-badge {
+        width: auto;
+        min-width: 18;
+        padding: 0 1;
+        align-vertical: middle;
+        text-align: right;
+    }
+    StockManagerModal .stock-textarea {
+        height: 7;
+        border: solid #30363d;
+        margin-bottom: 1;
+    }
+    StockManagerModal #table-modal-stock-report {
+        height: 1fr;
+        min-height: 10;
+        border: solid #30363d;
+        margin-bottom: 1;
+    }
+    StockManagerModal #modal-footer {
+        height: 3;
+        align: right middle;
+        margin-top: 1;
+    }
+    StockManagerModal #modal-footer Button {
+        margin-left: 1;
+        min-width: 16;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss_modal", "Close / Cancel", priority=True),
+        Binding("e", "export_csv", "Export CSV"),
+        Binding("r", "refresh_stock", "Refresh"),
+    ]
+
+    def __init__(self, target_date_suffix: Optional[str] = None, **kwargs):
+        super().__init__(**kwargs)
+        self.target_date_suffix = target_date_suffix or timezone.localdate().strftime("%d%m%y")
+        self._cached_recon: Optional[Dict[str, Any]] = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="modal-dialog"):
+            yield Static(id="modal-header")
+
+            with TabbedContent(id="stock-tabbed-content"):
+                # TAB 1: Live Stock Report Table (PSV vs PMO)
+                with TabPane("📊 Stock Report (PSV / PMO)", id="tab-report-view"):
+                    with Vertical(classes="stock-tab-pane"):
+                        yield Static(
+                            "[bold cyan]📋 Daily Bond Physical Stock & Reconciliation Balance[/bold cyan]  │  "
+                            "[dim]Opening + Received + Transfer In - Transfer Out - Installed = Closing Balance[/dim]",
+                            id="stock-report-intro",
+                        )
+                        yield DataTable(id="table-modal-stock-report")
+                        yield Static(id="stock-floor-summary")
+
+                # TAB 2: Dispatched (Taking Out to Line)
+                with TabPane("📤 Dispatch (Line Out)", id="tab-dispatch-pane"):
+                    with Vertical(classes="stock-tab-pane"):
+                        yield Static(
+                            "[bold yellow]📤 Record Plates Dispatched to Assembly Line[/bold yellow]  │  "
+                            "[dim]Scan plate QR or paste multi-line list (e.g. UMA711PW, UMA993PW...)[/dim]"
+                        )
+                        with Horizontal(classes="stock-row"):
+                            yield Select(
+                                [("Public White (PSV)", "PSV"), ("Private Yellow (PMO)", "PMO")],
+                                value="PSV",
+                                id="sel-dispatch-category",
+                                prompt="Select Plate Category",
+                            )
+                            yield Input(
+                                placeholder="⚡ Rapid scan plate QR code [Enter to add]...",
+                                id="input-dispatch-single",
+                                classes="stock-input-field",
+                            )
+                            yield Static("[dim]Staged: 0 plates[/dim]", id="lbl-dispatch-staged", classes="stock-staged-badge")
+                        yield TextArea(
+                            id="text-dispatch-bulk",
+                            classes="stock-textarea",
+                        )
+                        with Horizontal(classes="stock-row"):
+                            yield Button("💾 Record Dispatched Plates [Enter]", variant="primary", id="btn-save-dispatch")
+                            yield Button("Clear Batch", variant="default", id="btn-clear-dispatch")
+
+                # TAB 3: Inbound Deliveries
+                with TabPane("📥 Inbound Delivery", id="tab-delivery-pane"):
+                    with Vertical(classes="stock-tab-pane"):
+                        yield Static(
+                            "[bold green]📥 Record Inbound Plate Delivery Manifest[/bold green]  │  "
+                            "[dim]Increases warehouse physical stock (+Received) and auto-creates kits[/dim]"
+                        )
+                        with Horizontal(classes="stock-row"):
+                            yield Input(
+                                placeholder="Delivery Manifest # (e.g. DEL-20260929-01)",
+                                id="input-deliv-number",
+                                classes="stock-input-field",
+                            )
+                            yield Input(
+                                value="Factory / Central Depot",
+                                placeholder="Supplier Name",
+                                id="input-deliv-supplier",
+                                classes="stock-input-field",
+                            )
+                            yield Select(
+                                [("Public White (PSV)", "PSV"), ("Private Yellow (PMO)", "PMO")],
+                                value="PSV",
+                                id="sel-deliv-category",
+                            )
+                        with Horizontal(classes="stock-row"):
+                            yield Input(
+                                placeholder="⚡ Rapid scan delivery plate QR [Enter to add]...",
+                                id="input-deliv-single",
+                                classes="stock-input-field",
+                            )
+                            yield Static("[dim]Staged: 0 plates[/dim]", id="lbl-deliv-staged", classes="stock-staged-badge")
+                        yield TextArea(
+                            id="text-deliv-bulk",
+                            classes="stock-textarea",
+                        )
+                        with Horizontal(classes="stock-row"):
+                            yield Checkbox(
+                                "Auto-create local Installation Kits (marked 'New') in stock",
+                                value=True,
+                                id="chk-deliv-kits",
+                            )
+                            yield Button("📥 Ingest Delivery into Stock", variant="success", id="btn-save-delivery")
+                            yield Button("Clear Delivery", variant="default", id="btn-clear-deliv")
+
+                # TAB 4: Bond Transfers (In / Out)
+                with TabPane("🔄 Bond Transfers", id="tab-transfers-pane"):
+                    with Vertical(classes="stock-tab-pane"):
+                        yield Static(
+                            "[bold magenta]🔄 Record Inter-Bond Transfers (Transfer In / Transfer Out)[/bold magenta]  │  "
+                            "[dim]Transfer In (+Stock) from another bond  │  Transfer Out (-Stock) to another bond[/dim]"
+                        )
+                        with Horizontal(classes="stock-row"):
+                            yield Select(
+                                [
+                                    ("Bond Transfer In (Received from another bond)", "TRANSFER_IN"),
+                                    ("Bond Transfer Out (Sent to another bond)", "TRANSFER_OUT"),
+                                ],
+                                value="TRANSFER_IN",
+                                id="sel-transfer-type",
+                            )
+                            yield Select(
+                                [("Public White (PSV)", "PSV"), ("Private Yellow (PMO)", "PMO")],
+                                value="PSV",
+                                id="sel-transfer-category",
+                            )
+                        with Horizontal(classes="stock-row"):
+                            yield Input(
+                                placeholder="Other Bond Location / Name (e.g. Kampala Central Bond)",
+                                id="input-transfer-bond",
+                                classes="stock-input-field",
+                            )
+                            yield Input(
+                                placeholder="Plates Count (e.g. 50)",
+                                id="input-transfer-count",
+                                classes="stock-input-field",
+                            )
+                        with Horizontal(classes="stock-row"):
+                            yield Input(
+                                placeholder="⚡ Rapid scan transfer plate QR [Enter to add]...",
+                                id="input-transfer-single",
+                                classes="stock-input-field",
+                            )
+                            yield Static("[dim]Staged: 0 plates[/dim]", id="lbl-transfer-staged", classes="stock-staged-badge")
+                        yield TextArea(
+                            id="text-transfer-bulk",
+                            classes="stock-textarea",
+                        )
+                        with Horizontal(classes="stock-row"):
+                            yield Button("🔄 Record Bond Transfer", variant="primary", id="btn-save-transfer")
+                            yield Button("Clear Transfer", variant="default", id="btn-clear-transfer")
+
+                # TAB 5: Returns (Line In)
+                with TabPane("↩️ Returns (Line In)", id="tab-returns-pane"):
+                    with Vertical(classes="stock-tab-pane"):
+                        yield Static(
+                            "[bold red]↩️ Record Uninstalled Plates Returned to Stock[/bold red]  │  "
+                            "[dim]Scan plate QR or paste returned plates (Bike No-Show, Defective, Cancelled)[/dim]"
+                        )
+                        with Horizontal(classes="stock-row"):
+                            yield Select(
+                                [("Public White (PSV)", "PSV"), ("Private Yellow (PMO)", "PMO")],
+                                value="PSV",
+                                id="sel-return-category",
+                            )
+                            yield Select(
+                                [
+                                    ("Bike No-Show (Owner did not arrive)", "BIKE_NO_SHOW"),
+                                    ("Defective Plate (Damaged / Bad Print)", "DEFECTIVE_PLATE"),
+                                    ("Cancelled Order", "CANCELLED_ORDER"),
+                                    ("Line Rollover (Shift End)", "LINE_ROLLOVER"),
+                                ],
+                                value="BIKE_NO_SHOW",
+                                id="sel-return-reason",
+                            )
+                        with Horizontal(classes="stock-row"):
+                            yield Input(
+                                placeholder="⚡ Rapid scan returned plate QR code [Enter to add]...",
+                                id="input-return-single",
+                                classes="stock-input-field",
+                            )
+                            yield Static("[dim]Staged: 0 plates[/dim]", id="lbl-return-staged", classes="stock-staged-badge")
+                        yield TextArea(
+                            id="text-return-bulk",
+                            classes="stock-textarea",
+                        )
+                        with Horizontal(classes="stock-row"):
+                            yield Button("↩️ Record Returned Plates", variant="warning", id="btn-save-return")
+                            yield Button("Clear Returns", variant="default", id="btn-clear-return")
+
+                # TAB 6: Scheduled Target & Opening Balance Feed
+                with TabPane("🎯 Scheduled & Opening Balance", id="tab-scheduled-pane"):
+                    with Vertical(classes="stock-tab-pane"):
+                        yield Static(
+                            "[bold cyan]🎯 Scheduled Installation Target & Opening Balance Entry[/bold cyan]  │  "
+                            "[dim]Manually feed in the scheduled target plates to be installed under bond for the shift[/dim]"
+                        )
+                        with Horizontal(classes="stock-row"):
+                            yield Static("[bold white]Scheduled Target PSV (White):[/bold white] ", classes="stock-input-field")
+                            yield Input(value="0", placeholder="Target PSV count", id="input-sched-psv", classes="stock-input-field")
+                        with Horizontal(classes="stock-row"):
+                            yield Static("[bold white]Scheduled Target PMO (Yellow):[/bold white] ", classes="stock-input-field")
+                            yield Input(value="0", placeholder="Target PMO count", id="input-sched-pmo", classes="stock-input-field")
+                        with Horizontal(classes="stock-row"):
+                            yield Static("[bold white]Opening Balance PSV (White):[/bold white] ", classes="stock-input-field")
+                            yield Input(value="0", placeholder="Opening PSV count", id="input-open-psv", classes="stock-input-field")
+                        with Horizontal(classes="stock-row"):
+                            yield Static("[bold white]Opening Balance PMO (Yellow):[/bold white] ", classes="stock-input-field")
+                            yield Input(value="0", placeholder="Opening PMO count", id="input-open-pmo", classes="stock-input-field")
+                        yield Button("💾 Save Scheduled Targets & Opening Balances", variant="success", id="btn-save-scheduled")
+
+            with Horizontal(id="modal-footer"):
+                yield Button("📑 Export CSV [E]", variant="default", id="btn-stock-export")
+                yield Button("🔄 Refresh [R]", variant="primary", id="btn-stock-refresh")
+                yield Button("Close [Esc]", variant="error", id="btn-stock-close")
+
+    def on_mount(self) -> None:
+        table = self.query_one("#table-modal-stock-report", DataTable)
+        table.add_columns("Description Metric", "Public White (PSV)", "Private Yellow (PMO)", "Total Combined (Bond)", "Formula / Note")
+        table.cursor_type = "row"
+        self.action_refresh_stock()
+
+    def action_refresh_stock(self) -> None:
+        """Fetches fresh reconciliation from stock service and updates all widgets."""
+        from core.services import stock_monitoring_service
+        try:
+            recon = stock_monitoring_service.compute_daily_reconciliation(self.target_date_suffix)
+            self._cached_recon = recon
+            self._render_header(recon)
+            self._render_report_table(recon)
+            self._load_inputs(recon)
+        except Exception as exc:
+            self.notify(f"Stock reconciliation error: {exc}", severity="error")
+
+    def _render_header(self, r: Dict[str, Any]) -> None:
+        fmt_date = r.get("formatted_date", "")
+        suf = r.get("work_date_suffix", "")
+        wh = r.get("warehouse_name", "Bond Warehouse")
+        self.query_one("#modal-header", Static).update(
+            f"[bold cyan]═══ 📦 ITMS BOND PHYSICAL STOCK & RECONCILIATION MANAGER ═══[/bold cyan]\n"
+            f"[bold white]Shift Work Date:[/bold white] [bold yellow]{fmt_date}[/bold yellow] ([cyan]{suf}[/cyan])  │  "
+            f"[bold white]Warehouse / Bond:[/bold white] [bold white]{wh}[/bold white]  │  "
+            f"[dim]Synced: {r.get('last_reconciled_at', '')}[/dim]"
+        )
+
+    def _render_report_table(self, r: Dict[str, Any]) -> None:
+        table = self.query_one("#table-modal-stock-report", DataTable)
+        table.clear()
+
+        rows = r.get("report_table", {}).get("rows", [])
+        for row in rows:
+            metric = row.get("metric", "")
+            psv = row.get("psv", 0)
+            pmo = row.get("pmo", 0)
+            tot = row.get("total", 0)
+            note = row.get("note", "")
+
+            # Highlight specific rows
+            if "Closing Balance" in metric:
+                m_str = f"[bold green]{metric}[/bold green]"
+                p_str = f"[bold green]{psv:,}[/bold green]"
+                y_str = f"[bold green]{pmo:,}[/bold green]"
+                t_str = f"[bold white on dark_green] {tot:,} [/bold white on dark_green]"
+            elif "Scheduled" in metric:
+                m_str = f"[bold cyan]{metric}[/bold cyan]"
+                p_str = f"[bold cyan]{psv:,}[/bold cyan]"
+                y_str = f"[bold cyan]{pmo:,}[/bold cyan]"
+                t_str = f"[bold cyan]{tot:,}[/bold cyan]"
+            elif "Variance" in metric:
+                color = "green" if tot >= 0 else "red"
+                m_str = f"[{color}]{metric}[/{color}]"
+                p_str = f"[{color}]{psv:+d}[/{color}]"
+                y_str = f"[{color}]{pmo:+d}[/{color}]"
+                t_str = f"[{color}]{tot:+d}[/{color}]"
+            else:
+                m_str = f"[bold white]{metric}[/bold white]"
+                p_str = f"{psv:,}"
+                y_str = f"{pmo:,}"
+                t_str = f"[bold white]{tot:,}[/bold white]"
+
+            table.add_row(m_str, p_str, y_str, t_str, f"[dim]{note}[/dim]")
+
+        floor = r.get("floor_operations", {})
+        unalloc = floor.get("unallocated_discrepancy", 0)
+        unalloc_style = "[bold red]" if unalloc > 0 else "[bold green]"
+        self.query_one("#stock-floor-summary", Static).update(
+            f" [b]Floor Operations:[/b] Dispatched: [cyan]{floor.get('dispatched_count', 0)}[/cyan]  │  "
+            f"Returned: [yellow]{floor.get('returned_count', 0)}[/yellow]  │  "
+            f"Net on Line: [white]{floor.get('net_dispatched', 0)}[/white]  │  "
+            f"Pending Orders: [gold1]{floor.get('itms_pending_count', 0)}[/gold1]  │  "
+            f"{unalloc_style}⚠️ Unallocated Discrepancy: {unalloc} plates{unalloc_style}"
+        )
+
+    def _load_inputs(self, r: Dict[str, Any]) -> None:
+        try:
+            from core.models import DailyStockLedger
+            work_d = r.get("work_date")
+            ledger = DailyStockLedger.objects.filter(work_date=work_d).first()
+            if ledger:
+                self.query_one("#input-sched-psv", Input).value = str(ledger.scheduled_psv)
+                self.query_one("#input-sched-pmo", Input).value = str(ledger.scheduled_pmo)
+                self.query_one("#input-open-psv", Input).value = str(ledger.opening_balance_psv)
+                self.query_one("#input-open-pmo", Input).value = str(ledger.opening_balance_pmo)
+        except Exception:
+            pass
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        btn_id = event.button.id
+        if btn_id == "btn-stock-close":
+            self.action_dismiss_modal()
+        elif btn_id == "btn-stock-refresh":
+            self.action_refresh_stock()
+        elif btn_id == "btn-stock-export":
+            self.action_export_csv()
+        elif btn_id == "btn-save-dispatch":
+            self._handle_save_dispatch()
+        elif btn_id == "btn-clear-dispatch":
+            self.query_one("#text-dispatch-bulk", TextArea).text = ""
+            self.query_one("#input-dispatch-single", Input).value = ""
+            try:
+                self.query_one("#lbl-dispatch-staged", Static).update("[dim]Staged: 0 plates[/dim]")
+            except Exception:
+                pass
+        elif btn_id == "btn-save-delivery":
+            self._handle_save_delivery()
+        elif btn_id == "btn-clear-deliv":
+            self.query_one("#text-deliv-bulk", TextArea).text = ""
+            try:
+                self.query_one("#input-deliv-single", Input).value = ""
+                self.query_one("#lbl-deliv-staged", Static).update("[dim]Staged: 0 plates[/dim]")
+            except Exception:
+                pass
+        elif btn_id == "btn-save-transfer":
+            self._handle_save_transfer()
+        elif btn_id == "btn-clear-transfer":
+            self.query_one("#text-transfer-bulk", TextArea).text = ""
+            try:
+                self.query_one("#input-transfer-single", Input).value = ""
+                self.query_one("#lbl-transfer-staged", Static).update("[dim]Staged: 0 plates[/dim]")
+            except Exception:
+                pass
+        elif btn_id == "btn-save-return":
+            self._handle_save_return()
+        elif btn_id == "btn-clear-return":
+            self.query_one("#text-return-bulk", TextArea).text = ""
+            try:
+                self.query_one("#input-return-single", Input).value = ""
+                self.query_one("#lbl-return-staged", Static).update("[dim]Staged: 0 plates[/dim]")
+            except Exception:
+                pass
+        elif btn_id == "btn-save-scheduled":
+            self._handle_save_scheduled()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Rapid USB barcode scanner handler with automatic deduplication."""
+        from core.services import stock_monitoring_service
+        from core.models import StockDispatchScan, StockDeliveryItem, StockReturnScan
+        inp_id = event.input.id
+        raw_val = event.value.strip()
+
+        if not raw_val:
+            return
+
+        plate = stock_monitoring_service.extract_single_plate(raw_val)
+        if not plate:
+            self.notify(f"⚠️ Invalid plate QR/barcode format: '{raw_val}'", severity="warning")
+            event.input.value = ""
+            event.input.focus()
+            return
+
+        target_area_id = None
+        target_badge_id = None
+        db_check = None
+
+        if inp_id == "input-dispatch-single":
+            target_area_id = "#text-dispatch-bulk"
+            target_badge_id = "#lbl-dispatch-staged"
+            db_check = ("dispatch", StockDispatchScan.objects.filter(work_date_suffix=self.target_date_suffix, registration_number=plate).exists())
+        elif inp_id == "input-deliv-single":
+            target_area_id = "#text-deliv-bulk"
+            target_badge_id = "#lbl-deliv-staged"
+            db_check = ("delivery", StockDeliveryItem.objects.filter(registration_number=plate).exists())
+        elif inp_id == "input-transfer-single":
+            target_area_id = "#text-transfer-bulk"
+            target_badge_id = "#lbl-transfer-staged"
+        elif inp_id == "input-return-single":
+            target_area_id = "#text-return-bulk"
+            target_badge_id = "#lbl-return-staged"
+            db_check = ("return", StockReturnScan.objects.filter(work_date_suffix=self.target_date_suffix, registration_number=plate).exists())
+
+        if not target_area_id:
+            return
+
+        text_area = self.query_one(target_area_id, TextArea)
+        curr_text = text_area.text
+        existing_plates, _, _ = stock_monitoring_service.parse_plate_input_with_stats(curr_text)
+
+        # Check 1: In-staging duplicate prevention
+        if plate in existing_plates:
+            self.notify(f"⚠️ Duplicate ignored: Plate {plate} is ALREADY in staging batch!", severity="warning")
+            event.input.value = ""
+            event.input.focus()
+            return
+
+        # Check 2: Database existing check advisory
+        if db_check:
+            kind, exists = db_check
+            if exists:
+                if kind == "dispatch":
+                    self.notify(f"⚠️ Advisory: Plate {plate} was already dispatched today!", severity="warning")
+                elif kind == "delivery":
+                    self.notify(f"⚠️ Advisory: Plate {plate} already exists in warehouse stock!", severity="warning")
+                elif kind == "return":
+                    self.notify(f"⚠️ Advisory: Plate {plate} was already returned today!", severity="warning")
+
+        # Append plate cleanly
+        text_area.text = f"{curr_text}\n{plate}".strip()
+        event.input.value = ""
+        event.input.focus()
+
+        staged_count = len(existing_plates) + 1
+        if target_badge_id:
+            try:
+                self.query_one(target_badge_id, Static).update(f"[bold green]Staged: {staged_count} plates[/bold green]")
+            except Exception:
+                pass
+        self.notify(f"✓ Scanned {plate} (Total Staged: {staged_count})", severity="information")
+
+    def _handle_save_dispatch(self) -> None:
+        from core.services import stock_monitoring_service
+        bulk_text = self.query_one("#text-dispatch-bulk", TextArea).text
+        single_text = self.query_one("#input-dispatch-single", Input).value
+        combined = f"{bulk_text}\n{single_text}".strip()
+        cat_select = self.query_one("#sel-dispatch-category", Select)
+        category = str(cat_select.value or "PSV")
+
+        if not combined:
+            self.notify("Please scan or paste plate numbers first.", severity="warning")
+            return
+
+        try:
+            res = stock_monitoring_service.record_dispatch_scans(
+                plates=combined,
+                plate_category=category,
+                target_date_suffix=self.target_date_suffix,
+            )
+            new_cnt = res.get("newly_dispatched", 0)
+            dup_cnt = res.get("duplicate_scans_skipped", 0)
+            already_cnt = res.get("already_dispatched", 0)
+            msg = f"✓ Dispatched {new_cnt} {category} plates."
+            if dup_cnt > 0 or already_cnt > 0:
+                msg += f" ({dup_cnt} duplicate scans, {already_cnt} already dispatched skipped)"
+            self.notify(msg, severity="information")
+
+            self.query_one("#text-dispatch-bulk", TextArea).text = ""
+            self.query_one("#input-dispatch-single", Input).value = ""
+            try:
+                self.query_one("#lbl-dispatch-staged", Static).update("[dim]Staged: 0 plates[/dim]")
+            except Exception:
+                pass
+            self.action_refresh_stock()
+        except Exception as exc:
+            self.notify(f"Error saving dispatch scans: {exc}", severity="error")
+
+    def _handle_save_delivery(self) -> None:
+        from core.services import stock_monitoring_service
+        deliv_no = self.query_one("#input-deliv-number", Input).value.strip()
+        supplier = self.query_one("#input-deliv-supplier", Input).value.strip()
+        cat_select = self.query_one("#sel-deliv-category", Select)
+        category = str(cat_select.value or "PSV")
+        bulk_text = self.query_one("#text-deliv-bulk", TextArea).text.strip()
+        single_text = ""
+        try:
+            single_text = self.query_one("#input-deliv-single", Input).value.strip()
+        except Exception:
+            pass
+        combined = f"{bulk_text}\n{single_text}".strip()
+        auto_kits = self.query_one("#chk-deliv-kits", Checkbox).value
+
+        if not combined:
+            self.notify("Please scan or paste incoming plates for this delivery.", severity="warning")
+            return
+
+        try:
+            res = stock_monitoring_service.record_delivery(
+                delivery_number=deliv_no,
+                supplier=supplier,
+                plates=combined,
+                plate_category=category,
+                target_date_suffix=self.target_date_suffix,
+                auto_create_kits=auto_kits,
+            )
+            p_cnt = res.get("plates_count", 0)
+            k_cnt = res.get("created_kits_count", 0)
+            dup_cnt = res.get("duplicate_scans_skipped", 0)
+            msg = f"✓ Ingested delivery {res.get('delivery_number')} with {p_cnt} unique {category} plates ({k_cnt} new kits created)!"
+            if dup_cnt > 0:
+                msg += f" ({dup_cnt} duplicate scans skipped)"
+            self.notify(msg, severity="information")
+
+            self.query_one("#text-deliv-bulk", TextArea).text = ""
+            try:
+                self.query_one("#input-deliv-single", Input).value = ""
+                self.query_one("#lbl-deliv-staged", Static).update("[dim]Staged: 0 plates[/dim]")
+            except Exception:
+                pass
+            self.action_refresh_stock()
+        except Exception as exc:
+            self.notify(f"Error saving delivery: {exc}", severity="error")
+
+    def _handle_save_transfer(self) -> None:
+        from core.services import stock_monitoring_service
+        t_type = str(self.query_one("#sel-transfer-type", Select).value or "TRANSFER_IN")
+        cat = str(self.query_one("#sel-transfer-category", Select).value or "PSV")
+        bond_name = self.query_one("#input-transfer-bond", Input).value.strip() or "Other Bond"
+        cnt_val = self.query_one("#input-transfer-count", Input).value.strip()
+        bulk_text = self.query_one("#text-transfer-bulk", TextArea).text.strip()
+        single_text = ""
+        try:
+            single_text = self.query_one("#input-transfer-single", Input).value.strip()
+        except Exception:
+            pass
+        combined = f"{bulk_text}\n{single_text}".strip()
+
+        count = int(cnt_val) if cnt_val.isdigit() else 0
+        if not count and not combined:
+            self.notify("Please enter plates count or scan transfer plates.", severity="warning")
+            return
+
+        try:
+            res = stock_monitoring_service.record_bond_transfer(
+                transfer_type=t_type,
+                plate_category=cat,
+                plates_count=count,
+                other_bond_name=bond_name,
+                plates=combined if combined else None,
+                target_date_suffix=self.target_date_suffix,
+            )
+            lbl = "Transfer In" if t_type == "TRANSFER_IN" else "Transfer Out"
+            self.notify(f"Recorded {lbl} of {res.get('plates_count')} {cat} plates ({bond_name})!")
+            self.query_one("#text-transfer-bulk", TextArea).text = ""
+            try:
+                self.query_one("#input-transfer-single", Input).value = ""
+                self.query_one("#lbl-transfer-staged", Static).update("[dim]Staged: 0 plates[/dim]")
+            except Exception:
+                pass
+            self.query_one("#input-transfer-count", Input).value = ""
+            self.action_refresh_stock()
+        except Exception as exc:
+            self.notify(f"Error saving bond transfer: {exc}", severity="error")
+
+    def _handle_save_return(self) -> None:
+        from core.services import stock_monitoring_service
+        cat_select = self.query_one("#sel-return-category", Select)
+        category = str(cat_select.value or "PSV")
+        reason_select = self.query_one("#sel-return-reason", Select)
+        reason = str(reason_select.value or "BIKE_NO_SHOW")
+        bulk_text = self.query_one("#text-return-bulk", TextArea).text.strip()
+        single_text = ""
+        try:
+            single_text = self.query_one("#input-return-single", Input).value.strip()
+        except Exception:
+            pass
+        combined = f"{bulk_text}\n{single_text}".strip()
+
+        if not combined:
+            self.notify("Please scan or paste returned plates first.", severity="warning")
+            return
+
+        try:
+            res = stock_monitoring_service.record_return_scans(
+                plates=combined,
+                plate_category=category,
+                reason=reason,
+                target_date_suffix=self.target_date_suffix,
+            )
+            new_cnt = res.get("newly_returned", 0)
+            dup_cnt = res.get("duplicate_scans_skipped", 0)
+            already_cnt = res.get("already_returned", 0)
+            msg = f"✓ Recorded {new_cnt} returned {category} plates."
+            if dup_cnt > 0 or already_cnt > 0:
+                msg += f" ({dup_cnt} duplicates, {already_cnt} already returned skipped)"
+            self.notify(msg, severity="information")
+
+            self.query_one("#text-return-bulk", TextArea).text = ""
+            try:
+                self.query_one("#input-return-single", Input).value = ""
+                self.query_one("#lbl-return-staged", Static).update("[dim]Staged: 0 plates[/dim]")
+            except Exception:
+                pass
+            self.action_refresh_stock()
+        except Exception as exc:
+            self.notify(f"Error saving return scans: {exc}", severity="error")
+
+    def _handle_save_scheduled(self) -> None:
+        from core.services import stock_monitoring_service
+        try:
+            s_psv = int(self.query_one("#input-sched-psv", Input).value.strip() or 0)
+            s_pmo = int(self.query_one("#input-sched-pmo", Input).value.strip() or 0)
+            o_psv = int(self.query_one("#input-open-psv", Input).value.strip() or 0)
+            o_pmo = int(self.query_one("#input-open-pmo", Input).value.strip() or 0)
+
+            stock_monitoring_service.set_scheduled_target(
+                scheduled_psv=s_psv,
+                scheduled_pmo=s_pmo,
+                target_date_suffix=self.target_date_suffix,
+            )
+            stock_monitoring_service.set_opening_balances(
+                opening_psv=o_psv,
+                opening_pmo=o_pmo,
+                target_date_suffix=self.target_date_suffix,
+            )
+            self.notify("Saved scheduled targets and opening balances successfully!", severity="information")
+            self.action_refresh_stock()
+        except Exception as exc:
+            self.notify(f"Error saving scheduled values: {exc}", severity="error")
+
+    def action_export_csv(self) -> None:
+        from core.services import stock_monitoring_service
+        try:
+            content = stock_monitoring_service.export_stock_reconciliation_csv(self.target_date_suffix)
+            date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"itms_bond_stock_{self.target_date_suffix}_{date_str}.csv"
+            out_path = os.path.join(settings.BASE_DIR, filename)
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            self.notify(f"Exported stock report to {filename}!", severity="information")
+        except Exception as exc:
+            self.notify(f"Error exporting CSV: {exc}", severity="error")
+
+    def action_dismiss_modal(self) -> None:
+        self.dismiss(self._cached_recon)
 
 
 

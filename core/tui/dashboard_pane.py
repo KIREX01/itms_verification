@@ -117,7 +117,16 @@ class DashboardPane(VerticalScroll):
                     yield Static("[bold magenta]⚡ Offline Outbox & Auto-Sync Monitor[/bold magenta]", classes="card-title")
                     yield Static(id="dashboard-outbox-stats")
 
-            # Row 4: Quick Action Workflow Launchpad
+            # Row 4: Wireless Mobile Camera QR Section
+            with Vertical(classes="dashboard-card", id="card-mobile-qr"):
+                yield Static("[bold cyan]📱 Wireless Mobile Camera Connect & QR Code[/bold cyan] [dim](Point phone camera at screen to pair)[/dim]", classes="card-title")
+                with Horizontal(id="dashboard-mobile-qr-row"):
+                    with Vertical(id="dashboard-qr-box"):
+                        yield Static(id="dashboard-qr-code")
+                    with Vertical(id="dashboard-qr-details"):
+                        yield Static(id="dashboard-mobile-info")
+
+            # Row 5: Quick Action Workflow Launchpad
             with Vertical(classes="dashboard-card", id="card-quick-actions"):
                 yield Static("[bold white]⚡ Quick Action Workflow Launchpad[/bold white] [dim](Click or press keyboard hotkey)[/dim]", classes="card-title")
                 with Horizontal(classes="action-button-row"):
@@ -133,6 +142,33 @@ class DashboardPane(VerticalScroll):
 
     def on_mount(self) -> None:
         self.refresh_dashboard()
+        self.set_interval(2.0, self.check_network_and_mobile_status)
+
+    def check_network_and_mobile_status(self) -> None:
+        """Polls network interface changes and updates QR code & connected phones live in real time."""
+        try:
+            from core.services import network_service
+            from core.services.device_session_service import session_manager
+            from core.services import vault_service
+
+            net_info = network_service.get_mobile_connection_info(port=8000)
+            primary_url = net_info.get("primary_url")
+            sess_info = session_manager.get_active_sessions()
+            dev_count = sess_info.get("active_count", 0)
+            batch = vault_service.get_or_create_mobile_batch()
+            batch_count = batch.ingested_count
+
+            last_url = getattr(self, "_last_primary_url", None)
+            last_devs = getattr(self, "_last_dev_count", None)
+            last_batch_count = getattr(self, "_last_batch_count", None)
+
+            if primary_url != last_url or dev_count != last_devs or batch_count != last_batch_count:
+                self._last_primary_url = primary_url
+                self._last_dev_count = dev_count
+                self._last_batch_count = batch_count
+                self._update_mobile_qr_widgets(net_info)
+        except Exception:
+            pass
 
     def refresh_dashboard(self) -> None:
         """Computes and renders real-time dashboard telemetry."""
@@ -374,6 +410,72 @@ class DashboardPane(VerticalScroll):
         )
         try:
             self.query_one("#dashboard-outbox-stats", Static).update(outbox_text)
+        except Exception:
+            pass
+
+        # Refresh Wireless Mobile Companion QR Code & URL
+        try:
+            from core.services import network_service
+            net_info = network_service.get_mobile_connection_info(port=8000)
+            self._last_primary_url = net_info.get("primary_url")
+            self._update_mobile_qr_widgets(net_info)
+        except Exception:
+            pass
+
+    def _update_mobile_qr_widgets(self, net_info: Dict[str, Any]) -> None:
+        try:
+            from core.services.qr_generator import generate_rich_qr
+            primary_url = net_info.get("primary_url", "http://127.0.0.1:8000/mobile/")
+            mode = net_info.get("connection_mode", "WIFI_LAN")
+            badge = net_info.get("connection_badge", "Wi-Fi LAN")
+            desc = net_info.get("connection_desc", "")
+
+            if mode == "LAPTOP_HOTSPOT":
+                status_tag = f"[bold green]🟢 {badge}[/bold green]"
+                tip = "[bold cyan]Laptop is broadcasting Hotspot. Connect phone to laptop's Wi-Fi network.[/bold cyan]"
+            elif mode == "PHONE_HOTSPOT":
+                status_tag = f"[bold green]🟢 {badge}[/bold green]"
+                tip = "[bold green]Laptop is connected to Phone Hotspot. Direct mobile pairing active.[/bold green]"
+            else:
+                status_tag = f"[bold green]🟢 {badge} ({net_info.get('primary_ip')})[/bold green]"
+                tip = "[dim]Phone and laptop must be connected to the same Wi-Fi network.[/dim]"
+
+            qr_widget = self.query_one("#dashboard-qr-code", Static)
+            if qr_widget:
+                qr_widget.update(generate_rich_qr(primary_url, quiet_zone=2))
+
+            info_widget = self.query_one("#dashboard-mobile-info", Static)
+            if info_widget:
+                from core.services.device_session_service import session_manager
+                from core.services import vault_service
+                from django.conf import settings
+
+                sess_info = session_manager.get_active_sessions()
+                dev_count = sess_info.get("active_count", 0)
+                max_dev = sess_info.get("max_allowed", 2)
+                devices = sess_info.get("devices", [])
+                dev_names = ", ".join(d.get("device_name", "Phone") for d in devices)
+                dev_names_str = f" ({dev_names})" if dev_names else ""
+                dev_color = "green" if dev_count > 0 else "yellow"
+
+                batch = vault_service.get_or_create_mobile_batch()
+                max_batch_photos = getattr(settings, "MAX_MOBILE_BATCH_PHOTOS", 200)
+                pairs_count = batch.ingested_count // 2
+
+                cand_list = "\n".join(f"  • [cyan]{c['ip']}[/cyan] ({c['type']})" for c in net_info.get("candidate_urls", [])[:3])
+                info_text = (
+                    f"[bold yellow]Direct Mobile Companion URL:[/bold yellow]\n[bold underline cyan]{primary_url}[/bold underline cyan]\n\n"
+                    f"[bold]Active Network Mode:[/bold] {status_tag}  •  📱 [bold cyan]Phones Connected:[/bold cyan] [bold {dev_color}]{dev_count}/{max_dev}{dev_names_str}[/bold {dev_color}] (Load Protected)\n"
+                    f"📦 [bold white]Active Mobile Batch:[/bold white] [bold yellow]{batch.source_label}[/bold yellow] ([cyan]{batch.ingested_count}/{max_batch_photos} photos[/cyan] • {pairs_count}/{max_batch_photos//2} pairs)\n"
+                    f"[dim]{desc}[/dim]\n\n"
+                    f"[dim]Available Interfaces:[/dim]\n{cand_list}\n\n"
+                    f"[bold white]Supported Phone Modes:[/bold white]\n"
+                    f"  🏭 [bold green]On-Conveyor[/bold green]: 1-by-1 Front ➔ Rear guided capture (Instant pair)\n"
+                    f"  🚶 [bold cyan]Off-Conveyor[/bold cyan]: U-Turn yard walk (Rears 1..N ➔ Fronts N..1)\n\n"
+                    f"💡 {tip}\n"
+                    f"[dim](Real-time poll: Auto-detects phone connect/disconnect & IP switches every 2s)[/dim]"
+                )
+                info_widget.update(info_text)
         except Exception:
             pass
 

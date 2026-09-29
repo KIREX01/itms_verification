@@ -54,6 +54,7 @@ from textual.widgets import (
 from core.tui.dashboard_pane import DashboardPane
 from core.tui.inspectors import InspectorPane
 from core.tui.itms_pane import ITMSConnectionPane
+from core.tui.reports_pane import ReportsPane
 from core.tui.settings_pane import SettingsPane
 from core.tui.tables import TableLoaderMixin, HISTORY_FILTERS
 from core.tui.handlers import NavigationHandlersMixin
@@ -76,24 +77,28 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         ("4", "tab_queue", "Queue (4)"),
         ("5", "tab_history", "History (5)"),
         ("6", "tab_settings", "Settings (6)"),
+        ("7", "tab_reports", "Reports (7)"),
         ("f1", "tab_dashboard", "Dashboard"),
         ("f2", "tab_itms", "ITMS"),
         ("f3", "tab_batches", "Batches"),
         ("f4", "tab_queue", "Queue"),
         ("f5", "tab_history", "History"),
         ("f6", "tab_settings", "Settings"),
+        ("f7", "tab_reports", "Reports"),
         ("ctrl+1", "tab_dashboard", "Dashboard"),
         ("ctrl+2", "tab_itms", "ITMS"),
         ("ctrl+3", "tab_batches", "Batches"),
         ("ctrl+4", "tab_queue", "Queue"),
         ("ctrl+5", "tab_history", "History"),
         ("ctrl+6", "tab_settings", "Settings"),
+        ("ctrl+7", "tab_reports", "Reports"),
         ("i", "native_ingest", "Add Photos (Dialog)"),
         ("w", "open_upload_ui", "Web Upload"),
         ("p", "process_vision", "Run Vision"),
         ("j", "joint_rescan", "Joint Re-Scan"),
         ("m", "match_pairs", "Match Pairs"),
         ("t", "quick_type_plate", "Type Plate"),
+        ("k", "open_stock_manager", "Stock Manager (K)"),
         ("y", "sync_itms_orders", "Sync Orders"),
         ("u", "submit_pair", "Submit Order"),
         ("b", "batch_submit", "Batch Submit"),
@@ -186,6 +191,9 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
             with TabPane("⚙️ Settings & Safety (6)", id="tab-settings"):
                 yield SettingsPane(id="settings-pane")
 
+            with TabPane("📑 Reports & Totals (7)", id="tab-reports"):
+                yield ReportsPane(id="reports-pane")
+
         with Vertical(id="activity-container"):
             yield Static(
                 "[b]Console & Activity Log[/b] (Real-time Vision, Automation & Execution)",
@@ -247,7 +255,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         else:
             self.push_screen(LandingAuthScreen(), self._on_auth_completed)
 
-        self.log_message("[dim]Press [1-6] workflow tabs │ [I] Photos │ [P] Vision │ [M] Match │ [B] Batch Submit │ [O] Drain Outbox │ [X] Sign Out[/dim]")
+        self.log_message("[dim]Press [1-7] workflow tabs │ [I] Photos │ [P] Vision │ [M] Match │ [B] Batch Submit │ [O] Drain Outbox │ [X] Sign Out[/dim]")
 
         # Periodically refresh dashboard and outbox monitor every 15s
         self.set_interval(15.0, self._auto_refresh_dashboard_and_outbox)
@@ -381,6 +389,11 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
             event.prevent_default()
             event.stop()
             return
+        elif event.key in ("f7", "ctrl+7"):
+            self.action_tab_reports()
+            event.prevent_default()
+            event.stop()
+            return
 
         if isinstance(self.focused, Input):
             return
@@ -500,6 +513,10 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         self._reload_history_table()
         self._update_batches_scope_bar()
         self._reload_batches_table()
+        try:
+            self.query_one("#reports-pane", ReportsPane).refresh_reports()
+        except Exception:
+            pass
         try:
             metrics = self.query_one("#metrics")
             metrics.refresh_metrics()

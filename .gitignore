@@ -11,7 +11,9 @@ db.sqlite3-*
 media/vault/
 media/crops/
 media/*.log
+media/*.bak
 *.log
+*.bak
 *.pt
 .pytest_cache/
 .DS_Store

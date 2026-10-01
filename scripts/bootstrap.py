@@ -13,8 +13,11 @@ Tasks Performed:
 7. Supports `--verify-only` for non-destructive system health diagnostics.
 """
 import argparse
+import hashlib
+import importlib.metadata
 import os
 import platform
+import re
 import secrets
 import shutil
 import subprocess
@@ -22,7 +25,7 @@ import sys
 import tempfile
 import urllib.request
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -125,6 +128,132 @@ ITMS_REQUEST_TIMEOUT_SECONDS=30
     env_file.write_text(content, encoding="utf-8")
     log_success("Created .env with secure random DJANGO_SECRET_KEY and SQLite default.")
     return True
+
+
+def ensure_dependencies(install_missing: bool = True, upgrade: bool = False) -> bool:
+    """
+    Verifies and automatically installs required Python packages from requirements.txt.
+    Guarantees that new and missing dependencies added in system updates
+    are automatically installed into the active Python environment (.venv).
+    """
+    req_file = PROJECT_ROOT / "requirements.txt"
+    if not req_file.is_file():
+        log_success("No requirements.txt found.")
+        return True
+
+    log_step("Checking Python dependencies (requirements.txt)...")
+
+    # Locate active python executable (prefer local .venv)
+    local_venv = PROJECT_ROOT / ".venv"
+    if sys.platform == "win32":
+        venv_py = local_venv / "Scripts" / "python.exe"
+    else:
+        venv_py = local_venv / "bin" / "python"
+    python_bin = str(venv_py) if venv_py.is_file() else sys.executable
+
+    # 1. Scan requirements.txt for missing packages
+    missing_packages: List[str] = []
+    try:
+        from packaging.requirements import Requirement
+        use_packaging = True
+    except ImportError:
+        use_packaging = False
+
+    for raw_line in req_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.split("#")[0].strip()
+        if not line:
+            continue
+        pkg_name = None
+        if use_packaging:
+            try:
+                req = Requirement(line)
+                if req.marker and not req.marker.evaluate():
+                    continue
+                pkg_name = req.name
+            except Exception:
+                pass
+
+        if not pkg_name:
+            if ";" in line:
+                marker_part = line.split(";", 1)[1].strip()
+                if '< "3.12"' in marker_part and sys.version_info >= (3, 12):
+                    continue
+                line = line.split(";", 1)[0].strip()
+            m = re.match(r"^([A-Za-z0-9_\-\.]+)", line)
+            if m:
+                pkg_name = m.group(1)
+
+        if pkg_name:
+            try:
+                importlib.metadata.distribution(pkg_name)
+            except importlib.metadata.PackageNotFoundError:
+                missing_packages.append(pkg_name)
+
+    # If verify-only, report status
+    if not install_missing:
+        if missing_packages:
+            log_warning(f"Missing Python dependencies: {', '.join(missing_packages)}")
+            return False
+        log_success("All Python dependencies are installed.")
+        return True
+
+    # 2. Check hash file to avoid redundant pip runs if nothing is missing
+    hash_file = PROJECT_ROOT / ".venv" / ".reqs_hash"
+    if not hash_file.is_file():
+        hash_file = PROJECT_ROOT / "secure" / ".reqs_hash"
+
+    current_hash = None
+    try:
+        current_hash = hashlib.sha256(req_file.read_bytes()).hexdigest()
+        cached_hash = hash_file.read_text(encoding="utf-8").strip() if hash_file.is_file() else None
+        if not missing_packages and cached_hash == current_hash and not upgrade:
+            log_success("Python dependencies verified and up to date.")
+            return True
+    except Exception:
+        pass
+
+    if missing_packages:
+        log_step(f"Detected missing packages: {', '.join(missing_packages)}. Installing...")
+    else:
+        log_step("Updating Python packages from requirements.txt...")
+
+    # 3. Execute pip install
+    suppress_windows_error_dialogs()
+    creationflags = 0x08000000 if platform.system().lower() == "windows" else 0
+    cmd = [python_bin, "-m", "pip", "install", "-r", str(req_file)]
+    if upgrade:
+        cmd.append("--upgrade")
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=180,
+            creationflags=creationflags,
+        )
+        if proc.returncode == 0:
+            log_success("All project Python dependencies verified and up to date.")
+            if current_hash:
+                try:
+                    target_hash_file = (PROJECT_ROOT / ".venv" / ".reqs_hash") if local_venv.is_dir() else (PROJECT_ROOT / "secure" / ".reqs_hash")
+                    target_hash_file.parent.mkdir(parents=True, exist_ok=True)
+                    target_hash_file.write_text(current_hash, encoding="utf-8")
+                except Exception:
+                    pass
+            return True
+        else:
+            err = proc.stderr.strip() or proc.stdout.strip()
+            log_warning(f"pip reported warnings during dependency installation: {err[:140]}...")
+            return True
+    except subprocess.TimeoutExpired:
+        log_warning("pip install timed out after 180 seconds. Continuing with existing packages.")
+        return False
+    except Exception as exc:
+        log_error(f"Failed to install dependencies: {exc}")
+        return False
+
 
 
 def download_file_with_progress(url: str, dest_path: Path) -> bool:
@@ -398,6 +527,7 @@ def run_diagnostics_table() -> None:
 
     ensure_directories()
     ensure_env_file()
+    ensure_dependencies(install_missing=False)
     ensure_model_weights(download_missing=False)
     ocr_info = detect_and_configure_ocr(download_missing=False)
     ensure_database_and_operator(verify_only=True)
@@ -430,13 +560,16 @@ def main() -> int:
     # 2. Environment file
     ensure_env_file()
 
-    # 3. Model weights
+    # 3. Python Dependencies
+    ensure_dependencies(install_missing=True)
+
+    # 4. Model weights
     ensure_model_weights(download_missing=True)
 
-    # 4. OCR
+    # 5. OCR
     detect_and_configure_ocr(download_missing=True)
 
-    # 5. Database & Admin user
+    # 6. Database & Admin user
     ok = ensure_database_and_operator(verify_only=False)
     if not ok:
         log_error("Bootstrap completed with warnings. Check logs above.")

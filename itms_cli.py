@@ -353,6 +353,17 @@ def run_update(extra_args=None):
         print(f"[*] Checking updates via git pull: {exc}")
         import subprocess
         subprocess.run(["git", "pull", "--rebase", "origin", "main"], cwd=PROJECT_ROOT, check=False)
+        try:
+            from scripts import bootstrap
+            bootstrap.ensure_dependencies(install_missing=True)
+            import django
+            django.setup()
+            from django.core.management import call_command
+            call_command("migrate", interactive=False)
+            bootstrap.ensure_directories()
+            bootstrap.ensure_model_weights(download_missing=True)
+        except Exception as post_exc:
+            print(f"[!] Post-update task notice: {post_exc}")
 
 
 def run_uninstall(extra_args=None):

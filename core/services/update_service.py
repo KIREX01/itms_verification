@@ -343,22 +343,44 @@ class UpdateService:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     @staticmethod
-    def _run_post_update_tasks() -> Tuple[bool, str]:
-        """Runs pip install and database migrations after code update."""
+    def ensure_dependencies(install_missing: bool = True, upgrade: bool = False) -> Tuple[bool, str]:
+        """
+        Verifies and installs required Python packages from requirements.txt.
+        Guarantees that new and missing dependencies added in system updates
+        are automatically installed into the active Python environment.
+        """
         try:
-            # 1. Apply database migrations
+            from scripts import bootstrap
+            ok = bootstrap.ensure_dependencies(install_missing=install_missing, upgrade=upgrade)
+            if ok:
+                return True, "Python dependencies verified and up to date."
+            return False, "Some Python dependencies could not be installed."
+        except Exception as exc:
+            logger.error("Error verifying dependencies: %s", exc)
+            return False, f"Dependency verification error: {exc}"
+
+    @staticmethod
+    def _run_post_update_tasks() -> Tuple[bool, str]:
+        """Runs pip install, database migrations, and resource verification after code update."""
+        try:
+            # 1. Install or update Python dependencies from requirements.txt
+            from scripts import bootstrap
+            bootstrap.ensure_directories()
+            bootstrap.ensure_env_file()
+            bootstrap.ensure_dependencies(install_missing=True)
+
+            # 2. Apply database migrations
             os.environ.setdefault("DJANGO_SETTINGS_MODULE", "itms_project.settings")
             import django
             django.setup()
             from django.core.management import call_command
             call_command("migrate", interactive=False)
 
-            # 2. Verify bootstrap
-            from scripts import bootstrap
-            bootstrap.ensure_directories()
+            # 3. Verify AI model weights and OCR engine
             bootstrap.ensure_model_weights(download_missing=True)
+            bootstrap.detect_and_configure_ocr(download_missing=True)
 
-            return True, "Migrations and dependencies verified."
+            return True, "Dependencies, migrations, and model weights verified."
         except Exception as exc:
             logger.error("Post-update task error: %s", exc)
             return False, f"Post-update configuration error: {exc}"

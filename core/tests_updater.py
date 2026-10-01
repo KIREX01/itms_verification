@@ -235,6 +235,36 @@ class UpdateServiceApplyTests(TestCase):
         self.assertFalse(res["success"])
         self.assertIn("conflict", res["error"].lower())
 
+    @patch("scripts.bootstrap.detect_and_configure_ocr")
+    @patch("scripts.bootstrap.ensure_model_weights")
+    @patch("scripts.bootstrap.ensure_directories")
+    @patch("scripts.bootstrap.ensure_env_file")
+    @patch("django.core.management.call_command")
+    @patch("scripts.bootstrap.ensure_dependencies")
+    def test_post_update_tasks_runs_dependencies_and_migrations(
+        self, mock_deps, mock_migrate, mock_env, mock_dirs, mock_weights, mock_ocr
+    ):
+        mock_deps.return_value = True
+        ok, msg = UpdateService._run_post_update_tasks()
+        self.assertTrue(ok)
+        self.assertIn("verified", msg.lower())
+        mock_deps.assert_called_once_with(install_missing=True)
+        mock_migrate.assert_called_once_with("migrate", interactive=False)
+        mock_dirs.assert_called_once()
+        mock_weights.assert_called_once_with(download_missing=True)
+
+    @patch("scripts.bootstrap.ensure_dependencies")
+    def test_ensure_dependencies_delegates(self, mock_deps):
+        mock_deps.return_value = True
+        ok, msg = UpdateService.ensure_dependencies(install_missing=True)
+        self.assertTrue(ok)
+        mock_deps.assert_called_once_with(install_missing=True, upgrade=False)
+
+    def test_bootstrap_ensure_dependencies_verify_only(self):
+        from scripts import bootstrap
+        ok = bootstrap.ensure_dependencies(install_missing=False)
+        self.assertTrue(ok)
+
     def test_protected_paths_configuration(self):
         """Verifies all critical operator data paths are in PROTECTED_PATHS."""
         self.assertIn("db.sqlite3", PROTECTED_PATHS)

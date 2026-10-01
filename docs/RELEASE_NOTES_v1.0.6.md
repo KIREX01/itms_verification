@@ -62,6 +62,11 @@ Version 1.0.6 is a comprehensive reliability, usability, and operational release
 * **Fixed Missing Page Counters**: Resolved issue where page numbers for Active Orders, Archive, and Installation Kits were not displayed after fetching.
 * **Interactive Pagination**: Seamlessly navigates pages with active position indicators (`Page 1 of 35 (700 Total)`).
 
+### 8. Self-Healing Dependency Installation During Updates
+* **Automated `requirements.txt` Ingestion**: `itms update`, `python manage.py check_updates --apply`, and the Web Console update manager now automatically install any new or missing Python dependencies directly into the active `.venv` environment prior to running database migrations.
+* **SHA-256 Dependency Caching**: Caches `.reqs_hash` to skip redundant pip operations when dependencies are already up to date, completing checks in milliseconds.
+* **System Health Diagnostics**: `itms status` and `itms bootstrap` now audit dependencies against `requirements.txt` using non-destructive environment metadata scanning.
+
 ---
 
 ## 🛠️ CLI Quick Reference for v1.0.6

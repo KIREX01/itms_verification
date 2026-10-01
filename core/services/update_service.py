@@ -239,7 +239,30 @@ class UpdateService:
                     "error": f"Git update conflict: {pull_proc.stderr.strip() or pull_proc.stdout.strip()}",
                 }
 
-            # Run post-update migrations & dependency checks
+            # Locate active python executable
+            local_venv = PROJECT_ROOT / ".venv"
+            if sys.platform == "win32":
+                venv_py = local_venv / "Scripts" / "python.exe"
+            else:
+                venv_py = local_venv / "bin" / "python"
+            py_bin = str(venv_py) if venv_py.is_file() else sys.executable
+
+            # 1. Run pip install directly in fresh subprocess from newly pulled requirements.txt
+            req_file = PROJECT_ROOT / "requirements.txt"
+            if req_file.is_file():
+                print("  [>] Installing / updating Python dependencies (requirements.txt)...")
+                creationflags = 0x08000000 if platform.system().lower() == "windows" else 0
+                try:
+                    subprocess.run(
+                        [py_bin, "-m", "pip", "install", "-r", str(req_file)],
+                        cwd=str(PROJECT_ROOT),
+                        timeout=180,
+                        creationflags=creationflags,
+                    )
+                except Exception as pip_exc:
+                    logger.warning("pip invocation notice: %s", pip_exc)
+
+            # 2. Run post-update migrations & dependency checks
             post_ok, post_msg = UpdateService._run_post_update_tasks()
             if not post_ok:
                 return {"success": False, "error": post_msg}
@@ -324,7 +347,30 @@ class UpdateService:
                 dest_file.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(item, dest_file)
 
-            # 4. Run migrations & dependencies
+            # Locate active python executable
+            local_venv = PROJECT_ROOT / ".venv"
+            if sys.platform == "win32":
+                venv_py = local_venv / "Scripts" / "python.exe"
+            else:
+                venv_py = local_venv / "bin" / "python"
+            py_bin = str(venv_py) if venv_py.is_file() else sys.executable
+
+            # 4. Run pip install directly in fresh subprocess from newly extracted requirements.txt
+            req_file = PROJECT_ROOT / "requirements.txt"
+            if req_file.is_file():
+                print("  [>] Installing / updating Python dependencies (requirements.txt)...")
+                creationflags = 0x08000000 if platform.system().lower() == "windows" else 0
+                try:
+                    subprocess.run(
+                        [py_bin, "-m", "pip", "install", "-r", str(req_file)],
+                        cwd=str(PROJECT_ROOT),
+                        timeout=180,
+                        creationflags=creationflags,
+                    )
+                except Exception as pip_exc:
+                    logger.warning("pip invocation notice: %s", pip_exc)
+
+            # 5. Run migrations & dependencies
             post_ok, post_msg = UpdateService._run_post_update_tasks()
             if not post_ok:
                 return {"success": False, "error": post_msg}

@@ -64,6 +64,7 @@ Version 1.0.6 is a comprehensive reliability, usability, and operational release
 
 ### 8. Self-Healing Dependency Installation During Updates
 * **Automated `requirements.txt` Ingestion**: `itms update`, `python manage.py check_updates --apply`, and the Web Console update manager now automatically install any new or missing Python dependencies directly into the active `.venv` environment prior to running database migrations.
+* **Synchronized Core Dependencies**: Explicitly declared all previously implicit and optional runtime dependencies in `requirements.txt`: `qrcode>=7.4` (terminal & mobile pairing QR generator), `pyperclip>=1.8.2` (cross-platform clipboard exporter), `huggingface_hub>=0.20.0` (model weight hub resolver), and `packaging>=21.3`.
 * **SHA-256 Dependency Caching**: Caches `.reqs_hash` to skip redundant pip operations when dependencies are already up to date, completing checks in milliseconds.
 * **System Health Diagnostics**: `itms status` and `itms bootstrap` now audit dependencies against `requirements.txt` using non-destructive environment metadata scanning.
 

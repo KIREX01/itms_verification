@@ -12,6 +12,14 @@ Screen {
 #tabs-content {
     height: 1fr;
 }
+Tabs {
+    dock: top;
+    height: 3;
+}
+Tab {
+    padding: 0 2;
+    text-style: bold;
+}
 .tab-horizontal {
     height: 1fr;
 }
@@ -392,10 +400,13 @@ LandingAuthScreen {
 }
 
 .itms-input-page {
-    width: 6;
-    min-width: 6;
-    max-width: 8;
+    width: 10;
+    min-width: 10;
+    max-width: 14;
     margin-right: 1;
+    color: #ffffff;
+    background: #0d1117;
+    border: tall #0284c7;
 }
 
 .itms-btn-fetch {
@@ -961,6 +972,32 @@ DashboardPane {
 .unallocated-actions-row Button {
     margin-right: 1;
     min-width: 20;
+}
+
+#card-report-csv-exports {
+    background: #081512;
+    border: heavy #059669;
+    padding: 0 1;
+    margin-bottom: 1;
+    height: auto;
+}
+
+#reports-csv-exports-summary {
+    height: auto;
+    margin-top: 0;
+    margin-bottom: 1;
+}
+
+.csv-actions-row {
+    height: 3;
+    margin-top: 1;
+    margin-bottom: 1;
+    align-vertical: middle;
+}
+
+.csv-actions-row Button {
+    margin-right: 1;
+    min-width: 18;
 }
 
 

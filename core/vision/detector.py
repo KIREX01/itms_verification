@@ -121,6 +121,49 @@ class Detection:
     backend: str                 # "yolo" or "heuristic"
 
 
+def get_yolo_weights() -> str:
+    """Returns the currently active YOLO weights path."""
+    try:
+        from core.services import config_service
+        cfg_val = config_service.get_setting("vision.yolo_weights")
+        if cfg_val:
+            return str(cfg_val)
+    except Exception:
+        pass
+    try:
+        from django.conf import settings
+        if hasattr(settings, "PLATE_YOLO_WEIGHTS"):
+            return str(settings.PLATE_YOLO_WEIGHTS)
+    except Exception:
+        pass
+    return _YOLO_WEIGHTS
+
+
+def set_yolo_weights(weights_path: str) -> bool:
+    """Updates the active YOLO weights path, synchronizes config & settings, and clears model cache."""
+    global _YOLO_WEIGHTS
+    _YOLO_WEIGHTS = str(weights_path).strip()
+    try:
+        _get_yolo_model.cache_clear()
+    except Exception:
+        pass
+    try:
+        _get_onnx_session.cache_clear()
+    except Exception:
+        pass
+    try:
+        from django.conf import settings
+        setattr(settings, "PLATE_YOLO_WEIGHTS", _YOLO_WEIGHTS)
+    except Exception:
+        pass
+    try:
+        from core.services import config_service
+        config_service.set_developer_setting("vision.yolo_weights", _YOLO_WEIGHTS)
+    except Exception:
+        pass
+    return True
+
+
 @lru_cache(maxsize=1)
 def _get_yolo_model():
     """Lazily load the YOLO model exactly once per process. Returns None if unavailable."""
@@ -129,7 +172,7 @@ def _get_yolo_model():
     except ImportError:
         return None
     try:
-        weights_path = _resolve_weights_path(_YOLO_WEIGHTS)
+        weights_path = _resolve_weights_path(get_yolo_weights())
         return YOLO(weights_path)
     except Exception:
         return None
@@ -143,7 +186,7 @@ def _get_onnx_session():
     except ImportError:
         return None
 
-    weights_path = _resolve_weights_path(_YOLO_WEIGHTS)
+    weights_path = _resolve_weights_path(get_yolo_weights())
     onnx_path = Path(weights_path).with_suffix(".onnx")
     if not onnx_path.exists():
         return None

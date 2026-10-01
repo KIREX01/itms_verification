@@ -264,7 +264,14 @@ function renderDateDrivenSection(dd) {
 
     const elCat3Breakdown = document.getElementById("report-cat3-breakdown");
     if (elCat3Breakdown) {
-        elCat3Breakdown.textContent = `${unalloc.failed_linking_count || 0} failed pair links │ ${unalloc.stock_kits_count || 0} stock new kits`;
+        const recon = dd.stock_reconciliation || {};
+        const floor = recon.floor_operations || {};
+        const disp = floor.dispatched_count ?? 0;
+        if (disp > 0) {
+            elCat3Breakdown.textContent = `Elimination: ${disp} Out − ${inst.count ?? 0} Arch − ${pend.count ?? 0} Pend = ${unalloc.total_count ?? 0} Unallocated`;
+        } else {
+            elCat3Breakdown.textContent = `${unalloc.total_count ?? 0} floor unallocated discrepancy`;
+        }
     }
 
     cachedUnallocatedItems = unalloc.items || [];
@@ -282,9 +289,10 @@ function renderUnallocatedTable(items) {
 
     tbody.innerHTML = items.slice(0, 100).map(item => {
         const isPair = (item.source === "PAIR_LINK_FAILED");
-        const badgeClass = isPair ? "badge-red" : "badge-green";
-        const badgeLabel = isPair ? "PAIR LINK FAILED" : "STOCK NEW KIT";
-        const sourceId = isPair ? `Pair #${item.source_id}` : (item.source_id || "Kit");
+        const isDispatched = (item.source === "DISPATCH_UNALLOCATED");
+        const badgeClass = isPair ? "badge-red" : (isDispatched ? "badge-red" : "badge-yellow");
+        const badgeLabel = isPair ? "PAIR LINK FAILED" : (isDispatched ? "UNALLOCATED FLOOR" : "DISCREPANCY");
+        const sourceId = isPair ? `Pair #${item.source_id}` : (item.source_id || "Shift Out");
 
         return `
             <tr style="border-bottom:1px solid #1e293b;">
@@ -420,4 +428,254 @@ async function copyMvrDocket() {
         }
     }
 }
+
+
+function toggleShiftCsvMenu(event) {
+    if (event) {
+        event.stopPropagation();
+    }
+    const menu = document.getElementById("shift-csv-dropdown");
+    if (!menu) return;
+    const isShown = menu.style.display === "block";
+    menu.style.display = isShown ? "none" : "block";
+
+    if (!isShown) {
+        const closeHandler = () => {
+            menu.style.display = "none";
+            document.removeEventListener("click", closeHandler);
+        };
+        setTimeout(() => document.addEventListener("click", closeHandler), 10);
+    }
+}
+
+function downloadCategoryCsv(category) {
+    const suf = reportCurrentDate || "today";
+    const url = `/api/stock/export/category/${encodeURIComponent(category)}/?date=${encodeURIComponent(suf)}`;
+    window.location.href = url;
+}
+
+function openShiftReconcileModal() {
+    const sufInput = document.getElementById("shift-reconcile-suffix");
+    if (sufInput) {
+        sufInput.value = reportCurrentDate || "";
+    }
+    if (typeof openModal === "function") {
+        openModal("modal-shift-reconcile");
+    } else {
+        const modal = document.getElementById("modal-shift-reconcile");
+        if (modal) modal.classList.add("active");
+    }
+}
+
+function onShiftInputCountChanged() {
+    const input = document.getElementById("shift-reconcile-morning-input");
+    const countEl = document.getElementById("shift-reconcile-morning-count");
+    if (!input || !countEl) return;
+    const raw = input.value || "";
+    const lines = raw.split(/[\r\n,;]+/).map(s => s.trim()).filter(s => s.length > 0);
+    const unique = new Set(lines.map(s => s.toUpperCase().replace(/\s+/g, "")));
+    countEl.textContent = `${unique.size} unique plate(s) entered`;
+}
+
+async function submitShiftReconciliation() {
+    const morningInput = document.getElementById("shift-reconcile-morning-input");
+    const returnsInput = document.getElementById("shift-reconcile-returns-input");
+    const suffixInput = document.getElementById("shift-reconcile-suffix");
+    const operatorInput = document.getElementById("shift-reconcile-operator");
+    const syncChk = document.getElementById("shift-reconcile-sync-chk");
+    const runBtn = document.getElementById("btn-run-shift-reconcile");
+
+    const payload = {
+        morning_plates: morningInput ? morningInput.value : "",
+        return_plates: returnsInput ? returnsInput.value : "",
+        date_suffix: suffixInput ? suffixInput.value : "",
+        operator_name: operatorInput ? operatorInput.value : "Operator",
+        sync_itms: syncChk ? syncChk.checked : true,
+    };
+
+    if (runBtn) {
+        runBtn.disabled = true;
+        runBtn.textContent = "⏳ Reconciling & Updating Inventory...";
+    }
+
+    try {
+        const resp = await fetch("/api/stock/shift/reconcile/", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+        });
+
+        const data = await resp.json();
+        if (!data.success) {
+            alert("Shift reconciliation failed: " + (data.error || "Unknown error"));
+            return;
+        }
+
+        // Render results card
+        const card = document.getElementById("shift-reconcile-results-card");
+        if (card) {
+            card.style.display = "flex";
+            const s = data.summary || {};
+            const dispEl = document.getElementById("shift-res-dispatched");
+            const archEl = document.getElementById("shift-res-archived");
+            const pendEl = document.getElementById("shift-res-pending");
+            const retEl = document.getElementById("shift-res-returned");
+            const unallocEl = document.getElementById("shift-res-unallocated");
+
+            if (dispEl) dispEl.textContent = s.dispatched_count ?? 0;
+            if (archEl) archEl.textContent = s.reconciled_installed_count ?? 0;
+            if (pendEl) pendEl.textContent = s.on_line_active_count ?? 0;
+            if (retEl) retEl.textContent = s.returned_count ?? 0;
+            if (unallocEl) unallocEl.textContent = s.unallocated_count ?? 0;
+
+            const cntUnalloc = document.getElementById("btn-cnt-unallocated");
+            const cntArch = document.getElementById("btn-cnt-archived");
+            const cntPend = document.getElementById("btn-cnt-pending");
+            const cntDisp = document.getElementById("btn-cnt-dispatched");
+
+            if (cntUnalloc) cntUnalloc.textContent = s.unallocated_count ?? 0;
+            if (cntArch) cntArch.textContent = s.reconciled_installed_count ?? 0;
+            if (cntPend) cntPend.textContent = s.on_line_active_count ?? 0;
+            if (cntDisp) cntDisp.textContent = s.dispatched_count ?? 0;
+        }
+
+        if (typeof showToast === "function") {
+            showToast(`✓ Shift reconciled! ${data.summary?.unallocated_count ?? 0} unallocated, ${data.summary?.reconciled_installed_count ?? 0} archived.`, "success");
+        }
+
+        // Refresh underlying totals in reports tab
+        fetchReportTotals();
+    } catch (err) {
+        console.error("Error submitting shift reconciliation:", err);
+        alert("Network or server error during reconciliation: " + err);
+    } finally {
+        if (runBtn) {
+            runBtn.disabled = false;
+            runBtn.textContent = "🚀 Run Shift Reconciliation";
+        }
+    }
+}
+
+function downloadShiftCsvFromModal(category) {
+    const suffixInput = document.getElementById("shift-reconcile-suffix");
+    const suf = (suffixInput && suffixInput.value) ? suffixInput.value : (reportCurrentDate || "today");
+    const url = `/api/stock/export/category/${encodeURIComponent(category)}/?date=${encodeURIComponent(suf)}`;
+    window.location.href = url;
+}
+
+function openStockKitSyncModal() {
+    refreshStockKitReadinessInModal();
+    if (typeof openModal === "function") {
+        openModal("modal-sync-stock-kits");
+    } else {
+        const modal = document.getElementById("modal-sync-stock-kits");
+        if (modal) modal.classList.add("active");
+    }
+}
+
+async function refreshStockKitReadinessInModal() {
+    try {
+        const resp = await fetch("/api/stock/kits/readiness/");
+        const data = await resp.json();
+        if (data.success && data.readiness) {
+            const r = data.readiness;
+            const elTotal = document.getElementById("sync-kits-val-total");
+            const elNew = document.getElementById("sync-kits-val-new");
+            const elAlloc = document.getElementById("sync-kits-val-alloc");
+            const elInst = document.getElementById("sync-kits-val-inst");
+            const elWh = document.getElementById("sync-kits-wh-name");
+            const elBadge = document.getElementById("sync-kits-header-badge");
+
+            if (elTotal) elTotal.textContent = r.total_kits ?? 0;
+            if (elNew) elNew.textContent = r.new_unallocated ?? 0;
+            if (elAlloc) elAlloc.textContent = r.allocated_orders ?? 0;
+            if (elInst) elInst.textContent = r.installed_archived ?? 0;
+            if (elWh && r.facility_name) elWh.textContent = r.facility_name.substring(0, 24);
+            if (elBadge) {
+                elBadge.textContent = `${r.new_unallocated ?? 0} Ready ('New')`;
+            }
+        }
+    } catch (err) {
+        console.warn("Could not load kit readiness:", err);
+    }
+}
+
+function onSyncKitsInputCountChanged() {
+    const input = document.getElementById("sync-kits-plates-input");
+    const countEl = document.getElementById("sync-kits-input-count");
+    if (!input || !countEl) return;
+    const raw = input.value || "";
+    const lines = raw.split(/[\r\n,;]+/).map(s => s.trim()).filter(s => s.length > 0);
+    const unique = new Set(lines.map(s => s.toUpperCase().replace(/\s+/g, "")));
+    countEl.textContent = `${unique.size} plate(s) entered`;
+}
+
+async function submitStockKitSync() {
+    const input = document.getElementById("sync-kits-plates-input");
+    const syncChk = document.getElementById("sync-kits-itms-chk");
+    const runBtn = document.getElementById("btn-run-kits-sync");
+
+    const payload = {
+        plates: input ? input.value : "",
+        sync_itms: syncChk ? syncChk.checked : true,
+    };
+
+    if (runBtn) {
+        runBtn.disabled = true;
+        runBtn.textContent = "⏳ Syncing & Provisioning...";
+    }
+
+    try {
+        const resp = await fetch("/api/stock/kits/sync/", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+        });
+
+        const data = await resp.json();
+        if (!data.success) {
+            alert("Stock kit sync failed: " + (data.error || "Unknown error"));
+            return;
+        }
+
+        const resCard = document.getElementById("sync-kits-results-card");
+        if (resCard) {
+            resCard.style.display = "flex";
+            const resTitle = document.getElementById("sync-kits-res-title");
+            const resTime = document.getElementById("sync-kits-res-time");
+            const resMsg = document.getElementById("sync-kits-res-msg");
+            const resSeries = document.getElementById("sync-kits-res-series");
+
+            if (resTitle) resTitle.textContent = `✓ Provisioned ${data.result?.new_kits_ready_count ?? 0} Kits as 'New'`;
+            if (resTime) resTime.textContent = `${data.result?.duration_ms ?? 0}ms`;
+            if (resMsg) resMsg.textContent = data.result?.message || "Stock kits synchronized.";
+
+            const seriesObj = data.result?.series_breakdown || {};
+            const seriesStr = Object.entries(seriesObj).map(([s, c]) => `${s}: ${c}`).join(" │ ") || "All series ready";
+            if (resSeries) resSeries.textContent = `Series Breakdown: ${seriesStr}`;
+        }
+
+        if (typeof showToast === "function") {
+            showToast(`✓ Kits synced: ${data.result?.new_kits_ready_count ?? 0} ready as 'New'!`, "success");
+        }
+
+        // Refresh live stats in modal and reports pane
+        refreshStockKitReadinessInModal();
+        fetchReportTotals();
+    } catch (err) {
+        console.error("Error running stock kit sync:", err);
+        alert("Network or server error during kit sync: " + err);
+    } finally {
+        if (runBtn) {
+            runBtn.disabled = false;
+            runBtn.textContent = "⚡ Sync & Provision Kits";
+        }
+    }
+}
+
+
 

@@ -40,6 +40,8 @@ fill in real values locally:
 [x] Level 5: Simulated ITMS Automation Worker & Fallback Engine
      ↓
 [x] Level 6: End-to-End Benchmarking & Test Suite
+     ↓
+[x] Level 7: Bond Stock Reconciliation, Mobile Camera Scanning & TUI Standardization (v1.0.6)
 ```
 
 Every level below has real, runnable code in this repository (see file paths). The one
@@ -139,3 +141,23 @@ end-to-end on any machine with no extra downloads.
 * `[x]` **Benchmarking Command** (`core/management/commands/benchmark_pipeline.py`).
 * `[x]` **Comprehensive Test Suite**: `core/tests.py`, `core/tests_vision.py`, `core/tests_association.py`, `core/tests_auth.py`.
 * `[x]` **Documentation**: `docs/propsal.md`, `docs/ROADMAP.md`, `docs/ITMS_WEBAPP_CONNECTION_AND_SESSION_ARCHITECTURE.md`, `README.md`.
+
+## Level 7: Bond Stock Reconciliation, Mobile Camera Scanning & TUI Standardization (v1.0.6)
+
+* `[x]` **Bond Stock Reconciliation & Daily Ledger Engine**:
+  - `core/services/stock_monitoring_service.py`: Automated daily stock ledger reconciliation, discrepancy detection, and dynamic audit docket generation with semantic release versioning.
+  - Management commands: `sync_stock_kits.py` (multi-page background crawler up to 35 pages) and `reconcile_shift.py` (shift audit with timestamped CSV exports).
+* `[x]` **Mobile Companion Live Camera QR & Barcode Scanner**:
+  - Web & PWA scanner (`/mobile/stock-scanner/`) with native `BarcodeDetector` + client-side ZXing-JS fallback.
+  - Live video stream with animated laser guide, audio scan confirmation, camera switcher, torch toggle, and real-time stock ledger synchronization.
+  - Terminal CLI direct launcher: `python itms_cli.py scan-camera`.
+* `[x]` **Textual TUI Modernization & Standardization**:
+  - Standardized non-scrolling tab bar with clean uppercase single-word titles: `DASHBOARD (1)`, `ITMS (2)`, `BATCHES (3)`, `REVIEW (4)`, `AUDIT (5)`, `REPORTS (6)`, `SETTINGS (7)`.
+  - Reordered reports before settings (`REPORTS` = Tab 6, `SETTINGS` = Tab 7) across all keyboard bindings (`1..7`, `F1..F7`, `Ctrl+1..7`).
+  - Review queue order unlinking (`X` / `Ctrl+U`) and modal action with database status reset and audit logging.
+  - Synchronized Command Palette (`Ctrl+P`) with all newly added shortcuts: Joint Vision (`J`), Stock Manager (`K`), Offline Drain (`O`), Date Scope (`D`).
+  - Restored live page number indicators across active orders, archives, and installation kits in ITMS Connect panel.
+* `[x]` **System Standardization & User vs. Developer Settings**:
+  - Partitioned settings hierarchy into Developer options (YOLO weight selector, confidence thresholds, sync budgets) and User options (reports export directory, batch folder, OCR preferences).
+  - Native OS folder selector tool integration for report directories and batch paths.
+

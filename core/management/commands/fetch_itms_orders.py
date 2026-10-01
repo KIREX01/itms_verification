@@ -163,6 +163,16 @@ class Command(BaseCommand):
             action="store_true",
             help="Synchronize fetched orders into the local InstallationOrder database registry.",
         )
+        parser.add_argument(
+            "--today",
+            action="store_true",
+            help="Automatically sync complete today's archive (or target date) using intelligent date boundary.",
+        )
+        parser.add_argument(
+            "--shift",
+            action="store_true",
+            help="Perform complete shift sync: all active orders + all today's archives + recent stock kits.",
+        )
 
     def handle(self, *args, **options):
         client = get_web_client()
@@ -187,6 +197,22 @@ class Command(BaseCommand):
                     "   (Pass --live-commit to authorize live submissions)."
                 )
             )
+
+        if options.get("shift"):
+            from core.services.order_sync import OrderSyncService
+            sync_svc = OrderSyncService(client=client)
+            self.stdout.write(self.style.NOTICE("Executing full shift order sync (all active orders + today's archive)..."))
+            res = sync_svc.sync_shift_scoped(force=True)
+            self.stdout.write(self.style.SUCCESS(f"\n[SHIFT SYNC COMPLETE] {res['message']}"))
+            return
+
+        if options.get("today") and (options.get("archive") or do_sync):
+            from core.services.order_sync import OrderSyncService
+            sync_svc = OrderSyncService(client=client)
+            self.stdout.write(self.style.NOTICE("Executing intelligent date-bounded archive sync for today..."))
+            res = sync_svc.sync_archive_today(force=True)
+            self.stdout.write(self.style.SUCCESS(f"\n[TODAY ARCHIVE SYNC COMPLETE] {res['message']}"))
+            return
 
         # ──────────────────────────────────────────────────────────────────────
         # Branch -1: Detect Workflow Stage (--detect-stage)

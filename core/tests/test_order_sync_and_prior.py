@@ -368,3 +368,77 @@ class AutomatedSubmissionTests(TestCase):
         self.assertEqual(len(progress_calls), 2)
         called_plates = {call[2] for call in progress_calls}
         self.assertEqual(called_plates, {"UMA888AA", "UMA888BB"})
+
+
+class SyncArchiveTodayTests(TestCase):
+    def setUp(self):
+        self.mock_client = MagicMock()
+        self.sync_svc = OrderSyncService(client=self.mock_client)
+
+    def test_sync_archive_today_date_boundary_termination(self):
+        """
+        Verifies that sync_archive_today fetches all records for today across pages,
+        and halts immediately upon encountering records with a date older than target.
+        """
+        # Page 1: All 20 orders are from today 30.09.2026
+        page1_orders = [
+            {
+                "order_number": f"PO-PAGE1-{i:02d}-300926",
+                "registration_number": f"UMA{100+i}AA",
+                "installation_date": "30.09.2026 - 16:30",
+                "officer": "ENOCK MATOVU",
+                "order_status": "Installed",
+            }
+            for i in range(1, 21)
+        ]
+
+        # Page 2: First 5 are from today 30.09.2026, remaining are from yesterday 29.09.2026
+        page2_orders = [
+            {
+                "order_number": f"PO-PAGE2-{i:02d}-300926",
+                "registration_number": f"UMA{200+i}AA",
+                "installation_date": "30.09.2026 - 11:15",
+                "officer": "ROLLAND MUYIIRA",
+                "order_status": "Installed",
+            }
+            for i in range(1, 6)
+        ] + [
+            {
+                "order_number": f"PO-PAGE2-OLD-{i:02d}-290926",
+                "registration_number": f"UMA{300+i}AA",
+                "installation_date": "29.09.2026 - 17:45",
+                "officer": "EMMY AKENA",
+                "order_status": "Installed",
+            }
+            for i in range(6, 21)
+        ]
+
+        def side_effect(page=1, archive=True, search_params=None):
+            if page == 1:
+                return {"success": True, "orders": page1_orders, "has_next_page": True}
+            elif page == 2:
+                return {"success": True, "orders": page2_orders, "has_next_page": True}
+            else:
+                return {"success": True, "orders": [], "has_next_page": False}
+
+        self.mock_client.fetch_installation_orders.side_effect = side_effect
+        self.mock_client.sync_orders_to_local_db.return_value = {
+            "created": 25,
+            "updated": 0,
+            "installed_verified": 25,
+        }
+
+        from datetime import date
+        res = self.sync_svc.sync_archive_today(target_date=date(2026, 9, 30), force=True)
+
+        self.assertTrue(res["success"])
+        # Should collect 20 from page 1 + 5 from page 2 = 25 total
+        self.assertEqual(res["total_fetched"], 25)
+        # Should have stopped at page 2, never calling page 3!
+        self.assertEqual(res["pages_fetched"], 2)
+        self.mock_client.sync_orders_to_local_db.assert_called_once()
+        synced_batch = self.mock_client.sync_orders_to_local_db.call_args[0][0]
+        self.assertEqual(len(synced_batch), 25)
+        self.assertEqual(res["officers"]["ENOCK MATOVU"], 20)
+        self.assertEqual(res["officers"]["ROLLAND MUYIIRA"], 5)
+

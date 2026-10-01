@@ -68,15 +68,22 @@ urlpatterns = [
 
     # Stock Monitoring & Daily Plate Reconciliation APIs
     path("api/stock/reconciliation/", views.api_stock_reconciliation, name="api_stock_reconciliation"),
+    path("api/stock/shift/reconcile/", views.api_stock_shift_reconcile, name="api_stock_shift_reconcile"),
     path("api/stock/dispatch/", views.api_stock_dispatch, name="api_stock_dispatch"),
     path("api/stock/delivery/", views.api_stock_delivery, name="api_stock_delivery"),
+    path("api/stock/delivery/<int:delivery_id>/", views.api_stock_delivery_detail, name="api_stock_delivery_detail"),
+    path("api/stock/delivery/upload-note/", views.api_stock_upload_delivery_note, name="api_stock_upload_delivery_note"),
     path("api/stock/transfer/", views.api_stock_bond_transfer, name="api_stock_bond_transfer"),
     path("api/stock/scheduled/", views.api_stock_scheduled, name="api_stock_scheduled"),
     path("api/stock/return/", views.api_stock_return, name="api_stock_return"),
     path("api/stock/opening/", views.api_stock_opening, name="api_stock_opening"),
     path("api/stock/physical/", views.api_stock_physical_count, name="api_stock_physical_count"),
     path("api/stock/export/", views.api_stock_export_csv, name="api_stock_export_csv"),
+    path("api/stock/export/category/<str:category>/", views.api_stock_export_category_csv, name="api_stock_export_category_csv"),
     path("api/stock/delivery-notes/", views.api_stock_delivery_notes, name="api_stock_delivery_notes"),
     path("api/stock/mvr-docket/", views.api_stock_mvr_docket, name="api_stock_mvr_docket"),
+    path("api/stock/kits/sync/", views.api_stock_kits_sync, name="api_stock_kits_sync"),
+    path("api/stock/kits/readiness/", views.api_stock_kits_readiness, name="api_stock_kits_readiness"),
 ]
+
 

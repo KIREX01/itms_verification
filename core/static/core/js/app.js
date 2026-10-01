@@ -61,6 +61,14 @@ document.addEventListener("DOMContentLoaded", () => {
             if (typeof fetchReportTotals === "function") {
                 fetchReportTotals();
             }
+        } else if (key === "s" && activeNavTab === 7) {
+            if (typeof openShiftReconcileModal === "function") {
+                openShiftReconcileModal();
+            }
+        } else if (key === "k" && activeNavTab === 7) {
+            if (typeof openStockKitSyncModal === "function") {
+                openStockKitSyncModal();
+            }
         } else if (key === "i") {
             openBatchUploadModal();
         } else if (key === "a" && activeNavTab === 4) {

@@ -125,15 +125,17 @@ class PipelineRunner:
             if task_type == "sync_orders":
                 with self._lock:
                     self._status["stage"] = "ORDER_SYNC"
-                    self._status["progress_pct"] = 40
-                    self._status["message"] = "Syncing installation orders from ITMS..."
+                    self._status["progress_pct"] = 30
+                    self._status["message"] = "Syncing active orders and shift archive from ITMS..."
 
-                self._append_log("Fetching live installation orders...", "SYNC")
+                self._append_log("Starting unified shift synchronization (active queue + shift archive)...", "SYNC")
                 try:
-                    call_command("fetch_itms_orders", "--page", "1", "--sync", stdout=out_stream, stderr=err_stream)
+                    from core.services.order_sync import OrderSyncService
+                    sync_svc = OrderSyncService()
+                    res = sync_svc.sync_shift_scoped(force=True)
+                    self._append_log(res.get("message", "Shift synchronization complete."), "SUCCESS")
                 except Exception as sync_err:
-                    # Fallback to seed if live server credentials/network unavailable
-                    self._append_log(f"Live fetch note ({sync_err}), checking local orders...", "WARNING")
+                    self._append_log(f"Live sync note ({sync_err}), checking local orders...", "WARNING")
 
             with self._lock:
                 self._status["running"] = False

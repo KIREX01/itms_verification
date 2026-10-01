@@ -287,6 +287,11 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         "total_orders": InstallationOrder.objects.count(),
         "total_pairs": VehicleInstallationPair.objects.count(),
         "app_version": __version__,
+        "user_settings": config_service.get_user_settings(),
+        "developer_settings": config_service.get_developer_settings(),
+        "developer_mode": config_service.is_developer_mode(),
+        "active_bond": config_service.get_active_bond(),
+        "available_bonds": config_service.get_available_bonds(),
     }
     return render(request, "core/dashboard.html", context)
 
@@ -1011,6 +1016,127 @@ def api_itms_orders_explorer(request: HttpRequest) -> JsonResponse:
 
     should_try_live = (source == "live") or (source == "auto" and session_valid)
 
+    # 1. Specialized handling for Installation Kits Tab
+    if tab == "kits":
+        if should_try_live:
+            try:
+                live_result = client.fetch_installation_kits(
+                    page=page,
+                    search_params=search if search else None,
+                )
+                if live_result.get("success"):
+                    raw_kits = live_result.get("kits", [])
+                    try:
+                        client.sync_kits_to_local_db(raw_kits)
+                    except Exception as exc:
+                        logger.warning("Auto-sync error during kits explorer: %s", exc)
+
+                    enriched_kits = []
+                    for k in raw_kits:
+                        reg_num = k.get("registration_number", "")
+                        canonical_reg = normalizer.canonicalize(reg_num) if reg_num else ""
+                        pair = None
+                        if canonical_reg:
+                            pair = VehicleInstallationPair.objects.filter(registration_number_detected=canonical_reg).first()
+                        k_dict = dict(k)
+                        k_dict["matched_pair_id"] = pair.id if pair else None
+                        k_dict["verification_status"] = pair.verification_status if pair else None
+                        enriched_kits.append(k_dict)
+
+                    return JsonResponse({
+                        "success": True,
+                        "source": "live",
+                        "tab": "kits",
+                        "page": page,
+                        "count": len(enriched_kits),
+                        "has_next_page": live_result.get("has_next_page", False),
+                        "summary": live_result.get("summary") or f"Live Page {page} ({len(enriched_kits)} kits)",
+                        "orders": enriched_kits,
+                        "kits": enriched_kits,
+                        "itms_connected": True,
+                    })
+                elif source == "live":
+                    return JsonResponse({
+                        "success": False,
+                        "error": live_result.get("error", "Failed to fetch installation kits from live ITMS."),
+                        "source": "live",
+                        "orders": [],
+                        "kits": [],
+                        "itms_connected": session_valid,
+                    }, status=502)
+            except Exception as exc:
+                logger.exception("Error querying live ITMS kits: %s", exc)
+                if source == "live":
+                    return JsonResponse({
+                        "success": False,
+                        "error": f"Live ITMS kits connection error: {exc}",
+                        "source": "live",
+                        "orders": [],
+                        "kits": [],
+                        "itms_connected": session_valid,
+                    }, status=502)
+
+        # Fallback to Local DB query for kits
+        qs_kits = InstallationKit.objects.all()
+        if search:
+            clean_search = normalizer.canonicalize(search) or search.upper()
+            qs_kits = qs_kits.filter(
+                Q(kit_code__icontains=clean_search) |
+                Q(registration_number__icontains=clean_search) |
+                Q(front_plate__icontains=search) |
+                Q(rear_plate__icontains=search) |
+                Q(gps_tracker__icontains=search) |
+                Q(warehouse__icontains=search) |
+                Q(status__icontains=search)
+            )
+
+        total_count = qs_kits.count()
+        total_pages = max(1, math.ceil(total_count / limit))
+        offset = (page - 1) * limit
+        paged_kits = qs_kits.order_by("-id")[offset : offset + limit]
+
+        local_kits = []
+        for k in paged_kits:
+            pair = VehicleInstallationPair.objects.filter(
+                registration_number_detected=k.registration_number
+            ).first() if k.registration_number else None
+
+            local_kits.append({
+                "id": k.id,
+                "kit_code": k.kit_code,
+                "registration_number": k.registration_number,
+                "front_plate": k.front_plate,
+                "rear_plate": k.rear_plate,
+                "front_tracker": k.front_tracker,
+                "rear_tracker": k.rear_tracker,
+                "gps_tracker": k.gps_tracker,
+                "warehouse": k.warehouse,
+                "status": k.status,
+                "created_date": k.created_date,
+                "kit_uuid": k.kit_uuid,
+                "detail_url": k.detail_url,
+                "matched_pair_id": pair.id if pair else None,
+                "verification_status": pair.verification_status if pair else None,
+            })
+
+        summary_text = f"Showing {offset + 1} to {min(offset + len(local_kits), total_count)} of {total_count} local kits" if total_count > 0 else "0 kits found"
+
+        return JsonResponse({
+            "success": True,
+            "source": "local",
+            "tab": "kits",
+            "page": page,
+            "total_count": total_count,
+            "total_pages": total_pages,
+            "has_next_page": page < total_pages,
+            "has_prev_page": page > 1,
+            "summary": summary_text,
+            "orders": local_kits,
+            "kits": local_kits,
+            "itms_connected": session_valid,
+        })
+
+    # 2. Handling for Active and Archive Orders
     if should_try_live:
         try:
             live_result = client.fetch_installation_orders(
@@ -1195,7 +1321,56 @@ def api_itms_order_detail(request: HttpRequest, order_ident: str) -> JsonRespons
             logger.warning("Error fetching live order info for %s: %s", order_ident, exc)
 
     if not order:
-        return JsonResponse({"success": False, "error": f"Order '{order_ident}' not found locally or on live ITMS."}, status=404)
+        kit = InstallationKit.objects.filter(
+            Q(kit_code__iexact=order_ident) |
+            Q(registration_number__iexact=normalizer.canonicalize(order_ident) or order_ident) |
+            Q(kit_uuid__iexact=order_ident)
+        ).first()
+        if kit:
+            if force_live and session_valid and kit.kit_uuid:
+                try:
+                    client.fetch_installation_kit_detail(kit.kit_uuid)
+                    kit.refresh_from_db()
+                except Exception:
+                    pass
+
+            return JsonResponse({
+                "success": True,
+                "is_kit": True,
+                "order": {
+                    "id": kit.id,
+                    "order_number": kit.kit_code,
+                    "registration_number": kit.registration_number,
+                    "vin": "---",
+                    "sales_order": "---",
+                    "service_type": "Installation Kit",
+                    "warehouse_name": kit.warehouse,
+                    "installation_officer": kit.created_by_user or "ITMS Central Stock",
+                    "installation_date": kit.created_date,
+                    "order_status": kit.status,
+                    "registration_status": "Stock Kit",
+                    "is_archived": False,
+                    "itms_stage": "KIT_STOCK",
+                    "itms_order_uuid": kit.kit_uuid,
+                    "hardware": {
+                        "gps_tracker_id": kit.gps_tracker or "Not Fitted",
+                        "front_beacon_id": kit.front_tracker or "None",
+                        "rear_beacon_id": kit.rear_tracker or "None",
+                        "front_plate_serial": kit.front_plate or "---",
+                        "front_plate_type": kit.front_plate_article or "---",
+                        "rear_plate_serial": kit.rear_plate or "---",
+                        "rear_plate_type": kit.rear_plate_article or "---",
+                    },
+                    "photos": [],
+                    "front_photo_url": None,
+                    "rear_photo_url": None,
+                    "details_json": kit.details_json,
+                    "matched_pair": None,
+                    "detail_url": kit.detail_url or (f"https://stock.itms.ug/installation-kit/{kit.kit_uuid}/main/information" if kit.kit_uuid else ""),
+                }
+            })
+
+        return JsonResponse({"success": False, "error": f"Record '{order_ident}' not found locally or on live ITMS."}, status=404)
 
     pair = VehicleInstallationPair.objects.filter(
         Q(order=order) | Q(registration_number_detected=order.registration_number)
@@ -1254,12 +1429,12 @@ def api_itms_order_detail(request: HttpRequest, order_ident: str) -> JsonRespons
 @require_POST
 def api_itms_sync_now(request: HttpRequest) -> JsonResponse:
     """
-    Directly triggers synchronization of active orders and/or archive orders
-    from stock.itms.ug into the local database.
+    Directly triggers synchronization of active orders, archive orders, or
+    installation kits from stock.itms.ug into the local database.
     """
     tab = request.POST.get("tab", "active").strip().lower()
     try:
-        pages = max(1, min(5, int(request.POST.get("pages", 1))))
+        pages = max(1, min(50, int(request.POST.get("pages", 1))))
     except (ValueError, TypeError):
         pages = 1
 
@@ -1267,7 +1442,7 @@ def api_itms_sync_now(request: HttpRequest) -> JsonResponse:
         try:
             body = json.loads(request.body.decode("utf-8"))
             tab = body.get("tab", tab)
-            pages = max(1, min(5, int(body.get("pages", pages))))
+            pages = max(1, min(50, int(body.get("pages", pages))))
         except Exception:
             pass
 
@@ -1278,40 +1453,61 @@ def api_itms_sync_now(request: HttpRequest) -> JsonResponse:
             "error": "ITMS WebApp session is not connected or has expired. Please connect your ITMS account.",
         }, status=401)
 
-    total_created = 0
-    total_updated = 0
-    total_installed = 0
-    total_fetched = 0
+    from core.services.order_sync import OrderSyncService
+    sync_svc = OrderSyncService(client=client)
 
-    do_active = tab in ("active", "both")
-    do_archive = tab in ("archive", "both")
+    if tab in ("kits", "installation_kits"):
+        pages_to_sync = max(1, min(50, pages if pages > 1 else int(request.POST.get("pages", 25))))
+        res = sync_svc.sync_installation_kits_scoped(max_pages=pages_to_sync, force=True)
+        return JsonResponse({
+            "success": res.get("success", False),
+            "created": res.get("created", 0),
+            "updated": res.get("updated", 0),
+            "total_fetched": res.get("total_fetched", 0),
+            "pages_fetched": res.get("pages_fetched", 0),
+            "message": res.get("message", "Installation kits sync complete."),
+        })
 
-    for p in range(1, pages + 1):
-        if do_active:
-            res = client.fetch_installation_orders(page=p, archive=False)
-            if res.get("success"):
-                sync_res = client.sync_orders_to_local_db(res.get("orders", []))
-                total_created += sync_res.get("created", 0)
-                total_updated += sync_res.get("updated", 0)
-                total_installed += sync_res.get("installed_verified", 0)
-                total_fetched += sync_res.get("total", 0)
+    if tab in ("shift", "both", "today", "all"):
+        res = sync_svc.sync_shift_scoped(force=True)
+        act = res.get("active", {})
+        arc = res.get("archive", {})
+        total_created = act.get("created", 0) + arc.get("created", 0)
+        total_updated = act.get("updated", 0) + arc.get("updated", 0)
+        total_fetched = act.get("total_active_seen", 0) + arc.get("total_fetched", 0)
+        total_installed = arc.get("installed_verified", 0)
+        return JsonResponse({
+            "success": True,
+            "created": total_created,
+            "updated": total_updated,
+            "installed_verified": total_installed,
+            "total_fetched": total_fetched,
+            "active_seen": act.get("total_active_seen", 0),
+            "archive_seen": arc.get("total_fetched", 0),
+            "message": res.get("message", "Shift sync complete."),
+        })
 
-        if do_archive:
-            res = client.fetch_archive_orders(page=p)
-            if res.get("success"):
-                sync_res = client.sync_orders_to_local_db(res.get("orders", []))
-                total_created += sync_res.get("created", 0)
-                total_updated += sync_res.get("updated", 0)
-                total_installed += sync_res.get("installed_verified", 0)
-                total_fetched += sync_res.get("total", 0)
+    if tab == "archive":
+        res = sync_svc.sync_archive_today(force=True)
+        return JsonResponse({
+            "success": True,
+            "created": res.get("created", 0),
+            "updated": res.get("updated", 0),
+            "installed_verified": res.get("installed_verified", 0),
+            "total_fetched": res.get("total_fetched", 0),
+            "pages_fetched": res.get("pages_fetched", 0),
+            "message": res.get("message", "Archive sync complete."),
+        })
 
+    # Default: active orders
+    res = sync_svc.sync_active_orders(force=True, max_pages=25)
     return JsonResponse({
         "success": True,
-        "created": total_created,
-        "updated": total_updated,
-        "installed_verified": total_installed,
-        "total_fetched": total_fetched,
-        "message": f"Successfully synced {total_fetched} orders ({total_created} new, {total_updated} updated).",
+        "created": res.get("created", 0),
+        "updated": res.get("updated", 0),
+        "total_fetched": res.get("total_active_seen", 0),
+        "disappeared": res.get("disappeared_from_active", 0),
+        "message": res.get("message", "Active orders sync complete."),
     })
 
 
@@ -1364,7 +1560,10 @@ def api_itms_kits(request: HttpRequest) -> JsonResponse:
     if request.method == "POST" or request.GET.get("sync") == "true":
         if not client.session_store.session.is_cookie_valid():
             return JsonResponse({"success": False, "error": "ITMS session not authenticated."}, status=401)
-        res = client.sync_kits_to_local_db(max_pages=3)
+        from core.services.order_sync import OrderSyncService
+        sync_svc = OrderSyncService(client=client)
+        pages_to_sync = int(request.GET.get("pages", 25) or 25)
+        res = sync_svc.sync_installation_kits_scoped(max_pages=pages_to_sync, force=True)
         return JsonResponse({"success": True, "sync": res})
 
     q = request.GET.get("q", "").strip()
@@ -1604,15 +1803,81 @@ def api_export_report(request: HttpRequest) -> HttpResponse:
 # System Configuration & Preferences API
 # ============================================================================
 
-@require_GET
+@csrf_exempt
 def api_settings(request: HttpRequest) -> JsonResponse:
-    """Returns current system configuration and safety controls."""
+    """
+    GET: Returns current system configuration, user settings, developer settings, and active engine.
+    POST: Updates configuration parameters dynamically.
+    """
+    if request.method == "POST":
+        updated_keys = []
+        payload = {}
+        if request.content_type == "application/json" and request.body:
+            try:
+                payload = json.loads(request.body.decode("utf-8"))
+            except Exception:
+                pass
+        else:
+            payload = dict(request.POST.items())
+
+        if "key" in payload and "value" in payload:
+            k = str(payload["key"]).strip()
+            v = payload["value"]
+            config_service.set_setting(k, v)
+            if "yolo_weights" in k:
+                try:
+                    from core.vision import detector
+                    detector.set_yolo_weights(v)
+                except Exception:
+                    pass
+            updated_keys.append(k)
+        elif "settings" in payload and isinstance(payload["settings"], dict):
+            for k, v in payload["settings"].items():
+                config_service.set_setting(str(k).strip(), v)
+                if "yolo_weights" in str(k):
+                    try:
+                        from core.vision import detector
+                        detector.set_yolo_weights(v)
+                    except Exception:
+                        pass
+                updated_keys.append(str(k).strip())
+        else:
+            for k, v in payload.items():
+                if k not in ("csrfmiddlewaretoken",):
+                    config_service.set_setting(str(k).strip(), v)
+                    if "yolo_weights" in str(k):
+                        try:
+                            from core.vision import detector
+                            detector.set_yolo_weights(v)
+                        except Exception:
+                            pass
+                    updated_keys.append(str(k).strip())
+
+        cfg = config_service.load_config()
+        db_info = config_service.get_active_database_info()
+        return JsonResponse({
+            "success": True,
+            "message": f"Updated {len(updated_keys)} setting(s).",
+            "updated_keys": updated_keys,
+            "dry_run": cfg.get("submission", {}).get("dry_run_mode", True),
+            "submit_step3": cfg.get("submission", {}).get("submit_step3", True),
+            "developer_mode": config_service.is_developer_mode(),
+            "user_settings": config_service.get_user_settings(),
+            "developer_settings": config_service.get_developer_settings(),
+            "database": db_info.get("display", "SQLite"),
+            "active_engine": db_info.get("vendor", "sqlite"),
+        })
+
     cfg = config_service.load_config()
     db_info = config_service.get_active_database_info()
     return JsonResponse({
         "success": True,
         "dry_run": cfg.get("submission", {}).get("dry_run_mode", True),
         "submit_step3": cfg.get("submission", {}).get("submit_step3", True),
+        "developer_mode": config_service.is_developer_mode(),
+        "user_settings": config_service.get_user_settings(),
+        "developer_settings": config_service.get_developer_settings(),
+        "active_bond": config_service.get_active_bond(),
         "database": db_info.get("display", "SQLite"),
         "active_engine": db_info.get("vendor", "sqlite"),
         "version": __version__,
@@ -2468,7 +2733,13 @@ def api_stock_delivery(request: HttpRequest) -> JsonResponse:
         if "auto_create_kits" in request.POST:
             auto_create_kits = request.POST.get("auto_create_kits", "").lower() in ("true", "1", "yes")
 
-    delivery_note_image = request.FILES.get("delivery_note_image")
+    delivery_note_image = (
+        request.FILES.get("delivery_note_image")
+        or request.FILES.get("image")
+        or request.FILES.get("photo")
+        or request.POST.get("delivery_note_image")
+        or request.POST.get("photo_path")
+    )
 
     if not plates_raw:
         return JsonResponse({"success": False, "error": "No plate numbers provided in 'plates'."}, status=400)
@@ -2623,6 +2894,7 @@ def api_stock_scheduled(request: HttpRequest) -> JsonResponse:
     under the bond for the day (PSV White and PMO Yellow).
     """
     from core.services import stock_monitoring_service
+    sched_target = None
     sched_psv = 0
     sched_pmo = 0
     target_date = None
@@ -2631,6 +2903,8 @@ def api_stock_scheduled(request: HttpRequest) -> JsonResponse:
     if request.content_type == "application/json" and request.body:
         try:
             body = json.loads(request.body.decode("utf-8"))
+            if "scheduled_target" in body or "scheduled_total" in body or "target" in body:
+                sched_target = int(body.get("scheduled_target") or body.get("scheduled_total") or body.get("target") or 0)
             sched_psv = int(body.get("scheduled_psv", 0) or 0)
             sched_pmo = int(body.get("scheduled_pmo", 0) or 0)
             target_date = body.get("date") or body.get("date_suffix") or body.get("suffix")
@@ -2638,7 +2912,9 @@ def api_stock_scheduled(request: HttpRequest) -> JsonResponse:
         except Exception:
             pass
 
-    if sched_psv == 0 and sched_pmo == 0:
+    if sched_target is None and sched_psv == 0 and sched_pmo == 0:
+        if "scheduled_target" in request.POST or "target" in request.POST:
+            sched_target = int(request.POST.get("scheduled_target") or request.POST.get("target") or 0)
         sched_psv = int(request.POST.get("scheduled_psv", 0) or 0)
         sched_pmo = int(request.POST.get("scheduled_pmo", 0) or 0)
         target_date = (
@@ -2651,8 +2927,9 @@ def api_stock_scheduled(request: HttpRequest) -> JsonResponse:
 
     try:
         res = stock_monitoring_service.set_scheduled_target(
-            scheduled_psv=sched_psv,
-            scheduled_pmo=sched_pmo,
+            scheduled_target=sched_target,
+            scheduled_psv=sched_psv if sched_target is None else None,
+            scheduled_pmo=sched_pmo if sched_target is None else None,
             target_date_suffix=target_date,
             notes=notes,
         )
@@ -2790,6 +3067,59 @@ def api_stock_delivery_notes(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
+def api_stock_delivery_detail(request: HttpRequest, delivery_id: int) -> JsonResponse:
+    """Returns detailed information and plates list for a specific delivery note."""
+    from core.services import stock_monitoring_service
+    detail = stock_monitoring_service.get_delivery_note_detail(delivery_id)
+    if not detail:
+        return JsonResponse({"success": False, "error": f"Delivery note #{delivery_id} not found."}, status=404)
+    return JsonResponse({"success": True, "delivery_note": detail})
+
+
+@csrf_exempt
+@require_POST
+def api_stock_upload_delivery_note(request: HttpRequest) -> JsonResponse:
+    """
+    Uploads a photo of the paper delivery note and attaches it to an existing
+    or upcoming delivery for the shift.
+    """
+    from core.models import StockDelivery
+    from core.services import vault_service
+    photo = request.FILES.get("delivery_note_image") or request.FILES.get("photo") or request.FILES.get("file")
+    if not photo:
+        return JsonResponse({"success": False, "error": "No delivery note photo provided."}, status=400)
+
+    delivery_id = request.POST.get("delivery_id")
+
+    try:
+        ev_img, status = vault_service.ingest_uploaded_file(photo)
+        if not ev_img:
+            return JsonResponse({"success": False, "error": f"Failed to ingest delivery note photo: {status}."}, status=400)
+
+        delivery_obj = None
+        if delivery_id:
+            try:
+                delivery_obj = StockDelivery.objects.get(id=int(delivery_id))
+                delivery_obj.delivery_note_image = ev_img
+                delivery_obj.save(update_fields=["delivery_note_image"])
+            except StockDelivery.DoesNotExist:
+                pass
+
+        return JsonResponse({
+            "success": True,
+            "image_id": str(ev_img.id),
+            "image_url": ev_img.url,
+            "image_path": ev_img.absolute_path,
+            "delivery_id": delivery_obj.id if delivery_obj else None,
+            "message": "Delivery note photo uploaded successfully.",
+        })
+    except Exception as exc:
+        logger.error("api_stock_upload_delivery_note error: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
+
+@require_GET
 def api_stock_mvr_docket(request: HttpRequest) -> JsonResponse:
     """Returns the MVR Allocation Exception Docket (raw plates list and formatted text)."""
     from core.services import stock_monitoring_service
@@ -2805,4 +3135,182 @@ def api_stock_mvr_docket(request: HttpRequest) -> JsonResponse:
     except Exception as exc:
         logger.error("api_stock_mvr_docket error: %s", exc)
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
+@csrf_exempt
+@require_POST
+def api_stock_shift_reconcile(request: HttpRequest) -> JsonResponse:
+    """
+    Unified Shift Stock Reconciliation and Inventory System Update:
+    Ingests morning counted plates, evening returns, updates InstallationKit records,
+    balances DailyStockLedger, and generates standardized CSV exports.
+    """
+    from core.services import stock_monitoring_service
+    morning_plates = None
+    return_plates = None
+    target_date = None
+    sync_itms = False
+    operator_name = "Operator"
+    notes = ""
+
+    if request.content_type == "application/json" and request.body:
+        try:
+            body = json.loads(request.body.decode("utf-8"))
+            morning_plates = body.get("morning_plates") or body.get("plates") or body.get("dispatched_plates")
+            return_plates = body.get("return_plates") or body.get("returns")
+            target_date = body.get("date") or body.get("date_suffix") or body.get("suffix")
+            sync_itms = bool(body.get("sync_itms", False))
+            operator_name = body.get("operator_name") or "Operator"
+            notes = body.get("notes") or ""
+        except Exception:
+            pass
+
+    if not morning_plates and not return_plates:
+        morning_plates = request.POST.get("morning_plates") or request.POST.get("plates") or request.POST.get("dispatched_plates")
+        return_plates = request.POST.get("return_plates") or request.POST.get("returns")
+        target_date = (
+            request.POST.get("date")
+            or request.POST.get("date_suffix")
+            or request.POST.get("suffix")
+            or target_date
+        )
+        sync_itms = request.POST.get("sync_itms", "").lower() in ("true", "1", "yes")
+        operator_name = request.POST.get("operator_name", operator_name)
+        notes = request.POST.get("notes", notes)
+
+    try:
+        user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
+        op_name = request.user.username if user else operator_name
+
+        if sync_itms:
+            try:
+                from core.services.order_sync import OrderSyncService
+                sync_service = OrderSyncService()
+                sync_service.sync_shift_scoped(target_date_suffix=target_date)
+            except Exception as sync_err:
+                logger.warning("Auto-sync prior to reconciliation encountered error: %s", sync_err)
+
+        res = stock_monitoring_service.reconcile_and_update_shift(
+            morning_plates=morning_plates,
+            return_plates=return_plates,
+            target_date_suffix=target_date,
+            operator_name=op_name,
+            notes=notes,
+            auto_create_kits=True,
+            export_csvs=True,
+        )
+        return JsonResponse(res)
+    except Exception as exc:
+        logger.error("api_stock_shift_reconcile error: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
+@require_GET
+def api_stock_export_category_csv(request: HttpRequest, category: str) -> HttpResponse:
+    """
+    Downloads standardized shift CSV for a given category:
+    - 'unallocated'
+    - 'archived'
+    - 'pending'
+    - 'dispatched'
+    - 'returned'
+    - 'master'
+    """
+    from core.services import stock_monitoring_service
+    date_suffix = (
+        request.GET.get("date")
+        or request.GET.get("date_suffix")
+        or request.GET.get("suffix")
+        or None
+    )
+    _, suffix = stock_monitoring_service.resolve_date_and_suffix(date_suffix)
+    cat_clean = str(category).strip().lower()
+    csv_content = stock_monitoring_service.generate_category_csv_content(cat_clean, suffix)
+
+    filename = f"shift_{suffix}_{cat_clean}.csv"
+    response = HttpResponse(csv_content, content_type="text/csv")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+@csrf_exempt
+@require_POST
+def api_stock_kits_sync(request: HttpRequest) -> JsonResponse:
+    """
+    Synchronizes installation kits from ITMS, inbound deliveries, and safe stock-taking,
+    ensuring they are provisioned and marked as 'New' in warehouse stock.
+    """
+    from core.services import kit_provisioning_service, stock_monitoring_service
+    target_date = None
+    sync_itms = True
+    plates_raw = None
+
+    if request.content_type == "application/json" and request.body:
+        try:
+            body = json.loads(request.body.decode("utf-8"))
+            target_date = body.get("date") or body.get("date_suffix") or body.get("suffix")
+            if "sync_itms" in body:
+                sync_itms = bool(body.get("sync_itms"))
+            plates_raw = body.get("plates")
+        except Exception:
+            pass
+
+    if not target_date:
+        target_date = request.POST.get("date") or request.POST.get("date_suffix") or request.POST.get("suffix")
+    if "sync_itms" in request.POST:
+        sync_itms = request.POST.get("sync_itms", "").lower() in ("true", "1", "yes")
+    if not plates_raw:
+        plates_raw = request.POST.get("plates")
+
+    source_plates = stock_monitoring_service.parse_plate_input(plates_raw) if plates_raw else None
+
+    try:
+        res = kit_provisioning_service.sync_and_provision_warehouse_kits(
+            target_date_suffix=target_date,
+            source_plates=source_plates,
+            sync_itms=sync_itms,
+        )
+        payload = dict(res)
+        payload["result"] = res
+        return JsonResponse(payload)
+    except Exception as exc:
+        logger.error("api_stock_kits_sync error: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
+@require_GET
+def api_stock_kits_readiness(request: HttpRequest) -> JsonResponse:
+    """Returns the warehouse stock readiness status for morning take-for-work dispatches."""
+    from core.models import InstallationKit
+    from core.services import bond_service, kit_provisioning_service
+    active_bond = bond_service.get_active_bond()
+    wh_name = active_bond.get("name", "AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)")
+
+    new_kits_qs = InstallationKit.objects.filter(status__iexact="New")
+    total_new = new_kits_qs.count()
+
+    series_breakdown: Dict[str, int] = {}
+    for p in new_kits_qs.values_list("registration_number", flat=True)[:500]:
+        c = p.strip().upper()
+        s = c[6:] if len(c) >= 7 else "UG"
+        series_breakdown[s] = series_breakdown.get(s, 0) + 1
+
+    daemon = kit_provisioning_service.MorningKitSyncDaemon.get_instance()
+    daemon_status = daemon.get_status()
+
+    return JsonResponse({
+        "success": True,
+        "warehouse": wh_name,
+        "total_new_in_stock": total_new,
+        "series_breakdown": dict(sorted(series_breakdown.items(), key=lambda x: -x[1])),
+        "daemon_status": daemon_status,
+        "readiness": {
+            "new_unallocated": total_new,
+            "total_new": total_new,
+            "warehouse": wh_name,
+            "series_breakdown": dict(sorted(series_breakdown.items(), key=lambda x: -x[1])),
+        },
+    })
+
+
 

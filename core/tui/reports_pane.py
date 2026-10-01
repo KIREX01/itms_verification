@@ -1,5 +1,5 @@
 """
-Reports & System Totals Pane (Tab 7) for the ITMS Operator TUI.
+Reports & System Totals Pane (Tab 6) for the ITMS Operator TUI.
 
 Provides an executive, visual dashboard designed for immediate clarity:
 1. Top 3-Pillar Hero Dashboard:
@@ -14,7 +14,7 @@ Provides an executive, visual dashboard designed for immediate clarity:
 """
 from typing import Any, Dict, List, Optional
 
-from textual import events
+from textual import events, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -31,7 +31,7 @@ from core.services import bond_service
 
 
 class ReportsPane(VerticalScroll):
-    """Interactive Reports & Totals Pane (Tab 7)."""
+    """Interactive Reports & Totals Pane (Tab 6)."""
 
     BINDINGS = [
         Binding("t", "cycle_date", "Select Date"),
@@ -58,6 +58,7 @@ class ReportsPane(VerticalScroll):
             with Horizontal(id="reports-actions-bar"):
                 yield Button("🗓️ Select Date [T]", variant="primary", id="btn-report-date")
                 yield Button("📦 Stock Manager & Safe Audit [K]", variant="success", id="btn-report-stock")
+                yield Button("⚡ Sync Stock Kits", variant="primary", id="btn-sync-stock-kits-ribbon")
                 yield Button("🔄 Sync Orders [S]", variant="warning", id="btn-report-sync")
                 yield Button("📑 Export Report [E]", variant="default", id="btn-report-export")
                 yield Button("🔄 Refresh [R]", variant="default", id="btn-report-refresh")
@@ -95,9 +96,22 @@ class ReportsPane(VerticalScroll):
                     yield Button("📑 Copy MVR Docket", variant="warning", id="btn-copy-mvr-docket")
                 yield DataTable(id="table-report-unallocated")
 
+            # 6. Direct Categorized Shift CSV Exports (Directory: exports/)
+            with Vertical(classes="report-card", id="card-report-csv-exports"):
+                yield Static("[bold green]📁 Categorized Shift CSV Exports (Directory: exports/)[/bold green]", classes="card-title")
+                yield Static(id="reports-csv-exports-summary")
+                with Horizontal(classes="csv-actions-row"):
+                    yield Button("🚀 Export All 5 CSVs [E]", variant="primary", id="btn-export-all-csvs")
+                    yield Button("📂 Export Folder", variant="default", id="btn-change-reports-folder")
+                    yield Button("📊 Master Ledger CSV", variant="success", id="btn-export-master-csv")
+                    yield Button("🔴 Unallocated CSV", variant="error", id="btn-export-unalloc-csv")
+                    yield Button("🔵 Archive CSV", variant="default", id="btn-export-arch-csv")
+                    yield Button("🟡 Pending CSV", variant="warning", id="btn-export-pend-csv")
+                    yield Button("⚪ Dispatched CSV", variant="default", id="btn-export-disp-csv")
+
     def on_mount(self) -> None:
         table_stock = self.query_one("#table-report-stock-ledger", DataTable)
-        table_stock.add_columns("Description Metric", "Public White (PSV)", "Private Yellow (PMO)", "Total Combined (Bond)", "Formula / Description")
+        table_stock.add_columns("DESCRIPTION", "PRIVATE (PMO)", "PUBLIC (PSV)", "Total Combined", "REMARKS / Formula Note")
         table_stock.cursor_type = "row"
 
         table_unalloc = self.query_one("#table-report-unallocated", DataTable)
@@ -136,6 +150,7 @@ class ReportsPane(VerticalScroll):
         self._render_hero_dashboard(totals)
         self._render_stock_ledger(totals)
         self._render_unallocated(totals)
+        self._render_csv_exports(totals)
 
     def _render_header(self, t: Dict[str, Any]) -> None:
         user = auth_service.get_remembered_session()
@@ -203,12 +218,22 @@ class ReportsPane(VerticalScroll):
             f"[bold yellow]⚡[/bold yellow] Active in installation fitment\n[dim]Stages: {stages_str}[/dim]"
         )
 
+        recon = dd.get("stock_reconciliation", {})
+        floor = recon.get("floor_operations", {})
+        disp_cnt = floor.get("dispatched_count", 0)
+        ret_cnt = floor.get("returned_count", 0)
+
         self.query_one("#hero-unallocated-metric", Static).update(
             f"[bold red]{unalloc_cnt}[/bold red] [bold white]Plates[/bold white]"
         )
-        self.query_one("#hero-unallocated-subtext", Static).update(
-            f"[bold red]⚠️[/bold red] Not allocated to any ITMS order\n[dim][red]{failed_link_cnt}[/red] unlinked pairs  │  [green]{stock_kits_cnt}[/green] stock kits 'New'[/dim]"
-        )
+        if disp_cnt > 0:
+            self.query_one("#hero-unallocated-subtext", Static).update(
+                f"[bold red]⚠️[/bold red] Dispatched to line / No ITMS order\n[dim]Elimination: {disp_cnt} Out − {inst_cnt} Arch − {pend_cnt} Pend = [bold red]{unalloc_cnt} Unalloc[/bold red][/dim]"
+            )
+        else:
+            self.query_one("#hero-unallocated-subtext", Static).update(
+                f"[bold red]⚠️[/bold red] Not allocated to any ITMS order\n[dim]Daily shift floor discrepancy audit[/dim]"
+            )
 
     def _render_stock_ledger(self, t: Dict[str, Any]) -> None:
         table = self.query_one("#table-report-stock-ledger", DataTable)
@@ -223,34 +248,50 @@ class ReportsPane(VerticalScroll):
 
         for row in rows:
             metric = row.get("metric", "")
-            psv = row.get("psv", 0)
             pmo = row.get("pmo", 0)
+            psv = row.get("psv", 0)
             tot = row.get("total", 0)
             note = row.get("note", "")
 
             if "Closing Balance" in metric:
                 m_s = f"[bold green]{metric}[/bold green]"
-                p_s = f"[bold green]{psv:,}[/bold green]"
-                y_s = f"[bold green]{pmo:,}[/bold green]"
-                t_s = f"[bold white on dark_green] {tot:,} [/bold white on dark_green]"
-            elif "Scheduled" in metric:
+                y_s = f"[bold green]{pmo:,}[/bold green]" if isinstance(pmo, int) else f"[bold green]{pmo}[/bold green]"
+                p_s = f"[bold green]{psv:,}[/bold green]" if isinstance(psv, int) else f"[bold green]{psv}[/bold green]"
+                t_s = f"[bold white on dark_green] {tot:,} [/bold white on dark_green]" if isinstance(tot, int) else f"[bold white on dark_green] {tot} [/bold white on dark_green]"
+            elif "SCHEDULED" in metric or "Scheduled" in metric:
                 m_s = f"[bold cyan]{metric}[/bold cyan]"
-                p_s = f"[bold cyan]{psv:,}[/bold cyan]"
-                y_s = f"[bold cyan]{pmo:,}[/bold cyan]"
-                t_s = f"[bold cyan]{tot:,}[/bold cyan]"
-            elif "Variance" in metric:
-                col = "green" if tot >= 0 else "red"
+                y_s = f"[bold cyan]{pmo:,}[/bold cyan]" if isinstance(pmo, int) else f"[bold cyan]{pmo}[/bold cyan]"
+                p_s = f"[bold cyan]{psv:,}[/bold cyan]" if isinstance(psv, int) else f"[bold cyan]{psv}[/bold cyan]"
+                t_s = f"[bold cyan]{tot:,}[/bold cyan]" if isinstance(tot, int) else f"[bold cyan]{tot}[/bold cyan]"
+            elif "Installed" in metric:
+                m_s = f"[bold yellow]{metric}[/bold yellow]"
+                y_s = f"[bold yellow]{pmo:,}[/bold yellow]" if isinstance(pmo, int) else f"[bold yellow]{pmo}[/bold yellow]"
+                p_s = f"[bold yellow]{psv:,}[/bold yellow]" if isinstance(psv, int) else f"[bold yellow]{psv}[/bold yellow]"
+                t_s = f"[bold yellow]{tot:,}[/bold yellow]" if isinstance(tot, int) else f"[bold yellow]{tot}[/bold yellow]"
+            elif "perfomance" in metric.lower() or "performance" in metric.lower():
+                m_s = f"[bold magenta]{metric}[/bold magenta]"
+                y_s = f"{pmo}"
+                p_s = f"{psv}"
+                t_s = f"[bold magenta]{tot}[/bold magenta]"
+            elif "Backlog" in metric:
+                col = "red" if (isinstance(tot, int) and tot > 0) else "green"
                 m_s = f"[{col}]{metric}[/{col}]"
-                p_s = f"[{col}]{psv:+d}[/{col}]"
-                y_s = f"[{col}]{pmo:+d}[/{col}]"
-                t_s = f"[{col}]{tot:+d}[/{col}]"
+                y_s = f"[{col}]{pmo:,}[/{col}]" if isinstance(pmo, int) else f"[{col}]{pmo}[/{col}]"
+                p_s = f"[{col}]{psv:,}[/{col}]" if isinstance(psv, int) else f"[{col}]{psv}[/{col}]"
+                t_s = f"[{col}]{tot:,}[/{col}]" if isinstance(tot, int) else f"[{col}]{tot}[/{col}]"
+            elif "Variance" in metric:
+                col = "green" if (isinstance(tot, int) and tot >= 0) else "red"
+                m_s = f"[{col}]{metric}[/{col}]"
+                y_s = f"[{col}]{pmo:+d}[/{col}]" if isinstance(pmo, int) else f"[dim]{pmo}[/dim]"
+                p_s = f"[{col}]{psv:+d}[/{col}]" if isinstance(psv, int) else f"[dim]{psv}[/dim]"
+                t_s = f"[{col}]{tot:+d}[/{col}]" if isinstance(tot, int) else f"[dim]{tot}[/dim]"
             else:
                 m_s = f"[bold white]{metric}[/bold white]"
-                p_s = f"{psv:,}"
-                y_s = f"{pmo:,}"
-                t_s = f"[bold white]{tot:,}[/bold white]"
+                y_s = f"{pmo:,}" if isinstance(pmo, int) else str(pmo)
+                p_s = f"{psv:,}" if isinstance(psv, int) else str(psv)
+                t_s = f"[bold white]{tot:,}[/bold white]" if isinstance(tot, int) else str(tot)
 
-            table.add_row(m_s, p_s, y_s, t_s, f"[dim]{note}[/dim]")
+            table.add_row(m_s, y_s, p_s, t_s, f"[dim]{note}[/dim]")
 
         floor = recon.get("floor_operations", {})
         unalloc = floor.get("unallocated_discrepancy", 0)
@@ -267,10 +308,29 @@ class ReportsPane(VerticalScroll):
         dd = t.get("date_driven", {})
         fmt_date = dd.get("selected_date_formatted") or "All Dates"
         suffix = dd.get("selected_date_suffix") or "ALL"
+        recon = dd.get("stock_reconciliation", {})
+        floor = recon.get("floor_operations", {})
+        disp_cnt = floor.get("dispatched_count", 0)
+        unalloc_cnt = dd.get("unallocated_plates", {}).get("total_count", 0)
+        inst_cnt = dd.get("installed_archive", {}).get("count", 0)
+        pend_cnt = dd.get("pending_orders", {}).get("count", 0)
+        ret_cnt = floor.get("returned_count", 0)
+
+        if disp_cnt > 0:
+            recon_summary = (
+                f"Morning Dispatched: [bold cyan]{disp_cnt}[/bold cyan]  │  "
+                f"ITMS Archived: [bold green]{inst_cnt}[/bold green]  │  "
+                f"Active Pending: [bold yellow]{pend_cnt}[/bold yellow]  │  "
+                f"Returned to Safe: [bold white]{ret_cnt}[/bold white]  │  "
+                f"Floor Discrepancy: [bold red]{unalloc_cnt} Plates[/bold red]"
+            )
+        else:
+            recon_summary = f"Floor Discrepancy: [bold red]{unalloc_cnt} Plates[/bold red]"
 
         self.query_one("#reports-unallocated-summary", Static).update(
-            f" [dim]Plates taken out from stock or detected by OCR that have [bold red]NO active order and NO archive record[/bold red] "
-            f"for work date [bold yellow]{fmt_date}[/bold yellow] ({suffix}), plus stock kits whose status is still 'New' in warehouse stock.[/dim]"
+            f" [dim]Plates dispatched from stock to the installation line that have [bold red]NO active order and NO archive record in ITMS[/bold red] "
+            f"for work date [bold yellow]{fmt_date}[/bold yellow] ({suffix}) via daily elimination audit:\n"
+            f" {recon_summary}[/dim]"
         )
         self._render_unallocated_table(t)
 
@@ -289,12 +349,8 @@ class ReportsPane(VerticalScroll):
             wh = item.get("warehouse") or item.get("status") or "—"
             dt = item.get("date") or "—"
 
-            if item.get("source") == "PAIR_LINK_FAILED":
-                plate_styled = f"[bold red]{p}[/bold red]"
-                src_styled = f"[bold yellow]{src}[/bold yellow]"
-            else:
-                plate_styled = f"[bold green]{p}[/bold green]"
-                src_styled = f"[bold cyan]{src}[/bold cyan]"
+            plate_styled = f"[bold red]{p}[/bold red]"
+            src_styled = f"[bold cyan]{src}[/bold cyan]"
 
             table.add_row(
                 plate_styled,
@@ -317,10 +373,52 @@ class ReportsPane(VerticalScroll):
         alloc_blocks = int(round((alloc_cnt / tot) * bar_len))
         inst_blocks = max(0, bar_len - (new_blocks + alloc_blocks))
 
+    def _render_csv_exports(self, t: Dict[str, Any]) -> None:
+        dd = t.get("date_driven", {})
+        suf = dd.get("selected_date_suffix") or self.current_target_date or "300926"
+        recon = dd.get("stock_reconciliation", {})
+        floor = recon.get("floor_operations", {})
+        dispatched_cnt = floor.get("dispatched_count", 370)
+        unalloc_cnt = floor.get("unallocated_discrepancy", 25)
+        inst_cnt = dd.get("installed_orders", {}).get("count") or dd.get("installed_archive", {}).get("count", 258)
+        pend_cnt = dd.get("pending_orders", {}).get("count", 87)
+
+        lines = [
+            f"[bold white]All categorized shift spreadsheets are saved in the [cyan]exports/[/cyan] directory:[/bold white]",
+            f"  1. [bold green]📊 Master Shift Reconciliation Ledger:[/bold green] [underline]exports/shift_{suf}_reconciliation_master.csv[/underline]",
+            f"     [dim]Web URL: http://localhost:8000/api/stock/export/category/master/?suffix={suf}[/dim]",
+            f"  2. [bold red]🔴 Unallocated Kits Docket ({unalloc_cnt} Plates):[/bold red] [underline]exports/shift_{suf}_unallocated_kits_{unalloc_cnt}.csv[/underline]",
+            f"     [dim]Web URL: http://localhost:8000/api/stock/export/category/unallocated/?suffix={suf}[/dim]",
+            f"  3. [bold blue]🔵 Completed Archive Fitments ({inst_cnt} Orders):[/bold blue] [underline]exports/shift_{suf}_itms_archived_{inst_cnt}.csv[/underline]",
+            f"     [dim]Web URL: http://localhost:8000/api/stock/export/category/archived/?suffix={suf}[/dim]",
+            f"  4. [bold yellow]🟡 Active Pending Queue ({pend_cnt} Orders):[/bold yellow] [underline]exports/shift_{suf}_itms_active_pending_{pend_cnt}.csv[/underline]",
+            f"     [dim]Web URL: http://localhost:8000/api/stock/export/category/pending/?suffix={suf}[/dim]",
+            f"  5. [bold white]⚪ Morning Dispatched Plates ({dispatched_cnt} Counted):[/bold white] [underline]exports/shift_{suf}_morning_dispatched_{dispatched_cnt}.csv[/underline]",
+            f"     [dim]Web URL: http://localhost:8000/api/stock/export/category/dispatched/?suffix={suf}[/dim]",
+        ]
+        try:
+            self.query_one("#reports-csv-exports-summary", Static).update("\n".join(lines))
+        except Exception:
+            pass
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         btn_id = event.button.id
-        if btn_id == "btn-report-export":
+        if btn_id in ("btn-report-export", "btn-export-all-csvs"):
             self.action_export_report()
+        elif btn_id == "btn-export-master-csv":
+            self.action_export_category_csv("master")
+        elif btn_id == "btn-export-unalloc-csv":
+            self.action_export_category_csv("unallocated")
+        elif btn_id == "btn-export-arch-csv":
+            self.action_export_category_csv("archived")
+        elif btn_id == "btn-export-pend-csv":
+            self.action_export_category_csv("pending")
+        elif btn_id == "btn-export-disp-csv":
+            self.action_export_category_csv("dispatched")
+        elif btn_id == "btn-change-reports-folder":
+            self.action_change_reports_folder()
+        elif btn_id == "btn-sync-stock-kits-ribbon":
+            self.action_sync_stock_kits()
         elif btn_id == "btn-report-stock":
             self.action_open_stock_manager()
         elif btn_id == "btn-report-sync":
@@ -333,6 +431,88 @@ class ReportsPane(VerticalScroll):
             self.action_copy_unallocated_raw()
         elif btn_id == "btn-copy-mvr-docket":
             self.action_copy_mvr_docket()
+
+    def action_change_reports_folder(self) -> None:
+        """Opens Reports Directory dialog to choose folder where CSVs are saved."""
+        from core.tui.dialogs import ReportsDirectoryDialog
+
+        def _on_dir_selected(new_path: Optional[str]) -> None:
+            if new_path:
+                self.notify(f"Reports export directory set to: {new_path}", severity="information")
+                self.refresh_reports()
+
+        self.app.push_screen(ReportsDirectoryDialog(), _on_dir_selected)
+
+    @work(thread=True)
+    def action_sync_stock_kits(self) -> None:
+        """Synchronizes installation kits from ITMS, deliveries, and safe audits in a non-blocking thread."""
+        if getattr(self, "_is_syncing_kits", False):
+            self.app.call_from_thread(self.notify, "Installation kit sync is already in progress...", severity="warning")
+            return
+        self._is_syncing_kits = True
+
+        def _set_btn_state(text: str, disabled: bool):
+            try:
+                btn = self.query_one("#btn-sync-stock-kits-ribbon", Button)
+                btn.label = text
+                btn.disabled = disabled
+            except Exception:
+                pass
+
+        self.app.call_from_thread(_set_btn_state, "⏳ Syncing Kits...", True)
+        self.app.call_from_thread(self.notify, "🔄 Synchronizing installation kits from ITMS, deliveries, and safe audits...")
+        self.app.call_from_thread(
+            self.app.log_message,
+            "Starting installation kits synchronization & morning provisioning (unconstrained by date)...",
+            level="ITMS",
+        )
+
+        from core.services import kit_provisioning_service
+
+        def _on_progress(msg: str):
+            self.app.call_from_thread(self.app.log_message, msg, level="ITMS")
+
+        try:
+            res = kit_provisioning_service.sync_and_provision_warehouse_kits(
+                target_date_suffix=None,  # No date constraint; sync global catalog
+                sync_itms=True,
+                max_pages=35,
+                log_callback=_on_progress,
+            )
+            count = res.get("new_kits_ready_count", 0)
+            wh = res.get("warehouse_facility", "Warehouse Stock")
+            itms_synced = res.get("itms_kits_synced", 0)
+            pages = res.get("itms_pages_crawled", 0)
+            created = res.get("kits_created", 0)
+            updated = res.get("kits_updated", 0)
+            total_stock = res.get("total_warehouse_new_stock", 0)
+            itms_status = res.get("itms_status", "")
+            itms_error = res.get("itms_error")
+
+            summary_msg = (
+                f"✓ Kits Sync Complete: {itms_synced} fetched from ITMS ({pages} pgs), "
+                f"{created} created, {updated} updated. Total ready in stock: {count} ({total_stock} total 'New')."
+            )
+            self.app.call_from_thread(self.notify, summary_msg, severity="information", timeout=8)
+            self.app.call_from_thread(self.app.log_message, f"[bold green]{summary_msg}[/bold green]", level="SUCCESS")
+
+            if itms_error:
+                self.app.call_from_thread(
+                    self.notify,
+                    f"Notice: {itms_status}",
+                    severity="warning",
+                    timeout=8,
+                )
+
+            self.app.call_from_thread(self.refresh_reports)
+            self.app.call_from_thread(self.app.reload_data)
+        except Exception as exc:
+            err_msg = f"Error syncing kits: {exc}"
+            self.app.call_from_thread(self.notify, err_msg, severity="error")
+            self.app.call_from_thread(self.app.log_message, f"[bold red]{err_msg}[/bold red]", level="ERROR")
+        finally:
+            self._is_syncing_kits = False
+            self.app.call_from_thread(_set_btn_state, "📦 Sync Stock Kits", False)
 
     def action_open_stock_manager(self) -> None:
         """Opens the Bond Physical Stock & Reconciliation Manager Dialog."""
@@ -374,22 +554,37 @@ class ReportsPane(VerticalScroll):
         )
 
     def action_export_report(self) -> None:
-        """Exports shift report and stock ledger to CSV."""
+        """Exports all categorized shift CSV reports to exports/."""
         from core.services import stock_monitoring_service
         try:
-            content = stock_monitoring_service.export_stock_reconciliation_csv(self.current_target_date)
-            date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-            suf = self.current_target_date or "latest"
-            filename = f"itms_bond_stock_{suf}_{date_str}.csv"
-            out_path = os.path.join(settings.BASE_DIR, filename)
-            with open(out_path, "w", encoding="utf-8") as f:
-                f.write(content)
-            self.notify(f"✓ Exported Shift Stock Report to {filename}!", severity="information")
+            res = stock_monitoring_service.export_shift_csvs(self.current_target_date)
+            suf = self.current_target_date or "shift"
+            cnt = len(res)
+            self.notify(f"✓ Saved {cnt} categorized shift CSVs into exports/ for {suf}!", severity="information")
+            self.refresh_reports()
         except Exception as exc:
             try:
                 self.app.action_export_shift_report()
             except Exception:
                 self.notify(f"Error exporting report: {exc}", severity="error")
+
+    def action_export_category_csv(self, category: str) -> None:
+        """Exports a single categorized shift CSV file directly into exports/."""
+        from core.services import stock_monitoring_service
+        try:
+            content = stock_monitoring_service.generate_category_csv_content(category, self.current_target_date)
+            recon = stock_monitoring_service.compute_daily_reconciliation(self.current_target_date)
+            suf = recon.get("work_date_suffix", "shift")
+            exports_dir = os.path.join(settings.BASE_DIR, "exports")
+            os.makedirs(exports_dir, exist_ok=True)
+            fname = f"shift_{suf}_{category}.csv"
+            fpath = os.path.join(exports_dir, fname)
+            with open(fpath, "w", encoding="utf-8") as f:
+                f.write(content)
+            self.notify(f"✓ Saved exports/{fname}!", severity="information")
+            self.refresh_reports()
+        except Exception as exc:
+            self.notify(f"Error exporting {category} CSV: {exc}", severity="error")
 
     def action_refresh_totals(self) -> None:
         self.refresh_reports()

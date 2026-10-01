@@ -552,5 +552,238 @@
     </div>
 </div>
 
+<!-- 8. Daily Shift Stock Reconciliation & Inventory Update Modal -->
+<div class="modal-overlay" id="modal-shift-reconcile">
+    <div class="modal-box" style="width: 760px; max-width: 95vw; max-height: 90vh;">
+        <div class="modal-header">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span class="modal-title">🌅 Daily Shift Stock Reconciliation &amp; Inventory Update</span>
+                <span class="badge badge-yellow" id="shift-modal-bond-badge">AGM Bond</span>
+            </div>
+            <button class="modal-close" onclick="closeModal('modal-shift-reconcile')">&times;</button>
+        </div>
+        <div class="modal-body" style="gap: 14px; overflow-y: auto;">
+            <!-- Instructions Banner -->
+            <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 14px; font-size:0.78rem; color:var(--ug-text-muted); line-height:1.4;">
+                <strong style="color:var(--ug-yellow);">Daily Shift Protocol:</strong>
+                Ingest morning counted/scanned plates, compare against ITMS active orders and completed archive, isolate unallocated plates (status <span style="color:var(--ug-green); font-weight:700;">New</span>), update local <code style="color:#38bdf8;">InstallationKit</code> inventory, and generate standardized CSV exports.
+            </div>
+
+            <!-- Parameters Row -->
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+                <div class="form-field">
+                    <label>Shift Work Date / Suffix</label>
+                    <input type="text" id="shift-reconcile-suffix" placeholder="e.g. 300926 or YYYY-MM-DD" style="font-family:var(--font-mono); font-weight:700; text-transform:uppercase;">
+                </div>
+                <div class="form-field">
+                    <label>Operator / Shift Lead</label>
+                    <input type="text" id="shift-reconcile-operator" placeholder="e.g. Enock / Rolland / Catherine / Emmy">
+                </div>
+            </div>
+
+            <!-- Morning Plates Input Area -->
+            <div class="form-field">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <label style="margin:0; font-weight:700; color:#38bdf8;">
+                        📥 Morning Counted / Dispatched Plates (Taken out to Line)
+                    </label>
+                    <span id="shift-reconcile-morning-count" style="font-size:0.75rem; color:var(--ug-text-dim);">0 plates entered</span>
+                </div>
+                <textarea id="shift-reconcile-morning-input" rows="5"
+                          placeholder="Paste plates counted in the morning (one per line, comma-separated, or scanner dump)...&#10;e.g.&#10;UMA704PW&#10;UMA688PW&#10;UMA071PX"
+                          oninput="onShiftInputCountChanged()"
+                          style="width:100%; box-sizing:border-box; padding:8px 12px; font-family:var(--font-mono); font-size:0.85rem; background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); color:#ffffff; resize:vertical;"></textarea>
+            </div>
+
+            <!-- Evening Returns Input Area -->
+            <div class="form-field">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <label style="margin:0; font-weight:700; color:#eab308;">
+                        ↩️ Shift Returns (Plates Returned to Safe Room Uninstalled)
+                    </label>
+                    <span id="shift-reconcile-returns-count" style="font-size:0.75rem; color:var(--ug-text-dim);">0 plates</span>
+                </div>
+                <textarea id="shift-reconcile-returns-input" rows="2"
+                          placeholder="Optional: Paste uninstalled plates returned to safe room (motorcycle no-show, defect, rollover)..."
+                          style="width:100%; box-sizing:border-box; padding:8px 12px; font-family:var(--font-mono); font-size:0.85rem; background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); color:#ffffff; resize:vertical;"></textarea>
+            </div>
+
+            <!-- Sync Option Checkbox -->
+            <div style="display:flex; align-items:center; gap:8px; background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 14px;">
+                <input type="checkbox" id="shift-reconcile-sync-chk" checked style="width:16px; height:16px; cursor:pointer;">
+                <label for="shift-reconcile-sync-chk" style="margin:0; cursor:pointer; font-size:0.82rem; color:#e2e8f0;">
+                    Sync active orders and today's archive from ITMS WebApp before running reconciliation
+                </label>
+            </div>
+
+            <!-- Live Reconciliation Results Banner (Hidden until run) -->
+            <div id="shift-reconcile-results-card" style="display:none; flex-direction:column; gap:12px; background:rgba(15,23,42,0.85); border:1px solid #3b82f6; border-radius:var(--radius-md); padding:14px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div style="font-size:0.9rem; font-weight:800; color:var(--ug-yellow);" id="shift-results-heading">
+                        ✓ Shift Reconciliation Results
+                    </div>
+                    <span class="badge badge-green" id="shift-results-status-badge">Complete</span>
+                </div>
+
+                <!-- 5 Metrics Cards Grid -->
+                <div style="display:grid; grid-template-columns:repeat(5, 1fr); gap:8px; text-align:center;">
+                    <div style="background:var(--ug-black-surface); border:1px solid #1e293b; border-radius:4px; padding:8px;">
+                        <div style="font-size:0.68rem; color:var(--ug-text-dim); text-transform:uppercase;">DISPATCHED</div>
+                        <div style="font-size:1.3rem; font-weight:800; color:#fff;" id="shift-res-dispatched">0</div>
+                    </div>
+                    <div style="background:var(--ug-black-surface); border:1px solid #1e3a8a; border-radius:4px; padding:8px;">
+                        <div style="font-size:0.68rem; color:#93c5fd; text-transform:uppercase;">ARCHIVED</div>
+                        <div style="font-size:1.3rem; font-weight:800; color:#60a5fa;" id="shift-res-archived">0</div>
+                    </div>
+                    <div style="background:var(--ug-black-surface); border:1px solid #854d0e; border-radius:4px; padding:8px;">
+                        <div style="font-size:0.68rem; color:#fde047; text-transform:uppercase;">PENDING</div>
+                        <div style="font-size:1.3rem; font-weight:800; color:#facc15;" id="shift-res-pending">0</div>
+                    </div>
+                    <div style="background:var(--ug-black-surface); border:1px solid #1e293b; border-radius:4px; padding:8px;">
+                        <div style="font-size:0.68rem; color:var(--ug-text-dim); text-transform:uppercase;">RETURNED</div>
+                        <div style="font-size:1.3rem; font-weight:800; color:#94a3b8;" id="shift-res-returned">0</div>
+                    </div>
+                    <div style="background:var(--ug-black-surface); border:1px solid #991b1b; border-radius:4px; padding:8px;">
+                        <div style="font-size:0.68rem; color:#fca5a5; text-transform:uppercase;">UNALLOCATED</div>
+                        <div style="font-size:1.3rem; font-weight:800; color:#f87171;" id="shift-res-unallocated">0</div>
+                    </div>
+                </div>
+
+                <!-- 1-Click CSV Downloads Ribbon -->
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                    <div style="font-size:0.75rem; font-weight:700; color:#cbd5e1; text-transform:uppercase;">
+                        📥 1-Click Standard CSV Downloads:
+                    </div>
+                    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                        <button type="button" class="btn btn-danger" onclick="downloadShiftCsvFromModal('unallocated')" style="font-size:0.78rem; padding:4px 10px;">
+                            🔴 Unallocated Kits (<span id="btn-cnt-unallocated">0</span>)
+                        </button>
+                        <button type="button" class="btn btn-primary" onclick="downloadShiftCsvFromModal('archived')" style="font-size:0.78rem; padding:4px 10px;">
+                            🔵 Completed Archive (<span id="btn-cnt-archived">0</span>)
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="downloadShiftCsvFromModal('pending')" style="font-size:0.78rem; padding:4px 10px; color:#facc15;">
+                            🟡 Active Pending (<span id="btn-cnt-pending">0</span>)
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="downloadShiftCsvFromModal('dispatched')" style="font-size:0.78rem; padding:4px 10px;">
+                            ⚪ Dispatched (<span id="btn-cnt-dispatched">0</span>)
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="downloadShiftCsvFromModal('master')" style="font-size:0.78rem; padding:4px 10px;">
+                            📊 Master Reconciliation
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:0.74rem; color:var(--ug-text-dim);">
+                Updates <code style="color:#38bdf8;">DailyStockLedger</code>, <code style="color:#38bdf8;">StockDispatchScan</code> &amp; <code style="color:#38bdf8;">InstallationKit</code>
+            </span>
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-secondary" onclick="closeModal('modal-shift-reconcile')">Close</button>
+                <button class="btn btn-primary" id="btn-run-shift-reconcile" onclick="submitShiftReconciliation()" style="font-weight:700;">
+                    🚀 Run Shift Reconciliation
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 9. Pre-Shift Stock Kits Sync & Morning Provisioning Modal -->
+<div class="modal-overlay" id="modal-sync-stock-kits">
+    <div class="modal-box" style="width: 740px; max-width: 95vw; max-height: 90vh;">
+        <div class="modal-header">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span class="modal-title">📦 Pre-Shift Stock Kits Sync &amp; Provisioning Engine [K]</span>
+                <span class="badge badge-green" id="sync-kits-header-badge">Warehouse Ready</span>
+            </div>
+            <button class="modal-close" onclick="closeModal('modal-sync-stock-kits')">&times;</button>
+        </div>
+        <div class="modal-body" style="gap: 14px; overflow-y: auto;">
+            <!-- Instructions Banner -->
+            <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 14px; font-size:0.78rem; color:var(--ug-text-muted); line-height:1.4;">
+                <strong style="color:#38bdf8;">Pre-Shift Stock Preparation Protocol:</strong>
+                Aggregates plates from inbound deliveries, safe room stock audits, and ITMS Central Stock. Auto-enrolls and marks available physical plates as <span style="color:var(--ug-green); font-weight:700;">'New'</span> in warehouse inventory (<code style="color:#facc15;">AGM SPIRO</code>) so morning dispatch scanning recognizes 100% of plates on the floor.
+            </div>
+
+            <!-- Current Readiness Card -->
+            <div style="background:rgba(15,23,42,0.6); border:1px solid #1e3a8a; border-radius:var(--radius-md); padding:12px 14px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <div style="font-size:0.8rem; font-weight:700; color:#93c5fd; text-transform:uppercase;">
+                        🏢 Safe Room Stock Readiness:
+                    </div>
+                    <span class="badge badge-blue" id="sync-kits-wh-name">AGM SPIRO</span>
+                </div>
+                <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; text-align:center;">
+                    <div style="background:var(--ug-black-surface); border:1px solid #1e293b; border-radius:4px; padding:8px;">
+                        <div style="font-size:0.68rem; color:var(--ug-text-dim); text-transform:uppercase;">TOTAL KITS</div>
+                        <div style="font-size:1.3rem; font-weight:800; color:#fff;" id="sync-kits-val-total">...</div>
+                    </div>
+                    <div style="background:var(--ug-black-surface); border:1px solid #166534; border-radius:4px; padding:8px;">
+                        <div style="font-size:0.68rem; color:#86efac; text-transform:uppercase;">READY ('NEW')</div>
+                        <div style="font-size:1.3rem; font-weight:800; color:#22c55e;" id="sync-kits-val-new">...</div>
+                    </div>
+                    <div style="background:var(--ug-black-surface); border:1px solid #854d0e; border-radius:4px; padding:8px;">
+                        <div style="font-size:0.68rem; color:#fde047; text-transform:uppercase;">ALLOCATED</div>
+                        <div style="font-size:1.3rem; font-weight:800; color:#facc15;" id="sync-kits-val-alloc">...</div>
+                    </div>
+                    <div style="background:var(--ug-black-surface); border:1px solid #1e3a8a; border-radius:4px; padding:8px;">
+                        <div style="font-size:0.68rem; color:#93c5fd; text-transform:uppercase;">INSTALLED</div>
+                        <div style="font-size:1.3rem; font-weight:800; color:#60a5fa;" id="sync-kits-val-inst">...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Additional Plates Input Area -->
+            <div class="form-field">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <label style="margin:0; font-weight:700; color:#38bdf8;">
+                        📥 Additional Plates from Delivery or Safe Room Audit (Optional)
+                    </label>
+                    <span id="sync-kits-input-count" style="font-size:0.75rem; color:var(--ug-text-dim);">0 plates entered</span>
+                </div>
+                <textarea id="sync-kits-plates-input" rows="4"
+                          placeholder="Optional: Paste plates from delivery receipt or safe room scanner dump to provision as 'New' immediately...&#10;e.g.&#10;UMA704PW&#10;UMA688PW&#10;UMA071PX"
+                          oninput="onSyncKitsInputCountChanged()"
+                          style="width:100%; box-sizing:border-box; padding:8px 12px; font-family:var(--font-mono); font-size:0.85rem; background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); color:#ffffff; resize:vertical;"></textarea>
+            </div>
+
+            <!-- Sync Options -->
+            <div style="display:flex; align-items:center; gap:8px; background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 14px;">
+                <input type="checkbox" id="sync-kits-itms-chk" checked style="width:16px; height:16px; cursor:pointer;">
+                <label for="sync-kits-itms-chk" style="margin:0; cursor:pointer; font-size:0.82rem; color:#e2e8f0;">
+                    Sync recent kits from ITMS WebApp &amp; consolidate with local delivery/safe room audits
+                </label>
+            </div>
+
+            <!-- Live Provisioning Results Card (Hidden until run) -->
+            <div id="sync-kits-results-card" style="display:none; flex-direction:column; gap:10px; background:rgba(6,78,59,0.25); border:1px solid #059669; border-radius:var(--radius-md); padding:14px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div style="font-size:0.9rem; font-weight:800; color:#34d399;" id="sync-kits-res-title">
+                        ✓ Provisioning Pass Succeeded
+                    </div>
+                    <span class="badge badge-green" id="sync-kits-res-time">0ms</span>
+                </div>
+                <div style="font-size:0.82rem; color:#d1fae5;" id="sync-kits-res-msg">
+                    Kits provisioned and ready for morning take-for-work dispatch.
+                </div>
+                <div style="font-size:0.75rem; color:#a7f3d0;" id="sync-kits-res-series">
+                    Series Breakdown: ...
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:0.74rem; color:var(--ug-text-dim);">
+                Hotkeys: <span class="hotkey">K</span> opens • <span class="hotkey">Esc</span> closes
+            </span>
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-secondary" onclick="closeModal('modal-sync-stock-kits')">Close [Esc]</button>
+                <button class="btn btn-primary" id="btn-run-kits-sync" onclick="submitStockKitSync()" style="font-weight:700; background:#0ea5e9; border-color:#0284c7;">
+                    ⚡ Sync &amp; Provision Kits
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Toast Notifications Container -->
 <div class="toast-container" id="toast-container"></div>

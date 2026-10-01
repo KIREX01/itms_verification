@@ -71,27 +71,27 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
 
     BINDINGS = [
         ("ctrl+p", "command_palette", "Commands (^P)"),
-        ("1", "tab_dashboard", "Dashboard (1)"),
-        ("2", "tab_itms", "ITMS (2)"),
-        ("3", "tab_batches", "Batches (3)"),
-        ("4", "tab_queue", "Queue (4)"),
-        ("5", "tab_history", "History (5)"),
-        ("6", "tab_settings", "Settings (6)"),
-        ("7", "tab_reports", "Reports (7)"),
+        ("1", "tab_dashboard", "Dashboard"),
+        ("2", "tab_itms", "ITMS"),
+        ("3", "tab_batches", "Batches"),
+        ("4", "tab_queue", "Review"),
+        ("5", "tab_history", "Audit"),
+        ("6", "tab_reports", "Reports"),
+        ("7", "tab_settings", "Settings"),
         ("f1", "tab_dashboard", "Dashboard"),
         ("f2", "tab_itms", "ITMS"),
         ("f3", "tab_batches", "Batches"),
-        ("f4", "tab_queue", "Queue"),
-        ("f5", "tab_history", "History"),
-        ("f6", "tab_settings", "Settings"),
-        ("f7", "tab_reports", "Reports"),
+        ("f4", "tab_queue", "Review"),
+        ("f5", "tab_history", "Audit"),
+        ("f6", "tab_reports", "Reports"),
+        ("f7", "tab_settings", "Settings"),
         ("ctrl+1", "tab_dashboard", "Dashboard"),
         ("ctrl+2", "tab_itms", "ITMS"),
         ("ctrl+3", "tab_batches", "Batches"),
-        ("ctrl+4", "tab_queue", "Queue"),
-        ("ctrl+5", "tab_history", "History"),
-        ("ctrl+6", "tab_settings", "Settings"),
-        ("ctrl+7", "tab_reports", "Reports"),
+        ("ctrl+4", "tab_queue", "Review"),
+        ("ctrl+5", "tab_history", "Audit"),
+        ("ctrl+6", "tab_reports", "Reports"),
+        ("ctrl+7", "tab_settings", "Settings"),
         ("i", "native_ingest", "Add Photos (Dialog)"),
         ("w", "open_upload_ui", "Web Upload"),
         ("p", "process_vision", "Run Vision"),
@@ -113,7 +113,9 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         ("f", "cycle_filter", "Cycle Filter"),
         ("c", "clean_storage", "Clean / Prune"),
         ("r", "refresh", "Refresh Data"),
-        ("x", "logout", "Sign Out"),
+        ("x", "unlink_order", "Unlink Order (X)"),
+        ("ctrl+u", "unlink_order", "Unlink Order (^U)"),
+        ("ctrl+x", "logout", "Sign Out (^X)"),
         ("q", "quit", "Quit"),
     ]
 
@@ -140,13 +142,13 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         yield Header(show_clock=True)
 
         with TabbedContent(id="tabs-content"):
-            with TabPane("📊 Dashboard (1)", id="tab-dashboard"):
+            with TabPane("DASHBOARD", id="tab-dashboard"):
                 yield DashboardPane(id="dashboard-pane")
 
-            with TabPane("🌐 ITMS Connect (2)", id="tab-itms"):
+            with TabPane("ITMS", id="tab-itms"):
                 yield ITMSConnectionPane(id="itms-connection-pane")
 
-            with TabPane("📦 Ingestion & Batches (3)", id="tab-batches"):
+            with TabPane("BATCHES", id="tab-batches"):
                 yield Static(
                     "[b]Add Photos:[/b] Press [bold green]I[/bold green] for Native Dialog  │  Press [bold cyan]W[/bold cyan] for Web Upload  │  Press [bold yellow]P[/bold yellow] to process batch  │  Press [bold magenta]V[/bold magenta] to view photo with BBox",
                     id="batches-upload-bar",
@@ -166,11 +168,12 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
                         yield DataTable(id="table-batch-images")
                     yield InspectorPane(id="inspector-batches", classes="inspector-panel")
 
-            with TabPane("📋 Review Queue (4)", id="tab-queue"):
+            with TabPane("REVIEW", id="tab-queue"):
                 yield Static(
                     "[b]Fast-Path Actions:[/b] Press [bold green]T[/bold green] Type/Match  │  "
                     "Press [bold cyan]V[/bold cyan] View Side-by-Side  │  "
                     "Press [bold yellow]A[/bold yellow] Approve/Retry  │  "
+                    "Press [bold red]X[/bold red] Unlink Order  │  "
                     "Press [bold blue]U[/bold blue] Submit Single  │  "
                     "Press [bold green]B[/bold green] Batch Submit  │  "
                     "Press [bold red]^R[/bold red] Retry Failed  │  "
@@ -182,17 +185,17 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
                     yield DataTable(id="table-queue", classes="table-panel")
                     yield InspectorPane(id="inspector-queue", classes="inspector-panel")
 
-            with TabPane("📜 History & Audit (5)", id="tab-history"):
+            with TabPane("AUDIT", id="tab-history"):
                 yield Static(id="history-filter-bar")
                 with Horizontal(classes="tab-horizontal"):
                     yield DataTable(id="table-history", classes="table-panel")
                     yield InspectorPane(id="inspector-history", classes="inspector-panel")
 
-            with TabPane("⚙️ Settings & Safety (6)", id="tab-settings"):
-                yield SettingsPane(id="settings-pane")
-
-            with TabPane("📑 Reports & Totals (7)", id="tab-reports"):
+            with TabPane("REPORTS", id="tab-reports"):
                 yield ReportsPane(id="reports-pane")
+
+            with TabPane("SETTINGS", id="tab-settings"):
+                yield SettingsPane(id="settings-pane")
 
         with Vertical(id="activity-container"):
             yield Static(

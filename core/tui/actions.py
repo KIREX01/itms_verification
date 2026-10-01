@@ -237,7 +237,11 @@ class OperatorActionsMixin:
                     p = it
                     orient_override = None
 
-                img, status = vault_service.ingest_from_disk(p, batch=batch, orientation_override=orient_override)
+                try:
+                    img, status = vault_service.ingest_from_disk(p, batch=batch, orientation_override=orient_override)
+                except Exception as exc:
+                    logger.exception("Ingestion exception on %s: %s", p, exc)
+                    img, status = None, f"ERROR: {exc}"
                 base_name = os.path.basename(p)
                 orient_tag = f"[{img.orientation}]" if img and img.orientation else (f"[{orient_override}]" if orient_override else "[UNKNOWN]")
 
@@ -596,11 +600,11 @@ class OperatorActionsMixin:
         if not config_service.is_developer_mode():
             self.notify(
                 "🔒 Side-by-Side Image Comparison is restricted to Developer Mode.\n"
-                "Please enable Developer Mode in Settings (Tab 6) to launch image comparison.",
+                "Please enable Developer Mode in Settings (Tab 7) to launch image comparison.",
                 severity="warning",
             )
             self.log_message(
-                "Image Comparison blocked: Developer Mode is disabled. Enable in Settings (Tab 6).",
+                "Image Comparison blocked: Developer Mode is disabled. Enable in Settings (Tab 7).",
                 level="WARNING",
             )
             return
@@ -1201,6 +1205,11 @@ class OperatorActionsMixin:
                 return
 
             plate = result["plate"]
+            if result.get("unlinked", False):
+                self.log_message(f"[bold yellow]Order unlinked from {plate}.[/bold yellow] Pair reset to Review.", level="WARNING")
+                self.reload_data()
+                return
+
             order = result.get("order")
             is_unalloc = result.get("unallocated", False)
             if is_unalloc:
@@ -1222,6 +1231,58 @@ class OperatorActionsMixin:
             self.reload_data()
 
         self.push_screen(PlateQuickEntryModal(pair), on_completed)
+
+    def action_unlink_order(self) -> None:
+        """Unlinks the matched ITMS order from the selected pair in Review Queue or History."""
+        pair = self._get_active_pair("table-queue") or self._get_active_pair("table-history")
+        if not pair:
+            self.notify("Select a pair in the queue to unlink order.", severity="warning")
+            return
+
+        if not pair.order:
+            self.notify(f"Pair {pair.registration_number_detected} has no linked order.", severity="information")
+            return
+
+        old_order = pair.order
+        old_order_num = old_order.order_number
+        plate = pair.registration_number_detected
+        op_name = self.current_user.username if getattr(self, "current_user", None) else "Operator"
+
+        pair.order = None
+        pair.match_type = VehicleInstallationPair.MatchType.NONE
+        pair.match_score = None
+        pair.is_manual_override = True
+        pair.matched_via = VehicleInstallationPair.MatchedVia.MANUAL
+        if pair.verification_status in (
+            VehicleInstallationPair.VerificationStatus.APPROVED,
+            VehicleInstallationPair.VerificationStatus.FAILED,
+        ):
+            pair.verification_status = VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
+        pair.operator_note = f"Order #{old_order_num} unlinked by {op_name}."
+        pair.save(update_fields=[
+            "order",
+            "match_type",
+            "match_score",
+            "is_manual_override",
+            "matched_via",
+            "verification_status",
+            "operator_note",
+            "updated_at",
+        ])
+
+        SubmissionAuditLog.objects.create(
+            pair=pair,
+            action=SubmissionAuditLog.Action.OPERATOR_OVERRIDE,
+            result=SubmissionAuditLog.ResultStatus.INFO,
+            message=f"Order #{old_order_num} unlinked from plate {plate} by operator '{op_name}' in TUI.",
+        )
+
+        self.notify(f"Unlinked Order #{old_order_num} from {plate} (Reset to Review).", severity="information")
+        self.log_message(
+            f"[bold yellow]Order Unlinked:[/bold yellow] Order #{old_order_num} detached from plate [cyan]{plate}[/cyan] by {op_name} (Status: PENDING_REVIEW).",
+            level="WARNING",
+        )
+        self.reload_data()
 
     def action_retry_failed(self) -> None:
         """Resets all FAILED orders to APPROVED status so they can be resubmitted in batch."""
@@ -1334,11 +1395,11 @@ class OperatorActionsMixin:
             pass
 
     def action_sync_itms_kits(self) -> None:
-        """Navigates to Installation Kits and triggers sync."""
+        """Navigates to Installation Kits and triggers full multi-page crawl."""
         self.action_open_itms_kits()
         try:
             pane = self.query_one("#itms-connection-pane")
-            pane.action_sync_kits()
+            pane.action_crawl_and_sync_all_kits()
         except Exception:
             pass
 

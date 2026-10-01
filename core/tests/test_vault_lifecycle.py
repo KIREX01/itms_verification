@@ -78,6 +78,57 @@ class VaultLifecycleTests(TestCase):
             self.assertEqual(batch2.duplicate_count, 1)
             self.assertEqual(batch2.ingested_count, 0)
 
+    def test_real_image_enhancement_deduplication(self):
+        """Tests that a valid JPEG photo that undergoes whole-image Pillow enhancement
+        is cleanly deduplicated when re-ingested, without throwing an IntegrityError on file_hash."""
+        from PIL import Image
+        with override_settings(MEDIA_ROOT=self.media_root, VAULT_ROOT=self.vault_root):
+            batch1 = vault_service.create_ingestion_batch(source_label="Real Batch 1")
+            source_file = Path(self.temp_dir) / "real_photo.jpg"
+            img_pil = Image.new("RGB", (64, 64), color=(100, 150, 200))
+            img_pil.save(source_file, format="JPEG")
+
+            img1, status1 = vault_service.ingest_from_disk(source_file, batch=batch1)
+            self.assertEqual(status1, "INGESTED")
+            self.assertIsNotNone(img1)
+
+            # Re-ingest the exact same real image in a second batch
+            batch2 = vault_service.create_ingestion_batch(source_label="Real Batch 2")
+            img2, status2 = vault_service.ingest_from_disk(source_file, batch=batch2)
+            self.assertEqual(status2, "DUPLICATE_SKIPPED")
+            self.assertEqual(img1.id, img2.id)
+
+            batch2.refresh_from_db()
+            self.assertEqual(batch2.duplicate_count, 1)
+            self.assertEqual(batch2.ingested_count, 0)
+
+    def test_same_batch_duplicate_photos_deduplicated(self):
+        """Tests that selecting duplicate photos within the same batch skips the duplicate
+        and increments the duplicate counter rather than raising an IntegrityError."""
+        from PIL import Image
+        with override_settings(MEDIA_ROOT=self.media_root, VAULT_ROOT=self.vault_root):
+            batch = vault_service.create_ingestion_batch(source_label="Batch with duplicates")
+            source1 = Path(self.temp_dir) / "photo_a.jpg"
+            source2 = Path(self.temp_dir) / "photo_a_copy.jpg"
+
+            img_pil = Image.new("RGB", (64, 64), color=(50, 100, 150))
+            img_pil.save(source1, format="JPEG")
+            shutil.copy2(source1, source2)
+
+            # Ingest photo 1
+            img1, status1 = vault_service.ingest_from_disk(source1, batch=batch)
+            self.assertEqual(status1, "INGESTED")
+
+            # Ingest photo 2 (identical content)
+            img2, status2 = vault_service.ingest_from_disk(source2, batch=batch)
+            self.assertEqual(status2, "DUPLICATE_SKIPPED")
+            self.assertEqual(img1.id, img2.id)
+
+            batch.refresh_from_db()
+            self.assertEqual(batch.total_files, 2)
+            self.assertEqual(batch.ingested_count, 1)
+            self.assertEqual(batch.duplicate_count, 1)
+
     def test_uploaded_file_ingestion(self):
         with override_settings(MEDIA_ROOT=self.media_root, VAULT_ROOT=self.vault_root):
             batch = vault_service.create_ingestion_batch(source_type=IngestionBatch.SourceType.WEB)

@@ -1503,3 +1503,20 @@ body {
     color: var(--ug-text-dim);
     font-family: var(--font-mono);
 }
+
+/* Stock Camera QR / Barcode Scanner Animations */
+@keyframes scanLaserLine {
+    0% { transform: translateY(-40px); opacity: 0.2; }
+    50% { transform: translateY(40px); opacity: 1; }
+    100% { transform: translateY(-40px); opacity: 0.2; }
+}
+
+.scanner-laser-line {
+    animation: scanLaserLine 2s infinite ease-in-out;
+}
+
+#stock-camera-viewport.detected .scanner-aim-frame {
+    border-color: #38bdf8 !important;
+    box-shadow: 0 0 16px rgba(56, 189, 248, 0.6) !important;
+    transition: all 0.2s ease;
+}

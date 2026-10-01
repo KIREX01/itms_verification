@@ -61,20 +61,24 @@ class ITMSCommandProvider(Provider):
         cmds = [
             # 1. Pipeline & Vision
             ("Pipeline: Run Vision Pipeline (Detect & OCR) [P]", app.action_process_vision, "Run YOLO plate detector and PaddleOCR across vault"),
+            ("Pipeline: Joint Vision Dual-Stream Re-Scan [J]", app.action_joint_rescan, "Run dual-stream front/rear consensus vision on selected pair"),
             ("Pipeline: Match Pairs & Spatial Association [M]", app.action_match_pairs, "Pair front and rear motorcycle evidence photos"),
             
             # 2. Operator Review & Pairing
             ("Review: Quick Type Plate / Match [T]", app.action_quick_type_plate, "Fast-path plate typing and order linking dialog"),
             ("Review: Approve Selected Pair [A]", app.action_approve, "Mark active pair as approved for submission"),
+            ("Review: Unlink Matched Order [X / ^U]", app.action_unlink_order, "Unlink active order from selected pair and reset to Pending Review"),
             ("Review: Swap Front/Rear Photos [S]", app.action_swap, "Invert front and rear image assignments on active pair"),
             ("Review: Link / Pick Photo [L]", app.action_link_pair, "Manually pick and associate photos for selected pair"),
             ("Review: View Side-by-Side Comparison [V] (Dev Mode)", app.action_view_evidence, "Launch high-res image viewer with plate crops & bounding boxes (Requires Developer Mode)"),
             
-            # 3. ITMS Submission & Sync
+            # 3. ITMS Submission, Sync & Stock
             ("ITMS: Submit Single Pair [U]", app.action_submit_pair, "Drive active pair through ITMS installation wizard"),
             ("ITMS: Batch Submit All Approved [B]", app.action_batch_submit, "Submit all approved pairs in unattended queue"),
             ("ITMS: Retry All Failed Orders [^R]", app.action_retry_failed, "Reset all failed orders to APPROVED and open batch submission modal"),
+            ("ITMS: Drain Offline Outbox [O]", app.action_drain_outbox, "Drain cached orders waiting in offline outbox to ITMS"),
             ("ITMS: Sync Active Orders [Y]", app.action_sync_itms_orders, "Synchronize active installation orders from stock.itms.ug"),
+            ("ITMS: Stock & Reconciliation Manager [K]", app.action_open_stock_manager, "Open daily bond physical stock ledger and morning kit provisioning"),
             ("ITMS: Installation Kits View", app.action_open_itms_kits, "Switch to ITMS Installation Kits stock inventory view"),
             ("ITMS: Sync Installation Kits", app.action_sync_itms_kits, "Synchronize installation kits to local database"),
             
@@ -83,22 +87,23 @@ class ITMSCommandProvider(Provider):
             ("Upload: Open Web Upload UI [W]", app.action_open_upload_ui, "Launch browser-based photo uploader"),
             
             # 5. Tabs & Navigation
-            ("Navigate: Dashboard (Tab 1)", app.action_tab_dashboard, "Switch to Executive Dashboard & System Health"),
-            ("Navigate: ITMS WebApp Connection (Tab 2)", app.action_tab_itms, "Switch to ITMS WebApp live connection tab"),
-            ("Navigate: Ingestion Batches (Tab 3)", app.action_tab_batches, "Switch to Ingestion Batches tab"),
-            ("Navigate: Review Queue (Tab 4)", app.action_tab_queue, "Switch to Review Queue tab"),
-            ("Navigate: History & Audit (Tab 5)", app.action_tab_history, "Switch to History & Audit tab"),
-            ("Navigate: System Settings & Config (Tab 6)", app.action_tab_settings, "Open configuration pane for safety, OCR, and storage settings"),
-            ("Navigate: Reports & System Totals (Tab 7)", app.action_tab_reports, "Switch to Reports tab to inspect system totals, shift statistics, kit breakdowns, and export"),
+            ("Navigate: DASHBOARD (Tab 1)", app.action_tab_dashboard, "Switch to Executive Dashboard & System Health"),
+            ("Navigate: ITMS (Tab 2)", app.action_tab_itms, "Switch to ITMS Connect & sync tab"),
+            ("Navigate: BATCHES (Tab 3)", app.action_tab_batches, "Switch to Ingestion Batches tab"),
+            ("Navigate: REVIEW (Tab 4)", app.action_tab_queue, "Switch to Review Queue tab"),
+            ("Navigate: AUDIT (Tab 5)", app.action_tab_history, "Switch to Audit & History tab"),
+            ("Navigate: REPORTS (Tab 6)", app.action_tab_reports, "Switch to Reports tab for shift metrics, totals, kit breakdowns, and export"),
+            ("Navigate: SETTINGS (Tab 7)", app.action_tab_settings, "Switch to Settings tab for safety guardrails, OCR engines, and developer options"),
             
             # 6. Filters & Storage
             ("Filter: Cycle History Status Filter [F]", app.action_cycle_filter, "Toggle between All, Submitted, Failed, and Audit Logs"),
+            ("Filter: Cycle Date Scope [D]", app.action_cycle_date_scope, "Toggle between Today, Active Batch, Prior Carryover, and All scopes"),
             ("Storage: Clean Storage & Optimize DB [C]", app.action_clean_storage, "Prune cropped scratch files, truncate SQLite WAL, and optimize storage"),
             ("Export: Shift Verification Report [E]", app.action_export_shift_report, "Export timestamped CSV shift handover & audit compliance report"),
             
             # 7. System & Session
             ("System: Refresh Data [R]", app.action_refresh, "Reload tables, metrics, and inspection panes"),
-            ("System: Sign Out Operator [X]", app.action_logout, "Sign out current operator and return to login portal"),
+            ("System: Sign Out Operator [^X]", app.action_logout, "Sign out current operator and return to login portal"),
             ("System: Close Command Palette [Esc]", lambda: None, "Close the command palette and return to app"),
             ("System: Quit Copilot [Q]", app.action_quit, "Exit the verification copilot application"),
         ]

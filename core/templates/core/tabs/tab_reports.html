@@ -26,9 +26,37 @@
                 <button class="btn btn-secondary" onclick="fetchReportTotals()" title="Refresh totals from database (Hotkey: R)">
                     🔄 Refresh [R]
                 </button>
-                <a href="{% url 'core:api_export_report' %}" class="btn btn-primary" title="Export timestamped CSV shift report (Hotkey: E)">
-                    📑 Export CSV Report [E]
-                </a>
+                <button class="btn btn-warning" onclick="openShiftReconcileModal()" title="Run Daily Shift Ingestion, Reconciliation & Update Inventory (Hotkey: S)" style="font-weight:700; background:#f59e0b; border-color:#d97706; color:#0f172a;">
+                    🌅 Shift Reconciliation [S]
+                </button>
+                <button class="btn btn-info" onclick="openStockKitSyncModal()" title="Sync & Pre-Provision Installation Kits in Warehouse Stock (Hotkey: K)" style="font-weight:700; background:#0284c7; border-color:#0369a1; color:#ffffff;">
+                    📦 Sync Stock Kits [K]
+                </button>
+                <div class="dropdown" style="position:relative; display:inline-block;">
+                    <button class="btn btn-primary dropdown-toggle" onclick="toggleShiftCsvMenu(event)" title="Export categorized Shift CSV spreadsheets">
+                        📑 Export CSVs ▾
+                    </button>
+                    <div id="shift-csv-dropdown" style="display:none; position:absolute; right:0; top:100%; margin-top:4px; background:#0f172a; border:1px solid #334155; border-radius:6px; box-shadow:0 8px 24px rgba(0,0,0,0.6); z-index:100; min-width:210px; overflow:hidden;">
+                        <a href="javascript:void(0)" onclick="downloadCategoryCsv('unallocated')" style="display:block; padding:8px 12px; color:#f87171; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
+                            🔴 Unallocated Kits CSV
+                        </a>
+                        <a href="javascript:void(0)" onclick="downloadCategoryCsv('archived')" style="display:block; padding:8px 12px; color:#60a5fa; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
+                            🔵 Completed Archive CSV
+                        </a>
+                        <a href="javascript:void(0)" onclick="downloadCategoryCsv('pending')" style="display:block; padding:8px 12px; color:#facc15; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
+                            🟡 Active Pending Orders CSV
+                        </a>
+                        <a href="javascript:void(0)" onclick="downloadCategoryCsv('dispatched')" style="display:block; padding:8px 12px; color:#e2e8f0; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
+                            ⚪ Morning Dispatched CSV
+                        </a>
+                        <a href="javascript:void(0)" onclick="downloadCategoryCsv('master')" style="display:block; padding:8px 12px; color:#34d399; text-decoration:none; font-size:0.8rem; font-weight:700; border-bottom:1px solid #1e293b;">
+                            📊 Master Shift Reconciliation
+                        </a>
+                        <a href="{% url 'core:api_export_report' %}" style="display:block; padding:8px 12px; color:#94a3b8; text-decoration:none; font-size:0.78rem;">
+                            📑 Shift Pairs Verification Report
+                        </a>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -90,10 +118,10 @@
                         </div>
                         <div style="font-size:1.8rem; font-weight:800; color:#f87171; margin:6px 0;" id="report-cat3-count">0</div>
                         <div style="font-size:0.75rem; color:#94a3b8;">
-                            Plates tried linking that failed (neither in active orders nor archive), plus stock kits 'New'.
+                            Plates dispatched to installation line with NO active order and NO archive record in ITMS.
                         </div>
                         <div style="font-size:0.75rem; color:#fecaca; margin-top:8px; border-top:1px solid #991b1b; padding-top:6px;" id="report-cat3-breakdown">
-                            0 failed pair links │ 0 stock new kits
+                            Shift floor discrepancy audit via elimination
                         </div>
                     </div>
 
@@ -111,6 +139,9 @@
                             </button>
                             <button type="button" class="btn btn-primary" onclick="copyMvrDocket()" title="Copy formatted MVR Shift Docket to clipboard" style="padding:4px 10px; font-size:0.8rem;">
                                 📑 Copy MVR Docket
+                            </button>
+                            <button type="button" class="btn btn-danger" onclick="downloadCategoryCsv('unallocated')" title="Download Unallocated Plates CSV" style="padding:4px 10px; font-size:0.8rem; background:#dc2626; border-color:#b91c1c;">
+                                📥 Download CSV
                             </button>
                             <input type="text" id="report-unallocated-search" placeholder="Filter plate or source..." oninput="filterUnallocatedTable(this.value)" style="background:#0f172a; border:1px solid #334155; color:#f8fafc; padding:4px 8px; border-radius:4px; font-size:0.78rem;">
                         </div>

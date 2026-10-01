@@ -19,8 +19,10 @@ accounting descriptions and balances:
 import csv
 import io
 import logging
+import os
 import re
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from django.db import models, transaction
@@ -240,6 +242,22 @@ def record_delivery(
 
     paper_ref = (paper_note_reference or "").strip()
 
+    # Ingest delivery_note_image if uploaded file or local path provided
+    if delivery_note_image:
+        from core.models import EvidenceImage
+        if not isinstance(delivery_note_image, EvidenceImage):
+            try:
+                from core.services import vault_service
+                if hasattr(delivery_note_image, "read"):
+                    ev_img, _ = vault_service.ingest_uploaded_file(delivery_note_image)
+                    delivery_note_image = ev_img
+                elif isinstance(delivery_note_image, (str, Path)) and os.path.exists(str(delivery_note_image)):
+                    ev_img, _ = vault_service.ingest_from_disk(str(delivery_note_image))
+                    delivery_note_image = ev_img
+            except Exception as img_err:
+                logger.warning("Could not ingest delivery note image: %s", img_err)
+                delivery_note_image = None
+
     with transaction.atomic():
         delivery, created = StockDelivery.objects.get_or_create(
             delivery_number=deliv_no,
@@ -281,25 +299,15 @@ def record_delivery(
 
         created_kits_count = 0
         if auto_create_kits:
-            existing_kits = set(
-                InstallationKit.objects.filter(registration_number__in=clean_plates)
-                .values_list("registration_number", flat=True)
+            from core.services import kit_provisioning_service, bond_service
+            active_bond = bond_service.get_active_bond()
+            prov_res = kit_provisioning_service.sync_and_provision_warehouse_kits(
+                target_date_suffix=suffix,
+                source_plates=clean_plates,
+                sync_itms=False,
+                facility_name=active_bond.get("name", "Bond Warehouse"),
             )
-            kits_to_create = []
-            for p in clean_plates:
-                if p not in existing_kits:
-                    kits_to_create.append(
-                        InstallationKit(
-                            kit_code=f"IK-{p}",
-                            registration_number=p,
-                            status="New",
-                            warehouse="Warehouse Stock",
-                            created_date=deliv_date.strftime("%d.%m.%Y"),
-                        )
-                    )
-            if kits_to_create:
-                InstallationKit.objects.bulk_create(kits_to_create, ignore_conflicts=True)
-                created_kits_count = len(kits_to_create)
+            created_kits_count = prov_res.get("kits_created", 0)
 
         recon = compute_daily_reconciliation(suffix)
 
@@ -313,6 +321,9 @@ def record_delivery(
         "duplicate_scans_skipped": dup_count,
         "duplicate_plates": dup_plates,
         "created_kits_count": created_kits_count,
+        "has_image": bool(delivery.delivery_note_image),
+        "image_url": delivery.image_url,
+        "image_path": delivery.image_absolute_path,
         "reconciliation": recon,
     }
 
@@ -432,6 +443,14 @@ def record_dispatch_scans(
                     )
                 )
 
+        # Ensure all scanned dispatch plates are registered in InstallationKit as 'New' stock
+        from core.services import kit_provisioning_service
+        readiness = kit_provisioning_service.validate_morning_dispatch_readiness(
+            scanned_plates=clean_plates,
+            auto_enroll_missing=True,
+            facility_name=active_bond.get("name"),
+        )
+
         if new_scans:
             StockDispatchScan.objects.bulk_create(new_scans)
 
@@ -446,6 +465,7 @@ def record_dispatch_scans(
         "already_dispatched_plates": sorted(list(existing_dispatches)),
         "duplicate_scans_skipped": dup_count,
         "duplicate_plates": dup_plates,
+        "stock_readiness": readiness,
         "reconciliation": recon,
     }
 
@@ -519,14 +539,20 @@ def record_return_scans(
 
 
 def set_scheduled_target(
-    scheduled_psv: int,
-    scheduled_pmo: int = 0,
+    scheduled_target: Optional[int] = None,
+    scheduled_psv: Optional[int] = None,
+    scheduled_pmo: Optional[int] = None,
     target_date_suffix: Optional[str] = None,
     notes: str = "",
+    **kwargs,
 ) -> Dict[str, Any]:
     """
     Manually feeds in the scheduled target number of plates to be installed
-    under the bond for the day (PSV White and PMO Yellow).
+    under the bond for the day.
+    
+    Per user requirement:
+    This is an operational target for the day and does not by any means connect to
+    or alter physical stock. It is a single value covering both private and public.
     """
     work_d, suffix = resolve_date_and_suffix(target_date_suffix)
     with transaction.atomic():
@@ -534,9 +560,26 @@ def set_scheduled_target(
             work_date=work_d,
             defaults={"work_date_suffix": suffix},
         )
-        ledger.scheduled_psv = max(0, int(scheduled_psv))
-        ledger.scheduled_pmo = max(0, int(scheduled_pmo))
-        ledger.scheduled_total = ledger.scheduled_psv + ledger.scheduled_pmo
+        # Handle positional calls e.g. set_scheduled_target(120, 30)
+        if scheduled_target is not None and scheduled_psv is not None and scheduled_pmo is None:
+            ledger.scheduled_psv = max(0, int(scheduled_target))
+            ledger.scheduled_pmo = max(0, int(scheduled_psv))
+            ledger.scheduled_total = ledger.scheduled_psv + ledger.scheduled_pmo
+        elif scheduled_target is not None:
+            # Single combined target input for shift
+            tot = max(0, int(scheduled_target))
+            ledger.scheduled_total = tot
+            if scheduled_psv is not None or scheduled_pmo is not None:
+                ledger.scheduled_psv = max(0, int(scheduled_psv or 0))
+                ledger.scheduled_pmo = max(0, int(scheduled_pmo or 0))
+            else:
+                ledger.scheduled_psv = tot
+                ledger.scheduled_pmo = 0
+        else:
+            ledger.scheduled_psv = max(0, int(scheduled_psv or 0))
+            ledger.scheduled_pmo = max(0, int(scheduled_pmo or 0))
+            ledger.scheduled_total = ledger.scheduled_psv + ledger.scheduled_pmo
+
         if notes:
             ledger.notes = notes
         ledger.save()
@@ -553,10 +596,11 @@ def set_scheduled_target(
 
 
 def set_opening_balances(
-    opening_psv: int,
+    opening_psv: int = 0,
     opening_pmo: int = 0,
     target_date_suffix: Optional[str] = None,
     notes: str = "",
+    opening_total: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Manually sets or adjusts the Opening Balance for PSV (White) and PMO (Yellow).
@@ -567,9 +611,15 @@ def set_opening_balances(
             work_date=work_d,
             defaults={"work_date_suffix": suffix},
         )
-        ledger.opening_balance_psv = max(0, int(opening_psv))
-        ledger.opening_balance_pmo = max(0, int(opening_pmo))
-        ledger.opening_stock = ledger.opening_balance_psv + ledger.opening_balance_pmo
+        if opening_total is not None and opening_psv == 0 and opening_pmo == 0:
+            ledger.opening_stock = max(0, int(opening_total))
+            ledger.opening_balance_psv = ledger.opening_stock
+            ledger.opening_balance_pmo = 0
+        else:
+            ledger.opening_balance_psv = max(0, int(opening_psv))
+            ledger.opening_balance_pmo = max(0, int(opening_pmo))
+            ledger.opening_stock = ledger.opening_balance_psv + ledger.opening_balance_pmo
+
         if notes:
             ledger.notes = notes
         ledger.save()
@@ -583,6 +633,53 @@ def set_opening_balances(
         "opening_stock": ledger.opening_stock,
         "reconciliation": recon,
     }
+
+
+def get_previous_shift_closing_balances(target_date_suffix: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Finds the most recent closing stock balances prior to the target work date.
+    Returns:
+    {
+        "found": True,
+        "opening_psv": prev.closing_balance_psv,
+        "opening_pmo": prev.closing_balance_pmo,
+        "opening_total": prev.closing_stock,
+        "previous_work_date": prev.work_date.isoformat(),
+        "previous_suffix": prev.work_date_suffix,
+    }
+    """
+    work_d, _ = resolve_date_and_suffix(target_date_suffix)
+    prev = DailyStockLedger.objects.filter(work_date__lt=work_d).order_by("-work_date").first()
+    if prev:
+        return {
+            "found": True,
+            "opening_psv": prev.closing_balance_psv,
+            "opening_pmo": prev.closing_balance_pmo,
+            "opening_total": prev.closing_stock,
+            "previous_work_date": prev.work_date.isoformat(),
+            "previous_suffix": prev.work_date_suffix,
+        }
+    return {
+        "found": False,
+        "opening_psv": 0,
+        "opening_pmo": 0,
+        "opening_total": 0,
+        "previous_work_date": "",
+        "previous_suffix": "",
+    }
+
+
+def set_shift_remarks(remarks: str, target_date_suffix: Optional[str] = None) -> Dict[str, Any]:
+    """Updates shift remarks (REMARKS column in official report) on DailyStockLedger."""
+    work_d, suffix = resolve_date_and_suffix(target_date_suffix)
+    with transaction.atomic():
+        ledger, _ = DailyStockLedger.objects.get_or_create(
+            work_date=work_d,
+            defaults={"work_date_suffix": suffix},
+        )
+        ledger.notes = (remarks or "").strip()
+        ledger.save(update_fields=["notes", "updated_at"])
+    return {"success": True, "notes": ledger.notes}
 
 
 def set_physical_count(
@@ -678,6 +775,16 @@ def record_stock_taking_audit(
             ledger.notes = notes
         ledger.save()
 
+        # Auto-provision all scanned safe room plates into InstallationKit marked 'New'
+        from core.services import kit_provisioning_service, bond_service
+        active_bond = bond_service.get_active_bond()
+        prov_res = kit_provisioning_service.sync_and_provision_warehouse_kits(
+            target_date_suffix=suffix,
+            source_plates=clean_plates,
+            sync_itms=False,
+            facility_name=active_bond.get("name", "Bond Warehouse"),
+        )
+
         updated_recon = compute_daily_reconciliation(suffix)
 
     return {
@@ -699,6 +806,7 @@ def record_stock_taking_audit(
         "duplicate_scans_skipped": dup_count,
         "duplicate_plates": dup_plates,
         "scanned_plates": clean_plates,
+        "kits_provisioned": prov_res,
         "reconciliation": updated_recon,
     }
 
@@ -854,11 +962,22 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
     )
     total_closing = closing_psv + closing_pmo
 
-    # 5. Scheduled variance: Actual Installed - Target Scheduled
-    scheduled_total = ledger.scheduled_psv + ledger.scheduled_pmo
+    # 5. Scheduled Target, Daily Performance % & Backlog Level (from official report)
+    scheduled_total = ledger.scheduled_total if ledger.scheduled_total > 0 else (ledger.scheduled_psv + ledger.scheduled_pmo)
+    daily_perf_total = round((total_installed / scheduled_total * 100), 1) if scheduled_total > 0 else 0.0
+    daily_perf_psv = round((installed_psv_count / ledger.scheduled_psv * 100), 1) if ledger.scheduled_psv > 0 else 0.0
+    daily_perf_pmo = round((installed_pmo_count / ledger.scheduled_pmo * 100), 1) if ledger.scheduled_pmo > 0 else 0.0
+
+    backlog_total = max(0, scheduled_total - total_installed)
+    backlog_psv = max(0, ledger.scheduled_psv - installed_psv_count) if ledger.scheduled_psv > 0 else 0
+    backlog_pmo = max(0, ledger.scheduled_pmo - installed_pmo_count) if ledger.scheduled_pmo > 0 else 0
+
     variance_psv = installed_psv_count - ledger.scheduled_psv
     variance_pmo = installed_pmo_count - ledger.scheduled_pmo
     variance_total = total_installed - scheduled_total
+
+    sched_psv_display = ledger.scheduled_psv if (ledger.scheduled_psv > 0 or ledger.scheduled_pmo > 0) else scheduled_total
+    sched_pmo_display = ledger.scheduled_pmo if (ledger.scheduled_psv > 0 or ledger.scheduled_pmo > 0) else 0
 
     # 6. Floor Dispatched & Returns Reconciliation (Graduated Discrepancy Scale)
     dispatches_qs = StockDispatchScan.objects.filter(
@@ -996,72 +1115,111 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         "formatted_date": formatted_date,
         "warehouse_name": ledger.warehouse_name,
         "active_bond_code": active_bond_code,
-        # Structured report columns
+        "closing_stock": total_closing,
+        "closing_balance_psv": closing_psv,
+        "closing_balance_pmo": closing_pmo,
+        # Structured report columns adhering to official spreadsheet (IMG-20260929-WA0005.jpg)
+        "storage_bond_name": ledger.warehouse_name or "AGM SPIRO/8/2",
+        "remarks": ledger.notes or "",
+        "consumables": ["Rivets", "Cable ties", "Drill bits", "Insulating Tape"],
+        "scheduled_summary": {
+            "scheduled_target": scheduled_total,
+            "installed_total": total_installed,
+            "installed_pmo": installed_pmo_count,
+            "installed_psv": installed_psv_count,
+            "daily_performance_pct": daily_perf_total,
+            "backlog_level": backlog_total,
+            "variance": variance_total,
+        },
         "report_table": {
             "columns": [
                 "Description",
-                "Public White (PSV)",
                 "Private Yellow (PMO)",
+                "Public White (PSV)",
                 "Total Combined (Bond)",
             ],
             "rows": [
                 {
                     "metric": "Opening Balance",
-                    "psv": ledger.opening_balance_psv,
                     "pmo": ledger.opening_balance_pmo,
+                    "psv": ledger.opening_balance_psv,
                     "total": ledger.opening_stock,
-                    "note": "Physical count at start of day",
+                    "note": "Physical count in safe room at start of shift",
                 },
                 {
                     "metric": "Kits Received",
-                    "psv": kits_received_psv,
                     "pmo": kits_received_pmo,
+                    "psv": kits_received_psv,
                     "total": total_kits_received,
                     "note": "Shipments received from supplier",
                 },
                 {
-                    "metric": "Bond Transfer In",
-                    "psv": transfer_in_psv,
-                    "pmo": transfer_in_pmo,
-                    "total": total_transfer_in,
-                    "note": "Kits transferred in from other bonds",
-                },
-                {
-                    "metric": "Bond Transfer Out",
-                    "psv": transfer_out_psv,
-                    "pmo": transfer_out_pmo,
-                    "total": total_transfer_out,
-                    "note": "Kits transferred out to other bonds",
-                },
-                {
-                    "metric": "Scheduled (Target)",
-                    "psv": ledger.scheduled_psv,
-                    "pmo": ledger.scheduled_pmo,
+                    "metric": "SCHEDULED",
+                    "pmo": sched_pmo_display,
+                    "psv": sched_psv_display,
                     "total": scheduled_total,
-                    "note": "Target installation under bond (manually entered)",
+                    "note": "Target installation under bond (operational target)",
                 },
                 {
-                    "metric": "Kits Installed (Actual)",
-                    "psv": installed_psv_count,
+                    "metric": "Kits Installed",
                     "pmo": installed_pmo_count,
+                    "psv": installed_psv_count,
                     "total": total_installed,
                     "note": "Installed & verified in orders / archive",
                 },
                 {
+                    "metric": "Daily perfomance, %",
+                    "pmo": f"{daily_perf_pmo}%" if ledger.scheduled_pmo > 0 else "0%",
+                    "psv": f"{daily_perf_psv}%" if ledger.scheduled_psv > 0 else "0%",
+                    "total": f"{daily_perf_total}%",
+                    "note": "Kits Installed vs Scheduled Target",
+                },
+                {
+                    "metric": "Bond transfer IN",
+                    "pmo": transfer_in_pmo,
+                    "psv": transfer_in_psv,
+                    "total": total_transfer_in,
+                    "note": "Kits transferred in from other bonds",
+                },
+                {
+                    "metric": "Bond transfer OUT",
+                    "pmo": transfer_out_pmo,
+                    "psv": transfer_out_psv,
+                    "total": total_transfer_out,
+                    "note": "Kits transferred out to other bonds",
+                },
+                {
+                    "metric": "Backlog level",
+                    "pmo": backlog_pmo,
+                    "psv": backlog_psv,
+                    "total": backlog_total,
+                    "note": "Scheduled Target minus Installed",
+                },
+                {
                     "metric": "Closing Balance",
-                    "psv": closing_psv,
                     "pmo": closing_pmo,
+                    "psv": closing_psv,
                     "total": total_closing,
                     "note": "Opening + Received + Transfer In - Transfer Out - Installed",
                 },
-                {
-                    "metric": "Scheduled Target Variance",
-                    "psv": variance_psv,
-                    "pmo": variance_pmo,
-                    "total": variance_total,
-                    "note": "Actual Installed vs Scheduled Target",
-                },
             ],
+            # Aliases dictionary for backward-compatible lookups
+            "rows_by_metric": {
+                "Opening Balance": {"metric": "Opening Balance", "pmo": ledger.opening_balance_pmo, "psv": ledger.opening_balance_psv, "total": ledger.opening_stock},
+                "Kits Received": {"metric": "Kits Received", "pmo": kits_received_pmo, "psv": kits_received_psv, "total": total_kits_received},
+                "SCHEDULED": {"metric": "SCHEDULED", "pmo": sched_pmo_display, "psv": sched_psv_display, "total": scheduled_total},
+                "Scheduled (Target)": {"metric": "SCHEDULED", "pmo": sched_pmo_display, "psv": sched_psv_display, "total": scheduled_total},
+                "Kits Installed": {"metric": "Kits Installed", "pmo": installed_pmo_count, "psv": installed_psv_count, "total": total_installed},
+                "Kits Installed (Actual)": {"metric": "Kits Installed", "pmo": installed_pmo_count, "psv": installed_psv_count, "total": total_installed},
+                "Daily perfomance, %": {"metric": "Daily perfomance, %", "pmo": daily_perf_pmo, "psv": daily_perf_psv, "total": daily_perf_total},
+                "Scheduled Target Variance": {"metric": "Scheduled Target Variance", "pmo": variance_pmo, "psv": variance_psv, "total": variance_total},
+                "Bond transfer IN": {"metric": "Bond transfer IN", "pmo": transfer_in_pmo, "psv": transfer_in_psv, "total": total_transfer_in},
+                "Bond Transfer In": {"metric": "Bond transfer IN", "pmo": transfer_in_pmo, "psv": transfer_in_psv, "total": total_transfer_in},
+                "Bond transfer OUT": {"metric": "Bond transfer OUT", "pmo": transfer_out_pmo, "psv": transfer_out_psv, "total": total_transfer_out},
+                "Bond Transfer Out": {"metric": "Bond transfer OUT", "pmo": transfer_out_pmo, "psv": transfer_out_psv, "total": total_transfer_out},
+                "Backlog level": {"metric": "Backlog level", "pmo": backlog_pmo, "psv": backlog_psv, "total": backlog_total},
+                "Closing Balance": {"metric": "Closing Balance", "pmo": closing_pmo, "psv": closing_psv, "total": total_closing},
+            },
         },
         # Floor Operations & Graduated Discrepancy Audit
         "floor_operations": {
@@ -1112,32 +1270,50 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
 
 
 def export_stock_reconciliation_csv(target_date_suffix: Optional[str] = None) -> str:
-    """Generates the clean CSV export strictly adhering to the user's report format."""
+    """Generates the clean CSV export strictly adhering to the user's report format (IMG-20260929-WA0005.jpg)."""
     recon = compute_daily_reconciliation(target_date_suffix)
     suffix = recon["work_date_suffix"]
     formatted_date = recon["formatted_date"]
+    bond_name = recon.get("storage_bond_name") or recon.get("warehouse_name") or "AGM SPIRO/8/2"
 
     out = io.StringIO()
     writer = csv.writer(out)
 
-    writer.writerow(["ITMS BOND PHYSICAL STOCK REPORT"])
-    writer.writerow(["Work Date", formatted_date, f"Suffix: {suffix}"])
-    writer.writerow(["Warehouse / Bond", recon.get("warehouse_name", "Bond Warehouse")])
-    writer.writerow(["Generated At", timezone.now().strftime("%Y-%m-%d %H:%M:%S")])
-    writer.writerow([])
+    # Official spreadsheet header from IMG-20260929-WA0005.jpg
+    writer.writerow([
+        "STORAGE BOND NAME",
+        "DESCRIPTION",
+        "PRIVATE",
+        "PUBLIC",
+        "Total",
+        "REMARKS",
+        "Consumables",
+    ])
+
+    consumables_list = ["Rivets", "Cable ties", "Drill bits", "Insulating Tape"]
+    raw_notes = recon.get("remarks") or ""
+    remarks_lines = [line.strip() for line in raw_notes.splitlines() if line.strip()]
 
     table = recon["report_table"]
-    writer.writerow(table["columns"] + ["Formula / Description Note"])
+    for idx, row in enumerate(table["rows"]):
+        bond_cell = bond_name if idx == 0 else ""
+        rem_cell = remarks_lines[idx] if idx < len(remarks_lines) else ""
+        cons_cell = consumables_list[idx] if idx < len(consumables_list) else ""
 
-    for row in table["rows"]:
         writer.writerow([
+            bond_cell,
             row["metric"],
-            row["psv"],
             row["pmo"],
+            row["psv"],
             row["total"],
-            row["note"],
+            rem_cell,
+            cons_cell,
         ])
 
+    writer.writerow([])
+    writer.writerow(["SHIFT CONTEXT METADATA"])
+    writer.writerow(["Work Date", formatted_date, f"Suffix: {suffix}"])
+    writer.writerow(["Generated At", timezone.now().strftime("%Y-%m-%d %H:%M:%S")])
     writer.writerow([])
     writer.writerow(["FLOOR OPERATIONS & DISCREPANCY AUDIT"])
     floor = recon["floor_operations"]
@@ -1196,11 +1372,38 @@ def get_delivery_notes_for_date(target_date_suffix: Optional[Any] = None) -> Lis
             "notes": d.notes or "",
             "created_at": d.created_at.strftime("%Y-%m-%d %H:%M:%S") if d.created_at else "",
             "has_image": bool(d.delivery_note_image),
-            "image_url": d.delivery_note_image.url if d.delivery_note_image else None,
+            "image_url": d.image_url,
+            "image_path": d.image_absolute_path,
             "plates": plates,
         })
 
     return results
+
+
+def get_delivery_note_detail(delivery_id: int) -> Optional[Dict[str, Any]]:
+    """Returns detailed information for a specific Delivery Note by ID."""
+    try:
+        d = StockDelivery.objects.prefetch_related("items").get(id=delivery_id)
+        plates = list(d.items.values_list("registration_number", flat=True))
+        return {
+            "id": d.id,
+            "delivery_number": d.delivery_number,
+            "paper_note_reference": d.paper_note_reference or "",
+            "supplier": d.supplier,
+            "plate_category": d.plate_category,
+            "delivery_date": d.delivery_date.isoformat() if d.delivery_date else "",
+            "target_date_suffix": d.target_date_suffix,
+            "total_plates_count": d.total_plates_count or len(plates),
+            "operator_name": d.operator_name,
+            "notes": d.notes or "",
+            "created_at": d.created_at.strftime("%Y-%m-%d %H:%M:%S") if d.created_at else "",
+            "has_image": bool(d.delivery_note_image),
+            "image_url": d.image_url,
+            "image_path": d.image_absolute_path,
+            "plates": plates,
+        }
+    except StockDelivery.DoesNotExist:
+        return None
 
 
 def get_mvr_unallocated_docket(target_date_suffix: Optional[Any] = None) -> Dict[str, Any]:
@@ -1280,10 +1483,11 @@ def get_mvr_unallocated_docket(target_date_suffix: Optional[Any] = None) -> Dict
     if pending_block_lines:
         docket_lines.extend(pending_block_lines)
 
+    from core.version import __version__
     docket_lines.extend([
         "",
         "==================================================",
-        "ITMS Verification & Daily Stock Ledger Audit — v1.0.5",
+        f"ITMS Verification & Daily Stock Ledger Audit — v{__version__}",
         "==================================================",
     ])
     formatted_docket = "\n".join(docket_lines)
@@ -1303,4 +1507,517 @@ def get_mvr_unallocated_docket(target_date_suffix: Optional[Any] = None) -> Dict
         "formatted_docket": formatted_docket,
         "floor_operations": floor,
     }
+
+
+def generate_category_csv_content(category: str, target_date_suffix: Optional[str] = None) -> str:
+    """
+    Generates standard downloadable CSV content for a specific shift category:
+    - 'unallocated': Kits counted/dispatched with NO order in ITMS (Status New).
+    - 'archived' or 'installed': Officially completed & verified orders in ITMS archive.
+    - 'pending' or 'active': Active installation orders still in progress/queue.
+    - 'dispatched' or 'counted': Morning counted & issued plates for the shift.
+    - 'returned': Plates returned uninstalled to safe room storage.
+    - 'master' or 'reconciliation': Master spreadsheet combining ledger balances & floor audits.
+    """
+    work_d, suffix = resolve_date_and_suffix(target_date_suffix)
+    cat_lower = str(category).strip().lower()
+
+    if cat_lower in ("master", "reconciliation", "ledger"):
+        return export_stock_reconciliation_csv(suffix)
+
+    active_bond = bond_service.get_active_bond()
+    active_code = active_bond.get("code", "AGM")
+    active_name = active_bond.get("name", "AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)")
+
+    out = io.StringIO()
+    writer = csv.writer(out)
+
+    if cat_lower in ("unallocated", "new"):
+        # Unallocated plates: Dispatched but not found in ITMS orders or archive, and not returned
+        recon = compute_daily_reconciliation(suffix)
+        unalloc_plates = recon.get("unallocated_plates", [])
+
+        writer.writerow([
+            "#",
+            "Registration Number",
+            "Series",
+            "Kit Status",
+            "ITMS Order Found",
+            "Operating Facility",
+            "Audit Note",
+        ])
+        for idx, p in enumerate(unalloc_plates, start=1):
+            m = re.search(r"U[A-Z]{2}\d{3}([A-Z]{1,2})", p)
+            series = m.group(1) if m else "UG"
+            writer.writerow([
+                idx,
+                p,
+                series,
+                "New / Unallocated",
+                "NO",
+                active_name,
+                "Counted on site; verified absent from ITMS active orders and archive",
+            ])
+        return out.getvalue()
+
+    if cat_lower in ("archived", "installed"):
+        orders_qs = list(InstallationOrder.objects.filter(order_number__endswith=suffix))
+        archived_orders = [
+            o for o in orders_qs
+            if bond_service.classify_order_bond_scope(o, active_code=active_code) == "ACTIVE_BOND"
+            and (o.is_archived or (o.order_status or "").strip().lower() == "installed")
+        ]
+        # Sort by installation date or order number
+        archived_orders.sort(key=lambda o: (o.installation_date or "", o.order_number))
+
+        writer.writerow([
+            "#",
+            "Order Number",
+            "Registration Number",
+            "VIN",
+            "Installation Officer",
+            "Installation Date",
+            "Order Status",
+            "Warehouse",
+        ])
+        for idx, o in enumerate(archived_orders, start=1):
+            writer.writerow([
+                idx,
+                o.order_number,
+                o.registration_number,
+                o.vin or "—",
+                o.installation_officer or "—",
+                o.installation_date or "—",
+                o.order_status or "Installed",
+                o.warehouse_name or active_name,
+            ])
+        return out.getvalue()
+
+    if cat_lower in ("pending", "active"):
+        orders_qs = list(InstallationOrder.objects.filter(order_number__endswith=suffix))
+        active_orders = [
+            o for o in orders_qs
+            if bond_service.classify_order_bond_scope(o, active_code=active_code) == "ACTIVE_BOND"
+            and not o.is_archived
+            and (o.order_status or "").strip().lower() != "installed"
+        ]
+        active_orders.sort(key=lambda o: (o.order_status or "", o.registration_number))
+
+        writer.writerow([
+            "#",
+            "Order Number",
+            "Registration Number",
+            "VIN",
+            "Order Status",
+            "ITMS Stage",
+            "Warehouse",
+        ])
+        for idx, o in enumerate(active_orders, start=1):
+            writer.writerow([
+                idx,
+                o.order_number,
+                o.registration_number,
+                o.vin or "—",
+                o.order_status or "Ready for installation",
+                o.itms_stage or "STAGE_1_INSTALLATION",
+                o.warehouse_name or active_name,
+            ])
+        return out.getvalue()
+
+    if cat_lower in ("dispatched", "counted", "morning"):
+        dispatches = list(
+            StockDispatchScan.objects.filter(work_date_suffix=suffix)
+            .order_by("registration_number")
+        )
+        writer.writerow([
+            "#",
+            "Registration Number",
+            "Plate Category",
+            "Dispatched At",
+            "Operator",
+            "Reconciliation Status",
+            "Bond Facility",
+        ])
+        for idx, d in enumerate(dispatches, start=1):
+            writer.writerow([
+                idx,
+                d.registration_number,
+                d.plate_category,
+                d.dispatched_at.strftime("%Y-%m-%d %H:%M:%S") if d.dispatched_at else "",
+                d.operator_name or "Operator",
+                d.status,
+                d.bond_code or active_code,
+            ])
+        return out.getvalue()
+
+    if cat_lower in ("returned", "returns"):
+        returns = list(
+            StockReturnScan.objects.filter(work_date_suffix=suffix)
+            .order_by("registration_number")
+        )
+        writer.writerow([
+            "#",
+            "Registration Number",
+            "Plate Category",
+            "Returned At",
+            "Operator",
+            "Return Reason",
+            "Notes",
+        ])
+        for idx, r in enumerate(returns, start=1):
+            writer.writerow([
+                idx,
+                r.registration_number,
+                r.plate_category,
+                r.returned_at.strftime("%Y-%m-%d %H:%M:%S") if r.returned_at else "",
+                r.operator_name or "Operator",
+                r.get_reason_display() if hasattr(r, "get_reason_display") else r.reason,
+                r.notes or "",
+            ])
+        return out.getvalue()
+
+    # Fallback default: unallocated
+    return generate_category_csv_content("unallocated", target_date_suffix)
+
+
+def export_shift_csvs(
+    target_date_suffix: Optional[str] = None,
+    exports_dir: Optional[str] = None,
+) -> Dict[str, str]:
+    """
+    Exports all shift reconciliation lists to standardized CSV files in exports/ directory:
+    1. shift_{suffix}_morning_dispatched_{count}.csv
+    2. shift_{suffix}_itms_archived_{count}.csv
+    3. shift_{suffix}_itms_active_pending_{count}.csv
+    4. shift_{suffix}_unallocated_kits_{count}.csv
+    5. shift_{suffix}_reconciliation_master.csv
+    6. shift_{suffix}_returned_to_stock_{count}.csv (if any returns exist)
+
+    Returns dictionary of {category_key: absolute_file_path}.
+    """
+    from django.conf import settings
+    _, suffix = resolve_date_and_suffix(target_date_suffix)
+
+    if exports_dir:
+        out_dir = Path(exports_dir)
+    else:
+        from core.services import config_service
+        def_dir = str(config_service.get_setting("sync.default_export_directory", "exports")).strip() or "exports"
+        out_dir = Path(def_dir) if os.path.isabs(def_dir) else Path(settings.BASE_DIR) / def_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    recon = compute_daily_reconciliation(suffix)
+    floor = recon.get("floor_operations", {})
+    disp_cnt = floor.get("dispatched_count", 0)
+    ret_cnt = floor.get("returned_count", 0)
+    unalloc_cnt = floor.get("unallocated_discrepancy", 0)
+
+    sched_summary = recon.get("scheduled_summary", {})
+    arch_cnt = sched_summary.get("installed_total", 0)
+    pend_cnt = floor.get("itms_pending_count", 0)
+
+    files_generated: Dict[str, str] = {}
+
+    # 1. Unallocated Kits CSV
+    unalloc_csv = generate_category_csv_content("unallocated", suffix)
+    unalloc_path = out_dir / f"shift_{suffix}_unallocated_kits_{unalloc_cnt}.csv"
+    unalloc_path.write_text(unalloc_csv, encoding="utf-8")
+    files_generated["unallocated"] = str(unalloc_path)
+
+    # 2. ITMS Archived / Installed CSV
+    arch_csv = generate_category_csv_content("archived", suffix)
+    arch_path = out_dir / f"shift_{suffix}_itms_archived_{arch_cnt}.csv"
+    arch_path.write_text(arch_csv, encoding="utf-8")
+    files_generated["archived"] = str(arch_path)
+
+    # 3. ITMS Active / Pending Orders CSV
+    pend_csv = generate_category_csv_content("pending", suffix)
+    pend_path = out_dir / f"shift_{suffix}_itms_active_pending_{pend_cnt}.csv"
+    pend_path.write_text(pend_csv, encoding="utf-8")
+    files_generated["pending"] = str(pend_path)
+
+    # 4. Morning Dispatched Plates CSV
+    disp_csv = generate_category_csv_content("dispatched", suffix)
+    disp_path = out_dir / f"shift_{suffix}_morning_dispatched_{disp_cnt}.csv"
+    disp_path.write_text(disp_csv, encoding="utf-8")
+    files_generated["dispatched"] = str(disp_path)
+
+    # 5. Returns CSV (if any)
+    if ret_cnt > 0:
+        ret_csv = generate_category_csv_content("returned", suffix)
+        ret_path = out_dir / f"shift_{suffix}_returned_to_stock_{ret_cnt}.csv"
+        ret_path.write_text(ret_csv, encoding="utf-8")
+        files_generated["returned"] = str(ret_path)
+
+    # 6. Master Shift Reconciliation CSV
+    master_csv = export_stock_reconciliation_csv(suffix)
+    master_path = out_dir / f"shift_{suffix}_reconciliation_master.csv"
+    master_path.write_text(master_csv, encoding="utf-8")
+    files_generated["master"] = str(master_path)
+
+    return files_generated
+
+
+def reconcile_and_update_shift(
+    morning_plates: Optional[Iterable[str]] = None,
+    return_plates: Optional[Iterable[str]] = None,
+    target_date_suffix: Optional[str] = None,
+    operator_name: str = "Operator",
+    notes: str = "",
+    auto_create_kits: bool = True,
+    export_csvs: bool = True,
+    exports_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Automated Daily Shift Stock Reconciliation and Inventory System Update:
+    1. Ingests morning physical plates counted/scanned for installation.
+    2. Ingests any evening uninstalled plates returned to safe room storage.
+    3. Cross-references against ITMS active orders and completed archive for the shift date.
+    4. Categorizes every plate into:
+       - RECONCILED_INSTALLED (Archive)
+       - ON_LINE_ACTIVE (Pending Orders)
+       - RETURNED_TO_SAFE (Safe Room Returns)
+       - UNRESOLVED_DISCREPANCY (Unallocated Kits)
+    5. Synchronizes local physical inventory (InstallationKit):
+       - Sets status='New' for unallocated kits without ITMS orders.
+       - Sets status='Allocated' for active orders and installed kits.
+       - Sets warehouse assignment to active bond facility.
+    6. Updates DailyStockLedger with opening, received, installed, pending, returned,
+       unallocated, and closing balance figures.
+    7. Automatically generates downloadable and saved CSV reports for all categories.
+    """
+    work_d, suffix = resolve_date_and_suffix(target_date_suffix)
+    formatted_date = format_date_suffix_readable(suffix)
+    active_bond = bond_service.get_active_bond()
+    active_bond_code = active_bond.get("code", "AGM")
+    active_bond_name = active_bond.get("name", "AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)")
+
+    new_dispatches_count = 0
+    new_returns_count = 0
+
+    with transaction.atomic():
+        # 1. Ingest morning plates if provided
+        if morning_plates:
+            clean_morning, _, _ = parse_plate_input_with_stats(morning_plates)
+            if clean_morning:
+                existing_dispatches = set(
+                    StockDispatchScan.objects.filter(
+                        work_date_suffix=suffix,
+                        registration_number__in=clean_morning,
+                    ).values_list("registration_number", flat=True)
+                )
+                scans_to_add = [
+                    StockDispatchScan(
+                        registration_number=p,
+                        plate_category=PlateCategory.PSV,
+                        work_date=work_d,
+                        work_date_suffix=suffix,
+                        bond_code=active_bond_code,
+                        operator_name=operator_name or "Operator",
+                        status=StockDispatchScan.Status.ON_LINE_ACTIVE,
+                        notes=notes or "",
+                    )
+                    for p in clean_morning
+                    if p not in existing_dispatches
+                ]
+                if scans_to_add:
+                    StockDispatchScan.objects.bulk_create(scans_to_add)
+                    new_dispatches_count = len(scans_to_add)
+
+        # 2. Ingest return plates if provided
+        if return_plates:
+            clean_returns, _, _ = parse_plate_input_with_stats(return_plates)
+            if clean_returns:
+                existing_returns = set(
+                    StockReturnScan.objects.filter(
+                        work_date_suffix=suffix,
+                        registration_number__in=clean_returns,
+                    ).values_list("registration_number", flat=True)
+                )
+                returns_to_add = [
+                    StockReturnScan(
+                        registration_number=p,
+                        plate_category=PlateCategory.PSV,
+                        work_date=work_d,
+                        work_date_suffix=suffix,
+                        operator_name=operator_name or "Operator",
+                        reason=StockReturnScan.Reason.BIKE_NO_SHOW,
+                        notes=notes or "",
+                    )
+                    for p in clean_returns
+                    if p not in existing_returns
+                ]
+                if returns_to_add:
+                    StockReturnScan.objects.bulk_create(returns_to_add)
+                    new_returns_count = len(returns_to_add)
+
+        # 3. Retrieve all dispatches and returns for this shift
+        dispatches_qs = list(
+            StockDispatchScan.objects.filter(work_date_suffix=suffix)
+            .filter(Q(bond_code__iexact=active_bond_code) | Q(bond_code="") | Q(bond_code__isnull=True))
+        )
+        returns_set = set(
+            normalizer.canonicalize(p)
+            for p in StockReturnScan.objects.filter(work_date_suffix=suffix).values_list("registration_number", flat=True)
+            if p
+        )
+
+        orders_qs = list(InstallationOrder.objects.filter(order_number__endswith=suffix))
+        scoped_orders: List[InstallationOrder] = [
+            o for o in orders_qs
+            if bond_service.classify_order_bond_scope(o, active_code=active_bond_code) == "ACTIVE_BOND"
+        ]
+        order_by_plate: Dict[str, InstallationOrder] = {
+            normalizer.canonicalize(o.registration_number): o
+            for o in scoped_orders
+            if o.registration_number
+        }
+
+        # 4. Classify each dispatched plate
+        reconciled_installed: List[str] = []
+        on_line_active: List[str] = []
+        returned_to_safe: List[str] = []
+        unallocated_plates: List[str] = []
+        scans_to_update: List[StockDispatchScan] = []
+
+        for scan in dispatches_qs:
+            orig_plate = scan.registration_number
+            c_plate = normalizer.canonicalize(orig_plate)
+
+            if c_plate in returns_set:
+                returned_to_safe.append(orig_plate)
+                if scan.status != StockDispatchScan.Status.RETURNED_TO_SAFE:
+                    scan.status = StockDispatchScan.Status.RETURNED_TO_SAFE
+                    scans_to_update.append(scan)
+                continue
+
+            matched_order = order_by_plate.get(c_plate)
+            if matched_order:
+                if matched_order.is_archived or (matched_order.order_status or "").strip().lower() == "installed":
+                    reconciled_installed.append(orig_plate)
+                    if scan.status != StockDispatchScan.Status.RECONCILED_INSTALLED:
+                        scan.status = StockDispatchScan.Status.RECONCILED_INSTALLED
+                        scans_to_update.append(scan)
+                else:
+                    on_line_active.append(orig_plate)
+                    if scan.status != StockDispatchScan.Status.ON_LINE_ACTIVE:
+                        scan.status = StockDispatchScan.Status.ON_LINE_ACTIVE
+                        scans_to_update.append(scan)
+            else:
+                unallocated_plates.append(orig_plate)
+                if scan.status != StockDispatchScan.Status.UNRESOLVED_DISCREPANCY:
+                    scan.status = StockDispatchScan.Status.UNRESOLVED_DISCREPANCY
+                    scans_to_update.append(scan)
+
+        if scans_to_update:
+            StockDispatchScan.objects.bulk_update(scans_to_update, ["status"])
+
+        # 5. Inventory System Synchronization (InstallationKit)
+        kits_created_count = 0
+        kits_updated_count = 0
+        if auto_create_kits and dispatches_qs:
+            dispatch_plates = [normalizer.canonicalize(s.registration_number) for s in dispatches_qs if s.registration_number]
+            target_codes = [f"IK-{p}" for p in dispatch_plates if p]
+            existing_kits = InstallationKit.objects.filter(
+                Q(registration_number__in=dispatch_plates) | Q(kit_code__in=target_codes)
+            )
+            existing_kits_map = {
+                normalizer.canonicalize(k.registration_number): k
+                for k in existing_kits
+            }
+            kits_to_create = []
+            kits_to_update = []
+
+            for scan in dispatches_qs:
+                orig_plate = scan.registration_number
+                c_plate = normalizer.canonicalize(orig_plate)
+                matched_order = order_by_plate.get(c_plate)
+                is_unalloc = (c_plate not in order_by_plate) and (c_plate not in returns_set)
+                target_status = "New" if is_unalloc else "Allocated"
+                wh = (matched_order.warehouse_name if matched_order and matched_order.warehouse_name else active_bond_name)
+
+                kit = existing_kits_map.get(c_plate)
+                if kit:
+                    changed = False
+                    if kit.status != target_status:
+                        kit.status = target_status
+                        changed = True
+                    if not kit.warehouse and wh:
+                        kit.warehouse = wh
+                        changed = True
+                    if matched_order:
+                        if not kit.front_plate and matched_order.front_plate_serial:
+                            kit.front_plate = matched_order.front_plate_serial
+                            changed = True
+                        if not kit.rear_plate and matched_order.rear_plate_serial:
+                            kit.rear_plate = matched_order.rear_plate_serial
+                            changed = True
+                        if not kit.gps_tracker and matched_order.gps_tracker_id:
+                            kit.gps_tracker = matched_order.gps_tracker_id
+                            changed = True
+                    if changed:
+                        kits_to_update.append(kit)
+                else:
+                    new_kit = InstallationKit(
+                        kit_code=f"IK-{orig_plate}",
+                        registration_number=orig_plate,
+                        status=target_status,
+                        warehouse=wh,
+                        created_date=work_d.strftime("%d.%m.%Y"),
+                    )
+                    if matched_order:
+                        new_kit.front_plate = matched_order.front_plate_serial or ""
+                        new_kit.rear_plate = matched_order.rear_plate_serial or ""
+                        new_kit.gps_tracker = matched_order.gps_tracker_id or ""
+                    kits_to_create.append(new_kit)
+
+            if kits_to_create:
+                InstallationKit.objects.bulk_create(kits_to_create, ignore_conflicts=True, batch_size=200)
+                kits_created_count = len(kits_to_create)
+            if kits_to_update:
+                InstallationKit.objects.bulk_update(
+                    kits_to_update,
+                    ["status", "warehouse", "front_plate", "rear_plate", "gps_tracker"],
+                    batch_size=200
+                )
+                kits_updated_count = len(kits_to_update)
+
+        # 6. Recompute and balance DailyStockLedger
+        recon = compute_daily_reconciliation(suffix)
+
+    # 7. Generate CSV exports
+    exported_files: Dict[str, str] = {}
+    if export_csvs:
+        exported_files = export_shift_csvs(
+            target_date_suffix=suffix,
+            exports_dir=exports_dir,
+        )
+
+    return {
+        "success": True,
+        "work_date": work_d.isoformat(),
+        "work_date_suffix": suffix,
+        "formatted_date": formatted_date,
+        "warehouse_name": active_bond_name,
+        "active_bond_code": active_bond_code,
+        "summary": {
+            "dispatched_count": len(dispatches_qs),
+            "reconciled_installed_count": len(reconciled_installed),
+            "on_line_active_count": len(on_line_active),
+            "returned_count": len(returned_to_safe),
+            "unallocated_count": len(unallocated_plates),
+            "new_dispatches_recorded": new_dispatches_count,
+            "new_returns_recorded": new_returns_count,
+            "kits_created": kits_created_count,
+            "kits_updated": kits_updated_count,
+        },
+        "dispatched_plates": [s.registration_number for s in dispatches_qs],
+        "reconciled_installed": reconciled_installed,
+        "on_line_active": on_line_active,
+        "returned_to_safe": returned_to_safe,
+        "unallocated_plates": unallocated_plates,
+        "exported_files": exported_files,
+        "reconciliation": recon,
+    }
+
 

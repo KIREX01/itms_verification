@@ -24,9 +24,23 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "theme": "dark",
         "show_safety_guarantee": False, # When True, displays safety guarantee card in ITMS Hub based on loaded config
     },
+    "sync": {
+        "auto_sync_enabled": True,             # Background active queue & shift synchronization
+        "auto_sync_interval_seconds": 60,      # Background sync cycle frequency (seconds)
+        "shift_target_date_mode": "today",     # "today", "yesterday", or "manual"
+        "manual_target_date": "",              # e.g. "30.09.2026" or "300926"
+        "default_export_directory": "exports", # Shift reconciliation spreadsheet export folder
+    },
+    "crawl": {
+        "max_active_pages": 25,                # Max pages to crawl for active orders (20 records/page)
+        "max_archive_pages": 50,               # Max pages to crawl for archive orders
+        "max_kit_pages": 25,                   # Max pages to crawl for installation kits
+    },
     "database": {
-        "engine": "sqlite",            # "sqlite" (default for all machines) or "postgresql"
+        "engine": "sqlite",                    # "sqlite" (default for all machines) or "postgresql"
         "sqlite_file": "db.sqlite3",
+        "sqlite_busy_timeout_ms": 30000,       # Milliseconds to wait for SQLite locks before timeout
+        "batch_write_size": 200,               # Bulk atomic commit chunk size
         "postgres_host": "localhost",
         "postgres_port": "5432",
         "postgres_db": "itms",
@@ -34,9 +48,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "postgres_password": "",
     },
     "submission": {
-        "dry_run_mode": True,          # Safe simulation mode for ITMS submissions
-        "submit_step3": True,          # Auto-finalize Step 3 remote installation
-        "request_timeout_seconds": 30,
+        "dry_run_mode": True,                  # Safe simulation mode for ITMS submissions
+        "submit_step3": True,                  # Auto-finalize Step 3 remote installation
+        "request_timeout_seconds": 15,
         "circuit_breaker_threshold": 3,
         "max_retries": 3,
     },
@@ -47,6 +61,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "auto_preprocess_ingest": True,
         "min_ocr_confidence": 0.55,
         "detector_conf_threshold": 0.35,
+        "yolo_weights": "models/license-plate-finetune-v1n.pt",  # Path to YOLOv8/YOLOv11 weights (.pt/.onnx)
     },
     "storage": {
         "vault_path": "media/vault",           # Root directory where photographic evidence is stored
@@ -61,15 +76,18 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "network": {
         "itms_base_url": "https://stock.itms.ug",
         "login_endpoint": "/site/login",
+        "http_timeout_seconds": 15,            # Socket timeout for ITMS HTTP requests
+        "pool_connections": 10,                # Persistent connection pool size
+        "pool_maxsize": 20,                    # Maximum active connection pool size
     },
     "compression": {
-        "enabled": True,               # Smart on-the-fly multipart photo compression
-        "max_dimension": 1920,         # Max dimension in px (LANCZOS downsampling)
-        "jpeg_quality": 88,            # JPEG quality for multipart stream
+        "enabled": True,                       # Smart on-the-fly multipart photo compression
+        "max_dimension": 1920,                 # Max dimension in px (LANCZOS downsampling)
+        "jpeg_quality": 88,                    # JPEG quality for multipart stream
     },
     "outbox": {
-        "enabled": True,               # Auto-transition network failures to OFFLINE_OUTBOX
-        "auto_sync_interval_seconds": 15, # Background heartbeat ping and drain interval
+        "enabled": True,                       # Auto-transition network failures to OFFLINE_OUTBOX
+        "auto_sync_interval_seconds": 15,      # Background heartbeat ping and drain interval
     },
     "bond": {
         "active_bond_code": "AGM",
@@ -82,6 +100,238 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             {"code": "MBALE", "name": "Mbale Bond", "warehouse_id": "mbale-bond"},
             {"code": "MBR", "name": "Mbarara Bond", "warehouse_id": "mbarara-bond"},
         ],
+    },
+}
+
+USER_SETTINGS_SCHEMA: Dict[str, Dict[str, Any]] = {
+    "bond.active_bond_code": {
+        "label": "Active Bond Facility",
+        "description": "Selected warehouse facility for plate allocation, stock, and fitment operations.",
+        "type": "select",
+        "default": "AGM",
+        "category": "Facility & Operations",
+    },
+    "bond.strict_bond_scoping": {
+        "label": "Strict Bond Scoping",
+        "description": "Filter inventory and shift reconciliation strictly to the selected bonded warehouse.",
+        "type": "bool",
+        "default": True,
+        "category": "Facility & Operations",
+    },
+    "submission.dry_run_mode": {
+        "label": "Dry-Run Safety Mode",
+        "description": "Simulate ITMS uploads and approvals locally without executing remote mutating writes.",
+        "type": "bool",
+        "default": True,
+        "category": "Safety & Submission",
+    },
+    "submission.submit_step3": {
+        "label": "Auto-Submit Step 3 Confirmation",
+        "description": "Automatically finalize remote installation record on ITMS when evidence photos upload.",
+        "type": "bool",
+        "default": True,
+        "category": "Safety & Submission",
+    },
+    "sync.auto_sync_enabled": {
+        "label": "Auto Shift Sync",
+        "description": "Periodically poll ITMS active orders, morning installation kits, and shift archive in background.",
+        "type": "bool",
+        "default": True,
+        "category": "Shift & Synchronization",
+    },
+    "sync.auto_sync_interval_seconds": {
+        "label": "Sync Interval (seconds)",
+        "description": "Time between automated background sync passes (default: 60s).",
+        "type": "int",
+        "default": 60,
+        "category": "Shift & Synchronization",
+    },
+    "sync.shift_target_date_mode": {
+        "label": "Shift Date Selection Mode",
+        "description": "Target date rule for reconciliation ledgers: 'today', 'yesterday', or 'manual'.",
+        "type": "select",
+        "default": "today",
+        "options": ["today", "yesterday", "manual"],
+        "category": "Shift & Synchronization",
+    },
+    "sync.manual_target_date": {
+        "label": "Manual Shift Date",
+        "description": "Specific calendar date to reconcile when mode is 'manual' (e.g. 30.09.2026 or 300926).",
+        "type": "str",
+        "default": "",
+        "category": "Shift & Synchronization",
+    },
+    "sync.default_export_directory": {
+        "label": "CSV Export Directory",
+        "description": "Directory where shift reconciliation CSV reports and ledgers are generated.",
+        "type": "str",
+        "default": "exports",
+        "category": "Shift & Synchronization",
+    },
+    "storage.vault_path": {
+        "label": "Evidence Vault Folder",
+        "description": "Local directory where photographic evidence and camera files are stored.",
+        "type": "str",
+        "default": "media/vault",
+        "category": "Storage & Vault",
+    },
+    "storage.prompt_vault_on_startup": {
+        "label": "Prompt for Vault on Startup",
+        "description": "Display folder confirmation prompt whenever the application launches.",
+        "type": "bool",
+        "default": True,
+        "category": "Storage & Vault",
+    },
+    "system.theme": {
+        "label": "UI Theme",
+        "description": "Terminal and display styling theme.",
+        "type": "select",
+        "default": "dark",
+        "options": ["dark", "light", "high_contrast"],
+        "category": "Display & Preferences",
+    },
+}
+
+DEVELOPER_SETTINGS_SCHEMA: Dict[str, Dict[str, Any]] = {
+    "system.developer_mode": {
+        "label": "Developer Mode Enabled",
+        "description": "Enables engineering diagnostic tools, raw telemetry, and advanced parameters.",
+        "type": "bool",
+        "default": False,
+        "category": "Diagnostics",
+    },
+    "crawl.max_active_pages": {
+        "label": "Max Active Orders Pages",
+        "description": "Maximum pages crawled when fetching active installation orders (default: 25).",
+        "type": "int",
+        "default": 25,
+        "category": "Crawl & Pagination",
+    },
+    "crawl.max_archive_pages": {
+        "label": "Max Archive Orders Pages",
+        "description": "Maximum pages crawled when scanning shift archive orders (default: 50).",
+        "type": "int",
+        "default": 50,
+        "category": "Crawl & Pagination",
+    },
+    "crawl.max_kit_pages": {
+        "label": "Max Kit Catalog Pages",
+        "description": "Maximum pages crawled when scanning warehouse stock kits (default: 25).",
+        "type": "int",
+        "default": 25,
+        "category": "Crawl & Pagination",
+    },
+    "network.http_timeout_seconds": {
+        "label": "HTTP Request Timeout (seconds)",
+        "description": "Socket timeout before aborting and retrying ITMS requests (default: 15s).",
+        "type": "int",
+        "default": 15,
+        "category": "Network & Sockets",
+    },
+    "network.pool_connections": {
+        "label": "HTTP Pool Connections",
+        "description": "Number of persistent connection pools to maintain (default: 10).",
+        "type": "int",
+        "default": 10,
+        "category": "Network & Sockets",
+    },
+    "network.pool_maxsize": {
+        "label": "HTTP Pool Max Sockets",
+        "description": "Maximum connection pool socket capacity (default: 20).",
+        "type": "int",
+        "default": 20,
+        "category": "Network & Sockets",
+    },
+    "submission.circuit_breaker_threshold": {
+        "label": "Circuit Breaker Threshold",
+        "description": "Consecutive network/server failures before pausing automated requests.",
+        "type": "int",
+        "default": 3,
+        "category": "Network & Sockets",
+    },
+    "database.sqlite_busy_timeout_ms": {
+        "label": "SQLite Busy Timeout (ms)",
+        "description": "Lock contention timeout in milliseconds before raising OperationalError (default: 30000ms).",
+        "type": "int",
+        "default": 30000,
+        "category": "Database Performance",
+    },
+    "database.batch_write_size": {
+        "label": "Database Batch Write Chunk",
+        "description": "Record batch size for chunked bulk updates and inserts (default: 200).",
+        "type": "int",
+        "default": 200,
+        "category": "Database Performance",
+    },
+    "vision.min_ocr_confidence": {
+        "label": "Minimum OCR Confidence",
+        "description": "Confidence threshold below which OCR detections are flagged for operator review (0.0 to 1.0).",
+        "type": "float",
+        "default": 0.55,
+        "category": "Vision Pipeline",
+    },
+    "vision.detector_conf_threshold": {
+        "label": "YOLO Detector Confidence",
+        "description": "Bounding box threshold for YOLO vehicle plate detection (0.0 to 1.0).",
+        "type": "float",
+        "default": 0.35,
+        "category": "Vision Pipeline",
+    },
+    "vision.yolo_weights": {
+        "label": "YOLO Neural Weights (.pt / .onnx)",
+        "description": "Local path or Hugging Face model ID for YOLOv8/YOLOv11 vehicle license plate detector weights.",
+        "type": "string",
+        "default": "models/license-plate-finetune-v1n.pt",
+        "category": "Vision Pipeline",
+    },
+    "matcher.uturn_threshold_seconds": {
+        "label": "U-Turn Threshold (seconds)",
+        "description": "Turnaround time delta for Tier 2 reverse U-turn walk alignment (default: 1800s).",
+        "type": "int",
+        "default": 1800,
+        "category": "Matcher",
+    },
+    "compression.enabled": {
+        "label": "Multipart Compression",
+        "description": "Downscale photos in-memory during HTTP upload (master photos remain untouched).",
+        "type": "bool",
+        "default": True,
+        "category": "Compression & Media",
+    },
+    "compression.max_dimension": {
+        "label": "Max Photo Dimension (px)",
+        "description": "Maximum width/height in px for streamed photos (LANCZOS downsampling).",
+        "type": "int",
+        "default": 1920,
+        "category": "Compression & Media",
+    },
+    "compression.jpeg_quality": {
+        "label": "JPEG Compression Quality",
+        "description": "JPEG encoding quality level (1 to 100).",
+        "type": "int",
+        "default": 88,
+        "category": "Compression & Media",
+    },
+    "storage.vault_retention_days": {
+        "label": "Vault Retention (Days)",
+        "description": "Days to preserve evidence photos in local vault before pruning.",
+        "type": "int",
+        "default": 7,
+        "category": "Lifecycle Policies",
+    },
+    "storage.export_retention_days": {
+        "label": "Export Retention (Days)",
+        "description": "Days to retain CSV and Excel exports.",
+        "type": "int",
+        "default": 30,
+        "category": "Lifecycle Policies",
+    },
+    "storage.crops_retention_days": {
+        "label": "Crops Retention (Days)",
+        "description": "Days to retain cropped plate images.",
+        "type": "int",
+        "default": 7,
+        "category": "Lifecycle Policies",
     },
 }
 
@@ -153,19 +403,29 @@ def save_config(config_data: Dict[str, Any], base_dir: Optional[Path] = None) ->
         return False
 
 
+CONFIG_ALIASES: Dict[str, str] = {
+    "shift.target_date_mode": "sync.shift_target_date_mode",
+    "shift.manual_target_date": "sync.manual_target_date",
+    "export.default_directory": "sync.default_export_directory",
+    "sync.export_directory": "sync.default_export_directory",
+    "network.http_timeout_seconds": "submission.request_timeout_seconds",
+    "submission.smart_compression_enabled": "compression.enabled",
+    "compression.smart_compression_enabled": "compression.enabled",
+    "network.offline_outbox_enabled": "outbox.enabled",
+    "submission.offline_outbox_enabled": "outbox.enabled",
+    "network.auto_sync_interval_seconds": "outbox.auto_sync_interval_seconds",
+    "yolo_weights": "vision.yolo_weights",
+    "plate_yolo_weights": "vision.yolo_weights",
+    "vision.weights": "vision.yolo_weights",
+}
+
+
 def get_setting(key_path: str, default: Any = None, base_dir: Optional[Path] = None) -> Any:
     """
     Reads a dotted key path from config (e.g. 'system.developer_mode').
     Supports aliases for cross-version compatibility.
     """
-    aliases = {
-        "submission.smart_compression_enabled": "compression.enabled",
-        "compression.smart_compression_enabled": "compression.enabled",
-        "network.offline_outbox_enabled": "outbox.enabled",
-        "submission.offline_outbox_enabled": "outbox.enabled",
-        "network.auto_sync_interval_seconds": "outbox.auto_sync_interval_seconds",
-    }
-    target_key = aliases.get(key_path, key_path)
+    target_key = CONFIG_ALIASES.get(key_path, key_path)
     config = load_config(base_dir)
     keys = target_key.split(".")
     curr = config
@@ -180,9 +440,11 @@ def get_setting(key_path: str, default: Any = None, base_dir: Optional[Path] = N
 def set_setting(key_path: str, value: Any, base_dir: Optional[Path] = None) -> bool:
     """
     Updates a dotted key path in config.json.
+    Supports aliases to maintain backward compatibility.
     """
+    target_key = CONFIG_ALIASES.get(key_path, key_path)
     config = load_config(base_dir)
-    keys = key_path.split(".")
+    keys = target_key.split(".")
     curr = config
     for k in keys[:-1]:
         if k not in curr or not isinstance(curr[k], dict):
@@ -190,6 +452,38 @@ def set_setting(key_path: str, value: Any, base_dir: Optional[Path] = None) -> b
         curr = curr[k]
     curr[keys[-1]] = value
     return save_config(config, base_dir)
+
+
+def get_user_settings(base_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """Returns all operator-facing settings populated with current values and schema metadata."""
+    result: Dict[str, Any] = {}
+    for key, meta in USER_SETTINGS_SCHEMA.items():
+        val = get_setting(key, meta.get("default"), base_dir)
+        item = copy.deepcopy(meta)
+        item["value"] = val
+        result[key] = item
+    return result
+
+
+def get_developer_settings(base_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """Returns all engineering-facing settings populated with current values and schema metadata."""
+    result: Dict[str, Any] = {}
+    for key, meta in DEVELOPER_SETTINGS_SCHEMA.items():
+        val = get_setting(key, meta.get("default"), base_dir)
+        item = copy.deepcopy(meta)
+        item["value"] = val
+        result[key] = item
+    return result
+
+
+def set_user_setting(key_path: str, value: Any, base_dir: Optional[Path] = None) -> bool:
+    """Updates an operator-facing setting key."""
+    return set_setting(key_path, value, base_dir)
+
+
+def set_developer_setting(key_path: str, value: Any, base_dir: Optional[Path] = None) -> bool:
+    """Updates an engineering-facing setting key."""
+    return set_setting(key_path, value, base_dir)
 
 
 def get_active_bond(base_dir: Optional[Path] = None) -> Dict[str, str]:

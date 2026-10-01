@@ -15,18 +15,25 @@
                     <span>🏛️ Completed Archive</span>
                     <span style="font-size:0.68rem; color:var(--ug-text-dim);">(/archive)</span>
                 </button>
+                <button class="itms-subview-btn" id="btn-sub-kits" onclick="switchItmsSubview('KITS')">
+                    <span>📦 Installation Kits</span>
+                    <span style="font-size:0.68rem; color:var(--ug-text-dim);">(/installation-kits)</span>
+                </button>
             </div>
 
-            <!-- Controls & Source Toggle (shown when in ORDERS or ARCHIVE) -->
+            <!-- Controls & Source Toggle (shown when in ORDERS, ARCHIVE, or KITS) -->
             <div id="itms-subview-controls" style="display:none; align-items:center; gap:8px;">
                 <div class="itms-source-toggle" style="display:flex; border:1px solid var(--ug-border); border-radius:var(--radius-md); overflow:hidden;">
                     <button class="btn btn-secondary active" id="itms-src-live-btn" onclick="setItmsExplorerSource('live')" style="padding:4px 10px; font-size:0.75rem; border-radius:0; border:none;">⚡ Live ITMS</button>
                     <button class="btn btn-secondary" id="itms-src-local-btn" onclick="setItmsExplorerSource('local')" style="padding:4px 10px; font-size:0.75rem; border-radius:0; border:none;">💾 Local DB</button>
                 </div>
+                <button class="btn btn-warning" id="btn-itms-auto-sync-kits" onclick="autoSyncAllItmsKits()" style="display:none; padding:5px 12px; font-size:0.78rem; font-weight:700; background:#f59e0b; border-color:#d97706; color:#0f172a;" title="Auto-sync all 20+ pages of installation kits from ITMS into local database">
+                    ⚡ Auto-Sync Kits (All Pages)
+                </button>
                 <button class="btn btn-primary" onclick="syncCurrentItmsPage()" style="padding:5px 12px; font-size:0.78rem;" title="Sync current page into local database">
                     📥 Sync Page to DB
                 </button>
-                <button class="btn btn-secondary" onclick="fetchItmsExplorerOrders()" style="padding:5px 12px; font-size:0.78rem;" title="Refresh orders">
+                <button class="btn btn-secondary" onclick="fetchItmsExplorerOrders()" style="padding:5px 12px; font-size:0.78rem;" title="Refresh registry records">
                     🔄 Refresh
                 </button>
             </div>
@@ -119,7 +126,7 @@
 
                 <div class="itms-table-scroll">
                     <table class="itms-grid-table">
-                        <thead>
+                        <thead id="itms-explorer-thead">
                             <tr>
                                 <th style="width:160px;">Order #</th>
                                 <th style="width:120px;">Plate</th>
@@ -200,6 +207,14 @@
                     <button class="btn btn-success" id="btn-itms-jump-queue" style="padding:4px 10px; font-size:0.75rem;">
                         👉 Open in Queue
                     </button>
+                </div>
+
+                <!-- Direct ITMS Kit Web Link (when viewing an installation kit) -->
+                <div id="itms-insp-kit-banner" style="display:none; background:rgba(14,165,233,0.12); border:1px solid rgba(14,165,233,0.3); border-radius:var(--radius-md); padding:10px 12px; align-items:center; justify-content:space-between; margin-top:10px;">
+                    <div style="font-size:0.75rem; color:#38bdf8; font-weight:700;">ITMS Kit Profile</div>
+                    <a href="#" id="link-itms-kit-web" target="_blank" rel="noopener noreferrer" class="btn btn-primary" style="padding:4px 10px; font-size:0.75rem; text-decoration:none;">
+                        Open on ITMS ↗
+                    </a>
                 </div>
             </div>
         </div>

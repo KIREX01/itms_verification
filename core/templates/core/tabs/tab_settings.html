@@ -1,11 +1,127 @@
 <!-- TAB 6: SETTINGS & SYSTEM CONFIGURATION -->
 <div class="tab-pane" id="pane-settings">
     <div class="settings-scroll-container">
+        
+        <!-- ======================================================== -->
+        <!-- SECTION 1: OPERATOR / USER SETTINGS (Essential Controls) -->
+        <!-- ======================================================== -->
+
+        <!-- Facility & Operating Bonded Warehouse -->
+        <div class="settings-card">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <span>🏢 Operating Facility &amp; Bonded Warehouse</span>
+                </div>
+                <span class="badge badge-yellow" id="settings-bond-badge">
+                    ● Active: {{ active_bond.code|default:"AGM" }}
+                </span>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label-group">
+                    <span class="settings-label-title">Active Bond Facility</span>
+                    <span class="settings-label-desc">Warehouse facility for scoping plate verification, active orders, and shift reconciliation.</span>
+                </div>
+                <div style="min-width: 220px;">
+                    <select id="settings-bond-select" class="form-control" onchange="changeActiveBond(this)"
+                            style="padding: 6px 12px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem; width: 100%;">
+                        {% for b in available_bonds %}
+                        <option value="{{ b.code }}" {% if b.code == active_bond.code %}selected{% endif %}>
+                            {{ b.code }} - {{ b.name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label-group">
+                    <span class="settings-label-title">Strict Bond Scoping</span>
+                    <span class="settings-label-desc">When enabled, order sync and morning kit allocations are strictly isolated to the active bond facility.</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="settings-strict-bond-toggle" 
+                           {% if user_settings.bond_strict_bond_scoping.value %}checked{% endif %}
+                           onchange="updateSetting('bond.strict_bond_scoping', this.checked)">
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Shift Synchronization & Daily Reconciliation Ledger -->
+        <div class="settings-card">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <span>📅 Shift Synchronization &amp; Reconciliation Ledger</span>
+                </div>
+                <span class="badge badge-cyan">Shift Operations</span>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label-group">
+                    <span class="settings-label-title">Background Shift Sync</span>
+                    <span class="settings-label-desc">Periodically synchronizes active queue, morning kits, and completed shift archive in the background.</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="settings-auto-sync-toggle" 
+                           {% if user_settings.sync_auto_sync_enabled.value %}checked{% endif %}
+                           onchange="updateSetting('sync.auto_sync_enabled', this.checked)">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label-group">
+                    <span class="settings-label-title">Sync Cycle Frequency (seconds)</span>
+                    <span class="settings-label-desc">Interval between automated background sync passes (default: 60s, min: 15s).</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <input type="number" id="settings-sync-interval-input" min="15" max="600"
+                           value="{{ user_settings.sync_auto_sync_interval_seconds.value|default:60 }}"
+                           style="width: 100px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateSetting('sync.auto_sync_interval_seconds', parseInt(this.value, 10))">
+                    <span style="font-size:0.75rem; color:var(--ug-text-dim);">seconds</span>
+                </div>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label-group">
+                    <span class="settings-label-title">Shift Target Date Selection</span>
+                    <span class="settings-label-desc">Rule for reconciliation ledger date boundary: 'today', 'yesterday', or specific 'manual' date.</span>
+                </div>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <select id="settings-shift-mode-select" 
+                            style="padding: 6px 12px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                            onchange="updateSetting('sync.shift_target_date_mode', this.value)">
+                        <option value="today" {% if user_settings.sync_shift_target_date_mode.value == 'today' %}selected{% endif %}>Today (Live Shift)</option>
+                        <option value="yesterday" {% if user_settings.sync_shift_target_date_mode.value == 'yesterday' %}selected{% endif %}>Yesterday</option>
+                        <option value="manual" {% if user_settings.sync_shift_target_date_mode.value == 'manual' %}selected{% endif %}>Manual Calendar Date</option>
+                    </select>
+
+                    <input type="text" id="settings-manual-date-input" placeholder="e.g. 30.09.2026"
+                           value="{{ user_settings.sync_manual_target_date.value|default:'' }}"
+                           style="width: 130px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateSetting('sync.manual_target_date', this.value.trim())">
+                </div>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label-group">
+                    <span class="settings-label-title">Reconciliation CSV Export Directory</span>
+                    <span class="settings-label-desc">Directory where timestamped shift reconciliation spreadsheets and dockets are written.</span>
+                </div>
+                <input type="text" id="settings-export-dir-input"
+                       value="{{ user_settings.sync_default_export_directory.value|default:'exports' }}"
+                       style="width: 220px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem; font-family:var(--font-mono);"
+                       onchange="updateSetting('sync.default_export_directory', this.value.trim())">
+            </div>
+        </div>
+
         <!-- Safety & Execution Mode -->
         <div class="settings-card">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <span>🛡️ Submission Safety & Operating Mode</span>
+                    <span>🛡️ Submission Safety &amp; Operating Mode</span>
                 </div>
                 <span class="badge {% if dry_run %}badge-yellow{% else %}badge-red{% endif %}" id="settings-dryrun-badge">
                     {% if dry_run %}● Simulation Mode (Safe){% else %}● LIVE ITMS SERVER{% endif %}
@@ -25,6 +141,19 @@
 
             <div class="settings-row">
                 <div class="settings-label-group">
+                    <span class="settings-label-title">Auto-Submit Step 3 Confirmation</span>
+                    <span class="settings-label-desc">Automatically complete final installation step when plate evidence photos are uploaded.</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="settings-submit-step3-toggle" 
+                           {% if user_settings.submission_submit_step3.value %}checked{% endif %}
+                           onchange="updateSetting('submission.submit_step3', this.checked)">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label-group">
                     <span class="settings-label-title">Active Database Backend</span>
                     <span class="settings-label-desc">Configured SQL database for installation orders, evidence vault, and audit trails.</span>
                 </div>
@@ -36,7 +165,7 @@
         <div class="settings-card">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <span>💾 Storage & Evidence Vault Folder</span>
+                    <span>💾 Storage &amp; Evidence Vault Folder</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span class="badge badge-cyan" id="vault-status-badge">Checking...</span>
@@ -82,14 +211,6 @@
 
                 <div id="vault-message-box" style="display:none; font-size:0.78rem; padding:8px 12px; border-radius:var(--radius-sm); width:100%;"></div>
             </div>
-
-            <div class="settings-row">
-                <div class="settings-label-group">
-                    <span class="settings-label-title">Photo Compression on Ingestion</span>
-                    <span class="settings-label-desc">Automatically downsizes high-res camera photos in-memory during ITMS submission.</span>
-                </div>
-                <span class="badge badge-yellow">Enabled (1920px Max)</span>
-            </div>
         </div>
 
         <!-- Connected ITMS Account -->
@@ -113,6 +234,277 @@
                 </button>
             </div>
         </div>
+
+        <!-- ======================================================== -->
+        <!-- SECTION 2: DEVELOPER / DIAGNOSTIC SETTINGS (Revealed)    -->
+        <!-- ======================================================== -->
+
+        <!-- Developer Mode Toggle Header Card -->
+        <div class="settings-card" style="border-left: 3px solid var(--ug-cyan);">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <span>🛠️ Developer &amp; Diagnostic Settings</span>
+                </div>
+                <span class="badge {% if developer_mode %}badge-cyan{% else %}badge-muted{% endif %}" id="settings-devmode-badge">
+                    {% if developer_mode %}● DEVELOPER MODE ON{% else %}● Hidden (Safe){% endif %}
+                </span>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label-group">
+                    <span class="settings-label-title">Enable Developer Diagnostics</span>
+                    <span class="settings-label-desc">Toggle ON to reveal advanced engineering parameters: Crawl limits, SQLite lock timeouts, HTTP pooling, and vision thresholds.</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="settings-devmode-toggle" {% if developer_mode %}checked{% endif %}
+                           onchange="toggleDeveloperSettingsMode(this)">
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Developer Settings Container -->
+        <div id="developer-settings-section" style="display: {% if developer_mode %}block{% else %}none{% endif %};">
+
+            <!-- Card 2A: Crawl & Pagination Bounds -->
+            <div class="settings-card">
+                <div class="settings-card-header">
+                    <div class="settings-card-title">
+                        <span>🕷️ Crawl &amp; Pagination Bounds (Engineering)</span>
+                    </div>
+                    <span class="badge badge-cyan">Pagination</span>
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">Max Active Orders Pages</span>
+                        <span class="settings-label-desc">Maximum pagination limit when scanning ITMS active installation orders (default: 25 pages = 500 records).</span>
+                    </div>
+                    <input type="number" id="input-dev-crawl-active" min="1" max="100"
+                           value="{{ developer_settings.crawl_max_active_pages.value|default:25 }}"
+                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateSetting('crawl.max_active_pages', parseInt(this.value, 10))">
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">Max Archive Orders Pages</span>
+                        <span class="settings-label-desc">Maximum pagination limit when synchronizing shift archive orders (default: 50 pages = 1000 records).</span>
+                    </div>
+                    <input type="number" id="input-dev-crawl-archive" min="1" max="200"
+                           value="{{ developer_settings.crawl_max_archive_pages.value|default:50 }}"
+                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateSetting('crawl.max_archive_pages', parseInt(this.value, 10))">
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">Max Kit Catalog Pages</span>
+                        <span class="settings-label-desc">Maximum pagination limit when indexing stock installation kits (default: 25 pages = 500 records).</span>
+                    </div>
+                    <input type="number" id="input-dev-crawl-kits" min="1" max="100"
+                           value="{{ developer_settings.crawl_max_kit_pages.value|default:25 }}"
+                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateSetting('crawl.max_kit_pages', parseInt(this.value, 10))">
+                </div>
+            </div>
+
+            <!-- Card 2B: Database Performance & Concurrency -->
+            <div class="settings-card">
+                <div class="settings-card-header">
+                    <div class="settings-card-title">
+                        <span>⚡ Database Performance &amp; Concurrency</span>
+                    </div>
+                    <span class="badge badge-green">SQLite / Locking</span>
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">SQLite Busy Timeout (ms)</span>
+                        <span class="settings-label-desc">Milliseconds to wait for SQLite database locks to release before raising OperationalError (default: 30000ms).</span>
+                    </div>
+                    <input type="number" id="input-dev-sqlite-timeout" min="1000" max="120000" step="1000"
+                           value="{{ developer_settings.database_sqlite_busy_timeout_ms.value|default:30000 }}"
+                           style="width: 110px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateSetting('database.sqlite_busy_timeout_ms', parseInt(this.value, 10))">
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">Database Batch Write Size</span>
+                        <span class="settings-label-desc">Record chunk size for bulk database updates and insertions wrapped in atomic transactions (default: 200).</span>
+                    </div>
+                    <input type="number" id="input-dev-batch-size" min="10" max="1000" step="50"
+                           value="{{ developer_settings.database_batch_write_size.value|default:200 }}"
+                           style="width: 110px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateSetting('database.batch_write_size', parseInt(this.value, 10))">
+                </div>
+            </div>
+
+            <!-- Card 2C: Network Connection Pooling & Sockets -->
+            <div class="settings-card">
+                <div class="settings-card-header">
+                    <div class="settings-card-title">
+                        <span>🌐 Network Connection Pooling &amp; Sockets</span>
+                    </div>
+                    <span class="badge badge-yellow">HTTP Adapter</span>
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">HTTP Request Timeout (seconds)</span>
+                        <span class="settings-label-desc">Socket timeout before aborting and retrying ITMS requests (default: 15s).</span>
+                    </div>
+                    <input type="number" id="input-dev-net-timeout" min="5" max="120"
+                           value="{{ developer_settings.network_http_timeout_seconds.value|default:15 }}"
+                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateSetting('network.http_timeout_seconds', parseInt(this.value, 10))">
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">HTTP Pool Connections</span>
+                        <span class="settings-label-desc">Number of persistent connection pools to maintain in memory (default: 10).</span>
+                    </div>
+                    <input type="number" id="input-dev-pool-conn" min="2" max="50"
+                           value="{{ developer_settings.network_pool_connections.value|default:10 }}"
+                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateSetting('network.pool_connections', parseInt(this.value, 10))">
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">HTTP Pool Max Sockets</span>
+                        <span class="settings-label-desc">Maximum connection pool socket capacity before recycling (default: 20).</span>
+                    </div>
+                    <input type="number" id="input-dev-pool-max" min="5" max="100"
+                           value="{{ developer_settings.network_pool_maxsize.value|default:20 }}"
+                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateSetting('network.pool_maxsize', parseInt(this.value, 10))">
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">Circuit Breaker Error Threshold</span>
+                        <span class="settings-label-desc">Consecutive network/server failures before pausing automated requests (default: 3).</span>
+                    </div>
+                    <input type="number" id="input-dev-circuit-breaker" min="1" max="10"
+                           value="{{ developer_settings.submission_circuit_breaker_threshold.value|default:3 }}"
+                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateSetting('submission.circuit_breaker_threshold', parseInt(this.value, 10))">
+                </div>
+            </div>
+
+            <!-- Card 2D: Vision & OCR Intelligence Calibration -->
+            <div class="settings-card">
+                <div class="settings-card-header">
+                    <div class="settings-card-title">
+                        <span>🧠 Vision Pipeline &amp; OCR Intelligence</span>
+                    </div>
+                    <span class="badge badge-purple">AI / OCR</span>
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">Minimum OCR Confidence Score</span>
+                        <span class="settings-label-desc">Threshold below which OCR detections are flagged for operator review (0.0 to 1.0, default: 0.55).</span>
+                    </div>
+                    <input type="number" id="input-dev-ocr-conf" min="0.1" max="1.0" step="0.05"
+                           value="{{ developer_settings.vision_min_ocr_confidence.value|default:0.55 }}"
+                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateSetting('vision.min_ocr_confidence', parseFloat(this.value))">
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">YOLO Plate Detector Confidence</span>
+                        <span class="settings-label-desc">Bounding box threshold for YOLO vehicle plate detection (0.0 to 1.0, default: 0.35).</span>
+                    </div>
+                    <input type="number" id="input-dev-detector-conf" min="0.1" max="1.0" step="0.05"
+                           value="{{ developer_settings.vision_detector_conf_threshold.value|default:0.35 }}"
+                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateSetting('vision.detector_conf_threshold', parseFloat(this.value))">
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">YOLOv8 / YOLOv11 Model Weights</span>
+                        <span class="settings-label-desc">Neural detector checkpoint (.pt / .onnx) for vehicle license plate localization.</span>
+                    </div>
+                    <input type="text" id="input-dev-yolo-weights"
+                           value="{{ developer_settings.vision_yolo_weights.value|default:'models/license-plate-finetune-v1n.pt' }}"
+                           style="width: 260px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem; font-family:var(--font-mono);"
+                           onchange="updateSetting('vision.yolo_weights', this.value.trim())">
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">U-Turn Turnaround Threshold (seconds)</span>
+                        <span class="settings-label-desc">Maximum turnaround time delta for Tier 2 reverse U-turn walk alignment (default: 1800s).</span>
+                    </div>
+                    <input type="number" id="input-dev-uturn-threshold" min="60" max="7200" step="60"
+                           value="{{ developer_settings.matcher_uturn_threshold_seconds.value|default:1800 }}"
+                           style="width: 100px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateSetting('matcher.uturn_threshold_seconds', parseInt(this.value, 10))">
+                </div>
+            </div>
+
+            <!-- Card 2E: Multipart Photo Compression & Lifecycle -->
+            <div class="settings-card">
+                <div class="settings-card-header">
+                    <div class="settings-card-title">
+                        <span>📸 Compression &amp; Retention Policies</span>
+                    </div>
+                    <span class="badge badge-yellow">Storage &amp; Compression</span>
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">Smart Photo Compression</span>
+                        <span class="settings-label-desc">Downscale photos in-memory during HTTP upload (master photos in vault remain untouched).</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="settings-compression-toggle" 
+                               {% if developer_settings.compression_enabled.value %}checked{% endif %}
+                               onchange="updateSetting('compression.enabled', this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">Max Dimension (px) &amp; JPEG Quality</span>
+                        <span class="settings-label-desc">LANCZOS downsampling resolution limit and JPEG quality factor (default: 1920px, 88 quality).</span>
+                    </div>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <input type="number" id="input-dev-comp-dim" min="640" max="3840" step="160"
+                               value="{{ developer_settings.compression_max_dimension.value|default:1920 }}"
+                               style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                               onchange="updateSetting('compression.max_dimension', parseInt(this.value, 10))">
+                        <input type="number" id="input-dev-comp-quality" min="50" max="100" step="2"
+                               value="{{ developer_settings.compression_jpeg_quality.value|default:88 }}"
+                               style="width: 80px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                               onchange="updateSetting('compression.jpeg_quality', parseInt(this.value, 10))">
+                    </div>
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">Vault Retention (Days)</span>
+                        <span class="settings-label-desc">Days to preserve evidence photos in local vault before pruning.</span>
+                    </div>
+                    <input type="number" id="input-dev-vault-days" min="1" max="90"
+                           value="{{ developer_settings.storage_vault_retention_days.value|default:7 }}"
+                           style="width: 80px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateSetting('storage.vault_retention_days', parseInt(this.value, 10))">
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- SECTION 3: SYSTEM UPDATES & VERSION CONTROL              -->
+        <!-- ======================================================== -->
 
         <!-- Application Updates & Version Control (GitHub Releases) -->
         <div class="settings-card">
@@ -158,5 +550,6 @@
                 </div>
             </div>
         </div>
+
     </div>
 </div>

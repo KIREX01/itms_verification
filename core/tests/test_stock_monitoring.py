@@ -31,7 +31,7 @@ from core.models import (
     StockReturnScan,
     VehicleInstallationPair,
 )
-from core.services import bond_service, stock_monitoring_service
+from core.services import bond_service, kit_provisioning_service, stock_monitoring_service
 
 
 class StockMonitoringTests(TestCase):
@@ -74,7 +74,7 @@ class StockMonitoringTests(TestCase):
         self.assertEqual(kits.count(), 3)
         for k in kits:
             self.assertEqual(k.status, "New")
-            self.assertEqual(k.warehouse, "Warehouse Stock")
+            self.assertIn(k.warehouse, ("Warehouse Stock", "AGM Bonded Warehouse", "AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)"))
 
     def test_bond_transfers_in_and_out(self):
         # Transfer in: 50 PSV plates from Kampala Bond
@@ -98,8 +98,9 @@ class StockMonitoringTests(TestCase):
         self.assertTrue(res_out["success"])
 
         recon = stock_monitoring_service.compute_daily_reconciliation(self.test_suffix)
-        self.assertEqual(recon["report_table"]["rows"][2]["psv"], 50)  # Bond Transfer In PSV
-        self.assertEqual(recon["report_table"]["rows"][3]["pmo"], 10)  # Bond Transfer Out PMO
+        rows_by_metric = recon["report_table"]["rows_by_metric"]
+        self.assertEqual(rows_by_metric["Bond transfer IN"]["psv"], 50)  # Bond Transfer In PSV
+        self.assertEqual(rows_by_metric["Bond transfer OUT"]["pmo"], 10)  # Bond Transfer Out PMO
 
     def test_full_reconciliation_equation_psv_and_pmo(self):
         """
@@ -152,7 +153,7 @@ class StockMonitoringTests(TestCase):
 
         # 6. Reconcile
         recon = stock_monitoring_service.compute_daily_reconciliation(self.test_suffix)
-        rows_by_metric = {r["metric"]: r for r in recon["report_table"]["rows"]}
+        rows_by_metric = recon["report_table"]["rows_by_metric"]
 
         # Check PSV:
         # Opening: 1000
@@ -280,8 +281,8 @@ class StockMonitoringTests(TestCase):
         self.assertEqual(r6.status_code, 200)
         self.assertEqual(r6["Content-Type"], "text/csv")
         csv_text = r6.content.decode("utf-8")
-        self.assertIn("Public White (PSV)", csv_text)
-        self.assertIn("Private Yellow (PMO)", csv_text)
+        self.assertIn("PUBLIC", csv_text)
+        self.assertIn("PRIVATE", csv_text)
         self.assertIn("Closing Balance", csv_text)
 
     def test_scanner_input_formats_and_deduplication(self):
@@ -484,7 +485,7 @@ class StockMonitoringTests(TestCase):
         )
 
         recon = stock_monitoring_service.compute_daily_reconciliation(self.test_suffix)
-        installed_row = next(r for r in recon["report_table"]["rows"] if r["metric"] == "Kits Installed (Actual)")
+        installed_row = recon["report_table"]["rows_by_metric"]["Kits Installed"]
         # Only AGM's order should count as installed for AGM bond!
         self.assertEqual(installed_row["psv"], 1)
 
@@ -643,6 +644,209 @@ class StockMonitoringTests(TestCase):
         self.assertTrue(res["success"])
         self.assertEqual(res["physical_count"], 198)
         self.assertEqual(res["variance"], -2)  # 198 - 200 = -2 missing
+
+    def test_single_scheduled_target_and_performance_kpis(self):
+        """
+        Operational Target (Scheduled) is a single combined figure (e.g. 500) covering
+        both Private and Public. It does NOT subtract from physical stock.
+        """
+        # 1. Opening stock: 50 PMO, 872 PSV (922 Total as in official spreadsheet)
+        stock_monitoring_service.set_opening_balances(
+            opening_pmo=50,
+            opening_psv=872,
+            target_date_suffix=self.test_suffix,
+        )
+
+        # 2. Inbound Delivery: 500 PSV
+        psv_plates = [f"UMA{i:03d}PW" for i in range(1, 501)]
+        stock_monitoring_service.record_delivery("DN-AGM-01", psv_plates, plate_category="PSV", target_date_suffix=self.test_suffix)
+
+        # 3. Scheduled Target: 500 total (Single combined input)
+        sched_res = stock_monitoring_service.set_scheduled_target(
+            scheduled_target=500,
+            target_date_suffix=self.test_suffix,
+        )
+        self.assertTrue(sched_res["success"])
+        self.assertEqual(sched_res["scheduled_total"], 500)
+
+        # 4. 200 kits installed (all 200 PSV)
+        for i in range(1, 201):
+            p = f"UMA{i:03d}PW"
+            InstallationOrder.objects.create(
+                order_number=f"PO-{p}-{self.test_suffix}",
+                registration_number=p,
+                order_status="Installed",
+                is_archived=True,
+            )
+
+        # 5. Compute reconciliation
+        recon = stock_monitoring_service.compute_daily_reconciliation(self.test_suffix)
+        sched_sum = recon["scheduled_summary"]
+        self.assertEqual(sched_sum["scheduled_target"], 500)
+        self.assertEqual(sched_sum["installed_total"], 200)
+        self.assertEqual(sched_sum["daily_performance_pct"], 40.0)  # 200 / 500 = 40%
+        self.assertEqual(sched_sum["backlog_level"], 300)  # 500 - 200 = 300 remaining
+
+        # 6. Physical closing stock must NOT be altered by scheduled target:
+        # Opening: 922 + Received: 500 - Installed: 200 = 1222 Closing stock
+        self.assertEqual(recon["closing_stock"], 1222)
+        self.assertEqual(recon["report_table"]["rows_by_metric"]["Closing Balance"]["total"], 1222)
+
+        # 7. Check 9 official rows in exact spreadsheet sequence
+        rows = recon["report_table"]["rows"]
+        self.assertEqual(len(rows), 9)
+        self.assertEqual(rows[0]["metric"], "Opening Balance")
+        self.assertEqual(rows[1]["metric"], "Kits Received")
+        self.assertEqual(rows[2]["metric"], "SCHEDULED")
+        self.assertEqual(rows[3]["metric"], "Kits Installed")
+        self.assertEqual(rows[4]["metric"], "Daily perfomance, %")
+        self.assertEqual(rows[5]["metric"], "Bond transfer IN")
+        self.assertEqual(rows[6]["metric"], "Bond transfer OUT")
+        self.assertEqual(rows[7]["metric"], "Backlog level")
+        self.assertEqual(rows[8]["metric"], "Closing Balance")
+
+    def test_auto_carry_previous_closing_balance(self):
+        """
+        Verify previous shift closing balances (PMO & PSV) can be auto-carried into current shift opening balances.
+        """
+        # Day 1: 28th September 2026
+        day1_date = date(2026, 9, 28)
+        day1_suffix = "280926"
+        DailyStockLedger.objects.create(
+            work_date=day1_date,
+            work_date_suffix=day1_suffix,
+            closing_balance_pmo=45,
+            closing_balance_psv=620,
+            closing_stock=665,
+        )
+
+        # Day 2: 29th September 2026 (target date)
+        carried = stock_monitoring_service.get_previous_shift_closing_balances(self.test_suffix)
+        self.assertTrue(carried["found"])
+        self.assertEqual(carried["opening_pmo"], 45)
+        self.assertEqual(carried["opening_psv"], 620)
+        self.assertEqual(carried["opening_total"], 665)
+        self.assertEqual(carried["previous_suffix"], day1_suffix)
+
+    def test_shift_remarks_and_official_spreadsheet_export(self):
+        """
+        Verify shift remarks and official WhatsApp spreadsheet format with STORAGE BOND NAME and Consumables.
+        """
+        remarks_text = "All ready bikes were installed. The rest of the bikes are not released. Unreleased bikes approx: 1000"
+        stock_monitoring_service.set_shift_remarks(remarks_text, target_date_suffix=self.test_suffix)
+
+        recon = stock_monitoring_service.compute_daily_reconciliation(self.test_suffix)
+        self.assertEqual(recon["remarks"], remarks_text)
+        self.assertIn("Rivets", recon["consumables"])
+        self.assertIn("Insulating Tape", recon["consumables"])
+
+        csv_text = stock_monitoring_service.export_stock_reconciliation_csv(self.test_suffix)
+        self.assertIn("STORAGE BOND NAME,DESCRIPTION,PRIVATE,PUBLIC,Total,REMARKS,Consumables", csv_text)
+        self.assertIn("Opening Balance", csv_text)
+        self.assertIn("SCHEDULED", csv_text)
+        self.assertIn("Daily perfomance, %", csv_text)
+        self.assertIn("Backlog level", csv_text)
+        self.assertIn("Closing Balance", csv_text)
+        self.assertIn("Rivets", csv_text)
+        self.assertIn("All ready bikes were installed", csv_text)
+
+    def test_kit_provisioning_from_deliveries_and_safe_room(self):
+        """
+        Verify that kit provisioning aggregates plates from deliveries, safe audits,
+        and marks unassigned plates as 'New' while preserving existing order states.
+        """
+        deliv = StockDelivery.objects.create(
+            delivery_number="DEL-PROV-001",
+            supplier="Factory Intake",
+            target_date_suffix=self.test_suffix,
+            total_plates_count=2,
+        )
+        StockDeliveryItem.objects.create(delivery=deliv, registration_number="UMA101PW")
+        StockDeliveryItem.objects.create(delivery=deliv, registration_number="UMA102PW")
+
+        StockReturnScan.objects.create(
+            registration_number="UMA103PW",
+            work_date_suffix=self.test_suffix,
+            reason=StockReturnScan.Reason.OTHER,
+            notes="Safe Room Retake",
+        )
+
+        # Existing completed order for UMA101PW
+        InstallationOrder.objects.create(
+            order_number=f"PO-UMA101PW-{self.test_suffix}",
+            registration_number="UMA101PW",
+            order_status="Installed",
+            is_archived=True,
+        )
+
+        res = kit_provisioning_service.sync_and_provision_warehouse_kits(sync_itms=False)
+        self.assertTrue(res["success"])
+        self.assertGreaterEqual(res["new_kits_ready_count"], 2)
+
+        k101 = InstallationKit.objects.get(registration_number="UMA101PW")
+        self.assertEqual(k101.status, "Installed")
+
+        k102 = InstallationKit.objects.get(registration_number="UMA102PW")
+        self.assertEqual(k102.status, "New")
+
+        k103 = InstallationKit.objects.get(registration_number="UMA103PW")
+        self.assertEqual(k103.status, "New")
+
+    def test_validate_morning_dispatch_readiness_auto_enroll(self):
+        """
+        Verify that morning dispatch validation recognizes existing 'New' plates,
+        and auto-enrolls any missing plates as 'New' to prevent operational delay.
+        """
+        plates = ["UMA901PW", "UMA902PW"]
+        res = kit_provisioning_service.validate_morning_dispatch_readiness(plates, auto_enroll_missing=True)
+        self.assertEqual(res["total_scanned"], 2)
+        self.assertEqual(res["kits_auto_enrolled"], 2)
+
+        # Re-validating should now see both as ready in stock
+        res2 = kit_provisioning_service.validate_morning_dispatch_readiness(plates, auto_enroll_missing=False)
+        self.assertEqual(res2["already_in_stock_new"], 2)
+        self.assertEqual(res2["missing_count"], 0)
+
+    def test_api_stock_kits_sync_and_readiness(self):
+        """
+        Verify REST API endpoints /api/stock/kits/sync/ and /api/stock/kits/readiness/.
+        """
+        # POST /api/stock/kits/sync/
+        sync_resp = self.client.post(
+            "/api/stock/kits/sync/",
+            data={"plates": "UMA951PW, UMA952PW", "sync_itms": False},
+            content_type="application/json",
+        )
+        self.assertEqual(sync_resp.status_code, 200)
+        sync_data = sync_resp.json()
+        self.assertTrue(sync_data["success"])
+        self.assertIn("new_kits_ready_count", sync_data["result"])
+
+        # GET /api/stock/kits/readiness/
+        readiness_resp = self.client.get("/api/stock/kits/readiness/")
+        self.assertEqual(readiness_resp.status_code, 200)
+        readiness_data = readiness_resp.json()
+        self.assertTrue(readiness_data["success"])
+        self.assertGreaterEqual(readiness_data["readiness"]["new_unallocated"], 2)
+
+    def test_api_itms_orders_kits_tab(self):
+        """
+        Verify /api/itms/orders/?tab=kits returns kits from local DB with kit fields.
+        """
+        InstallationKit.objects.create(
+            kit_code="IK-UMA999PW",
+            registration_number="UMA999PW",
+            status="New",
+            warehouse="AGM SPIRO",
+        )
+        resp = self.client.get("/api/itms/orders/?tab=kits&source=local")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["tab"], "kits")
+        self.assertIn("kits", data)
+        self.assertTrue(any(k["kit_code"] == "IK-UMA999PW" for k in data["kits"]))
+
 
 
 

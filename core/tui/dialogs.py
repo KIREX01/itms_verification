@@ -7,6 +7,7 @@ import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 from django.conf import settings
 from django.utils import timezone
+from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -202,6 +203,7 @@ class PlateQuickEntryModal(ModalScreen[Optional[Dict]]):
         Binding("escape", "cancel", "Cancel", priority=True),
         Binding("v", "preview_pair", "Preview Photos"),
         Binding("tab", "autocomplete_plate", "Auto-complete Plate"),
+        Binding("ctrl+u", "unlink_order", "Unlink Order"),
         Binding("enter", "confirm_plate", "Apply Plate"),
     ]
 
@@ -242,6 +244,8 @@ class PlateQuickEntryModal(ModalScreen[Optional[Dict]]):
             with Horizontal(id="modal-footer"):
                 yield Button("Preview Photos [V]", variant="default", id="btn-preview-photos")
                 yield Button("Auto-complete [Tab]", variant="default", id="btn-autocomplete")
+                if self.pair.order:
+                    yield Button("Unlink Order [Ctrl+U]", variant="warning", id="btn-unlink-plate-order")
                 yield Button("Apply Plate & Approve [Enter]", variant="primary", id="btn-apply-plate")
                 yield Button("Cancel [Esc]", variant="error", id="btn-cancel-plate")
 
@@ -739,6 +743,48 @@ class PlateQuickEntryModal(ModalScreen[Optional[Dict]]):
             "success": True,
         })
 
+    def action_unlink_order(self) -> None:
+        p = self.pair
+        if not p.order:
+            self.notify("No order currently linked to this pair.", severity="information")
+            return
+        old_order_num = p.order.order_number
+        p.order = None
+        p.match_type = VehicleInstallationPair.MatchType.NONE
+        p.match_score = None
+        p.is_manual_override = True
+        p.matched_via = VehicleInstallationPair.MatchedVia.MANUAL
+        if p.verification_status in (
+            VehicleInstallationPair.VerificationStatus.APPROVED,
+            VehicleInstallationPair.VerificationStatus.FAILED,
+        ):
+            p.verification_status = VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
+        p.operator_note = f"Order #{old_order_num} unlinked by operator in Plate Matcher."
+        p.save(update_fields=[
+            "order",
+            "match_type",
+            "match_score",
+            "is_manual_override",
+            "matched_via",
+            "verification_status",
+            "operator_note",
+            "updated_at",
+        ])
+        SubmissionAuditLog.objects.create(
+            pair=p,
+            action=SubmissionAuditLog.Action.OPERATOR_OVERRIDE,
+            result=SubmissionAuditLog.ResultStatus.INFO,
+            message=f"Order #{old_order_num} unlinked from plate {p.registration_number_detected} by operator in dialog.",
+        )
+        self.notify(f"Unlinked Order #{old_order_num} from {p.registration_number_detected}.")
+        self.dismiss({
+            "pair": p,
+            "plate": p.registration_number_detected,
+            "order": None,
+            "unlinked": True,
+            "success": True,
+        })
+
     def action_cancel(self) -> None:
         self.dismiss(None)
 
@@ -750,6 +796,8 @@ class PlateQuickEntryModal(ModalScreen[Optional[Dict]]):
             self.action_autocomplete_plate()
         elif btn_id == "btn-preview-photos":
             self.action_preview_pair()
+        elif btn_id == "btn-unlink-plate-order":
+            self.action_unlink_order()
         elif btn_id == "btn-cancel-plate":
             self.action_cancel()
 
@@ -1378,6 +1426,206 @@ class VaultLocationDialog(ModalScreen[Optional[str]]):
             self.notify(f"Selected: {chosen}")
 
 
+class ReportsDirectoryDialog(ModalScreen[Optional[str]]):
+    """
+    Interactive modal dialog allowing operators to choose where
+    CSV shift reports and stock reconciliation ledgers are stored on disk.
+    """
+    BINDINGS = [
+        Binding("escape", "dismiss_dialog", "Keep Current", priority=True),
+        Binding("enter", "confirm_selection", "Confirm Reports Path"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        from core.services import config_service
+        current_dir = str(config_service.get_setting("sync.default_export_directory", "exports"))
+        abs_path = os.path.abspath(current_dir)
+
+        header_lines = [
+            "[bold cyan]═══ 📁 Shift CSV Reports & Export Storage ═══[/bold cyan]",
+            "Directory where daily master shift reconciliation ledgers, unallocated kits dockets, and",
+            "audit exports are written.",
+            f"Active Directory: [bold yellow]{escape(abs_path)}[/bold yellow]",
+            "[dim]Choose your desired exports folder below, or keep the default (exports).[/dim]",
+        ]
+
+        with Vertical(id="modal-dialog", classes="vault-location-modal"):
+            yield Static("\n".join(header_lines), id="modal-header")
+            with Horizontal(classes="vault-input-row"):
+                yield Input(value=current_dir, placeholder="e.g. exports or D:/ITMS_Exports", id="input-reports-path")
+                yield Button("📂 Browse Folder...", variant="primary", id="btn-browse-reports")
+                yield Button("Default (exports)", variant="default", id="btn-default-reports")
+
+            yield Static("[dim]Press Enter or click Confirm to save, or Esc to keep current location.[/dim]", id="vault-dialog-hint")
+
+            with Horizontal(id="modal-footer"):
+                yield Button("💾 Confirm & Use Directory [Enter]", variant="success", id="btn-confirm-reports")
+                yield Button("Cancel [Esc]", variant="warning", id="btn-cancel-reports")
+
+    def action_dismiss_dialog(self) -> None:
+        self.dismiss(None)
+
+    def action_confirm_selection(self) -> None:
+        from core.services import config_service
+        input_w = self.query_one("#input-reports-path", Input)
+        new_path = input_w.value.strip() or "exports"
+        try:
+            os.makedirs(new_path, exist_ok=True)
+        except Exception:
+            pass
+        config_service.set_user_setting("sync.default_export_directory", new_path)
+        self.notify(f"Reports Directory configured: {new_path}", severity="information")
+        self.dismiss(new_path)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        btn_id = event.button.id
+        if btn_id == "btn-confirm-reports":
+            self.action_confirm_selection()
+        elif btn_id == "btn-cancel-reports":
+            self.action_dismiss_dialog()
+        elif btn_id == "btn-default-reports":
+            input_w = self.query_one("#input-reports-path", Input)
+            input_w.value = "exports"
+        elif btn_id == "btn-browse-reports":
+            self._browse_directory()
+
+    def _browse_directory(self) -> None:
+        from core.services.file_dialog import prompt_native_directory_selection
+        input_w = self.query_one("#input-reports-path", Input)
+        chosen = prompt_native_directory_selection(
+            initial_dir=input_w.value.strip() or None,
+            title="Choose CSV Reports & Ledger Export Directory",
+        )
+        if chosen:
+            input_w.value = chosen
+            self.notify(f"Selected: {chosen}")
+
+
+class YoloWeightsDialog(ModalScreen[Optional[str]]):
+    """
+    Developer modal dialog for choosing and testing YOLOv8 / YOLOv11 neural network weights
+    for vehicle license plate localization and bounding box detection.
+    """
+    BINDINGS = [
+        Binding("escape", "dismiss_dialog", "Keep Current", priority=True),
+        Binding("enter", "confirm_selection", "Confirm Weights"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        from core.vision import detector
+        from pathlib import Path
+        from django.conf import settings
+
+        current_weights = detector.get_yolo_weights()
+        abs_weights = detector._resolve_weights_path(current_weights)
+        file_exists = os.path.isfile(abs_weights)
+        size_mb = f"{os.path.getsize(abs_weights) / (1024*1024):.1f} MB" if file_exists else "Not Found"
+        status_color = "green" if file_exists else "red"
+
+        # Discover available models in models/ directory
+        base_dir = getattr(settings, "BASE_DIR", Path("."))
+        models_dir = Path(base_dir) / "models"
+        options = []
+        if models_dir.exists():
+            for p in sorted(models_dir.glob("*.pt")):
+                options.append((f"{p.name} ({p.stat().st_size / (1024*1024):.1f} MB)", f"models/{p.name}"))
+            for p in sorted(models_dir.glob("*.onnx")):
+                options.append((f"{p.name} [ONNX] ({p.stat().st_size / (1024*1024):.1f} MB)", f"models/{p.name}"))
+
+        if not options:
+            options = [
+                ("license-plate-finetune-v1n.pt (Nano)", "models/license-plate-finetune-v1n.pt"),
+                ("license-plate-finetune-v1s.pt (Small)", "models/license-plate-finetune-v1s.pt"),
+            ]
+
+        # Add preset for HuggingFace pretrained model
+        options.append(("morsetechlab/yolov11-license-plate-detection (HF Hub)", "morsetechlab/yolov11-license-plate-detection"))
+
+        header_lines = [
+            "[bold magenta]═══ 🧠 YOLOv8 / YOLOv11 Model Weights Selector ═══[/bold magenta]",
+            "Select the neural detector checkpoint used for license plate localization on motorcycles.",
+            f"Active Weights: [bold yellow]{escape(current_weights)}[/bold yellow]  │  Status: [bold {status_color}]{size_mb}[/bold {status_color}]",
+            "[dim]Choose from verified local presets below, or browse for custom .pt / .onnx weights.[/dim]",
+        ]
+
+        with Vertical(id="modal-dialog", classes="vault-location-modal"):
+            yield Static("\n".join(header_lines), id="modal-header")
+
+            # Presets Dropdown
+            with Horizontal(classes="vault-input-row"):
+                yield Static("[b]Model Presets:[/b] ", classes="settings-label")
+                yield Select(options=options, value=current_weights if any(opt[1] == current_weights for opt in options) else Select.BLANK, id="select-yolo-preset")
+
+            # Manual / Browsed file path
+            with Horizontal(classes="vault-input-row"):
+                yield Input(value=current_weights, placeholder="e.g. models/license-plate-finetune-v1n.pt", id="input-yolo-path")
+                yield Button("📂 Browse Weights (.pt / .onnx)...", variant="primary", id="btn-browse-weights")
+                yield Button("Reset Default (v1n)", variant="default", id="btn-default-weights")
+
+            yield Static("[dim]Selecting a weights file dynamically updates the vision pipeline without restarting.[/dim]", id="vault-dialog-hint")
+
+            with Horizontal(id="modal-footer"):
+                yield Button("💾 Confirm & Apply Weights [Enter]", variant="success", id="btn-confirm-weights")
+                yield Button("Cancel [Esc]", variant="warning", id="btn-cancel-weights")
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "select-yolo-preset" and event.value and event.value != Select.BLANK:
+            input_w = self.query_one("#input-yolo-path", Input)
+            input_w.value = str(event.value)
+
+    def action_dismiss_dialog(self) -> None:
+        self.dismiss(None)
+
+    def action_confirm_selection(self) -> None:
+        from core.vision import detector
+        input_w = self.query_one("#input-yolo-path", Input)
+        new_weights = input_w.value.strip() or "models/license-plate-finetune-v1n.pt"
+
+        detector.set_yolo_weights(new_weights)
+        self.notify(f"✓ Active YOLO weights updated to: {new_weights}", severity="information")
+        self.dismiss(new_weights)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        btn_id = event.button.id
+        if btn_id == "btn-confirm-weights":
+            self.action_confirm_selection()
+        elif btn_id == "btn-cancel-weights":
+            self.action_dismiss_dialog()
+        elif btn_id == "btn-default-weights":
+            input_w = self.query_one("#input-yolo-path", Input)
+            input_w.value = "models/license-plate-finetune-v1n.pt"
+        elif btn_id == "btn-browse-weights":
+            self._browse_weights()
+
+    def _browse_weights(self) -> None:
+        from core.services.file_dialog import prompt_native_file_selection
+        from django.conf import settings
+        input_w = self.query_one("#input-yolo-path", Input)
+        initial = input_w.value.strip()
+        init_dir = os.path.dirname(initial) if initial and os.path.exists(os.path.dirname(initial)) else "models"
+
+        chosen = prompt_native_file_selection(
+            initial_dir=init_dir,
+            file_types=[
+                ("YOLO Weights (*.pt;*.onnx;*.engine)", "*.pt;*.onnx;*.engine"),
+                ("PyTorch Weights (*.pt)", "*.pt"),
+                ("ONNX Models (*.onnx)", "*.onnx"),
+                ("All Files (*.*)", "*.*"),
+            ],
+            title="Choose YOLOv8 / YOLOv11 Model Weights File",
+        )
+        if chosen:
+            # If inside project dir, make relative for portability
+            try:
+                base_dir = getattr(settings, "BASE_DIR", ".")
+                rel = os.path.relpath(chosen, base_dir)
+                if not rel.startswith(".."):
+                    chosen = rel.replace("\\", "/")
+            except Exception:
+                pass
+            input_w.value = chosen
+            self.notify(f"Selected model weights: {chosen}")
+
 
 # ============================================================================
 # Date Selection & Work Shift Modal
@@ -1667,6 +1915,31 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
         margin-top: 1;
         padding: 0 1;
     }
+    StockManagerModal .stock-label-fixed {
+        width: 25;
+        min-width: 25;
+        align-vertical: middle;
+        padding-right: 1;
+    }
+    StockManagerModal .stock-section-title {
+        height: auto;
+        margin-top: 1;
+        margin-bottom: 0;
+        padding: 0 1;
+    }
+    StockManagerModal #lbl-sched-status-card {
+        height: 3;
+        background: #161b22;
+        border: solid #0284c7;
+        padding: 0 1;
+        margin-bottom: 1;
+        align-vertical: middle;
+    }
+    StockManagerModal .stock-textarea-remarks {
+        height: 4;
+        border: solid #30363d;
+        margin-bottom: 1;
+    }
     StockManagerModal #modal-footer {
         height: 3;
         align: right middle;
@@ -1680,6 +1953,7 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
 
     BINDINGS = [
         Binding("escape", "dismiss_modal", "Close / Cancel", priority=True),
+        Binding("p", "show_phone_scanner", "Phone Scanner"),
         Binding("e", "export_csv", "Export CSV"),
         Binding("r", "refresh_stock", "Refresh"),
     ]
@@ -1702,6 +1976,9 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                             "[dim]Opening + Received + Transfer In - Transfer Out - Installed = Closing Balance[/dim]",
                             id="stock-report-intro",
                         )
+                        with Horizontal(classes="stock-row", id="row-stock-kits-prep"):
+                            yield Button("📦 Sync & Prep Morning Stock Kits", variant="success", id="btn-sync-stock-kits")
+                            yield Static("[dim]Safe Room Ready: [bold green]Checking...[/bold green][/dim]", id="lbl-stock-ready-badge", classes="stock-staged-badge")
                         yield DataTable(id="table-modal-stock-report")
                         yield Static(id="stock-floor-summary")
 
@@ -1712,6 +1989,9 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                             "[bold yellow]📤 Record Plates Dispatched to Assembly Line[/bold yellow]  │  "
                             "[dim]Scan plate QR or paste multi-line list (e.g. UMA711PW, UMA993PW...)[/dim]"
                         )
+                        with Horizontal(classes="stock-row"):
+                            yield Button("⚡ Prep & Provision Stock Kits", variant="success", id="btn-sync-stock-kits-tab2")
+                            yield Static("[dim]Ready in Stock: [bold green]Checking...[/bold green][/dim]", id="lbl-dispatch-stock-status", classes="stock-staged-badge")
                         with Horizontal(classes="stock-row"):
                             yield Select(
                                 [("Public White (PSV)", "PSV"), ("Private Yellow (PMO)", "PMO")],
@@ -1737,51 +2017,45 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                 with TabPane("📥 Inbound Delivery", id="tab-delivery-pane"):
                     with Vertical(classes="stock-tab-pane"):
                         yield Static(
-                            "[bold green]📥 Record Inbound Plate Delivery Manifest[/bold green]  │  "
-                            "[dim]Increases warehouse physical stock (+Received) and auto-creates kits[/dim]"
+                            "[bold green]📥 Record Inbound Delivery Note Manifest[/bold green]  │  "
+                            "[dim]Date-anchored deliveries for shift  │  Increases warehouse stock (+Received)[/dim]"
                         )
                         with Horizontal(classes="stock-row"):
+                            yield Static("[bold white]Delivery Identifier:[/bold white] ", classes="stock-label-fixed")
                             yield Input(
-                                placeholder="Delivery Note # (e.g. DN-20260930-01 or leave AUTO)",
+                                placeholder="Auto: DN-YYYYMMDD-01",
                                 id="input-deliv-number",
                                 classes="stock-input-field",
                             )
-                            yield Input(
-                                placeholder="Paper Note Ref # (e.g. DN/FAC/8912)",
-                                id="input-deliv-paper-ref",
-                                classes="stock-input-field",
-                            )
-                            yield Input(
-                                value="Factory / Central Depot",
-                                placeholder="Supplier Name",
-                                id="input-deliv-supplier",
-                                classes="stock-input-field",
-                            )
+                            yield Static("[bold white]Category:[/bold white] ", classes="stock-label-fixed")
                             yield Select(
                                 [("Public White (PSV)", "PSV"), ("Private Yellow (PMO)", "PMO")],
                                 value="PSV",
                                 id="sel-deliv-category",
                             )
                         with Horizontal(classes="stock-row"):
+                            yield Static("[bold white]Note Photo / File:[/bold white] ", classes="stock-label-fixed")
                             yield Input(
-                                placeholder="⚡ Rapid scan delivery plate QR [Enter to add]...",
+                                placeholder="Optional image file path (or uploaded from phone companion)",
+                                id="input-deliv-photo-path",
+                                classes="stock-input-field",
+                            )
+                        with Horizontal(classes="stock-row"):
+                            yield Input(
+                                placeholder="⚡ Rapid scan plate QR / barcode with USB scanner [Enter to add]...",
                                 id="input-deliv-single",
                                 classes="stock-input-field",
                             )
-                            yield Static("[dim]Staged: 0 plates[/dim]", id="lbl-deliv-staged", classes="stock-staged-badge")
+                            yield Static("[bold green]📦 Scanned: 0 plates[/bold green]", id="lbl-deliv-staged", classes="stock-staged-badge")
                         yield TextArea(
                             id="text-deliv-bulk",
                             classes="stock-textarea",
                         )
                         with Horizontal(classes="stock-row"):
-                            yield Checkbox(
-                                "Auto-create local Installation Kits (marked 'New') in stock",
-                                value=True,
-                                id="chk-deliv-kits",
-                            )
                             yield Button("📥 Ingest Delivery into Stock", variant="success", id="btn-save-delivery")
-                            yield Button("Clear Delivery", variant="default", id="btn-clear-deliv")
-                        yield Static("[bold white]Stored Inbound Delivery Notes for Shift:[/bold white]")
+                            yield Button("Clear Scans", variant="default", id="btn-clear-deliv")
+                            yield Button("👁️ View Selected Delivery Note & Plates", variant="primary", id="btn-view-deliv-note")
+                        yield Static("[bold white]📋 Stored Delivery Notes for Shift Work Date (Select row to view details & plates):[/bold white]")
                         yield DataTable(id="table-modal-deliv-notes")
 
                 # TAB 4: Bond Transfers (In / Out)
@@ -1869,26 +2143,56 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                             yield Button("↩️ Record Returned Plates", variant="warning", id="btn-save-return")
                             yield Button("Clear Returns", variant="default", id="btn-clear-return")
 
-                # TAB 6: Scheduled Target & Opening Balance Feed
+                # TAB 6: Scheduled Installation Target & Opening Balance Entry
                 with TabPane("🎯 Scheduled & Opening Balance", id="tab-scheduled-pane"):
-                    with Vertical(classes="stock-tab-pane"):
+                    with Vertical(classes="stock-tab-pane", id="pane-scheduled-container"):
                         yield Static(
                             "[bold cyan]🎯 Scheduled Installation Target & Opening Balance Entry[/bold cyan]  │  "
-                            "[dim]Manually feed in the scheduled target plates to be installed under bond for the shift[/dim]"
+                            "[dim]Operational Target for shift (does not alter physical stock)  │  Opening is physical safe inventory[/dim]",
+                            id="header-scheduled-pane"
+                        )
+
+                        # SECTION A: Scheduled Installation Target (Single Input)
+                        yield Static(
+                            "[bold yellow]1. 🎯 SCHEDULED INSTALLATION TARGET (Single Combined Target)[/bold yellow]\n"
+                            "[dim]Enter the total planned target plates to be installed under bond today (covers both Private Yellow & Public White). Operational goal only.[/dim]",
+                            classes="stock-section-title"
                         )
                         with Horizontal(classes="stock-row"):
-                            yield Static("[bold white]Scheduled Target PSV (White):[/bold white] ", classes="stock-input-field")
-                            yield Input(value="0", placeholder="Target PSV count", id="input-sched-psv", classes="stock-input-field")
+                            yield Static("[bold white]Scheduled Target (Total):[/bold white] ", classes="stock-label-fixed")
+                            yield Input(value="0", placeholder="e.g. 500 (Single target for shift)", id="input-sched-target", classes="stock-input-field")
+
+                        yield Static(
+                            "[bold green]📊 Live Status:[/bold green] Target: 0  │  Installed: 0  │  Daily Performance: 0%  │  Backlog: 0",
+                            id="lbl-sched-status-card"
+                        )
+
+                        # SECTION B: Physical Opening Stock Balances
+                        yield Static(
+                            "\n[bold green]2. 📦 PHYSICAL OPENING STOCK BALANCES (Safe Room / Storage Box at 06:00)[/bold green]\n"
+                            "[dim]Physical number plates in safe room at start of shift. Formula: Closing = Opening + Received + Transfer In - Transfer Out - Installed.[/dim]",
+                            classes="stock-section-title"
+                        )
                         with Horizontal(classes="stock-row"):
-                            yield Static("[bold white]Scheduled Target PMO (Yellow):[/bold white] ", classes="stock-input-field")
-                            yield Input(value="0", placeholder="Target PMO count", id="input-sched-pmo", classes="stock-input-field")
-                        with Horizontal(classes="stock-row"):
-                            yield Static("[bold white]Opening Balance PSV (White):[/bold white] ", classes="stock-input-field")
-                            yield Input(value="0", placeholder="Opening PSV count", id="input-open-psv", classes="stock-input-field")
-                        with Horizontal(classes="stock-row"):
-                            yield Static("[bold white]Opening Balance PMO (Yellow):[/bold white] ", classes="stock-input-field")
+                            yield Static("[bold white]PRIVATE (Yellow):[/bold white] ", classes="stock-label-fixed")
                             yield Input(value="0", placeholder="Opening PMO count", id="input-open-pmo", classes="stock-input-field")
-                        yield Button("💾 Save Scheduled Targets & Opening Balances", variant="success", id="btn-save-scheduled")
+                            yield Static("[bold white]PUBLIC (White):[/bold white] ", classes="stock-label-fixed")
+                            yield Input(value="0", placeholder="Opening PSV count", id="input-open-psv", classes="stock-input-field")
+                            yield Static("[bold cyan]Total Opening: 0[/bold cyan]", id="lbl-open-total", classes="stock-staged-badge")
+
+                        # SECTION C: Shift Remarks
+                        yield Static(
+                            "\n[bold white]3. 📝 SHIFT REMARKS (Handover Notes / Audit Remarks from Official Report):[/bold white]",
+                            classes="stock-section-title"
+                        )
+                        yield TextArea(
+                            id="text-stock-remarks",
+                            classes="stock-textarea-remarks",
+                        )
+
+                        with Horizontal(classes="stock-row"):
+                            yield Button("💾 Save Scheduled Target, Balances & Remarks", variant="success", id="btn-save-scheduled")
+                            yield Button("🔄 Auto-Carry Previous Day Closing Stock", variant="primary", id="btn-autofill-opening")
 
                 # TAB 7: Safe Room Stock Taking & Physical Audit
                 with TabPane("🔒 Safe Stock Taking", id="tab-stocktake-pane"):
@@ -1918,17 +2222,18 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                         yield Static(id="lbl-stocktake-summary")
 
             with Horizontal(id="modal-footer"):
+                yield Button("📱 Phone Scanner [P]", variant="warning", id="btn-stock-phone-scanner")
                 yield Button("📑 Export CSV [E]", variant="default", id="btn-stock-export")
                 yield Button("🔄 Refresh [R]", variant="primary", id="btn-stock-refresh")
                 yield Button("Close [Esc]", variant="error", id="btn-stock-close")
 
     def on_mount(self) -> None:
         table = self.query_one("#table-modal-stock-report", DataTable)
-        table.add_columns("Description Metric", "Public White (PSV)", "Private Yellow (PMO)", "Total Combined (Bond)", "Formula / Note")
+        table.add_columns("DESCRIPTION", "PRIVATE (PMO)", "PUBLIC (PSV)", "Total Combined", "REMARKS / Formula Note")
         table.cursor_type = "row"
 
         table_deliv = self.query_one("#table-modal-deliv-notes", DataTable)
-        table_deliv.add_columns("Delivery Note #", "Paper Ref #", "Category", "Plates Count", "Supplier", "Logged At")
+        table_deliv.add_columns("Delivery Identifier", "Category", "Plates Count", "Note Photo", "Delivered Plates Sample", "Logged At")
         table_deliv.cursor_type = "row"
 
         self.action_refresh_stock()
@@ -1943,6 +2248,21 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
             self._render_report_table(recon)
             self._render_delivery_notes_table()
             self._load_inputs(recon)
+
+            from core.models import InstallationKit
+            new_cnt = InstallationKit.objects.filter(status__iexact="New").count()
+            try:
+                self.query_one("#lbl-stock-ready-badge", Static).update(
+                    f"[bold green]📦 Safe Room Ready: {new_cnt:,} kits ('New' in warehouse stock)[/bold green]"
+                )
+            except Exception:
+                pass
+            try:
+                self.query_one("#lbl-dispatch-stock-status", Static).update(
+                    f"[bold green]📦 Ready in Stock: {new_cnt:,} 'New' kits[/bold green]"
+                )
+            except Exception:
+                pass
         except Exception as exc:
             self.notify(f"Stock reconciliation error: {exc}", severity="error")
 
@@ -1957,14 +2277,17 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                 return
             for n in notes:
                 cat_badge = "[bold white on dark_blue] PSV [/]" if n["plate_category"] == "PSV" else "[bold black on gold1] PMO [/]"
-                paper_ref = n["paper_note_reference"] or "—"
+                has_photo = "[bold green]✓ Attached[/bold green]" if n.get("has_image") else "[dim]No photo[/dim]"
+                plates = n.get("plates", [])
+                sample = ", ".join(plates[:4]) + (f" (+{len(plates)-4} more)" if len(plates) > 4 else "")
                 table.add_row(
                     f"[bold green]{n['delivery_number']}[/bold green]",
-                    f"[bold yellow]{paper_ref}[/bold yellow]",
                     cat_badge,
                     f"[bold cyan]{n['total_plates_count']:,}[/bold cyan]",
-                    n["supplier"][:25],
+                    has_photo,
+                    f"[dim]{sample}[/dim]",
                     f"[dim]{n['created_at']}[/dim]",
+                    key=str(n["id"]),
                 )
         except Exception:
             pass
@@ -1973,7 +2296,7 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
     def _render_header(self, r: Dict[str, Any]) -> None:
         fmt_date = r.get("formatted_date", "")
         suf = r.get("work_date_suffix", "")
-        wh = r.get("warehouse_name", "Bond Warehouse")
+        wh = r.get("storage_bond_name") or r.get("warehouse_name") or "AGM SPIRO/8/2"
         self.query_one("#modal-header", Static).update(
             f"[bold cyan]═══ 📦 ITMS BOND PHYSICAL STOCK & RECONCILIATION MANAGER ═══[/bold cyan]\n"
             f"[bold white]Shift Work Date:[/bold white] [bold yellow]{fmt_date}[/bold yellow] ([cyan]{suf}[/cyan])  │  "
@@ -1988,35 +2311,51 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
         rows = r.get("report_table", {}).get("rows", [])
         for row in rows:
             metric = row.get("metric", "")
-            psv = row.get("psv", 0)
             pmo = row.get("pmo", 0)
+            psv = row.get("psv", 0)
             tot = row.get("total", 0)
             note = row.get("note", "")
 
             # Highlight specific rows
             if "Closing Balance" in metric:
                 m_str = f"[bold green]{metric}[/bold green]"
-                p_str = f"[bold green]{psv:,}[/bold green]"
-                y_str = f"[bold green]{pmo:,}[/bold green]"
-                t_str = f"[bold white on dark_green] {tot:,} [/bold white on dark_green]"
-            elif "Scheduled" in metric:
+                y_str = f"[bold green]{pmo:,}[/bold green]" if isinstance(pmo, int) else f"[bold green]{pmo}[/bold green]"
+                p_str = f"[bold green]{psv:,}[/bold green]" if isinstance(psv, int) else f"[bold green]{psv}[/bold green]"
+                t_str = f"[bold white on dark_green] {tot:,} [/bold white on dark_green]" if isinstance(tot, int) else f"[bold white on dark_green] {tot} [/bold white on dark_green]"
+            elif "SCHEDULED" in metric or "Scheduled" in metric:
                 m_str = f"[bold cyan]{metric}[/bold cyan]"
-                p_str = f"[bold cyan]{psv:,}[/bold cyan]"
-                y_str = f"[bold cyan]{pmo:,}[/bold cyan]"
-                t_str = f"[bold cyan]{tot:,}[/bold cyan]"
-            elif "Variance" in metric:
-                color = "green" if tot >= 0 else "red"
+                y_str = f"[bold cyan]{pmo:,}[/bold cyan]" if isinstance(pmo, int) else f"[bold cyan]{pmo}[/bold cyan]"
+                p_str = f"[bold cyan]{psv:,}[/bold cyan]" if isinstance(psv, int) else f"[bold cyan]{psv}[/bold cyan]"
+                t_str = f"[bold cyan]{tot:,}[/bold cyan]" if isinstance(tot, int) else f"[bold cyan]{tot}[/bold cyan]"
+            elif "Installed" in metric:
+                m_str = f"[bold yellow]{metric}[/bold yellow]"
+                y_str = f"[bold yellow]{pmo:,}[/bold yellow]" if isinstance(pmo, int) else f"[bold yellow]{pmo}[/bold yellow]"
+                p_str = f"[bold yellow]{psv:,}[/bold yellow]" if isinstance(psv, int) else f"[bold yellow]{psv}[/bold yellow]"
+                t_str = f"[bold yellow]{tot:,}[/bold yellow]" if isinstance(tot, int) else f"[bold yellow]{tot}[/bold yellow]"
+            elif "perfomance" in metric.lower() or "performance" in metric.lower():
+                m_str = f"[bold magenta]{metric}[/bold magenta]"
+                y_str = f"{pmo}"
+                p_str = f"{psv}"
+                t_str = f"[bold magenta]{tot}[/bold magenta]"
+            elif "Backlog" in metric:
+                color = "red" if (isinstance(tot, int) and tot > 0) else "green"
                 m_str = f"[{color}]{metric}[/{color}]"
-                p_str = f"[{color}]{psv:+d}[/{color}]"
-                y_str = f"[{color}]{pmo:+d}[/{color}]"
-                t_str = f"[{color}]{tot:+d}[/{color}]"
+                y_str = f"[{color}]{pmo:,}[/{color}]" if isinstance(pmo, int) else f"[{color}]{pmo}[/{color}]"
+                p_str = f"[{color}]{psv:,}[/{color}]" if isinstance(psv, int) else f"[{color}]{psv}[/{color}]"
+                t_str = f"[{color}]{tot:,}[/{color}]" if isinstance(tot, int) else f"[{color}]{tot}[/{color}]"
+            elif "Variance" in metric:
+                color = "green" if (isinstance(tot, int) and tot >= 0) else "red"
+                m_str = f"[{color}]{metric}[/{color}]"
+                y_str = f"[{color}]{pmo:+d}[/{color}]" if isinstance(pmo, int) else f"[dim]{pmo}[/dim]"
+                p_str = f"[{color}]{psv:+d}[/{color}]" if isinstance(psv, int) else f"[dim]{psv}[/dim]"
+                t_str = f"[{color}]{tot:+d}[/{color}]" if isinstance(tot, int) else f"[{color}]{tot}[/{color}]"
             else:
                 m_str = f"[bold white]{metric}[/bold white]"
-                p_str = f"{psv:,}"
-                y_str = f"{pmo:,}"
-                t_str = f"[bold white]{tot:,}[/bold white]"
+                y_str = f"{pmo:,}" if isinstance(pmo, int) else str(pmo)
+                p_str = f"{psv:,}" if isinstance(psv, int) else str(psv)
+                t_str = f"[bold white]{tot:,}[/bold white]" if isinstance(tot, int) else str(tot)
 
-            table.add_row(m_str, p_str, y_str, t_str, f"[dim]{note}[/dim]")
+            table.add_row(m_str, y_str, p_str, t_str, f"[dim]{note}[/dim]")
 
         floor = r.get("floor_operations", {})
         unalloc = floor.get("unallocated_discrepancy", 0)
@@ -2035,14 +2374,54 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
             work_d = r.get("work_date")
             ledger = DailyStockLedger.objects.filter(work_date=work_d).first()
             if ledger:
-                self.query_one("#input-sched-psv", Input).value = str(ledger.scheduled_psv)
-                self.query_one("#input-sched-pmo", Input).value = str(ledger.scheduled_pmo)
-                self.query_one("#input-open-psv", Input).value = str(ledger.opening_balance_psv)
-                self.query_one("#input-open-pmo", Input).value = str(ledger.opening_balance_pmo)
+                target_val = ledger.scheduled_total if ledger.scheduled_total > 0 else (ledger.scheduled_psv + ledger.scheduled_pmo)
                 try:
-                    self.query_one("#input-stocktake-manual-count", Input).value = str(ledger.physical_count)
+                    self.query_one("#input-sched-target", Input).value = str(target_val)
                 except Exception:
                     pass
+                try:
+                    self.query_one("#input-open-pmo", Input).value = str(ledger.opening_balance_pmo)
+                    self.query_one("#input-open-psv", Input).value = str(ledger.opening_balance_psv)
+                    tot_open = ledger.opening_balance_pmo + ledger.opening_balance_psv
+                    self.query_one("#lbl-open-total", Static).update(f"[bold cyan]Total Opening: {tot_open:,}[/bold cyan]")
+                except Exception:
+                    pass
+                try:
+                    self.query_one("#text-stock-remarks", TextArea).text = ledger.notes or ""
+                except Exception:
+                    pass
+
+                # Live status banner
+                sched_sum = r.get("scheduled_summary", {})
+                inst_tot = sched_sum.get("installed_total", 0)
+                inst_pmo = sched_sum.get("installed_pmo", 0)
+                inst_psv = sched_sum.get("installed_psv", 0)
+                perf = sched_sum.get("daily_performance_pct", 0.0)
+                backlog = sched_sum.get("backlog_level", 0)
+                try:
+                    self.query_one("#lbl-sched-status-card", Static).update(
+                        f"[bold green]📊 Live Status:[/bold green] Target: [bold cyan]{target_val:,}[/bold cyan]  │  "
+                        f"Installed: [bold yellow]{inst_tot:,}[/bold yellow] (PRIVATE: {inst_pmo}, PUBLIC: {inst_psv})  │  "
+                        f"Performance: [bold magenta]{perf}%[/bold magenta]  │  "
+                        f"Backlog: [bold red]{backlog:,} remaining[/bold red]"
+                    )
+                except Exception:
+                    pass
+
+                try:
+                    self.query_one("#input-stocktake-manual-count", Input).value = str(ledger.physical_count) if ledger.physical_count is not None else ""
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        try:
+            from core.services import stock_monitoring_service
+            auto_ref = stock_monitoring_service.generate_delivery_note_reference(self.target_date_suffix)
+            deliv_inp = self.query_one("#input-deliv-number", Input)
+            deliv_inp.placeholder = f"Auto: {auto_ref}"
+            if not deliv_inp.value.strip():
+                deliv_inp.value = auto_ref
         except Exception:
             pass
 
@@ -2050,6 +2429,8 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
         btn_id = event.button.id
         if btn_id == "btn-stock-close":
             self.action_dismiss_modal()
+        elif btn_id == "btn-stock-phone-scanner":
+            self.action_show_phone_scanner()
         elif btn_id == "btn-stock-refresh":
             self.action_refresh_stock()
         elif btn_id == "btn-stock-export":
@@ -2094,6 +2475,8 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                 pass
         elif btn_id == "btn-save-scheduled":
             self._handle_save_scheduled()
+        elif btn_id == "btn-autofill-opening":
+            self._handle_autofill_opening()
         elif btn_id == "btn-save-stocktake":
             self._handle_save_stocktake()
         elif btn_id == "btn-clear-stocktake":
@@ -2105,6 +2488,89 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                 pass
         elif btn_id == "btn-stocktake-set-manual":
             self._handle_set_manual_physical_count()
+        elif btn_id in ("btn-sync-stock-kits", "btn-sync-stock-kits-tab2"):
+            self._handle_sync_stock_kits()
+
+    @work(thread=True)
+    def _handle_sync_stock_kits(self) -> None:
+        if getattr(self, "_is_syncing_kits", False):
+            self.app.call_from_thread(self.notify, "Kit sync is already in progress...", severity="warning")
+            return
+        self._is_syncing_kits = True
+
+        def _update_btn_state(text: str, disabled: bool):
+            for bid in ("#btn-sync-stock-kits", "#btn-sync-stock-kits-tab2"):
+                try:
+                    btn = self.query_one(bid, Button)
+                    btn.label = text
+                    btn.disabled = disabled
+                except Exception:
+                    pass
+
+        self.app.call_from_thread(_update_btn_state, "⏳ Syncing Kits...", True)
+        self.app.call_from_thread(self.notify, "🔄 Synchronizing installation kits from ITMS, deliveries, and safe audits...")
+
+        from core.services import kit_provisioning_service
+
+        def _on_progress(msg: str):
+            if hasattr(self.app, "log_message"):
+                self.app.call_from_thread(self.app.log_message, msg, level="ITMS")
+
+        try:
+            res = kit_provisioning_service.sync_and_provision_warehouse_kits(
+                target_date_suffix=None,
+                sync_itms=True,
+                max_pages=35,
+                log_callback=_on_progress,
+            )
+            count = res.get("new_kits_ready_count", 0)
+            wh = res.get("warehouse_facility", "Warehouse Stock")
+            itms_cnt = res.get("itms_kits_synced", 0)
+            pages = res.get("itms_pages_crawled", 0)
+            created = res.get("kits_created", 0)
+            updated = res.get("kits_updated", 0)
+            self.app.call_from_thread(
+                self.notify,
+                f"✓ Synced kits: {itms_cnt} from ITMS ({pages} pgs), {created} created, {updated} updated ({count} ready as 'New' in {wh})",
+                severity="information",
+                timeout=8,
+            )
+            self.app.call_from_thread(self.action_refresh_stock)
+        except Exception as exc:
+            self.app.call_from_thread(self.notify, f"Error syncing kits: {exc}", severity="error")
+        finally:
+            self._is_syncing_kits = False
+            self.app.call_from_thread(_update_btn_state, "📦 Sync & Prep Stock Kits", False)
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        inp_id = event.input.id
+        if inp_id in ("input-open-pmo", "input-open-psv"):
+            try:
+                pmo_val = self.query_one("#input-open-pmo", Input).value.strip()
+                psv_val = self.query_one("#input-open-psv", Input).value.strip()
+                pmo = int(pmo_val) if pmo_val.isdigit() else 0
+                psv = int(psv_val) if psv_val.isdigit() else 0
+                self.query_one("#lbl-open-total", Static).update(f"[bold cyan]Total Opening: {pmo + psv:,}[/bold cyan]")
+            except Exception:
+                pass
+        elif inp_id == "input-sched-target":
+            try:
+                t_val = event.value.strip()
+                target_cnt = int(t_val) if t_val.isdigit() else 0
+                sched_sum = (self._cached_recon or {}).get("scheduled_summary", {})
+                inst_tot = sched_sum.get("installed_total", 0)
+                inst_pmo = sched_sum.get("installed_pmo", 0)
+                inst_psv = sched_sum.get("installed_psv", 0)
+                perf = round((inst_tot / target_cnt) * 100.0, 1) if target_cnt > 0 else 0.0
+                backlog = max(0, target_cnt - inst_tot)
+                self.query_one("#lbl-sched-status-card", Static).update(
+                    f"[bold green]📊 Live Status:[/bold green] Target: [bold cyan]{target_cnt:,}[/bold cyan]  │  "
+                    f"Installed: [bold yellow]{inst_tot:,}[/bold yellow] (PRIVATE: {inst_pmo}, PUBLIC: {inst_psv})  │  "
+                    f"Performance: [bold magenta]{perf}%[/bold magenta]  │  "
+                    f"Backlog: [bold red]{backlog:,} remaining[/bold red]"
+                )
+            except Exception:
+                pass
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Rapid USB barcode scanner handler with automatic deduplication."""
@@ -2361,25 +2827,50 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
     def _handle_save_scheduled(self) -> None:
         from core.services import stock_monitoring_service
         try:
-            s_psv = int(self.query_one("#input-sched-psv", Input).value.strip() or 0)
-            s_pmo = int(self.query_one("#input-sched-pmo", Input).value.strip() or 0)
-            o_psv = int(self.query_one("#input-open-psv", Input).value.strip() or 0)
+            target_raw = self.query_one("#input-sched-target", Input).value.strip()
+            s_target = int(target_raw) if target_raw.isdigit() else 0
             o_pmo = int(self.query_one("#input-open-pmo", Input).value.strip() or 0)
+            o_psv = int(self.query_one("#input-open-psv", Input).value.strip() or 0)
+            remarks_text = self.query_one("#text-stock-remarks", TextArea).text.strip()
 
             stock_monitoring_service.set_scheduled_target(
-                scheduled_psv=s_psv,
-                scheduled_pmo=s_pmo,
+                scheduled_target=s_target,
                 target_date_suffix=self.target_date_suffix,
             )
             stock_monitoring_service.set_opening_balances(
-                opening_psv=o_psv,
                 opening_pmo=o_pmo,
+                opening_psv=o_psv,
                 target_date_suffix=self.target_date_suffix,
             )
-            self.notify("Saved scheduled targets and opening balances successfully!", severity="information")
+            if remarks_text:
+                stock_monitoring_service.set_shift_remarks(
+                    remarks=remarks_text,
+                    target_date_suffix=self.target_date_suffix,
+                )
+            self.notify(f"✓ Saved scheduled target ({s_target:,}), opening balances (Total: {o_pmo + o_psv:,}) & remarks!", severity="information")
             self.action_refresh_stock()
         except Exception as exc:
             self.notify(f"Error saving scheduled values: {exc}", severity="error")
+
+    def _handle_autofill_opening(self) -> None:
+        from core.services import stock_monitoring_service
+        try:
+            carried = stock_monitoring_service.get_previous_shift_closing_balances(self.target_date_suffix)
+            pmo = carried.get("pmo", 0)
+            psv = carried.get("psv", 0)
+            tot = carried.get("total", 0)
+            prev_suf = carried.get("previous_date_suffix") or "previous shift"
+
+            self.query_one("#input-open-pmo", Input).value = str(pmo)
+            self.query_one("#input-open-psv", Input).value = str(psv)
+            self.query_one("#lbl-open-total", Static).update(f"[bold cyan]Total Opening: {tot:,}[/bold cyan]")
+
+            if carried.get("source_ledger_exists"):
+                self.notify(f"✓ Auto-carried previous shift ({prev_suf}) closing stock: {tot:,} plates (PMO: {pmo:,}, PSV: {psv:,})", severity="information")
+            else:
+                self.notify(f"⚠️ No previous shift closing stock found before {self.target_date_suffix}. Opening set to 0.", severity="warning")
+        except Exception as exc:
+            self.notify(f"Error auto-carrying previous closing stock: {exc}", severity="error")
 
     def _handle_save_stocktake(self) -> None:
         from core.services import stock_monitoring_service
@@ -2454,6 +2945,24 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
 
     def action_dismiss_modal(self) -> None:
         self.dismiss(self._cached_recon)
+
+    def action_show_phone_scanner(self) -> None:
+        import socket
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            local_ip = "127.0.0.1"
+
+        url = f"http://{local_ip}:8000/mobile/"
+        self.notify(f"📱 Phone Scanner URL: {url}\nSelect Mode 3 (WAREHOUSE & BOND STOCK SCANNER) for live camera QR scanning.", severity="information", timeout=8)
+        if hasattr(self.app, "log_message"):
+            self.app.log_message(
+                f"[bold cyan]📱 Mobile Phone Stock Scanner:[/bold cyan] Open [bold yellow]{url}[/bold yellow] on your smartphone camera (Select Mode 3: WAREHOUSE & BOND STOCK SCANNER for auto-scan intake).",
+                level="INFO",
+            )
 
 
 

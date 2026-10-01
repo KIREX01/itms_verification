@@ -135,7 +135,7 @@ class ITMSConnectionPane(Vertical):
                 yield Static("[bold white]📥 Live Active Fitment Orders (GET /installation-orders/index)[/bold white]", classes="itms-section-title")
                 with Horizontal(classes="itms-toolbar-row"):
                     yield Input(placeholder="Filter Plate (e.g. UMA 946DQ) / VIN / Status or paste URL", id="input-itms-search-plate", classes="itms-input-filter")
-                    yield Input(placeholder="Pg", value="1", id="input-itms-page", classes="itms-input-page")
+                    yield Input(value="1", id="input-itms-page", classes="itms-input-page")
                     yield Button("Fetch", variant="primary", id="btn-itms-fetch-orders", classes="itms-btn-fetch")
                     yield Button("◄", variant="default", id="btn-itms-prev-page", classes="itms-btn-nav")
                     yield Button("►", variant="default", id="btn-itms-next-page", classes="itms-btn-nav")
@@ -158,7 +158,7 @@ class ITMSConnectionPane(Vertical):
                 yield Static("[bold white]🏛️ Completed Installation Orders Archive (GET /installation-orders/archive)[/bold white]", classes="itms-section-title")
                 with Horizontal(classes="itms-toolbar-row"):
                     yield Input(placeholder="Filter Plate (e.g. UMA 282PG) / Order # / VIN or paste URL", id="input-itms-archive-filter", classes="itms-input-filter")
-                    yield Input(placeholder="Pg", value="1", id="input-itms-archive-page", classes="itms-input-page")
+                    yield Input(value="1", id="input-itms-archive-page", classes="itms-input-page")
                     yield Button("Fetch", variant="warning", id="btn-itms-fetch-archive", classes="itms-btn-fetch")
                     yield Button("◄", variant="default", id="btn-itms-archive-prev", classes="itms-btn-nav")
                     yield Button("►", variant="default", id="btn-itms-archive-next", classes="itms-btn-nav")
@@ -181,14 +181,16 @@ class ITMSConnectionPane(Vertical):
                 yield Static("[bold white]📦 Installation Kits (GET /installation-kits)[/bold white]", classes="itms-section-title")
                 with Horizontal(classes="itms-toolbar-row"):
                     yield Input(placeholder="Search kit (e.g. 235pv, UMA 300PW, 001198122) or paste URL", id="input-itms-kits-search", classes="itms-input-filter")
-                    yield Input(placeholder="Pg", value="1", id="input-itms-kits-page", classes="itms-input-page")
+                    yield Input(value="1", id="input-itms-kits-page", classes="itms-input-page")
                     yield Button("Fetch", variant="primary", id="btn-itms-kits-fetch", classes="itms-btn-fetch")
                     yield Button("◄", variant="default", id="btn-itms-kits-prev", classes="itms-btn-nav")
                     yield Button("►", variant="default", id="btn-itms-kits-next", classes="itms-btn-nav")
 
                 with Horizontal(classes="itms-actions-toolbar"):
                     yield Button("🔍 Kit Details", variant="default", id="btn-itms-kits-info")
-                    yield Button("🔄 Sync to DB", variant="success", id="btn-itms-kits-sync")
+                    yield Button("🔄 Sync Page", variant="default", id="btn-itms-kits-sync")
+                    yield Button("🌐 Crawl & Sync All (20+ Pgs)", variant="success", id="btn-itms-kits-crawl-all")
+                    yield Button("📦 Provision Stock Kits", variant="primary", id="btn-itms-kits-provision")
 
                 yield DataTable(id="table-itms-kits", classes="itms-table")
 
@@ -528,6 +530,10 @@ class ITMSConnectionPane(Vertical):
             self.action_fetch_kit_info()
         elif btn_id in ("btn-itms-kits-sync", "btn-itms-sync-kits"):
             self.action_sync_kits()
+        elif btn_id == "btn-itms-kits-crawl-all":
+            self.action_crawl_and_sync_all_kits()
+        elif btn_id == "btn-itms-kits-provision":
+            self.action_provision_stock_kits()
         elif btn_id in ("btn-itms-order-info", "btn-itms-orders-info", "btn-itms-archive-info"):
             self.action_fetch_order_info(download_photos=False)
         elif btn_id in ("btn-itms-view-photos", "btn-itms-orders-view-photos", "btn-itms-archive-view-photos"):
@@ -920,6 +926,13 @@ class ITMSConnectionPane(Vertical):
             except Exception:
                 page = 1
 
+            def _sync_page_input():
+                try:
+                    self.query_one(page_input_id, Input).value = str(page)
+                except Exception:
+                    pass
+            self.app.call_from_thread(_sync_page_input)
+
             try:
                 plate_filter = self.query_one(filter_input_id, Input).value.strip()
             except Exception:
@@ -1166,6 +1179,13 @@ class ITMSConnectionPane(Vertical):
             except Exception:
                 page = 1
 
+            def _sync_kit_page():
+                try:
+                    self.query_one("#input-itms-kits-page", Input).value = str(page)
+                except Exception:
+                    pass
+            self.app.call_from_thread(_sync_kit_page)
+
             try:
                 search_val = self.query_one("#input-itms-kits-search", Input).value.strip()
             except Exception:
@@ -1321,3 +1341,104 @@ class ITMSConnectionPane(Vertical):
             f"Synced {sync_res['total']} ITMS installation kits to local database",
             level="SUCCESS",
         )
+
+    @work(thread=True)
+    def action_crawl_and_sync_all_kits(self) -> None:
+        """Crawls all pages of /installation-kits (20+ pages) from ITMS and syncs into local DB."""
+        if getattr(self, "_is_crawling_kits", False):
+            self.app.call_from_thread(self._set_feedback, "Kit crawl is already running...", "yellow")
+            return
+        self._is_crawling_kits = True
+        self.app.call_from_thread(self._set_feedback, "Starting multi-page crawl across ITMS installation kits...", "yellow")
+        self.app.call_from_thread(
+            self._log_preview,
+            "[bold cyan]🌐 Initiating Full ITMS Installation Kits Crawl (All Pages)...[/bold cyan]",
+        )
+
+        def _on_log(msg: str):
+            self.app.call_from_thread(self._set_feedback, msg, "yellow")
+            self.app.call_from_thread(self._log_preview, f"  • {msg}")
+            self.app.call_from_thread(self.app.log_message, msg, level="ITMS")
+
+        try:
+            res = self.client.fetch_and_sync_all_kits(
+                max_pages=35,
+                delay=0.12,
+                log_callback=_on_log,
+                allow_local_fallback=False,
+            )
+            if res.get("success"):
+                total = res.get("total_fetched", 0)
+                created = res.get("created", 0)
+                updated = res.get("updated", 0)
+                pages = res.get("pages_crawled", 0)
+                dur = res.get("duration_ms", 0)
+                msg = f"Crawled {pages} pages: {total} kits fetched ({created} created, {updated} updated) in {dur}ms."
+                self.app.call_from_thread(self._set_feedback, f"✓ {msg}", "bold green")
+                self.app.call_from_thread(
+                    self._log_preview,
+                    f"[bold green]✓ Full Installation Kits Crawl Succeeded:[/bold green]\n"
+                    f"  • Total Crawled Pages: [bold white]{pages}[/bold white]\n"
+                    f"  • Total Kits Synced: [bold white]{total}[/bold white]\n"
+                    f"  • New Created in DB: [bold green]{created}[/bold green]\n"
+                    f"  • Updated in DB: [bold yellow]{updated}[/bold yellow]\n"
+                    f"  • Duration: [dim]{dur}ms[/dim]",
+                )
+                self.app.call_from_thread(self.app.notify, f"✓ Full Kit Crawl: {total} kits synced ({pages} pages)!", severity="information")
+                self.app.call_from_thread(self.app.reload_data)
+            else:
+                err = res.get("error", "Multi-page crawl failed.")
+                self.app.call_from_thread(self._set_feedback, f"✗ {err}", "bold red")
+                self.app.call_from_thread(self._log_preview, f"[bold red]✗ Kit Crawl Error:[/bold red] {err}")
+                self.app.call_from_thread(self.app.notify, f"Crawl Error: {err}", severity="error")
+        except Exception as exc:
+            self.app.call_from_thread(self._set_feedback, f"✗ Error: {exc}", "bold red")
+            self.app.call_from_thread(self.app.notify, f"Kit crawl exception: {exc}", severity="error")
+        finally:
+            self._is_crawling_kits = False
+
+    @work(thread=True)
+    def action_provision_stock_kits(self) -> None:
+        """Full morning stock provisioning: reconciles deliveries, safe audits, and ITMS into warehouse stock."""
+        from core.services import kit_provisioning_service
+        self.app.call_from_thread(self._set_feedback, "Provisioning morning stock kits...", "yellow")
+        self.app.call_from_thread(
+            self._log_preview,
+            "[bold cyan]📦 Reconciling Inbound Deliveries, Safe Returns & ITMS Kits into Warehouse Stock...[/bold cyan]",
+        )
+
+        def _on_log(msg: str):
+            self.app.call_from_thread(self._set_feedback, msg, "yellow")
+            self.app.call_from_thread(self.app.log_message, msg, level="ITMS")
+
+        try:
+            res = kit_provisioning_service.sync_and_provision_warehouse_kits(
+                target_date_suffix=None,
+                sync_itms=True,
+                max_pages=35,
+                log_callback=_on_log,
+            )
+            count = res.get("new_kits_ready_count", 0)
+            wh = res.get("warehouse_facility", "Warehouse Stock")
+            itms_cnt = res.get("itms_kits_synced", 0)
+            pages = res.get("itms_pages_crawled", 0)
+            created = res.get("kits_created", 0)
+            updated = res.get("kits_updated", 0)
+            total_stock = res.get("total_warehouse_new_stock", 0)
+
+            msg = f"Provisioned {count} kits ready as 'New' in {wh} (ITMS: {itms_cnt} kits across {pages} pgs; {created} created, {updated} updated)."
+            self.app.call_from_thread(self._set_feedback, f"✓ {msg}", "bold green")
+            self.app.call_from_thread(
+                self._log_preview,
+                f"[bold green]✓ Warehouse Morning Provisioning Complete:[/bold green]\n"
+                f"  • Operating Facility: [bold white]{wh}[/bold white]\n"
+                f"  • Ready for Morning Take-for-Work: [bold green]{count}[/bold green]\n"
+                f"  • Total Warehouse 'New' Stock: [bold white]{total_stock}[/bold white]\n"
+                f"  • ITMS Kits Synced: [bold cyan]{itms_cnt}[/bold cyan] ({pages} pages)\n"
+                f"  • DB Records Created: [bold green]{created}[/bold green] | Updated: [bold yellow]{updated}[/bold yellow]",
+            )
+            self.app.call_from_thread(self.app.notify, f"✓ Provisioned {count} kits as 'New' in {wh}!", severity="information")
+            self.app.call_from_thread(self.app.reload_data)
+        except Exception as exc:
+            self.app.call_from_thread(self._set_feedback, f"✗ Error: {exc}", "bold red")
+            self.app.call_from_thread(self.app.notify, f"Provisioning error: {exc}", severity="error")

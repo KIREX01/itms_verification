@@ -263,6 +263,15 @@ class EvidenceImage(models.Model):
     def __str__(self):
         return f"{self.id} [{self.orientation}] {self.detected_plate or '???'}"
 
+    @property
+    def url(self) -> str:
+        return f"/media/{self.vault_file}" if self.vault_file else ""
+
+    @property
+    def absolute_path(self) -> str:
+        from core.services import vault_service
+        return str(vault_service.resolve_vault_path(self.vault_file))
+
 
 class VehicleInstallationPair(models.Model):
     """Associates a front + rear EvidenceImage pair with an InstallationOrder."""
@@ -547,6 +556,18 @@ class StockDelivery(models.Model):
 
     def __str__(self):
         return f"{self.delivery_number} ({self.total_plates_count} {self.plate_category} plates on {self.delivery_date})"
+
+    @property
+    def image_url(self) -> Optional[str]:
+        if self.delivery_note_image:
+            return self.delivery_note_image.url
+        return None
+
+    @property
+    def image_absolute_path(self) -> Optional[str]:
+        if self.delivery_note_image:
+            return self.delivery_note_image.absolute_path
+        return None
 
 
 class StockDeliveryItem(models.Model):

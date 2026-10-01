@@ -70,6 +70,14 @@ const MobileState = {
         subMode: "DISPATCH", // 'DISPATCH' | 'DELIVERY' | 'RETURN'
         category: "PSV",     // 'PSV' | 'PMO'
         queue: [],
+        cameraStream: null,
+        cameraFacing: "environment",
+        isScanning: false,
+        lastScannedCode: "",
+        lastScannedTime: 0,
+        torchActive: false,
+        scanLoopId: null,
+        barcodeDetector: null,
     }
 };
 
@@ -425,6 +433,9 @@ function manualSyncOutbox(e) {
 // Mode Switching (Conveyor vs U-Turn vs Stock)
 // ============================================================================
 function switchMobileMode(mode) {
+    if (mode !== "stock" && MobileState.stock && MobileState.stock.isScanning) {
+        stopStockCameraScanner();
+    }
     MobileState.mode = mode;
 
     document.querySelectorAll(".mode-btn").forEach(btn => btn.classList.remove("active"));
@@ -492,6 +503,313 @@ function setStockCategory(cat) {
         btnPmo.style.color = "#000000";
         btnPsv.style.background = "#374151";
         btnPsv.style.color = "#cbd5e1";
+    }
+}
+
+// ============================================================================
+// MODE 3: Stock Live Camera QR & Barcode Scanner Engine
+// ============================================================================
+
+function extractPlateFromScannedCode(rawCode) {
+    if (!rawCode) return "";
+    let str = rawCode.trim();
+
+    // 1. If it's a URL, extract search query params or URL path segment
+    if (str.startsWith("http://") || str.startsWith("https://")) {
+        try {
+            const url = new URL(str);
+            const codeParam = url.searchParams.get("code") || url.searchParams.get("kit") || url.searchParams.get("plate");
+            if (codeParam) str = codeParam;
+            else {
+                const parts = url.pathname.split("/").filter(Boolean);
+                if (parts.length > 0) str = parts[parts.length - 1];
+            }
+        } catch (e) {}
+    }
+
+    // 2. Remove common system prefixes (e.g. "IK-", "KIT:", "PLATE:", "REG:")
+    str = str.replace(/^(KIT:|PLATE:|REG:|IK-)/i, "");
+
+    // 3. Match Ugandan vehicle registration format (e.g. UMA 711PW, UMA711PW, UFX 123A)
+    const match = str.match(/([A-Z]{3})\s*([0-9]{3,4})\s*([A-Z]{1,2})/i) || str.match(/([A-Z]{2,3})[0-9]{3,4}[A-Z]{1,2}/i);
+    if (match) {
+        return match[0].replace(/\s+/g, "").toUpperCase();
+    }
+
+    // 4. Fallback: sanitize alphanumeric string
+    return str.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+}
+
+function playScanBeep(success = true) {
+    try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        if (success) {
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+            osc.frequency.setValueAtTime(1320, audioCtx.currentTime + 0.08);
+            gain.gain.setValueAtTime(0.18, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.22);
+            osc.start(audioCtx.currentTime);
+            osc.stop(audioCtx.currentTime + 0.22);
+        } else {
+            osc.type = "sawtooth";
+            osc.frequency.setValueAtTime(240, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.28);
+            osc.start(audioCtx.currentTime);
+            osc.stop(audioCtx.currentTime + 0.28);
+        }
+    } catch (e) {
+        // AudioContext may be restricted before user gesture
+    }
+}
+
+async function toggleStockCameraScanner() {
+    if (MobileState.stock.isScanning) {
+        stopStockCameraScanner();
+    } else {
+        await startStockCameraScanner();
+    }
+}
+
+async function startStockCameraScanner() {
+    const video = document.getElementById("stock-scanner-video");
+    const viewport = document.getElementById("stock-camera-viewport");
+    const btnToggle = document.getElementById("btn-toggle-stock-camera");
+    const btnTorch = document.getElementById("btn-stock-torch");
+    const btnFlip = document.getElementById("btn-stock-flip");
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert("Camera access is not supported by your browser or requires a secure (HTTPS) connection.");
+        return;
+    }
+
+    try {
+        if (btnToggle) {
+            btnToggle.innerHTML = "<span>⏳ Accessing camera...</span>";
+            btnToggle.disabled = true;
+        }
+
+        const constraints = {
+            video: {
+                facingMode: { ideal: MobileState.stock.cameraFacing },
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+            },
+            audio: false,
+        };
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        MobileState.stock.cameraStream = stream;
+        MobileState.stock.isScanning = true;
+
+        if (video) {
+            video.srcObject = stream;
+            await video.play();
+        }
+
+        if (viewport) {
+            viewport.style.display = "flex";
+        }
+
+        // Check torch capability
+        const track = stream.getVideoTracks()[0];
+        if (track && track.getCapabilities && track.getCapabilities().torch) {
+            if (btnTorch) btnTorch.style.display = "inline-block";
+        } else {
+            if (btnTorch) btnTorch.style.display = "none";
+        }
+        if (btnFlip) btnFlip.style.display = "inline-block";
+
+        if (btnToggle) {
+            btnToggle.disabled = false;
+            btnToggle.style.background = "#dc2626";
+            btnToggle.innerHTML = "<span>⏹ Stop Camera Scanner</span>";
+        }
+
+        // Initialize BarcodeDetector if available
+        if ("BarcodeDetector" in window && !MobileState.stock.barcodeDetector) {
+            try {
+                MobileState.stock.barcodeDetector = new BarcodeDetector({
+                    formats: ["qr_code", "code_128", "code_39", "ean_13", "data_matrix", "upc_a"],
+                });
+            } catch (e) {
+                console.warn("BarcodeDetector initialization failed, using canvas fallback:", e);
+            }
+        }
+
+        startStockScanLoop();
+        showMobileToast("📷 Camera scanner active. Point at plate QR or barcode.");
+    } catch (err) {
+        console.error("Camera access error:", err);
+        alert(`Cannot access camera: ${err.message || err.name}. Please ensure camera permission is granted.`);
+        if (btnToggle) {
+            btnToggle.disabled = false;
+            btnToggle.style.background = "";
+            btnToggle.innerHTML = "<span>📷 Start Camera QR Scanner</span>";
+        }
+        MobileState.stock.isScanning = false;
+    }
+}
+
+function stopStockCameraScanner() {
+    if (MobileState.stock.scanLoopId) {
+        cancelAnimationFrame(MobileState.stock.scanLoopId);
+        MobileState.stock.scanLoopId = null;
+    }
+
+    if (MobileState.stock.cameraStream) {
+        MobileState.stock.cameraStream.getTracks().forEach(track => track.stop());
+        MobileState.stock.cameraStream = null;
+    }
+
+    MobileState.stock.isScanning = false;
+    MobileState.stock.torchActive = false;
+
+    const viewport = document.getElementById("stock-camera-viewport");
+    const video = document.getElementById("stock-scanner-video");
+    const btnToggle = document.getElementById("btn-toggle-stock-camera");
+    const btnTorch = document.getElementById("btn-stock-torch");
+    const btnFlip = document.getElementById("btn-stock-flip");
+
+    if (video) video.srcObject = null;
+    if (viewport) {
+        viewport.style.display = "none";
+        viewport.classList.remove("detected");
+    }
+    if (btnTorch) {
+        btnTorch.style.display = "none";
+        btnTorch.style.background = "#30363d";
+    }
+    if (btnFlip) btnFlip.style.display = "none";
+
+    if (btnToggle) {
+        btnToggle.disabled = false;
+        btnToggle.style.background = "";
+        btnToggle.innerHTML = "<span>📷 Start Camera QR Scanner</span>";
+    }
+}
+
+function toggleStockTorch() {
+    if (!MobileState.stock.cameraStream) return;
+    const track = MobileState.stock.cameraStream.getVideoTracks()[0];
+    if (!track || !track.applyConstraints) return;
+
+    MobileState.stock.torchActive = !MobileState.stock.torchActive;
+    track.applyConstraints({
+        advanced: [{ torch: MobileState.stock.torchActive }]
+    }).then(() => {
+        const btnTorch = document.getElementById("btn-stock-torch");
+        if (btnTorch) {
+            btnTorch.style.background = MobileState.stock.torchActive ? "#eab308" : "#30363d";
+            btnTorch.style.color = MobileState.stock.torchActive ? "#000000" : "#e6edf3";
+        }
+    }).catch(err => {
+        console.warn("Torch error:", err);
+    });
+}
+
+function flipStockCamera() {
+    MobileState.stock.cameraFacing = (MobileState.stock.cameraFacing === "environment") ? "user" : "environment";
+    stopStockCameraScanner();
+    startStockCameraScanner();
+}
+
+function startStockScanLoop() {
+    const video = document.getElementById("stock-scanner-video");
+    const canvas = document.getElementById("stock-scanner-canvas");
+    if (!video) return;
+
+    let isDetecting = false;
+
+    async function tick() {
+        if (!MobileState.stock.isScanning) return;
+
+        if (video.readyState === video.HAVE_ENOUGH_DATA && !isDetecting) {
+            isDetecting = true;
+            try {
+                if (MobileState.stock.barcodeDetector) {
+                    const barcodes = await MobileState.stock.barcodeDetector.detect(video);
+                    if (barcodes && barcodes.length > 0) {
+                        const raw = barcodes[0].rawValue;
+                        if (raw) {
+                            handleStockBarcodeDetected(raw);
+                        }
+                    }
+                } else if (canvas) {
+                    canvas.width = Math.min(640, video.videoWidth);
+                    canvas.height = Math.min(480, video.videoHeight);
+                    const ctx = canvas.getContext("2d");
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    if (window.jsQR) {
+                        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                        const code = window.jsQR(imgData.data, imgData.width, imgData.height);
+                        if (code && code.data) {
+                            handleStockBarcodeDetected(code.data);
+                        }
+                    }
+                }
+            } catch (err) {
+                // Frame decode error; continue scanning next frame
+            } finally {
+                isDetecting = false;
+            }
+        }
+
+        if (MobileState.stock.isScanning) {
+            MobileState.stock.scanLoopId = requestAnimationFrame(tick);
+        }
+    }
+
+    MobileState.stock.scanLoopId = requestAnimationFrame(tick);
+}
+
+function handleStockBarcodeDetected(rawCode) {
+    const now = Date.now();
+    if (rawCode === MobileState.stock.lastScannedCode && (now - MobileState.stock.lastScannedTime) < 2500) {
+        return;
+    }
+
+    const cleanPlate = extractPlateFromScannedCode(rawCode);
+    if (!cleanPlate || cleanPlate.length < 3) return;
+
+    MobileState.stock.lastScannedCode = rawCode;
+    MobileState.stock.lastScannedTime = now;
+
+    // Visual feedback
+    const viewport = document.getElementById("stock-camera-viewport");
+    const liveBadge = document.getElementById("stock-scan-live-badge");
+    const detectedSpan = document.getElementById("stock-last-detected");
+    if (viewport) {
+        viewport.classList.add("detected");
+        setTimeout(() => viewport.classList.remove("detected"), 450);
+    }
+    if (liveBadge && detectedSpan) {
+        detectedSpan.textContent = cleanPlate;
+        liveBadge.style.display = "block";
+        setTimeout(() => {
+            if (liveBadge) liveBadge.style.display = "none";
+        }, 2200);
+    }
+
+    // Audio & haptic feedback
+    playScanBeep(true);
+    if (navigator.vibrate) navigator.vibrate(100);
+
+    // Add to staged queue
+    addPlateToStockQueue(cleanPlate);
+
+    // Auto-sync if checkbox is checked
+    const chkAutoSync = document.getElementById("chk-auto-sync");
+    if (chkAutoSync && chkAutoSync.checked) {
+        setTimeout(() => {
+            syncStockScansToServer();
+        }, 250);
     }
 }
 

@@ -491,7 +491,56 @@ if dir_path:
     return None
 
 
+def prompt_native_file_selection(
+    initial_dir: Optional[str] = None,
+    file_types: Optional[List[Tuple[str, str]]] = None,
+    title: str = "Select File",
+) -> Optional[str]:
+    """
+    Launches a native OS file picker dialog in a lightweight subprocess.
+    Returns the chosen file path as a string, or None if cancelled.
+    """
+    default_types = [
+        ("YOLO Model Weights (*.pt;*.onnx;*.engine)", "*.pt;*.onnx;*.engine"),
+        ("PyTorch Weights (*.pt)", "*.pt"),
+        ("ONNX Models (*.onnx)", "*.onnx"),
+        ("All Files (*.*)", "*.*"),
+    ]
+    types_repr = repr(file_types or default_types)
+    code = f"""
+import tkinter as tk
+from tkinter import filedialog
+root = tk.Tk()
+root.withdraw()
+root.attributes('-topmost', True)
+file_path = filedialog.askopenfilename(
+    title={title!r},
+    initialdir={initial_dir!r} or None,
+    filetypes={types_repr}
+)
+root.destroy()
+if file_path:
+    print(file_path)
+"""
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            selected = proc.stdout.strip().splitlines()[-1].strip()
+            if os.path.isfile(selected):
+                return selected
+    except Exception as exc:
+        logger.debug("Native file picker subprocess error: %s", exc)
+    return None
+
+
 if __name__ == "__main__":
     results = _run_native_picker_gui()
     print(json.dumps(results))
+
 

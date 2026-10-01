@@ -339,3 +339,47 @@ async function saveVaultFolder() {
 document.addEventListener("DOMContentLoaded", () => {
     loadVaultSettings();
 });
+
+async function updateSetting(key, value) {
+    try {
+        const res = await fetch("/api/settings/", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ key, value })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Setting updated: ${key}`, "success");
+        } else {
+            showToast(`Update error: ${data.error || "Unknown error"}`, "error");
+        }
+    } catch (err) {
+        showToast(`Failed to update setting: ${err}`, "error");
+    }
+}
+
+async function changeActiveBond(selectEl) {
+    const code = selectEl.value;
+    const name = selectEl.options[selectEl.selectedIndex].text;
+    try {
+        const res = await fetch("/api/itms/warehouses/", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: `code=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}`
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Active bond facility set to ${code}`, "success");
+        }
+    } catch (err) {
+        showToast(`Failed to switch bond facility: ${err}`, "error");
+    }
+}
+
+function toggleDeveloperSettingsMode(chk) {
+    const devContainer = document.getElementById("developer-settings-section");
+    if (devContainer) {
+        devContainer.style.display = chk.checked ? "block" : "none";
+    }
+    updateSetting("system.developer_mode", chk.checked);
+}

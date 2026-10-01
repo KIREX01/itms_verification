@@ -33,7 +33,7 @@ from core.services import config_service, vault_service
 
 
 class SettingsPane(Vertical):
-    """Interactive Settings and System Configuration Pane (Tab 6)."""
+    """Interactive Settings and System Configuration Pane (Tab 7)."""
 
     BINDINGS = [
         ("down", "scroll_down", "Scroll Down"),
@@ -83,18 +83,42 @@ class SettingsPane(Vertical):
     def compose(self) -> ComposeResult:
         cfg = config_service.load_config()
 
-        # Operator settings
+        # Operator settings: Safety & Permissions
         dry_run = cfg.get("submission", {}).get("dry_run_mode", True)
         step3 = cfg.get("submission", {}).get("submit_step3", True)
         show_safety = cfg.get("system", {}).get("show_safety_guarantee", False)
         vault_prompt_startup = cfg.get("storage", {}).get("prompt_vault_on_startup", True)
         dev_mode = cfg.get("system", {}).get("developer_mode", False)
 
+        # Operator settings: Bond Facility
+        active_bond = config_service.get_active_bond()
+        bond_code = active_bond.get("code", "AGM")
+        strict_bond = cfg.get("bond", {}).get("strict_bond_scoping", True)
+
+        # Operator settings: Shift & Synchronization
+        auto_sync = cfg.get("sync", {}).get("auto_sync_enabled", True)
+        sync_interval = str(cfg.get("sync", {}).get("auto_sync_interval_seconds", 60))
+        shift_mode = str(cfg.get("sync", {}).get("shift_target_date_mode", "today"))
+        manual_shift_date = str(cfg.get("sync", {}).get("manual_target_date", ""))
+        export_dir = str(cfg.get("sync", {}).get("default_export_directory", "exports"))
+
+        # Developer settings: Crawl Bounds
+        crawl_active = str(cfg.get("crawl", {}).get("max_active_pages", 25))
+        crawl_archive = str(cfg.get("crawl", {}).get("max_archive_pages", 50))
+        crawl_kits = str(cfg.get("crawl", {}).get("max_kit_pages", 25))
+
+        # Developer settings: Concurrency & Database
+        sqlite_timeout = str(cfg.get("database", {}).get("sqlite_busy_timeout_ms", 30000))
+        db_batch_size = str(cfg.get("database", {}).get("batch_write_size", 200))
+        net_timeout = str(cfg.get("network", {}).get("http_timeout_seconds", 15))
+        pool_conn = str(cfg.get("network", {}).get("pool_connections", 10))
+        pool_max = str(cfg.get("network", {}).get("pool_maxsize", 20))
+
         # Developer settings: Trajectory Matcher
         uturn_threshold = str(cfg.get("matcher", {}).get("uturn_threshold_seconds", 1800))
 
         # Developer settings: Network & Submission
-        timeout = str(cfg.get("submission", {}).get("request_timeout_seconds", 30))
+        timeout = str(cfg.get("submission", {}).get("request_timeout_seconds", 15))
         circuit_breaker = str(cfg.get("submission", {}).get("circuit_breaker_threshold", 3))
         compression_enabled = cfg.get("compression", {}).get("enabled", True)
         comp_max_dim = str(cfg.get("compression", {}).get("max_dimension", 1920))
@@ -103,6 +127,8 @@ class SettingsPane(Vertical):
         outbox_interval = str(cfg.get("outbox", {}).get("auto_sync_interval_seconds", 15))
 
         # Developer settings: Vision & OCR
+        from core.vision import detector
+        yolo_weights = detector.get_yolo_weights()
         ensemble = cfg.get("vision", {}).get("adaptive_ensemble_voting", True)
         syntax_corr = cfg.get("vision", {}).get("positional_disambiguation", True)
         auto_pre = cfg.get("vision", {}).get("auto_preprocess_ingest", True)
@@ -141,7 +167,48 @@ class SettingsPane(Vertical):
                 # SECTION 1: OPERATOR ESSENTIALS (Visible)
                 # ==========================================
 
-                # Card 1A: Submission Safety Controls
+                # Card 1A: Facility & Bond Operations
+                with Vertical(classes="settings-card"):
+                    yield Static("[bold yellow]🏢 Operating Facility & Bonded Warehouse[/bold yellow]", classes="settings-card-title")
+
+                    with Horizontal(classes="settings-row"):
+                        yield Static("[b]Active Bond Code[/b]\n[dim]Warehouse facility code for scoping orders and stock (e.g. AGM, KLA_CENTRAL)[/dim]", classes="settings-label")
+                        yield Input(value=bond_code, id="input-bond-code", classes="settings-input")
+
+                    with Horizontal(classes="settings-row"):
+                        yield Static("[b]Strict Bond Scoping[/b]\n[dim]Restrict orders, kits, and reconciliation strictly to the active bond warehouse[/dim]", classes="settings-label")
+                        yield Switch(value=strict_bond, id="switch-strict-bond")
+
+                # Card 1B: Shift Synchronization & Reconciliation
+                with Vertical(classes="settings-card"):
+                    yield Static("[bold cyan]📅 Shift Synchronization & Reconciliation Ledger[/bold cyan]", classes="settings-card-title")
+
+                    with Horizontal(classes="settings-row"):
+                        yield Static("[b]Auto Shift Sync[/b]\n[dim]Background service synchronizing active queue, morning kits, and shift archive[/dim]", classes="settings-label")
+                        yield Switch(value=auto_sync, id="switch-auto-sync")
+
+                    with Horizontal(classes="settings-row"):
+                        yield Static("[b]Sync Polling Interval (seconds)[/b]\n[dim]Frequency of background synchronization cycles (default: 60s)[/dim]", classes="settings-label")
+                        yield Input(value=sync_interval, id="input-sync-interval", classes="settings-input")
+
+                    with Horizontal(classes="settings-row"):
+                        yield Static("[b]Shift Target Date Mode[/b]\n[dim]Reconciliation target date: 'today', 'yesterday', or 'manual'[/dim]", classes="settings-label")
+                        yield Input(value=shift_mode, id="input-shift-mode", classes="settings-input")
+
+                    with Horizontal(classes="settings-row"):
+                        yield Static("[b]Manual Shift Target Date[/b]\n[dim]Calendar date when mode is 'manual' (e.g. 30.09.2026 or 300926)[/dim]", classes="settings-label")
+                        yield Input(value=manual_shift_date, id="input-manual-shift-date", classes="settings-input")
+
+                    with Horizontal(classes="settings-row"):
+                        yield Static(
+                            f"[b]Reports Export Directory:[/b] [bold yellow]{export_dir}[/bold yellow]\n"
+                            "[dim]Directory where master shift reconciliation ledgers and CSV dockets are written[/dim]",
+                            id="label-export-dir",
+                            classes="settings-label",
+                        )
+                        yield Button("📂 Choose Reports Folder", variant="primary", id="btn-change-reports-dir")
+
+                # Card 1C: Submission Safety Controls
                 with Vertical(classes="settings-card"):
                     yield Static("[bold yellow]🚀 Submission & Safety Controls[/bold yellow]", classes="settings-card-title")
 
@@ -194,6 +261,34 @@ class SettingsPane(Vertical):
                     classes="" if dev_mode else "hidden",
                     id="developer-settings-container",
                 ):
+                    # Card 2-Crawl: Crawl & Pagination Bounds
+                    with Vertical(classes="settings-card"):
+                        yield Static("[bold cyan]🕷️ Crawl & Pagination Bounds (Developer Mode)[/bold cyan]", classes="settings-card-title")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Max Active Orders Pages[/b]\n[dim]Maximum pages crawled for active installation queue (default: 25)[/dim]", classes="settings-label")
+                            yield Input(value=crawl_active, id="input-crawl-active", classes="settings-input")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Max Archive Orders Pages[/b]\n[dim]Maximum pages crawled for shift archive (default: 50)[/dim]", classes="settings-label")
+                            yield Input(value=crawl_archive, id="input-crawl-archive", classes="settings-input")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Max Installation Kit Pages[/b]\n[dim]Maximum pages crawled for warehouse kits (default: 25)[/dim]", classes="settings-label")
+                            yield Input(value=crawl_kits, id="input-crawl-kits", classes="settings-input")
+
+                    # Card 2-DB: Database Performance & Concurrency
+                    with Vertical(classes="settings-card"):
+                        yield Static("[bold cyan]⚡ Database Performance & Concurrency (Developer Mode)[/bold cyan]", classes="settings-card-title")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]SQLite Busy Timeout (ms)[/b]\n[dim]Lock timeout in milliseconds before raising error (default: 30000ms)[/dim]", classes="settings-label")
+                            yield Input(value=sqlite_timeout, id="input-sqlite-timeout", classes="settings-input")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Database Batch Write Chunk[/b]\n[dim]Record chunk size for bulk database commits (default: 200)[/dim]", classes="settings-label")
+                            yield Input(value=db_batch_size, id="input-db-batch-size", classes="settings-input")
+
                     # Card 2A: Trajectory & Spatial Matcher Calibration
                     with Vertical(classes="settings-card"):
                         yield Static("[bold cyan]🔄 Trajectory & Spatial Matcher Calibration (Developer Mode)[/bold cyan]", classes="settings-card-title")
@@ -235,12 +330,29 @@ class SettingsPane(Vertical):
                             yield Input(value=circuit_breaker, id="input-circuit-breaker", classes="settings-input")
 
                         with Horizontal(classes="settings-row"):
-                            yield Static("[b]HTTP Request Timeout (seconds)[/b]\n[dim]Socket timeout per API request before retry (default: 30)[/dim]", classes="settings-label")
+                            yield Static("[b]HTTP Request Timeout (seconds)[/b]\n[dim]Socket timeout per API request before retry (default: 15)[/dim]", classes="settings-label")
                             yield Input(value=timeout, id="input-timeout", classes="settings-input")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]HTTP Pool Connections[/b]\n[dim]Number of persistent connection pools to maintain (default: 10)[/dim]", classes="settings-label")
+                            yield Input(value=pool_conn, id="input-pool-conn", classes="settings-input")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]HTTP Pool Max Sockets[/b]\n[dim]Maximum connection pool socket capacity (default: 20)[/dim]", classes="settings-label")
+                            yield Input(value=pool_max, id="input-pool-max", classes="settings-input")
 
                     # Card 2C: Vision Pipeline & OCR Intelligence
                     with Vertical(classes="settings-card"):
                         yield Static("[bold magenta]🧠 Vision Pipeline & OCR Intelligence (Developer Mode)[/bold magenta]", classes="settings-card-title")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static(
+                                f"[b]YOLOv8 / YOLOv11 Model Weights:[/b] [bold yellow]{yolo_weights}[/bold yellow]\n"
+                                "[dim]Neural network checkpoint (.pt / .onnx) for vehicle license plate detection[/dim]",
+                                id="label-yolo-weights",
+                                classes="settings-label",
+                            )
+                            yield Button("📂 Choose / Change Weights", variant="primary", id="btn-change-yolo-weights")
 
                         with Horizontal(classes="settings-row"):
                             yield Static("[b]Adaptive Contrast Ensemble Voting[/b]\n[dim]Run 5-variant contrast ensemble on challenging or shadowed plates[/dim]", classes="settings-label")
@@ -417,6 +529,10 @@ class SettingsPane(Vertical):
             self.action_switch_active_database()
         elif btn_id == "btn-change-vault":
             self.action_change_vault()
+        elif btn_id == "btn-change-reports-dir":
+            self.action_change_reports_dir()
+        elif btn_id == "btn-change-yolo-weights":
+            self.action_change_yolo_weights()
 
     def action_change_vault(self) -> None:
         """Launches Vault Location dialog and refreshes display."""
@@ -435,6 +551,49 @@ class SettingsPane(Vertical):
             lbl.update(
                 f"[b]Active Vault Root:[/b] [bold yellow]{active_root}[/bold yellow]\n"
                 "[dim]Directory where incoming evidence photos, EXIF metadata, and hashes are stored[/dim]"
+            )
+        except Exception:
+            pass
+
+    def action_change_reports_dir(self) -> None:
+        """Launches Reports Directory dialog and refreshes display."""
+        from core.tui.dialogs import ReportsDirectoryDialog
+
+        def _on_reports_dir_selected(new_path):
+            self.refresh_reports_dir_display()
+
+        self.app.push_screen(ReportsDirectoryDialog(), _on_reports_dir_selected)
+
+    def refresh_reports_dir_display(self) -> None:
+        """Refreshes displayed reports directory label."""
+        try:
+            lbl = self.query_one("#label-export-dir", Static)
+            cur = str(config_service.get_setting("sync.default_export_directory", "exports"))
+            lbl.update(
+                f"[b]Reports Export Directory:[/b] [bold yellow]{cur}[/bold yellow]\n"
+                "[dim]Directory where master shift reconciliation ledgers and CSV dockets are written[/dim]"
+            )
+        except Exception:
+            pass
+
+    def action_change_yolo_weights(self) -> None:
+        """Launches YOLO Weights Selection dialog and refreshes display."""
+        from core.tui.dialogs import YoloWeightsDialog
+
+        def _on_weights_selected(new_weights):
+            self.refresh_yolo_weights_display()
+
+        self.app.push_screen(YoloWeightsDialog(), _on_weights_selected)
+
+    def refresh_yolo_weights_display(self) -> None:
+        """Refreshes displayed YOLO weights label."""
+        try:
+            from core.vision import detector
+            lbl = self.query_one("#label-yolo-weights", Static)
+            w = detector.get_yolo_weights()
+            lbl.update(
+                f"[b]YOLOv8 / YOLOv11 Model Weights:[/b] [bold yellow]{w}[/bold yellow]\n"
+                "[dim]Neural network checkpoint (.pt / .onnx) for vehicle license plate detection[/dim]"
             )
         except Exception:
             pass
@@ -611,7 +770,55 @@ class SettingsPane(Vertical):
             cfg.setdefault("storage", {})
             cfg["storage"]["prompt_vault_on_startup"] = vault_prompt
 
-            # 2. Developer Mode: Matcher
+            # Operator: Bond Facility
+            try:
+                b_code = self.query_one("#input-bond-code", Input).value.strip().upper() or "AGM"
+                b_strict = self.query_one("#switch-strict-bond", Switch).value
+                cfg.setdefault("bond", {})
+                cfg["bond"]["active_bond_code"] = b_code
+                cfg["bond"]["strict_bond_scoping"] = b_strict
+            except Exception:
+                pass
+
+            # Operator: Shift & Synchronization
+            try:
+                a_sync = self.query_one("#switch-auto-sync", Switch).value
+                s_int = int(self.query_one("#input-sync-interval", Input).value.strip() or 60)
+                s_mode = self.query_one("#input-shift-mode", Input).value.strip().lower() or "today"
+                m_date = self.query_one("#input-manual-shift-date", Input).value.strip()
+                e_dir = self.query_one("#input-export-dir", Input).value.strip() or "exports"
+                cfg.setdefault("sync", {})
+                cfg["sync"]["auto_sync_enabled"] = a_sync
+                cfg["sync"]["auto_sync_interval_seconds"] = max(10, s_int)
+                cfg["sync"]["shift_target_date_mode"] = s_mode
+                cfg["sync"]["manual_target_date"] = m_date
+                cfg["sync"]["default_export_directory"] = e_dir
+            except Exception:
+                pass
+
+            # 2. Developer Mode: Crawl & Pagination Bounds
+            try:
+                c_active = int(self.query_one("#input-crawl-active", Input).value.strip() or 25)
+                c_arch = int(self.query_one("#input-crawl-archive", Input).value.strip() or 50)
+                c_kits = int(self.query_one("#input-crawl-kits", Input).value.strip() or 25)
+                cfg.setdefault("crawl", {})
+                cfg["crawl"]["max_active_pages"] = c_active
+                cfg["crawl"]["max_archive_pages"] = c_arch
+                cfg["crawl"]["max_kit_pages"] = c_kits
+            except Exception:
+                pass
+
+            # Developer Mode: Database Performance & Concurrency
+            try:
+                sq_timeout = int(self.query_one("#input-sqlite-timeout", Input).value.strip() or 30000)
+                db_batch = int(self.query_one("#input-db-batch-size", Input).value.strip() or 200)
+                cfg.setdefault("database", {})
+                cfg["database"]["sqlite_busy_timeout_ms"] = sq_timeout
+                cfg["database"]["batch_write_size"] = db_batch
+            except Exception:
+                pass
+
+            # Developer Mode: Matcher
             try:
                 uturn = int(self.query_one("#input-uturn-threshold", Input).value.strip() or 1800)
                 cfg.setdefault("matcher", {})
@@ -619,7 +826,7 @@ class SettingsPane(Vertical):
             except Exception:
                 pass
 
-            # 3. Developer Mode: Network & Compression
+            # Developer Mode: Network & Compression
             try:
                 comp_enabled = self.query_one("#switch-compression-enabled", Switch).value
                 comp_dim = int(self.query_one("#input-compression-dim", Input).value.strip() or 1920)
@@ -634,17 +841,24 @@ class SettingsPane(Vertical):
             try:
                 outbox_enabled = self.query_one("#switch-outbox-enabled", Switch).value
                 outbox_interval = int(self.query_one("#input-outbox-interval", Input).value.strip() or 15)
-                timeout = int(self.query_one("#input-timeout", Input).value.strip() or 30)
+                timeout = int(self.query_one("#input-timeout", Input).value.strip() or 15)
                 circuit_breaker = int(self.query_one("#input-circuit-breaker", Input).value.strip() or 3)
+                p_conn = int(self.query_one("#input-pool-conn", Input).value.strip() or 10)
+                p_max = int(self.query_one("#input-pool-max", Input).value.strip() or 20)
+
                 cfg.setdefault("outbox", {})
                 cfg["outbox"]["enabled"] = outbox_enabled
                 cfg["outbox"]["auto_sync_interval_seconds"] = outbox_interval
                 cfg["submission"]["request_timeout_seconds"] = timeout
                 cfg["submission"]["circuit_breaker_threshold"] = circuit_breaker
+                cfg.setdefault("network", {})
+                cfg["network"]["http_timeout_seconds"] = timeout
+                cfg["network"]["pool_connections"] = p_conn
+                cfg["network"]["pool_maxsize"] = p_max
             except Exception:
                 pass
 
-            # 4. Developer Mode: Vision & OCR
+            # Developer Mode: Vision & OCR
             try:
                 ensemble = self.query_one("#switch-ensemble", Switch).value
                 syntax_corr = self.query_one("#switch-syntax-corr", Switch).value
@@ -660,7 +874,7 @@ class SettingsPane(Vertical):
             except Exception:
                 pass
 
-            # 5. Developer Mode: Storage Retention
+            # Developer Mode: Storage Retention
             try:
                 crop_days = int(self.query_one("#input-crop-days", Input).value.strip() or 7)
                 export_days = int(self.query_one("#input-export-days", Input).value.strip() or 30)
@@ -671,7 +885,7 @@ class SettingsPane(Vertical):
             except Exception:
                 pass
 
-            # 6. Developer Mode: PostgreSQL Database
+            # Developer Mode: PostgreSQL Database
             try:
                 use_pg = self.query_one("#switch-use-postgres", Switch).value
                 pg_host = self.query_one("#input-pg-host", Input).value.strip() or "localhost"
@@ -697,6 +911,8 @@ class SettingsPane(Vertical):
             setattr(settings, "ITMS_WEB_DRY_RUN", dry_run)
             setattr(settings, "ITMS_SUBMIT_STEP3", step3)
             self.refresh_vault_display()
+            self.refresh_reports_dir_display()
+            self.refresh_yolo_weights_display()
 
             # Dynamically refresh ITMS Hub pane if mounted
             if app:
@@ -735,14 +951,30 @@ class SettingsPane(Vertical):
             self.query_one("#switch-dev-mode", Switch).value = False
 
             try:
+                self.query_one("#input-bond-code", Input).value = "AGM"
+                self.query_one("#switch-strict-bond", Switch).value = True
+                self.query_one("#switch-auto-sync", Switch).value = True
+                self.query_one("#input-sync-interval", Input).value = "60"
+                self.query_one("#input-shift-mode", Input).value = "today"
+                self.query_one("#input-manual-shift-date", Input).value = ""
+                self.query_one("#input-export-dir", Input).value = "exports"
+
+                self.query_one("#input-crawl-active", Input).value = "25"
+                self.query_one("#input-crawl-archive", Input).value = "50"
+                self.query_one("#input-crawl-kits", Input).value = "25"
+                self.query_one("#input-sqlite-timeout", Input).value = "30000"
+                self.query_one("#input-db-batch-size", Input).value = "200"
+
                 self.query_one("#input-uturn-threshold", Input).value = "1800"
                 self.query_one("#switch-compression-enabled", Switch).value = True
                 self.query_one("#input-compression-dim", Input).value = "1920"
                 self.query_one("#input-compression-quality", Input).value = "88"
                 self.query_one("#switch-outbox-enabled", Switch).value = True
                 self.query_one("#input-outbox-interval", Input).value = "15"
-                self.query_one("#input-timeout", Input).value = "30"
+                self.query_one("#input-timeout", Input).value = "15"
                 self.query_one("#input-circuit-breaker", Input).value = "3"
+                self.query_one("#input-pool-conn", Input).value = "10"
+                self.query_one("#input-pool-max", Input).value = "20"
 
                 self.query_one("#switch-ensemble", Switch).value = True
                 self.query_one("#switch-syntax-corr", Switch).value = True
@@ -764,6 +996,8 @@ class SettingsPane(Vertical):
                 pass
 
             self.refresh_vault_display()
+            self.refresh_reports_dir_display()
+            self.refresh_yolo_weights_display()
 
             # Dynamically refresh ITMS Hub pane if mounted
             try:

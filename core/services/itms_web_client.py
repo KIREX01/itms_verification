@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import urllib.parse
 from dataclasses import asdict, dataclass, field
@@ -328,8 +329,21 @@ class ITMSWebClient:
         self.base_url = (base_url or get_itms_base_url()).rstrip("/")
         self.session_store = session_store or ITMSWebSessionStore()
         self.timeout = timeout
+        self._session: Optional[requests.Session] = None
+        self._session_lock = threading.Lock()
+
+    def _sync_session_cookies(self, s: requests.Session) -> None:
+        """Injects stored session cookies into the requests session."""
+        try:
+            stored_cookies = self.session_store.session.cookies
+            domain = urllib.parse.urlparse(self.base_url).hostname
+            for name, val in stored_cookies.items():
+                s.cookies.set(name, val, domain=domain)
+        except Exception as exc:
+            logger.debug("Cookie synchronization note: %s", exc)
 
     def _create_requests_session(self) -> requests.Session:
+        """Creates a newly configured requests.Session with connection pooling and retries."""
         s = requests.Session()
         s.headers.update({
             "User-Agent": USER_AGENT,
@@ -355,11 +369,31 @@ class ITMSWebClient:
         s.mount("https://", adapter)
         s.mount("http://", adapter)
 
-        # Inject stored cookies if available
-        stored_cookies = self.session_store.session.cookies
-        for name, val in stored_cookies.items():
-            s.cookies.set(name, val, domain=urllib.parse.urlparse(self.base_url).hostname)
+        self._sync_session_cookies(s)
         return s
+
+    def get_session(self) -> requests.Session:
+        """Returns the persistent pooled requests.Session, creating or refreshing it if needed."""
+        with self._session_lock:
+            if self._session is None:
+                self._session = self._create_requests_session()
+            else:
+                self._sync_session_cookies(self._session)
+            return self._session
+
+    def reset_session(self) -> None:
+        """Closes and resets the pooled session, freeing sockets and connection state."""
+        with self._session_lock:
+            if self._session is not None:
+                try:
+                    self._session.close()
+                except Exception:
+                    pass
+                self._session = None
+
+    def close(self) -> None:
+        """Cleanly closes active pooled HTTP connections."""
+        self.reset_session()
 
     def _request_with_retry(
         self,
@@ -370,8 +404,8 @@ class ITMSWebClient:
         **kwargs
     ) -> requests.Response:
         """
-        Executes an HTTP request with automatic exponential backoff + jitter
-        against TCP resets, transient network drops, and server errors (502, 503, 504, 429).
+        Executes an HTTP request using persistent connection pooling with automatic
+        exponential backoff + jitter against TCP resets, transient network drops, and server errors.
         Optionally attaches a deterministic X-Idempotency-Key header.
         """
         import random
@@ -380,8 +414,9 @@ class ITMSWebClient:
         if idempotency_key:
             headers.setdefault("X-Idempotency-Key", idempotency_key)
 
+        s = self.get_session()
+
         for attempt in range(1, max_attempts + 1):
-            s = self._create_requests_session()
             try:
                 if "timeout" not in kwargs:
                     kwargs["timeout"] = self.timeout
@@ -405,9 +440,12 @@ class ITMSWebClient:
                 return resp
             except (requests.exceptions.ConnectionError, ConnectionResetError, requests.exceptions.ChunkedEncodingError, requests.exceptions.Timeout) as exc:
                 last_exc = exc
+                # Reset connection pool on socket drop/reset before retrying
+                self.reset_session()
+                s = self.get_session()
                 sleep_time = min(10.0, (2 ** (attempt - 1)) + random.uniform(0.1, 0.5))
                 logger.warning(
-                    "ITMS WebApp connection issue (attempt %d/%d) on %s: %s. Retrying in %.2fs...",
+                    "ITMS WebApp connection issue (attempt %d/%d) on %s: %s. Re-pooling session and retrying in %.2fs...",
                     attempt, max_attempts, url, exc, sleep_time
                 )
                 if attempt < max_attempts:
@@ -427,7 +465,7 @@ class ITMSWebClient:
         """Performs a single lightweight reachability check against the ITMS base URL."""
         start = time.time()
         try:
-            s = self._create_requests_session()
+            s = self.get_session()
             resp = s.get(self.base_url, timeout=self.timeout, allow_redirects=True)
             elapsed_ms = round((time.time() - start) * 1000, 1)
             is_ok = resp.status_code in (200, 301, 302)
@@ -485,7 +523,7 @@ class ITMSWebClient:
                 "session": session_data.to_dict(),
             }
 
-        s = self._create_requests_session()
+        s = self.get_session()
         try:
             resp = s.get(f"{self.base_url}/", timeout=self.timeout, allow_redirects=True)
             # If redirected to /site/login, session is expired
@@ -631,6 +669,7 @@ class ITMSWebClient:
                     last_status_message=f"Connected as {email}",
                 )
                 self.session_store.save(session_data)
+                self.reset_session()
                 logger.info("Successfully authenticated to ITMS WebApp as %s", email)
                 return True, f"Successfully authenticated as {email}.", session_data.to_dict()
 
@@ -657,15 +696,21 @@ class ITMSWebClient:
             return False, f"SSL Certificate Error: {exc}", {}
         except requests.exceptions.RequestException as exc:
             return False, f"Network error connecting to ITMS: {exc}", {}
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
 
     def logout(self) -> Tuple[bool, str]:
         """Safely terminates the ITMS WebApp session and clears stored cookies."""
         session_data = self.session_store.session
         if not session_data.cookies:
             self.session_store.clear()
+            self.reset_session()
             return True, "No active session to terminate."
 
-        s = self._create_requests_session()
+        s = self.get_session()
         logout_url = f"{self.base_url}/site/logout"
         csrf_token = session_data.csrf_token
 
@@ -681,6 +726,7 @@ class ITMSWebClient:
             logger.warning("Logout request to ITMS encountered error (clearing local session anyway): %s", exc)
         finally:
             self.session_store.clear()
+            self.reset_session()
 
         return True, "Successfully logged out of ITMS WebApp."
 
@@ -700,7 +746,7 @@ class ITMSWebClient:
                 "error": "Session cookies invalid or missing. Please sign in first.",
             }
 
-        s = self._create_requests_session()
+        s = self.get_session()
         try:
             resp = s.get(f"{self.base_url}/", timeout=self.timeout)
             if resp.status_code != 200:
@@ -749,7 +795,7 @@ class ITMSWebClient:
                 "error": "Session cookies invalid or missing. Please sign in first.",
             }
 
-        s = self._create_requests_session()
+        s = self.get_session()
         url = f"{self.base_url}/installation-orders/index"
         try:
             resp = s.get(url, timeout=self.timeout)
@@ -825,7 +871,6 @@ class ITMSWebClient:
             else:
                 search_params = {"registration_number": raw_str}
 
-        s = self._create_requests_session()
         endpoint_path = "/installation-orders/archive" if archive else "/installation-orders/index"
         url = f"{self.base_url}{endpoint_path}"
 
@@ -971,8 +1016,13 @@ class ITMSWebClient:
     def sync_orders_to_local_db(self, orders: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Saves or updates fetched ITMS installation orders (active or archive) into the local Django database.
-        Allows fuzzy order matcher and verification review queue to correlate evidence photos with live ITMS records.
+        Wrapped in transaction.atomic() for high-speed batching and zero SQLite reader lock contention.
         """
+        from django.db import transaction
+        with transaction.atomic():
+            return self._sync_orders_to_local_db_atomic(orders)
+
+    def _sync_orders_to_local_db_atomic(self, orders: List[Dict[str, Any]]) -> Dict[str, Any]:
         from django.utils import timezone
         from django.db import models
         from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
@@ -1221,6 +1271,7 @@ class ITMSWebClient:
         self,
         page: int = 1,
         search_params: Optional[Any] = None,
+        allow_local_fallback: bool = True,
     ) -> Dict[str, Any]:
         """
         Safely fetches installation kits from https://stock.itms.ug/installation-kits.
@@ -1252,11 +1303,28 @@ class ITMSWebClient:
 
         session_data = self.session_store.session
         url = f"{self.base_url}/installation-kits/index"
+        last_error = ""
 
         # 1. Live request if valid session
         if session_data.is_cookie_valid():
             try:
                 resp = self._request_with_retry("GET", url, params=query_params, timeout=self.timeout)
+                # Check for session expiration / login redirect
+                if "/site/login" in resp.url or ("Login" in resp.text and "login-form" in resp.text):
+                    logger.warning("Session has expired on ITMS server during installation kits request.")
+                    session_data.is_authenticated = False
+                    session_data.last_status_message = "Session expired on ITMS server. Please sign in again."
+                    self.session_store.save(session_data)
+                    return {
+                        "success": False,
+                        "error": "Session has expired on ITMS server. Please sign in via Tab 2.",
+                        "is_expired": True,
+                        "page": page,
+                        "kits": [],
+                        "count": 0,
+                        "has_next_page": False,
+                    }
+
                 if resp.status_code == 200:
                     parsed = self.parse_installation_kits_html(resp.text)
                     return {
@@ -1272,8 +1340,24 @@ class ITMSWebClient:
                     }
                 else:
                     logger.warning("Installation kits endpoint returned HTTP %s", resp.status_code)
+                    last_error = f"ITMS server returned HTTP {resp.status_code}"
             except Exception as exc:
                 logger.warning("Error fetching installation kits from server: %s", exc)
+                last_error = str(exc)
+        else:
+            last_error = "ITMS session not authenticated or expired."
+
+        # If local fallback is disallowed (e.g. crawler or provisioning), stop here with clear error
+        if not allow_local_fallback:
+            return {
+                "success": False,
+                "error": last_error or "ITMS server unreachable or unauthenticated.",
+                "is_expired": not session_data.is_cookie_valid(),
+                "kits": [],
+                "page": page,
+                "count": 0,
+                "has_next_page": False,
+            }
 
         # 2. Offline repository fallback
         fallback_file = Path("secure/REQUEST FOR INSTALLION KITS.txt")
@@ -1351,7 +1435,7 @@ class ITMSWebClient:
 
         return {
             "success": False,
-            "error": "Could not connect to ITMS server and no local cache was available.",
+            "error": last_error or "Could not connect to ITMS server and no local cache was available.",
             "kits": [],
             "page": page,
         }
@@ -1440,37 +1524,39 @@ class ITMSWebClient:
     def sync_kits_to_local_db(self, kits: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Saves or updates fetched ITMS installation kits into the local Django database."""
         from django.utils import timezone
+        from django.db import transaction
         from core.models import InstallationKit
 
         created_count = 0
         updated_count = 0
 
-        for k in kits:
-            code = (k.get("kit_code") or k.get("number") or "").strip()
-            if not code:
-                continue
-            defaults = {
-                "registration_number": k.get("registration_number", ""),
-                "front_plate": k.get("front_plate", ""),
-                "rear_plate": k.get("rear_plate", ""),
-                "front_tracker": k.get("front_tracker", ""),
-                "rear_tracker": k.get("rear_tracker", ""),
-                "gps_tracker": k.get("gps_tracker", ""),
-                "warehouse": k.get("warehouse", ""),
-                "status": k.get("status", "New"),
-                "created_date": k.get("created_date", ""),
-                "kit_uuid": k.get("kit_uuid", ""),
-                "detail_url": k.get("detail_url", ""),
-                "last_synced_at": timezone.now(),
-            }
-            obj, was_created = InstallationKit.objects.update_or_create(
-                kit_code=code,
-                defaults=defaults,
-            )
-            if was_created:
-                created_count += 1
-            else:
-                updated_count += 1
+        with transaction.atomic():
+            for k in kits:
+                code = (k.get("kit_code") or k.get("number") or "").strip()
+                if not code:
+                    continue
+                defaults = {
+                    "registration_number": k.get("registration_number", ""),
+                    "front_plate": k.get("front_plate", ""),
+                    "rear_plate": k.get("rear_plate", ""),
+                    "front_tracker": k.get("front_tracker", ""),
+                    "rear_tracker": k.get("rear_tracker", ""),
+                    "gps_tracker": k.get("gps_tracker", ""),
+                    "warehouse": k.get("warehouse", ""),
+                    "status": k.get("status", "New"),
+                    "created_date": k.get("created_date", ""),
+                    "kit_uuid": k.get("kit_uuid", ""),
+                    "detail_url": k.get("detail_url", ""),
+                    "last_synced_at": timezone.now(),
+                }
+                obj, was_created = InstallationKit.objects.update_or_create(
+                    kit_code=code,
+                    defaults=defaults,
+                )
+                if was_created:
+                    created_count += 1
+                else:
+                    updated_count += 1
 
         return {
             "success": True,
@@ -1478,6 +1564,137 @@ class ITMSWebClient:
             "updated": updated_count,
             "total": len(kits),
         }
+
+    def fetch_and_sync_all_kits(
+        self,
+        max_pages: int = 35,
+        search_params: Optional[Any] = None,
+        delay: float = 0.12,
+        log_callback: Optional[Any] = None,
+        allow_local_fallback: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Crawls through multiple or all pages of /installation-kits (supports 20+ pages)
+        and synchronizes every kit into the local Django database.
+        """
+        start_time = time.time()
+        total_created = 0
+        total_updated = 0
+        all_kits: List[Dict[str, Any]] = []
+        pages_crawled = 0
+
+        for page in range(1, max_pages + 1):
+            if log_callback:
+                log_callback(f"Fetching ITMS installation kits page {page} of {max_pages}...")
+            res = self.fetch_installation_kits(page=page, search_params=search_params, allow_local_fallback=allow_local_fallback)
+            if not res.get("success"):
+                if page == 1:
+                    return {
+                        "success": False,
+                        "error": res.get("error", f"Failed on page {page}"),
+                        "is_expired": res.get("is_expired", False),
+                        "total_fetched": 0,
+                        "created": 0,
+                        "updated": 0,
+                        "pages_crawled": 0,
+                    }
+                if log_callback:
+                    log_callback(f"Notice: Crawl stopped at page {page}: {res.get('error')}")
+                break
+
+            kits = res.get("kits", [])
+            if not kits:
+                break
+
+            pages_crawled += 1
+            all_kits.extend(kits)
+            sync_res = self.sync_kits_to_local_db(kits)
+            total_created += sync_res.get("created", 0)
+            total_updated += sync_res.get("updated", 0)
+
+            if log_callback:
+                log_callback(f"Page {page}/{max_pages}: {len(kits)} kits fetched ({total_created} created, {total_updated} updated so far)...")
+
+            if not res.get("has_next_page") or len(kits) < 20:
+                break
+
+            if delay > 0:
+                time.sleep(delay)
+
+        duration_ms = int((time.time() - start_time) * 1000)
+        return {
+            "success": True,
+            "total_fetched": len(all_kits),
+            "created": total_created,
+            "updated": total_updated,
+            "pages_crawled": pages_crawled,
+            "duration_ms": duration_ms,
+            "message": (
+                f"Crawled {pages_crawled} pages of installation kits: "
+                f"{len(all_kits)} total kits synced ({total_created} new, {total_updated} updated) in {duration_ms}ms."
+            ),
+        }
+
+    def search_and_sync_kits_for_plates(
+        self,
+        plates: Iterable[str],
+        log_callback: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Targeted search on ITMS /installation-kits specifically for candidate plates
+        received in inbound deliveries or safe room stock audits.
+        Guarantees that plates not found on page 1 are discovered from ITMS without
+        crawling unrelated records.
+        """
+        from core.vision import normalizer
+        start_time = time.time()
+        total_found = 0
+        total_created = 0
+        total_updated = 0
+        searched_plates: List[str] = []
+
+        for raw_p in plates:
+            c = normalizer.canonicalize(raw_p) or (raw_p or "").replace(" ", "").upper()
+            if not c or c in searched_plates:
+                continue
+            searched_plates.append(c)
+
+            # Query ITMS specifically for this plate or series
+            try:
+                res = self.fetch_installation_kits(page=1, search_params=c, allow_local_fallback=False)
+                if res.get("success"):
+                    kits = res.get("kits", [])
+                    matching = [
+                        k for k in kits
+                        if (normalizer.canonicalize(k.get("registration_number", "")) == c)
+                        or (k.get("kit_code", "").upper() == f"IK-{c}")
+                        or (c in (k.get("registration_number", "") or "").upper())
+                    ]
+                    if matching:
+                        total_found += len(matching)
+                        sync_res = self.sync_kits_to_local_db(matching)
+                        total_created += sync_res.get("created", 0)
+                        total_updated += sync_res.get("updated", 0)
+                elif res.get("is_expired"):
+                    if log_callback:
+                        log_callback("ITMS session expired during candidate search; stopping targeted queries.")
+                    break
+            except Exception as exc:
+                logger.debug("Plate search exception for %s: %s", c, exc)
+
+            time.sleep(0.12)
+
+        duration_ms = int((time.time() - start_time) * 1000)
+        return {
+            "success": True,
+            "plates_searched": len(searched_plates),
+            "kits_found": total_found,
+            "created": total_created,
+            "updated": total_updated,
+            "duration_ms": duration_ms,
+            "message": f"Searched {len(searched_plates)} plates on ITMS: found and synced {total_found} kits.",
+        }
+
 
     def sync_kit_detail_to_local_db(self, kit_uuid: str, detail_data: Dict[str, Any]) -> None:
         """Updates detailed hardware components for an installation kit in the local database."""
@@ -2225,7 +2442,7 @@ class ITMSWebClient:
         if val_url.startswith("/"):
             val_url = f"{self.base_url}{val_url}"
 
-        s = self._create_requests_session()
+        s = self.get_session()
         headers = {
             "X-Requested-With": "XMLHttpRequest",
             "Referer": f"{self.base_url}/installation-orders/installation?id={order_uuid}",
@@ -2371,7 +2588,7 @@ class ITMSWebClient:
         target_csrf = csrf_token or session_data.csrf_token
         url = f"{self.base_url}/installation-orders/installation?id={order_uuid}"
 
-        s = self._create_requests_session()
+        s = self.get_session()
         headers = {
             "Origin": self.base_url,
             "Referer": url,
@@ -3258,7 +3475,7 @@ class ITMSWebClient:
                 "message": f"[DRY RUN] Step 3 confirmation simulated for #{order_uuid}{replace_desc}. Order marked ready for completion. (No changes written to stock.itms.ug).",
             }
 
-        s = self._create_requests_session()
+        s = self.get_session()
         headers = {
             "Origin": self.base_url,
             "Referer": url,

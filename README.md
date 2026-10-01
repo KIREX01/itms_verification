@@ -130,23 +130,30 @@ python manage.py associate_pairs
 # Options:
 #   --skip-matching        Group into pairs only; skip fuzzy matching against orders
 
-# 5. Interactive Operator Dashboard (TUI): Review queue, history, batches, and ITMS Hub
+# 5. Interactive Operator Dashboard (TUI): Fast, keyboard-driven terminal console
 python manage.py run_tui
 # TUI Navigation & Hotkeys:
-#   1 / 2 / 3 / 4          Switch Tabs: [1] Review Queue, [2] History & Audit, [3] Batches, [4] 🌐 ITMS WebApp
-#   I                      Add Photos via Native Desktop Dialog (select files or entire folder/SD card)
-#   W                      Launch Web Upload Interface in Browser (auto-falls back to native dialog if server offline)
-#   F                      Cycle History Label Filter (ALL -> SUBMITTED -> FAILED -> APPROVED -> AUDIT)
-#   P                      Run Vision Pipeline (background thread, streams to bottom console)
-#   M                      Run Pair Matcher (background thread, streams to bottom console)
-#   U                      Submit Selected Pair to ITMS (live step-by-step progress logging)
+#   1 .. 7 / F1 .. F7      Switch Tabs: [1] DASHBOARD, [2] ITMS, [3] BATCHES, [4] REVIEW, [5] AUDIT, [6] REPORTS, [7] SETTINGS
+#   Ctrl+P                 Open Command Palette (searchable actions, filters, submissions, tools)
+#   X / Ctrl+U             Unlink Order from Selected Pair in REVIEW queue (clears order ID, status -> UNMATCHED)
+#   T                      Type / Match Plate Manually with prefix autocomplete & hardware sync
 #   A                      Approve selected pair for submission
+#   U                      Submit Selected Pair to ITMS (live step-by-step progress logging)
+#   B                      Batch Submit all approved pairs
 #   S                      Swap front and rear image assignments
 #   L                      Link / Pick Photo to pair manually
 #   V                      View evidence side-by-side in standalone Python window (fast, 50Hz, no Photo Viewer)
+#   J                      Joint Vision Dual-Stream Re-Scan
+#   K                      Open Stock & Reconciliation Manager / Barcode Scanner modal
+#   D                      Cycle Date Scope (TODAY -> ALL -> RANGE)
+#   O                      Drain Offline Submission Outbox
+#   P                      Run Vision Pipeline (background thread, streams to bottom console)
+#   M                      Run Pair Matcher (background thread, streams to bottom console)
+#   I                      Add Photos via Native Desktop Dialog (select files or entire folder/SD card)
+#   W                      Launch Web Upload Interface in Browser (auto-falls back to native dialog if server offline)
+#   F                      Cycle History Label Filter (ALL -> SUBMITTED -> FAILED -> APPROVED -> AUDIT)
 #   C                      Clean temporary crops & enforce vault retention policy
 #   R                      Refresh data tables and metrics from database
-#   X                      Sign out operator
 #   Q                      Quit the TUI
 
 # 6. Submit approved pairs to ITMS (simulated sandbox or live server)
@@ -199,11 +206,12 @@ python manage.py fetch_itms_orders --info "ca7845a2-2488-495a-82cf-6a2e1502fa12"
 python manage.py fetch_itms_orders --info "UMA 282PG"
 ```
 
-> **Interactive TUI Hub**: In the TUI dashboard (`python manage.py run_tui`), press **`[4]`** to open the **`🌐 ITMS WebApp`** NavTab:
+> **Interactive TUI Hub**: In the TUI dashboard (`python manage.py run_tui`), press **`[2]`** or **`F2`** to open the **`ITMS`** tab:
 > - Query Active Orders (`[📥 Active Orders]`) or Completed Archive (`[🏛️ Archive (Installed)]`)
+> - Multi-page Installation Kit synchronization (`[📦 Sync Kits]`) with live progress and zero freezing
 > - Inspect full order details, hardware inventory, and photo links (`[🔍 View Details & Photos]`)
 > - Safely download evidence photos to local vault (`[💾 Download Photos]`)
-> - Seamless pagination with `[◄ Prev]` and `[Next ►]`, and 1-click database synchronization (`[Sync Orders to DB]`).
+> - Seamless pagination with `[◄ Prev]` and `[Next ►]`, active page counter, and 1-click database synchronization (`[Sync Orders to DB]`).
 
 ### 3.2 Standardized Unified Ingestion & Pairwise Synergy
 
@@ -309,6 +317,69 @@ python manage.py clear_data --include-orders
 # Clear database records only, keeping files on disk in media/vault
 python manage.py clear_data --keep-files
 ```
+
+### 3.7 Mobile Live Camera QR & Barcode Stock Scanner
+
+Technicians can scan physical hardware barcodes, installation kit QR codes, and tracker serial numbers directly using their mobile phone's live camera feed:
+* **Live Camera Stream**: High-performance continuous viewfinder rendered at full resolution with zero installation required (`http://<server-ip>:8000/mobile/stock-scanner/`).
+* **Multi-Format Barcode Engine**: Hardware-accelerated `BarcodeDetector` API with automatic fallback to client-side ZXing-JS decoding.
+* **Laser Aim Guide & Audio**: Real-time animated target viewfinder with audible confirmation beeps upon successful scan.
+* **Camera Controls**: Instant front/rear camera switching and hardware torch toggle for poorly lit bond warehouses.
+* **Automated Sync**: Scanned barcodes are automatically formatted and registered into the local bond ledger in real time.
+
+```bash
+# Launch camera barcode scanner directly via CLI:
+python itms_cli.py scan-camera
+```
+
+### 3.8 Installation Kit Crawling & Morning Provisioning (`sync_stock_kits`)
+
+To reconcile motorcycle assemblies before shifting them onto the installation line, the crawler automatically iterates through ITMS web portal kits index:
+* **Asynchronous Multi-Page Crawler**: Traverses up to 35 pages without freezing the main event loop or UI thread.
+* **Real-Time Progress Feedback**: Displays live record counters and page iteration progress (`Crawled Page 4/35 — 80 kits parsed`).
+* **Morning Provisioning**: Automatically marks and audits kits scheduled for morning rollout against local database orders.
+
+```bash
+# Sync all installation kits across all pages from ITMS:
+python manage.py sync_stock_kits
+
+# Limit crawl depth:
+python manage.py sync_stock_kits --max-pages 10
+```
+
+### 3.9 Daily Shift Stock Reconciliation & Ledger Auditing (`reconcile_shift`)
+
+Audits daily physical consumption against ITMS installation orders and generates certified stock reconciliation ledgers:
+* **Discrepancy Detection**: Identifies surplus or missing kits, duplicate tracker assignments, and unlinked motorcycles.
+* **Automated CSV Docket Export**: Generates timestamped reports (`itms_bond_stock_<date>_<timestamp>.csv`) saved to the user's custom reports directory.
+* **Dynamic Release Attribution**: Every audit export header contains verified system metadata and semantic versioning (`ITMS Verification & Daily Stock Ledger Audit — v1.0.6`).
+
+```bash
+# Reconcile today's morning and afternoon shifts:
+python manage.py reconcile_shift --date today
+
+# Reconcile specific historical date:
+python manage.py reconcile_shift --date 2026-09-30
+```
+
+### 3.10 System Reliability, Standardized Settings & Folder Pickers
+
+Configuration parameters are partitioned into **Developer** vs. **User/Operator** settings:
+* **User Settings**: Report output destination, default batch folder, OCR engine preference, auto-approval thresholds.
+* **Developer Settings**: YOLO model weight selector (`models/*.pt`), detection confidence threshold, camera latency budgets, background sync intervals.
+* **Native OS Folder Picker**: Seamlessly select report storage folders and image directories using the native operating system file dialog.
+
+### 3.11 Standardized Non-Scrolling TUI Tabs
+
+The Textual TUI tab bar is standardized with single-word uppercase titles:
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│  DASHBOARD │ ITMS │ BATCHES │ REVIEW │ AUDIT │ REPORTS │ SETTINGS      │
+└────────────────────────────────────────────────────────────────────────┘
+```
+* **Zero Horizontal Scrolling**: Guarantees all 7 tabs fit on standard 80-column terminals without truncated labels or horizontal scrollbars.
+* **Logical Operator Flow**: Tabs are strictly ordered: `DASHBOARD (1)`, `ITMS (2)`, `BATCHES (3)`, `REVIEW (4)`, `AUDIT (5)`, `REPORTS (6)`, and `SETTINGS (7)`.
+* **Quick Review Queue Unlinking**: Press **`X`** or **`Ctrl+U`** on any row in the **`REVIEW`** tab to instantly unlink an order and return it to `UNMATCHED` status without leaving your keyboard.
 
 ## 4. Running the test suite
 

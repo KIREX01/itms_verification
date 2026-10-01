@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import BinaryIO, Optional, Tuple, Union
 
 from django.conf import settings
+from django.db import IntegrityError
 from django.utils import timezone
 
 from core.models import EvidenceImage, IngestionBatch
@@ -358,6 +359,23 @@ def ingest_from_disk(
     final_file_hash = hash_file_path(vault_abs_path)
     final_size_bytes = vault_abs_path.stat().st_size
 
+    # Deduplication guard: Check if the enhanced image matches an existing vault record
+    existing_final = EvidenceImage.objects.filter(file_hash=final_file_hash).first()
+    if existing_final:
+        vault_abs_path.unlink(missing_ok=True)
+        if batch:
+            batch.total_files += 1
+            batch.duplicate_count += 1
+            batch.save(update_fields=["total_files", "duplicate_count"])
+        if orientation_override and existing_final.orientation == EvidenceImage.Orientation.UNKNOWN:
+            clean_orient = orientation_override.upper()
+            if clean_orient in (EvidenceImage.Orientation.FRONT, EvidenceImage.Orientation.REAR):
+                existing_final.folder_orientation = clean_orient
+                existing_final.orientation = clean_orient
+                existing_final.orientation_confidence = 1.0
+                existing_final.save(update_fields=["folder_orientation", "orientation", "orientation_confidence"])
+        return existing_final, "DUPLICATE_SKIPPED"
+
     try:
         vault_relative = str(vault_abs_path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
     except ValueError:
@@ -376,20 +394,39 @@ def ingest_from_disk(
     captured_at = extract_exif_timestamp(path)
     thumb_rel, preview_rel = generate_thumbnails(vault_abs_path)
 
-    image = EvidenceImage.objects.create(
-        batch=batch,
-        file_hash=final_file_hash,
-        original_source_path=str(path),
-        vault_file=vault_relative,
-        thumbnail_file=thumb_rel,
-        preview_file=preview_rel,
-        file_size_bytes=final_size_bytes,
-        status=EvidenceImage.Status.NEW,
-        folder_orientation=folder_orient,
-        orientation=initial_orient,
-        orientation_confidence=initial_orient_conf,
-        captured_at=captured_at,
-    )
+    try:
+        image = EvidenceImage.objects.create(
+            batch=batch,
+            file_hash=final_file_hash,
+            original_source_path=str(path),
+            vault_file=vault_relative,
+            thumbnail_file=thumb_rel,
+            preview_file=preview_rel,
+            file_size_bytes=final_size_bytes,
+            status=EvidenceImage.Status.NEW,
+            folder_orientation=folder_orient,
+            orientation=initial_orient,
+            orientation_confidence=initial_orient_conf,
+            captured_at=captured_at,
+        )
+    except IntegrityError:
+        vault_abs_path.unlink(missing_ok=True)
+        if thumb_rel:
+            try:
+                resolve_vault_path(thumb_rel).unlink(missing_ok=True)
+            except Exception:
+                pass
+        if preview_rel:
+            try:
+                resolve_vault_path(preview_rel).unlink(missing_ok=True)
+            except Exception:
+                pass
+        existing_dup = EvidenceImage.objects.filter(file_hash=final_file_hash).first()
+        if batch:
+            batch.total_files += 1
+            batch.duplicate_count += 1
+            batch.save(update_fields=["total_files", "duplicate_count"])
+        return existing_dup, "DUPLICATE_SKIPPED"
 
     if batch:
         batch.total_files += 1
@@ -466,6 +503,13 @@ def ingest_uploaded_file(
             batch.total_files += 1
             batch.duplicate_count += 1
             batch.save(update_fields=["total_files", "duplicate_count"])
+        if orientation_override and existing_final.orientation == EvidenceImage.Orientation.UNKNOWN:
+            clean_orient = orientation_override.upper()
+            if clean_orient in (EvidenceImage.Orientation.FRONT, EvidenceImage.Orientation.REAR):
+                existing_final.folder_orientation = clean_orient
+                existing_final.orientation = clean_orient
+                existing_final.orientation_confidence = 1.0
+                existing_final.save(update_fields=["folder_orientation", "orientation", "orientation_confidence"])
         return existing_final, "DUPLICATE_SKIPPED"
 
     try:
@@ -487,20 +531,39 @@ def ingest_uploaded_file(
     captured_at = extract_exif_timestamp(vault_abs_path)
     thumb_rel, preview_rel = generate_thumbnails(vault_abs_path)
 
-    image = EvidenceImage.objects.create(
-        batch=batch,
-        file_hash=final_file_hash,
-        original_source_path=name,
-        vault_file=vault_relative,
-        thumbnail_file=thumb_rel,
-        preview_file=preview_rel,
-        file_size_bytes=final_size_bytes,
-        status=EvidenceImage.Status.NEW,
-        folder_orientation=folder_orient,
-        orientation=initial_orient,
-        orientation_confidence=initial_orient_conf,
-        captured_at=captured_at,
-    )
+    try:
+        image = EvidenceImage.objects.create(
+            batch=batch,
+            file_hash=final_file_hash,
+            original_source_path=name,
+            vault_file=vault_relative,
+            thumbnail_file=thumb_rel,
+            preview_file=preview_rel,
+            file_size_bytes=final_size_bytes,
+            status=EvidenceImage.Status.NEW,
+            folder_orientation=folder_orient,
+            orientation=initial_orient,
+            orientation_confidence=initial_orient_conf,
+            captured_at=captured_at,
+        )
+    except IntegrityError:
+        vault_abs_path.unlink(missing_ok=True)
+        if thumb_rel:
+            try:
+                resolve_vault_path(thumb_rel).unlink(missing_ok=True)
+            except Exception:
+                pass
+        if preview_rel:
+            try:
+                resolve_vault_path(preview_rel).unlink(missing_ok=True)
+            except Exception:
+                pass
+        existing_dup = EvidenceImage.objects.filter(file_hash=final_file_hash).first()
+        if batch:
+            batch.total_files += 1
+            batch.duplicate_count += 1
+            batch.save(update_fields=["total_files", "duplicate_count"])
+        return existing_dup, "DUPLICATE_SKIPPED"
 
     if batch:
         batch.total_files += 1

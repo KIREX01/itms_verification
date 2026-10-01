@@ -33,3 +33,5 @@ exports
 scratch/
 .agents
 .vscode/
+itms_bond_stock_*.csv
+Screenshot*.png

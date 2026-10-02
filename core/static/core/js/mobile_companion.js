@@ -584,8 +584,23 @@ async function startStockCameraScanner() {
     const btnTorch = document.getElementById("btn-stock-torch");
     const btnFlip = document.getElementById("btn-stock-flip");
 
+    // Check if running on non-secure HTTP context on mobile
+    const isLocal = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+    if (!window.isSecureContext && !isLocal) {
+        const httpsUrl = `https://${window.location.hostname}:8443/mobile/`;
+        if (confirm("Live Camera & QR Scanning require HTTPS for browser security permissions.\n\nWould you like to switch to Secure HTTPS (Port 8443) now?\n\n(Note: When prompted by your phone browser, tap 'Advanced' -> 'Proceed').")) {
+            window.location.href = httpsUrl;
+            return;
+        }
+    }
+
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        alert("Camera access is not supported by your browser or requires a secure (HTTPS) connection.");
+        const httpsUrl = `https://${window.location.hostname}:8443/mobile/`;
+        if (confirm("Camera streaming is blocked by your mobile browser over plain HTTP.\n\nTap OK to switch to HTTPS (:8443) to unlock your camera.")) {
+            window.location.href = httpsUrl;
+        } else {
+            alert("Camera access is disabled over HTTP. Please use the manual plate input below or connect via HTTPS.");
+        }
         return;
     }
 
@@ -1715,10 +1730,32 @@ function toggleOutboxDrawer() {
     }
 }
 
+function checkSecureContextBanner() {
+    const banner = document.getElementById("https-alert-banner");
+    const switchBtn = document.getElementById("btn-switch-to-https");
+    if (!banner) return;
+
+    const isLocal = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+    if (window.location.protocol === "http:" && !isLocal) {
+        const httpsUrl = `https://${window.location.hostname}:8443/mobile/`;
+        if (switchBtn) {
+            switchBtn.href = httpsUrl;
+        }
+        banner.style.display = "flex";
+    } else {
+        banner.style.display = "none";
+    }
+}
+
 // ============================================================================
 // Initialization
 // ============================================================================
 function initMobileCompanion() {
+    try {
+        checkSecureContextBanner();
+    } catch (e) {
+        console.error("Error in checkSecureContextBanner:", e);
+    }
     try {
         updateConveyorStepper();
     } catch (e) {

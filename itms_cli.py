@@ -69,6 +69,7 @@ Usage:
   itms restart        Restart background Web Console
   itms --tui, -t      Launch Textual Terminal UI (keyboard-driven TUI)
   itms --web, -w      Launch Web Operator Console in foreground
+  itms --ssl, -s      Launch Web Console with HTTPS primary (port 8443)
   itms --port <port>  Launch Web Console on custom port (e.g. 8080)
   itms clear data     Clean up evidence images, batches, and vaulted files
   itms status         Display system health, active database & diagnostics
@@ -450,6 +451,10 @@ def main():
 
     if first in ("--web", "-w", "web"):
         launch_web(args[1:])
+        return
+
+    if first in ("--ssl", "-s", "ssl"):
+        launch_web(["--ssl"] + args[1:])
         return
 
     if first in ("status", "diagnostics", "health", "check"):

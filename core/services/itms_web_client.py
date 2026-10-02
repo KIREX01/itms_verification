@@ -866,6 +866,9 @@ class ITMSWebClient:
                         page = int(search_params["page"])
                     except ValueError:
                         pass
+            elif re.search(r"PO-([A-Za-z0-9]+)-", raw_str, re.IGNORECASE):
+                po_m = re.search(r"PO-([A-Za-z0-9]+)-", raw_str, re.IGNORECASE)
+                search_params = {"registration_number": po_m.group(1)}
             elif re.search(r"PO-[A-Z0-9]+", raw_str, re.IGNORECASE) or (len(raw_str) == 6 and raw_str.isdigit()):
                 search_params = {"order_number": raw_str.lstrip("#")}
             else:
@@ -878,7 +881,15 @@ class ITMSWebClient:
         if page > 1:
             query_params["page"] = page
 
-        if search_params:
+        if search_params and isinstance(search_params, dict):
+            # If search_params has order_number starting with PO-..., extract registration_number
+            if "order_number" in search_params and "registration_number" not in search_params:
+                raw_ord = str(search_params["order_number"]).strip()
+                po_m = re.search(r"PO-([A-Za-z0-9]+)-", raw_ord, re.IGNORECASE)
+                if po_m:
+                    search_params = dict(search_params)
+                    search_params["registration_number"] = po_m.group(1)
+
             for k, v in search_params.items():
                 if v is None or v == "":
                     continue
@@ -1768,6 +1779,59 @@ class ITMSWebClient:
     # Order Info & Plate Photo Extraction (Safe Read-Only)
     # ──────────────────────────────────────────────────────────────────────────
 
+    def _find_matching_order(
+        self,
+        orders: List[Dict[str, Any]],
+        ident: str,
+        target_reg: str = "",
+        target_order_num: str = "",
+        target_uuid: str = "",
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Safely identifies and returns the specific order dictionary matching the target
+        identifier, plate, order number, or UUID from an ITMS search results list.
+        NEVER blindly takes orders[0], preventing cross-order collision or false archive claims.
+        """
+        from core.vision import normalizer
+        clean_ident = (ident or "").strip().lower()
+        clean_uuid = (target_uuid or "").strip().lower()
+        clean_order_num = (target_order_num or "").strip().lower()
+        clean_reg = normalizer.canonicalize(target_reg or ident)
+
+        # Extract plate from PO number if present (e.g. PO-UMA196PS-021026 -> UMA196PS)
+        po_m = re.search(r"PO-([A-Za-z0-9]+)-", ident or target_order_num, re.IGNORECASE)
+        po_plate = normalizer.canonicalize(po_m.group(1)) if po_m else ""
+
+        for o in orders:
+            o_key = (o.get("order_key") or "").strip().lower()
+            o_num = (o.get("order_number") or "").strip().lower()
+            o_reg = normalizer.canonicalize(o.get("registration_number") or "")
+            o_vin = (o.get("vin") or "").strip().lower()
+
+            # Priority 1: Exact UUID match
+            if clean_uuid and o_key == clean_uuid:
+                return o
+            if clean_ident and o_key == clean_ident:
+                return o
+
+            # Priority 2: Exact Order Number match
+            if clean_order_num and o_num == clean_order_num:
+                return o
+            if clean_ident and o_num == clean_ident:
+                return o
+
+            # Priority 3: Registration Plate match
+            if clean_reg and o_reg == clean_reg:
+                return o
+            if po_plate and o_reg == po_plate:
+                return o
+
+            # Priority 4: VIN match
+            if clean_ident and o_vin == clean_ident:
+                return o
+
+        return None
+
     def parse_order_info_html(self, html: str) -> Dict[str, Any]:
         """
         Parses the HTML of an ITMS order info page (/installation-orders/info?id=...).
@@ -1939,19 +2003,24 @@ class ITMSWebClient:
 
         # Case 3: Search live ITMS archive or active orders to resolve the UUID
         if not target_uuid:
-            archive_res = self.fetch_archive_orders(page=1, search_params=ident)
-            orders = archive_res.get("orders", [])
-            for o in orders:
-                if o.get("order_key"):
-                    target_uuid = o["order_key"]
-                    break
+            from core.vision import normalizer
+            po_m = re.search(r"PO-([A-Za-z0-9]+)-", ident, re.IGNORECASE)
+            extracted_reg = normalizer.canonicalize(po_m.group(1)) if po_m else normalizer.canonicalize(ident)
+            formatted_plate = ""
+            if extracted_reg:
+                pm = re.match(r"^([A-Za-z]{3})(\d{3}[A-Za-z]{1,2})$", extracted_reg)
+                formatted_plate = f"{pm.group(1).upper()} {pm.group(2).upper()}" if pm else extracted_reg
+
+            clean_search = formatted_plate or ident
+            archive_res = self.fetch_archive_orders(page=1, search_params=clean_search)
+            matched_o = self._find_matching_order(archive_res.get("orders", []), ident=ident, target_reg=extracted_reg)
+            if matched_o and matched_o.get("order_key"):
+                target_uuid = matched_o["order_key"]
             if not target_uuid:
-                active_res = self.fetch_installation_orders(page=1, search_params=ident, archive=False)
-                active_orders = active_res.get("orders", [])
-                for o in active_orders:
-                    if o.get("order_key"):
-                        target_uuid = o["order_key"]
-                        break
+                active_res = self.fetch_installation_orders(page=1, search_params=clean_search, archive=False)
+                matched_o = self._find_matching_order(active_res.get("orders", []), ident=ident, target_reg=extracted_reg)
+                if matched_o and matched_o.get("order_key"):
+                    target_uuid = matched_o["order_key"]
 
         if not target_uuid:
             return {
@@ -2361,12 +2430,18 @@ class ITMSWebClient:
 
         # Check live ITMS active orders table
         if not target_uuid:
-            active_res = self.fetch_installation_orders(page=1, search_params=ident, archive=False)
-            active_orders = active_res.get("orders", [])
-            for o in active_orders:
-                if o.get("order_key"):
-                    target_uuid = o["order_key"]
-                    break
+            from core.vision import normalizer
+            po_m = re.search(r"PO-([A-Za-z0-9]+)-", ident, re.IGNORECASE)
+            extracted_reg = normalizer.canonicalize(po_m.group(1)) if po_m else normalizer.canonicalize(ident)
+            formatted_plate = ""
+            if extracted_reg:
+                pm = re.match(r"^([A-Za-z]{3})(\d{3}[A-Za-z]{1,2})$", extracted_reg)
+                formatted_plate = f"{pm.group(1).upper()} {pm.group(2).upper()}" if pm else extracted_reg
+            clean_search = formatted_plate or ident
+            active_res = self.fetch_installation_orders(page=1, search_params=clean_search, archive=False)
+            matched_o = self._find_matching_order(active_res.get("orders", []), ident=ident, target_reg=extracted_reg)
+            if matched_o and matched_o.get("order_key"):
+                target_uuid = matched_o["order_key"]
 
         if not target_uuid:
             return {
@@ -2844,12 +2919,18 @@ class ITMSWebClient:
 
         # Check live ITMS active orders table
         if not target_uuid:
-            active_res = self.fetch_installation_orders(page=1, search_params=ident, archive=False)
-            active_orders = active_res.get("orders", [])
-            for o in active_orders:
-                if o.get("order_key"):
-                    target_uuid = o["order_key"]
-                    break
+            from core.vision import normalizer
+            po_m = re.search(r"PO-([A-Za-z0-9]+)-", ident, re.IGNORECASE)
+            extracted_reg = normalizer.canonicalize(po_m.group(1)) if po_m else normalizer.canonicalize(ident)
+            formatted_plate = ""
+            if extracted_reg:
+                pm = re.match(r"^([A-Za-z]{3})(\d{3}[A-Za-z]{1,2})$", extracted_reg)
+                formatted_plate = f"{pm.group(1).upper()} {pm.group(2).upper()}" if pm else extracted_reg
+            clean_search = formatted_plate or ident
+            active_res = self.fetch_installation_orders(page=1, search_params=clean_search, archive=False)
+            matched_o = self._find_matching_order(active_res.get("orders", []), ident=ident, target_reg=extracted_reg)
+            if matched_o and matched_o.get("order_key"):
+                target_uuid = matched_o["order_key"]
 
         if not target_uuid:
             return {
@@ -3265,12 +3346,18 @@ class ITMSWebClient:
 
         # Check live ITMS active orders table
         if not target_uuid:
-            active_res = self.fetch_installation_orders(page=1, search_params=ident, archive=False)
-            active_orders = active_res.get("orders", [])
-            for o in active_orders:
-                if o.get("order_key"):
-                    target_uuid = o["order_key"]
-                    break
+            from core.vision import normalizer
+            po_m = re.search(r"PO-([A-Za-z0-9]+)-", ident, re.IGNORECASE)
+            extracted_reg = normalizer.canonicalize(po_m.group(1)) if po_m else normalizer.canonicalize(ident)
+            formatted_plate = ""
+            if extracted_reg:
+                pm = re.match(r"^([A-Za-z]{3})(\d{3}[A-Za-z]{1,2})$", extracted_reg)
+                formatted_plate = f"{pm.group(1).upper()} {pm.group(2).upper()}" if pm else extracted_reg
+            clean_search = formatted_plate or ident
+            active_res = self.fetch_installation_orders(page=1, search_params=clean_search, archive=False)
+            matched_o = self._find_matching_order(active_res.get("orders", []), ident=ident, target_reg=extracted_reg)
+            if matched_o and matched_o.get("order_key"):
+                target_uuid = matched_o["order_key"]
 
         if not target_uuid:
             return {
@@ -3537,7 +3624,7 @@ class ITMSWebClient:
                 is_index = "/installation-orders/index" in redirect_url
 
                 try:
-                    from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
+                    from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog, EvidenceImage
                     from django.utils import timezone
                     order_obj = InstallationOrder.objects.filter(itms_order_uuid=order_uuid).first()
                     if order_obj:
@@ -3704,32 +3791,39 @@ class ITMSWebClient:
         if not ident:
             return {"success": False, "error": "Order identifier cannot be empty."}
 
+        from core.vision import normalizer
+        po_m = re.search(r"PO-([A-Za-z0-9]+)-", ident, re.IGNORECASE)
+        extracted_reg = normalizer.canonicalize(po_m.group(1)) if po_m else normalizer.canonicalize(ident)
+        formatted_plate = ""
+        if extracted_reg:
+            pm = re.match(r"^([A-Za-z]{3})(\d{3}[A-Za-z]{1,2})$", extracted_reg)
+            formatted_plate = f"{pm.group(1).upper()} {pm.group(2).upper()}" if pm else extracted_reg
+        clean_search = formatted_plate or ident
+
         # 1. First check if archived (Installed)
-        arch_res = self.fetch_archive_orders(page=1, search_params=ident)
-        for o in arch_res.get("orders", []):
-            order_uuid = o.get("order_key", "")
+        arch_res = self.fetch_archive_orders(page=1, search_params=clean_search)
+        matching_arch = self._find_matching_order(arch_res.get("orders", []), ident=ident, target_reg=extracted_reg)
+        if matching_arch:
+            order_uuid = matching_arch.get("order_key", "")
             return {
                 "success": True,
                 "stage": "STAGE_ARCHIVED",
                 "step": 4,
                 "stage_name": "Completed / Archived (Installed)",
                 "order_uuid": order_uuid,
-                "order_number": o.get("order_number", ""),
-                "registration_number": o.get("registration_number", ""),
-                "vin": o.get("vin", ""),
-                "order_status": o.get("order_status", ""),
+                "order_number": matching_arch.get("order_number", ""),
+                "registration_number": matching_arch.get("registration_number", ""),
+                "vin": matching_arch.get("vin", ""),
+                "order_status": matching_arch.get("order_status", ""),
                 "is_archived": True,
                 "photos_count": 0,
-                "action_url": o.get("action_url", ""),
-                "message": f"Order #{o.get('order_number')} is fully completed and archived (Status: {o.get('order_status')}).",
+                "action_url": matching_arch.get("action_url", ""),
+                "message": f"Order #{matching_arch.get('order_number')} is fully completed and archived (Status: {matching_arch.get('order_status')}).",
             }
 
         # 2. Check active orders table
-        active_res = self.fetch_installation_orders(page=1, search_params=ident, archive=False)
-        active_order = None
-        for o in active_res.get("orders", []):
-            active_order = o
-            break
+        active_res = self.fetch_installation_orders(page=1, search_params=clean_search, archive=False)
+        active_order = self._find_matching_order(active_res.get("orders", []), ident=ident, target_reg=extracted_reg)
 
         target_uuid = active_order.get("order_key", "") if active_order else ""
         if not target_uuid:
@@ -4014,8 +4108,8 @@ class ITMSWebClient:
             csrf_step3 = step3_info.get("csrf_token") if step3_info.get("success") else None
             step3_res = self.submit_confirmation_step3(
                 order_uuid=order_uuid,
-                front_photo_path=front_photo_path,
-                rear_photo_path=rear_photo_path,
+                front_photo_path=actual_front,
+                rear_photo_path=actual_rear,
                 checklist_path=checklist_path,
                 csrf_token=csrf_step3,
                 dry_run=dry_run,

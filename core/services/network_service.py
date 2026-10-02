@@ -149,10 +149,16 @@ def get_local_ipv4_addresses() -> List[Dict[str, Any]]:
     return results
 
 
-def get_mobile_connection_info(port: int = 8000) -> Dict[str, Any]:
+def get_mobile_connection_info(
+    port: int = 8000,
+    ssl_port: int = 8443,
+    use_https: bool = True,
+) -> Dict[str, Any]:
     """
     Returns structured connection metadata for mobile pairing:
-    - primary_url: Best URL to open on the mobile browser
+    - primary_url: Best URL to open on the mobile browser (HTTPS default for camera & QR)
+    - https_primary_url: Direct HTTPS URL (enables mobile camera & QR scanner)
+    - http_primary_url: Standard HTTP URL
     - connection_mode: LAPTOP_HOTSPOT, PHONE_HOTSPOT, or WIFI_LAN
     - connection_badge: Human-readable badge text
     - candidate_urls: List of all valid URLs (for QR display & manual switching)
@@ -164,7 +170,13 @@ def get_mobile_connection_info(port: int = 8000) -> Dict[str, Any]:
     hotspot_detected = any(i.get("is_hotspot") for i in interfaces)
     primary_mode = primary.get("mode", "WIFI_LAN")
 
-    primary_url = f"http://{primary_ip}:{port}/mobile/"
+    active_scheme = "https" if use_https else "http"
+    active_port = ssl_port if use_https else port
+
+    primary_url = f"{active_scheme}://{primary_ip}:{active_port}/mobile/"
+    https_primary_url = f"https://{primary_ip}:{ssl_port}/mobile/"
+    http_primary_url = f"http://{primary_ip}:{port}/mobile/"
+
     candidate_urls = [
         {
             "ip": iface["ip"],
@@ -172,7 +184,9 @@ def get_mobile_connection_info(port: int = 8000) -> Dict[str, Any]:
             "mode": iface.get("mode", "WIFI_LAN"),
             "badge": iface.get("badge", ""),
             "description": iface.get("description", ""),
-            "url": f"http://{iface['ip']}:{port}/mobile/",
+            "url": f"{active_scheme}://{iface['ip']}:{active_port}/mobile/",
+            "https_url": f"https://{iface['ip']}:{ssl_port}/mobile/",
+            "http_url": f"http://{iface['ip']}:{port}/mobile/",
             "is_primary": (iface["ip"] == primary_ip),
             "is_hotspot": iface.get("is_hotspot", False),
             "is_laptop_hotspot": iface.get("is_laptop_hotspot", False),
@@ -185,12 +199,18 @@ def get_mobile_connection_info(port: int = 8000) -> Dict[str, Any]:
         "success": True,
         "primary_ip": primary_ip,
         "primary_url": primary_url,
+        "https_primary_url": https_primary_url,
+        "http_primary_url": http_primary_url,
+        "use_https": use_https,
+        "scheme": active_scheme,
         "connection_mode": primary_mode,
         "connection_badge": primary.get("badge", ""),
         "connection_desc": primary.get("description", ""),
         "is_laptop_hotspot": primary.get("is_laptop_hotspot", False),
         "is_phone_hotspot": primary.get("is_phone_hotspot", False),
         "port": port,
+        "ssl_port": ssl_port,
+        "active_port": active_port,
         "hotspot_detected": hotspot_detected,
         "hotspot_default_ip": WINDOWS_HOTSPOT_DEFAULT_IP,
         "candidate_urls": candidate_urls,

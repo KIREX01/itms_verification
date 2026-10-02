@@ -463,8 +463,11 @@ class DashboardPane(VerticalScroll):
                 pairs_count = batch.ingested_count // 2
 
                 cand_list = "\n".join(f"  • [cyan]{c['ip']}[/cyan] ({c['type']})" for c in net_info.get("candidate_urls", [])[:3])
+                https_url = net_info.get("https_primary_url")
+                https_line = f"🔒 [bold green]Secure Camera (HTTPS):[/bold green] [bold underline green]{https_url}[/bold underline green]\n" if https_url else ""
                 info_text = (
-                    f"[bold yellow]Direct Mobile Companion URL:[/bold yellow]\n[bold underline cyan]{primary_url}[/bold underline cyan]\n\n"
+                    f"[bold yellow]Direct Mobile Companion URL:[/bold yellow]\n[bold underline cyan]{primary_url}[/bold underline cyan]\n"
+                    f"{https_line}\n"
                     f"[bold]Active Network Mode:[/bold] {status_tag}  •  📱 [bold cyan]Phones Connected:[/bold cyan] [bold {dev_color}]{dev_count}/{max_dev}{dev_names_str}[/bold {dev_color}] (Load Protected)\n"
                     f"📦 [bold white]Active Mobile Batch:[/bold white] [bold yellow]{batch.source_label}[/bold yellow] ([cyan]{batch.ingested_count}/{max_batch_photos} photos[/cyan] • {pairs_count}/{max_batch_photos//2} pairs)\n"
                     f"[dim]{desc}[/dim]\n\n"

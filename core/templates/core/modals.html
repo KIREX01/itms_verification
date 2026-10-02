@@ -473,7 +473,7 @@
         <div class="modal-header">
             <div style="display:flex; align-items:center; gap:8px;">
                 <span class="modal-title">📱 Wireless Mobile Camera Connect</span>
-                <span class="badge badge-yellow" id="mobile-modal-hotspot-badge">Zero-Install Web App</span>
+                <span class="badge badge-green" id="mobile-modal-hotspot-badge">🔒 HTTPS Secure Context Active</span>
             </div>
             <button class="modal-close" onclick="closeModal('modal-mobile-connect')">&times;</button>
         </div>
@@ -485,7 +485,7 @@
                     <div id="mobile-qr-container" style="background:#ffffff; padding:12px; border-radius:8px; display:flex; align-items:center; justify-content:center; width:180px; height:180px; box-shadow:0 4px 14px rgba(0,0,0,0.5);">
                         <!-- Dynamic Canvas rendered by qrcode.min.js -->
                     </div>
-                    <span style="font-size:0.72rem; color:var(--ug-text-muted); text-align:center;">Instant pair &bull; Android or iOS</span>
+                    <span style="font-size:0.72rem; color:var(--ug-green); font-weight:700; text-align:center;">🔒 Secure HTTPS • Android &amp; iOS</span>
                 </div>
 
                 <!-- Network Discovery & Instructions -->
@@ -493,7 +493,7 @@
                     <!-- Active Direct URL & Copy Button -->
                     <div class="form-field">
                         <label style="display:flex; justify-content:space-between; align-items:center;">
-                            <span>Direct Mobile Companion URL</span>
+                            <span>Direct Mobile Companion URL (HTTPS)</span>
                             <span id="mobile-copy-status" style="font-size:0.72rem; color:var(--ug-green); display:none;">✓ Copied to clipboard!</span>
                         </label>
                         <div style="display:flex; gap:8px;">
@@ -518,13 +518,13 @@
                     <!-- Two Connection Methods Card -->
                     <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:12px; display:flex; flex-direction:column; gap:8px; font-size:0.78rem;">
                         <div style="display:flex; align-items:center; gap:6px; color:#fff; font-weight:800;">
-                            <span>📶 Connection Options</span>
+                            <span>🔒 Built-in Self-Signed HTTPS (100% Offline)</span>
                         </div>
                         <div style="color:var(--ug-text-muted); line-height:1.4;">
-                            <strong style="color:var(--ug-yellow);">Option 1 (Recommended): Windows Mobile Hotspot</strong><br>
-                            In Windows 10/11, enable <em>Settings &gt; Network &gt; Mobile hotspot</em>. Connect phone to the hotspot Wi-Fi.<br><br>
-                            <strong style="color:#38bdf8;">Option 2: Shared Local Wi-Fi</strong><br>
-                            Ensure laptop and phone are both connected to the same factory or warehouse Wi-Fi network.
+                            <strong style="color:var(--ug-green);">Live Camera &amp; QR Scanning Unlocked:</strong><br>
+                            Modern mobile browsers require HTTPS for camera streaming. When your phone browser shows <em>"Connection not private"</em>, simply tap <strong>Advanced ➔ Proceed</strong>.<br><br>
+                            <strong style="color:var(--ug-yellow);">Wi-Fi / Hotspot Tip:</strong><br>
+                            Ensure your phone is connected to the laptop's Windows Mobile Hotspot (<code style="color:#38bdf8;">192.168.137.1</code>) or shared local Wi-Fi.
                         </div>
                     </div>
 
@@ -535,7 +535,7 @@
                             <span id="modal-batch-capacity-badge" style="color:var(--ug-text-muted); font-family:var(--font-mono); font-weight:700;">Active Batch: 0/200 photos</span>
                         </div>
                         <div id="modal-connected-devices-detail" style="font-size:0.72rem; color:var(--ug-text-dim); line-height:1.4;">
-                            Ready for pairing. Point phone camera at QR code to open Mobile Companion.
+                            Ready for pairing. Point phone camera at QR code to open Mobile Companion in HTTPS mode.
                         </div>
                     </div>
                 </div>
@@ -543,7 +543,7 @@
         </div>
         <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
             <span style="font-size:0.74rem; color:var(--ug-text-dim);">
-                Server listening on all local interfaces (0.0.0.0:8000)
+                Listening on HTTPS (:8443) and HTTP (:8000) for dual-mode access
             </span>
             <div style="display:flex; gap:8px;">
                 <button class="btn btn-secondary" onclick="closeModal('modal-mobile-connect')">Close</button>

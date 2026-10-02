@@ -38,6 +38,16 @@
             </div>
         </header>
 
+        <!-- HTTPS Secure Camera Context Banner -->
+        <div class="network-alert-banner https-alert-banner" id="https-alert-banner" style="display:none; background:#1e293b; border-left:4px solid #eab308; margin-bottom:8px;">
+            <span class="alert-icon">🔒</span>
+            <div class="alert-content" style="flex:1;">
+                <strong id="https-alert-title" style="color:#fde047; font-size:0.82rem;">Switch to HTTPS for Live Camera Scanner</strong>
+                <span id="https-alert-desc" style="display:block; font-size:0.75rem; color:#94a3b8; margin:2px 0 6px 0;">Mobile browsers disable live camera streaming on plain HTTP. Tap to switch to secure port 8443:</span>
+                <a href="#" id="btn-switch-to-https" style="display:inline-block; padding:5px 12px; background:#eab308; color:#0f172a; font-weight:bold; font-size:0.75rem; border-radius:6px; text-decoration:none;">Switch to Secure HTTPS (Port 8443) ➔</a>
+            </div>
+        </div>
+
         <!-- Network / Signal Offline Alert Banner -->
         <div class="network-alert-banner" id="network-alert-banner" style="display:none;">
             <span class="alert-icon">📶</span>

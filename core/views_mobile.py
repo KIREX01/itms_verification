@@ -124,7 +124,14 @@ def api_network_info(request: HttpRequest) -> JsonResponse:
     except (ValueError, TypeError):
         port = 8000
 
-    info = network_service.get_mobile_connection_info(port=port)
+    # Default to HTTPS unless explicitly disabled via ?ssl=0
+    use_https_arg = request.GET.get("https") or request.GET.get("ssl")
+    if use_https_arg is not None:
+        use_https = use_https_arg.lower() not in ("0", "false", "no")
+    else:
+        use_https = True
+
+    info = network_service.get_mobile_connection_info(port=port, use_https=use_https)
     return JsonResponse(info)
 
 

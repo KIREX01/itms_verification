@@ -50,11 +50,20 @@ class TestMobileCompanion:
         assert "ip" in ips[0]
         assert "type" in ips[0]
 
-        info = network_service.get_mobile_connection_info(port=8080)
-        assert info["success"] is True
-        assert info["port"] == 8080
-        assert ":8080/mobile/" in info["primary_url"]
-        assert len(info["candidate_urls"]) > 0
+        # HTTPS mode (Default for secure mobile camera access)
+        info_https = network_service.get_mobile_connection_info(port=8080, ssl_port=8443, use_https=True)
+        assert info_https["success"] is True
+        assert info_https["ssl_port"] == 8443
+        assert "https://" in info_https["primary_url"]
+        assert ":8443/mobile/" in info_https["primary_url"]
+        assert len(info_https["candidate_urls"]) > 0
+
+        # HTTP fallback mode
+        info_http = network_service.get_mobile_connection_info(port=8080, use_https=False)
+        assert info_http["success"] is True
+        assert info_http["port"] == 8080
+        assert "http://" in info_http["primary_url"]
+        assert ":8080/mobile/" in info_http["primary_url"]
 
     def test_api_mobile_ping(self):
         """Tests the low-latency heartbeat / ping endpoint."""

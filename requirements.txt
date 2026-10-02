@@ -5,6 +5,7 @@ python-dotenv>=1.0
 django-environ>=0.11
 requests>=2.31.0
 packaging>=21.3
+cryptography>=41.0.0
 
 # --- Computer vision, Models & OCR ---
 opencv-python-headless>=4.9

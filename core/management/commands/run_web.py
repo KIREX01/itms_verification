@@ -1,23 +1,73 @@
 """
-Management command to launch the ITMS Web Operator Console and auto-open the browser.
+Management command to launch the ITMS Web Operator Console and Mobile Companion.
+Provides built-in, 100% offline self-signed HTTPS support to unlock modern mobile
+browser Secure Context (isSecureContext) for live camera and barcode/QR code scanning.
 
 Usage:
-    python manage.py run_web
-    python manage.py run_web --port 8080 --no-browser
+    python manage.py run_web                     # Dual mode (HTTP on 8000, HTTPS on 8443)
+    python manage.py run_web --ssl              # Primary HTTPS mode on 8443
+    python manage.py run_web --port 8080        # Custom HTTP port
+    python manage.py run_web --ssl-port 9443    # Custom HTTPS port
+    python manage.py run_web --no-ssl           # Plain HTTP only
 """
+import logging
 import os
+import ssl
 import sys
 import threading
 import time
 import webbrowser
+from typing import List
+
+from django.conf import settings
+from django.contrib.staticfiles.handlers import StaticFilesHandler
+from django.core.handlers.wsgi import WSGIHandler
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
+from django.core.servers.basehttp import ThreadedWSGIServer, WSGIRequestHandler
 
-from core.services import config_service
+from core.services import config_service, network_service, ssl_service
+
+logger = logging.getLogger(__name__)
+
+
+class SecureWSGIRequestHandler(WSGIRequestHandler):
+    """WSGI request handler that marks incoming requests as secure HTTPS."""
+
+    def get_environ(self):
+        env = super().get_environ()
+        env["HTTPS"] = "on"
+        env["wsgi.url_scheme"] = "https"
+        return env
+
+
+class SecureThreadedWSGIServer(ThreadedWSGIServer):
+    """Threaded WSGI server wrapping socket with self-signed SSL/TLS context."""
+
+    def __init__(self, server_address, RequestHandlerClass, ssl_context=None, *args, **kwargs):
+        self.ssl_context = ssl_context
+        super().__init__(server_address, RequestHandlerClass, *args, **kwargs)
+        if self.ssl_context:
+            self.socket = self.ssl_context.wrap_socket(self.socket, server_side=True)
+
+    def handle_error(self, request, client_address):
+        """Silently handle transient client SSL handshake resets / browser cancellations."""
+        exc_type, exc_val, _ = sys.exc_info()
+        if exc_type and issubclass(exc_type, (ssl.SSLError, ConnectionResetError, BrokenPipeError)):
+            return
+        super().handle_error(request, client_address)
+
+
+def create_secure_server(bind_host: str, port: int, ssl_context: ssl.SSLContext) -> SecureThreadedWSGIServer:
+    """Creates a configured static-file-serving WSGI server running on HTTPS."""
+    server = SecureThreadedWSGIServer((bind_host, port), SecureWSGIRequestHandler, ssl_context=ssl_context)
+    # StaticFilesHandler serves /static/ assets in development identical to runserver
+    server.set_app(StaticFilesHandler(WSGIHandler()))
+    return server
 
 
 class Command(BaseCommand):
-    help = "Launches the Web Operator Dashboard and automatically opens your default web browser."
+    help = "Launches the Web Operator Dashboard & Mobile Companion with built-in self-signed HTTPS."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -30,7 +80,23 @@ class Command(BaseCommand):
             "--port",
             type=int,
             default=8000,
-            help="Port to run the web server on (default: 8000).",
+            help="HTTP port for the desktop web operator console (default: 8000).",
+        )
+        parser.add_argument(
+            "--ssl",
+            action="store_true",
+            help="Prioritizes HTTPS as the primary desktop entrypoint.",
+        )
+        parser.add_argument(
+            "--ssl-port",
+            type=int,
+            default=8443,
+            help="HTTPS port for the secure mobile scanner (default: 8443).",
+        )
+        parser.add_argument(
+            "--no-ssl",
+            action="store_true",
+            help="Disables the background HTTPS listener (HTTP only).",
         )
         parser.add_argument(
             "--no-browser",
@@ -45,14 +111,16 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         port = options["port"]
+        ssl_port = options.get("ssl_port", 8443)
+        enable_ssl_primary = options.get("ssl", False)
+        no_ssl = options.get("no_ssl", False)
         bind_host = options.get("host", "0.0.0.0")
         no_browser = options["no_browser"]
         noreload = options["noreload"]
-        local_url = f"http://127.0.0.1:{port}/"
 
-        self.stdout.write(self.style.SUCCESS("=" * 65))
-        self.stdout.write(self.style.SUCCESS("  ITMS VERIFICATION COPILOT - WEB OPERATOR CONSOLE"))
-        self.stdout.write(self.style.SUCCESS("=" * 65))
+        self.stdout.write(self.style.SUCCESS("=" * 68))
+        self.stdout.write(self.style.SUCCESS("  ITMS VERIFICATION COPILOT - WEB & MOBILE OPERATOR CONSOLE"))
+        self.stdout.write(self.style.SUCCESS("=" * 68))
 
         # 1. Ensure migrations and initial operator setup
         self.stdout.write("Checking database schema and migrations...")
@@ -63,13 +131,38 @@ class Command(BaseCommand):
         self.stdout.write(f"Active Database: {db_info.get('vendor', 'sqlite').upper()} ({db_info.get('name', 'db.sqlite3')})")
 
         # 2. Network & Mobile Companion discovery
-        from core.services import network_service
-        net_info = network_service.get_mobile_connection_info(port=port)
-        self.stdout.write(self.style.SUCCESS(f"[Mobile] Mobile Companion: {net_info['primary_url']}"))
-        if net_info.get("hotspot_detected"):
-            self.stdout.write(self.style.NOTICE("   [+] Windows Mobile Hotspot detected (192.168.137.1)"))
+        interfaces = network_service.get_local_ipv4_addresses()
+        san_ips: List[str] = [i["ip"] for i in interfaces if i.get("ip")]
 
-        # 3. Timer to auto-launch browser once server is listening
+        # Prepare SSL context if not disabled
+        ssl_context = None
+        if not no_ssl:
+            try:
+                ssl_context = ssl_service.get_ssl_context(san_ips=san_ips)
+            except Exception as ssl_err:
+                self.stdout.write(self.style.WARNING(f"[!] Warning: Could not initialize SSL context: {ssl_err}"))
+
+        net_info = network_service.get_mobile_connection_info(
+            port=port,
+            ssl_port=ssl_port,
+            use_https=(ssl_context is not None),
+        )
+
+        # 3. Display Connection Endpoints
+        desktop_url = f"https://127.0.0.1:{ssl_port}/" if enable_ssl_primary else f"http://127.0.0.1:{port}/"
+        self.stdout.write(self.style.SUCCESS(f"[>] Desktop Console:       {desktop_url}"))
+
+        if ssl_context:
+            self.stdout.write(self.style.SUCCESS(f"[+] Mobile Scanner (HTTPS): {net_info['primary_url']}"))
+            self.stdout.write(self.style.NOTICE("    * Secure Context active: Live Camera & QR scanning unlocked"))
+            self.stdout.write(f"    [i] Plain HTTP fallback:  {net_info['http_primary_url']}")
+        else:
+            self.stdout.write(self.style.NOTICE(f"[i] Mobile Companion:       {net_info['primary_url']}"))
+
+        if net_info.get("hotspot_detected"):
+            self.stdout.write(self.style.NOTICE("    [+] Windows Mobile Hotspot detected (192.168.137.1)"))
+
+        # 4. Timer to auto-launch browser once server is listening
         is_reloader_child = os.environ.get("RUN_MAIN") == "true"
         is_noreload = noreload or ("--noreload" in sys.argv)
         should_open_browser = not no_browser and (is_reloader_child or is_noreload)
@@ -78,28 +171,52 @@ class Command(BaseCommand):
             def _launch_browser():
                 time.sleep(1.0)
                 try:
-                    webbrowser.open(local_url)
+                    webbrowser.open(desktop_url)
                 except Exception as exc:
-                    print(f"Note: Could not open browser automatically: {exc}")
+                    logger.debug("Could not open browser automatically: %s", exc)
 
             threading.Thread(target=_launch_browser, daemon=True).start()
-            self.stdout.write(self.style.NOTICE(f"Opening browser at: {local_url}"))
+            self.stdout.write(self.style.NOTICE(f"Opening browser at: {desktop_url}"))
         elif not no_browser and not is_reloader_child:
-            self.stdout.write(self.style.NOTICE(f"Web server starting at: {local_url}"))
+            self.stdout.write(self.style.NOTICE(f"Web server starting at: {desktop_url}"))
         else:
-            self.stdout.write(f"Web server ready at: {local_url}")
+            self.stdout.write(f"Web server ready at: {desktop_url}")
 
         self.stdout.write("Press Ctrl+C to stop the web server.")
-        self.stdout.write(self.style.SUCCESS("-" * 65))
+        self.stdout.write(self.style.SUCCESS("-" * 68))
 
-        # 4. Start Django Server
+        # 5. Dual-mode background HTTPS listener
+        # Spawn HTTPS server in daemon thread only in active worker process (to prevent reloader conflicts)
+        if ssl_context and not enable_ssl_primary and (is_reloader_child or is_noreload):
+            def _run_https_background():
+                try:
+                    https_server = create_secure_server(bind_host, ssl_port, ssl_context)
+                    https_server.serve_forever()
+                except OSError as os_err:
+                    if getattr(os_err, "winerror", None) == 10048 or "Address already in use" in str(os_err):
+                        pass
+                    else:
+                        logger.warning("[SSL Server] Could not bind HTTPS port %s: %s", ssl_port, os_err)
+                except Exception as exc:
+                    logger.warning("[SSL Server] Error in HTTPS daemon: %s", exc)
+
+            t = threading.Thread(target=_run_https_background, daemon=True, name="ITMS-HTTPS-Listener")
+            t.start()
+
+        # 6. Start Primary Server
         try:
-            call_command(
-                "runserver",
-                f"{bind_host}:{port}",
-                use_reloader=not is_noreload,
-                insecure_serving=True,
-            )
+            if enable_ssl_primary and ssl_context:
+                # Primary server runs directly on HTTPS
+                primary_server = create_secure_server(bind_host, ssl_port, ssl_context)
+                primary_server.serve_forever()
+            else:
+                # Standard HTTP primary server (supports Django auto-reloader)
+                call_command(
+                    "runserver",
+                    f"{bind_host}:{port}",
+                    use_reloader=not is_noreload,
+                    insecure_serving=True,
+                )
         except KeyboardInterrupt:
             self.stdout.write("\nWeb server stopped cleanly.")
             sys.exit(0)

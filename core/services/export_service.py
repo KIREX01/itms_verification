@@ -85,12 +85,9 @@ def export_shift_report(
             front = pair.front_image
             rear = pair.rear_image
 
-            # Extract latest submission token from audit logs if available
-            latest_sub_log = (
-                pair.audit_logs.filter(action=SubmissionAuditLog.Action.SUBMIT)
-                .order_by("-timestamp")
-                .first()
-            )
+            # Extract latest submission token from prefetched audit logs in memory (prevents N+1 DB queries)
+            submit_logs = [log for log in pair.audit_logs.all() if log.action == SubmissionAuditLog.Action.SUBMIT]
+            latest_sub_log = submit_logs[0] if submit_logs else None
             token = (
                 latest_sub_log.simulated_token
                 or latest_sub_log.message

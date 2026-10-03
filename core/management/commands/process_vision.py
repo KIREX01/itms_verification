@@ -139,7 +139,7 @@ class Command(BaseCommand):
                 front_image__isnull=False, rear_image__isnull=False
             ).exclude(
                 verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED
-            )
+            ).select_related("front_image", "rear_image", "order")
             if batch_arg:
                 pair_qs = pair_qs.filter(
                     Q(front_image__batch__batch_id=batch_arg) |
@@ -234,16 +234,15 @@ class Command(BaseCommand):
             status=EvidenceImage.Status.FAILED,
             error_message__icontains="cannot access local variable 'processed'",
         )
-        for img in unbound_err_qs:
-            if img.detected_plate:
-                img.status = EvidenceImage.Status.PLATE_DETECTED
-                img.error_message = ""
-                img.save(update_fields=["status", "error_message"])
-            else:
-                img.status = EvidenceImage.Status.NEW
-                img.error_message = ""
-                img.retry_count = 0
-                img.save(update_fields=["status", "error_message", "retry_count"])
+        unbound_err_qs.filter(detected_plate__gt="").update(
+            status=EvidenceImage.Status.PLATE_DETECTED,
+            error_message="",
+        )
+        unbound_err_qs.filter(Q(detected_plate="") | Q(detected_plate__isnull=True)).update(
+            status=EvidenceImage.Status.NEW,
+            error_message="",
+            retry_count=0,
+        )
 
         # ── Phase 3: Single-Image Vision for Remaining/Unpaired Evidence Images ──
         if options.get("reprocess_all"):

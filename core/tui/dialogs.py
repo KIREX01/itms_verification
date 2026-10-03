@@ -2668,15 +2668,33 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                 plate_category=category,
                 target_date_suffix=self.target_date_suffix,
             )
+            if not res.get("success"):
+                err = res.get("error", "Failed to dispatch plates.")
+                self.notify(f"⛔ {err}", severity="error")
+                return
+
             new_cnt = res.get("newly_dispatched", 0)
             dup_cnt = res.get("duplicate_scans_skipped", 0)
             already_cnt = res.get("already_dispatched", 0)
+            rejected = res.get("rejected_not_on_stock", [])
+            synced = res.get("synced_from_itms", [])
+
             msg = f"✓ Dispatched {new_cnt} {category} plates."
+            if synced:
+                msg += f" ({len(synced)} synced live from ITMS)"
             if dup_cnt > 0 or already_cnt > 0:
                 msg += f" ({dup_cnt} duplicate scans, {already_cnt} already dispatched skipped)"
             self.notify(msg, severity="information")
 
-            self.query_one("#text-dispatch-bulk", TextArea).text = ""
+            if rejected:
+                self.notify(
+                    f"⛔ BLOCKED: {len(rejected)} plate(s) not on ITMS stock ({', '.join(rejected)})",
+                    severity="error",
+                )
+                self.query_one("#text-dispatch-bulk", TextArea).text = "\n".join(rejected)
+            else:
+                self.query_one("#text-dispatch-bulk", TextArea).text = ""
+
             self.query_one("#input-dispatch-single", Input).value = ""
             try:
                 self.query_one("#lbl-dispatch-staged", Static).update("[dim]Staged: 0 plates[/dim]")
@@ -2936,10 +2954,12 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
             content = stock_monitoring_service.export_stock_reconciliation_csv(self.target_date_suffix)
             date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"itms_bond_stock_{self.target_date_suffix}_{date_str}.csv"
-            out_path = os.path.join(settings.BASE_DIR, filename)
+            out_dir = os.path.join(settings.BASE_DIR, "exports")
+            os.makedirs(out_dir, exist_ok=True)
+            out_path = os.path.join(out_dir, filename)
             with open(out_path, "w", encoding="utf-8") as f:
                 f.write(content)
-            self.notify(f"Exported stock report to {filename}!", severity="information")
+            self.notify(f"Exported stock report to exports/{filename}!", severity="information")
         except Exception as exc:
             self.notify(f"Error exporting CSV: {exc}", severity="error")
 

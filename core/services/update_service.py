@@ -164,6 +164,30 @@ class UpdateService:
         return result
 
     @staticmethod
+    def validate_download_url(url: Optional[str]) -> bool:
+        """
+        Validates that a download URL points to an authentic GitHub release or repository archive (CWE-918).
+        Only https:// URLs from github.com and official GitHub CDN hosts are permitted.
+        """
+        if not url or not isinstance(url, str):
+            return False
+        import urllib.parse
+        parsed = urllib.parse.urlparse(url.strip())
+        if parsed.scheme.lower() != "https":
+            return False
+        host = (parsed.hostname or "").lower()
+        trusted_hosts = {
+            "github.com",
+            "api.github.com",
+            "codeload.github.com",
+            "objects.githubusercontent.com",
+            "raw.githubusercontent.com",
+        }
+        if host in trusted_hosts or host.endswith(".github.com") or host.endswith(".githubusercontent.com"):
+            return True
+        return False
+
+    @staticmethod
     def apply_update(download_url: Optional[str] = None) -> Dict[str, Any]:
         """
         Executes a safe in-place upgrade.
@@ -174,6 +198,8 @@ class UpdateService:
         5. Verifies system integrity.
         """
         if download_url:
+            if not UpdateService.validate_download_url(download_url):
+                return {"success": False, "error": f"Untrusted download URL: {download_url}"}
             return UpdateService._apply_zip_update(download_url)
 
         is_git = (PROJECT_ROOT / ".git").is_dir()
@@ -186,6 +212,11 @@ class UpdateService:
     @staticmethod
     def _apply_git_update() -> Dict[str, Any]:
         """Performs non-destructive git pull rebase."""
+        if not shutil.which("git"):
+            return {
+                "success": False,
+                "error": "Git executable is not installed or not found in system PATH.",
+            }
         try:
             # Check for uncommitted changes in tracked files
             status_proc = subprocess.run(
@@ -288,6 +319,9 @@ class UpdateService:
 
         if not download_url:
             download_url = f"https://github.com/{GITHUB_REPO}/archive/refs/heads/main.zip"
+
+        if not UpdateService.validate_download_url(download_url):
+            return {"success": False, "error": f"Untrusted or insecure download URL: {download_url}"}
 
         temp_dir = Path(tempfile.mkdtemp(prefix="itms_update_"))
         zip_path = temp_dir / "release.zip"

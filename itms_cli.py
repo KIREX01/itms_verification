@@ -15,6 +15,7 @@ Usage:
   itms --help, -h     Show this command guide
 """
 import os
+import shutil
 import signal
 import sys
 from pathlib import Path
@@ -30,7 +31,7 @@ if hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
+    except (AttributeError, OSError, ValueError):
         pass
 
 
@@ -185,7 +186,7 @@ def start_daemon(extra_args=None, port=8000):
         log_content = ""
         try:
             log_content = log_file.read_text(encoding="utf-8", errors="replace")[-600:]
-        except Exception:
+        except OSError:
             pass
         print(f"[x] Error: Background Web Console process failed to start (exit code {proc.returncode}).")
         if log_content:
@@ -248,30 +249,49 @@ def stop_server(extra_args=None):
     if sys.platform == "win32":
         import subprocess
         try:
-            ps_cmd = 'powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like \'*run_web*\' } | Select-Object -ExpandProperty ProcessId"'
-            ps_res = subprocess.run(ps_cmd, shell=True, capture_output=True, text=True)
+            ps_args = [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*run_web*' } | Select-Object -ExpandProperty ProcessId"
+            ]
+            ps_res = subprocess.run(ps_args, capture_output=True, text=True, check=False)
             for line in ps_res.stdout.splitlines():
                 line = line.strip()
                 if line.isdigit() and int(line) != os.getpid():
                     subprocess.run(["taskkill", "/F", "/T", "/PID", line], capture_output=True, check=False)
                     stopped = True
-        except Exception:
+        except (subprocess.SubprocessError, OSError):
             pass
 
     # Verify if target port is still listening
-    if is_port_in_use(port):
-        print(f"[*] Releasing port {port}...")
+    try:
+        clean_port = int(port)
+        if not (1 <= clean_port <= 65535):
+            clean_port = 8000
+    except (ValueError, TypeError):
+        clean_port = 8000
+
+    if is_port_in_use(clean_port):
+        print(f"[*] Releasing port {clean_port}...")
         if sys.platform == "win32":
             import subprocess
-            res = subprocess.run(f'netstat -ano | findstr :{port}', shell=True, capture_output=True, text=True)
-            for line in res.stdout.splitlines():
-                parts = line.strip().split()
-                if len(parts) >= 5 and "LISTENING" in parts:
-                    proc_pid = parts[-1]
-                    if proc_pid.isdigit() and int(proc_pid) != os.getpid():
-                        subprocess.run(["taskkill", "/F", "/T", "/PID", proc_pid], capture_output=True, check=False)
-                        stopped = True
-        print(f"[+] Port {port} released.")
+            try:
+                res = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, check=False)
+                target_suffix = f":{clean_port}"
+                for line in res.stdout.splitlines():
+                    parts = line.strip().split()
+                    if len(parts) >= 5 and "LISTENING" in parts:
+                        local_addr = parts[1]
+                        if local_addr.endswith(target_suffix):
+                            proc_pid = parts[-1]
+                            if proc_pid.isdigit() and int(proc_pid) != os.getpid():
+                                subprocess.run(["taskkill", "/F", "/T", "/PID", proc_pid], capture_output=True, check=False)
+                                stopped = True
+            except (subprocess.SubprocessError, OSError):
+                pass
+        print(f"[+] Port {clean_port} released.")
     elif stopped:
         print("[+] ITMS Web server stopped cleanly.")
     else:
@@ -339,7 +359,7 @@ def run_update(extra_args=None):
     url = None
     if extra_args:
         for a in extra_args:
-            if a.startswith("http://") or a.startswith("https://"):
+            if a.startswith(("http://", "https://")):
                 url = a
                 break
     try:
@@ -352,8 +372,11 @@ def run_update(extra_args=None):
             call_command("check_updates", apply=True)
     except Exception as exc:
         print(f"[*] Checking updates via git pull: {exc}")
-        import subprocess
-        subprocess.run(["git", "pull", "--rebase", "origin", "main"], cwd=PROJECT_ROOT, check=False)
+        if shutil.which("git"):
+            import subprocess
+            subprocess.run(["git", "pull", "--rebase", "origin", "main"], cwd=PROJECT_ROOT, check=False)
+        else:
+            print("[*] Git CLI not found in environment; skipped git pull.")
 
     # Ensure dependencies and bootstrap run in a fresh child process
     py_exe = get_python_exe()
@@ -379,7 +402,7 @@ def run_uninstall(extra_args=None):
         cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(uninstall_ps1)]
         if extra_args:
             cmd.extend(extra_args)
-        subprocess.run(cmd)
+        subprocess.run(cmd, check=False)
     else:
         uninstall_sh = PROJECT_ROOT / "uninstall.sh"
         if not uninstall_sh.is_file():
@@ -388,7 +411,7 @@ def run_uninstall(extra_args=None):
         cmd = ["bash", str(uninstall_sh)]
         if extra_args:
             cmd.extend(extra_args)
-        subprocess.run(cmd)
+        subprocess.run(cmd, check=False)
 
 
 def run_manage(args):
@@ -417,7 +440,7 @@ def main():
         try:
             from core.version import __version__
             print(f"ITMS Verification Copilot v{__version__}")
-        except Exception:
+        except (ImportError, AttributeError):
             print("ITMS Verification Copilot v1.0.6")
         return
 

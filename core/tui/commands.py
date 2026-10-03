@@ -93,7 +93,7 @@ class ITMSCommandProvider(Provider):
             ("Navigate: REVIEW (Tab 4)", app.action_tab_queue, "Switch to Review Queue tab"),
             ("Navigate: AUDIT (Tab 5)", app.action_tab_history, "Switch to Audit & History tab"),
             ("Navigate: REPORTS (Tab 6)", app.action_tab_reports, "Switch to Reports tab for shift metrics, totals, kit breakdowns, and export"),
-            ("Navigate: SETTINGS (Tab 7)", app.action_tab_settings, "Switch to Settings tab for safety guardrails, OCR engines, and developer options"),
+            ("Navigate: System Settings & Config (Tab 7)", app.action_tab_settings, "Switch to Settings tab for safety guardrails, OCR engines, and developer options"),
             
             # 6. Filters & Storage
             ("Filter: Cycle History Status Filter [F]", app.action_cycle_filter, "Toggle between All, Submitted, Failed, and Audit Logs"),

@@ -984,11 +984,30 @@ async function syncStockScansToServer() {
         });
         const data = await resp.json();
         if (data.success) {
-            alert(`✓ Success: Recorded ${q.length} plates for ${subMode} (${category})!`);
-            MobileState.stock.queue = [];
+            let msg = `✓ Success: Recorded ${data.newly_dispatched !== undefined ? data.newly_dispatched : q.length} plates for ${subMode} (${category})!`;
+            if (data.synced_from_itms && data.synced_from_itms.length > 0) {
+                msg += `\n(${data.synced_from_itms.length} kit(s) verified & synced from ITMS)`;
+            }
+            if (data.rejected_not_on_stock && data.rejected_not_on_stock.length > 0) {
+                msg += `\n\n⛔ BLOCKED (${data.rejected_not_on_stock.length} NOT ON ITMS STOCK):\n` +
+                       data.rejected_not_on_stock.join(", ") +
+                       "\nKits not on stock cannot be taken out!";
+                MobileState.stock.queue = data.rejected_not_on_stock;
+            } else {
+                MobileState.stock.queue = [];
+            }
+            alert(msg);
             renderStockQueueList();
         } else {
-            alert(`Server error: ${data.error || "Unknown"}`);
+            let errMsg = data.error || "Unknown server error";
+            if (data.rejected_not_on_stock && data.rejected_not_on_stock.length > 0) {
+                errMsg = `⛔ DISPATCH BLOCKED - NOT ON ITMS STOCK:\n` +
+                         `Kits not on stock cannot be taken out:\n` +
+                         data.rejected_not_on_stock.join(", ");
+                MobileState.stock.queue = data.rejected_not_on_stock;
+                renderStockQueueList();
+            }
+            alert(errMsg);
         }
     } catch (err) {
         alert(`Network connection error: ${err.message}`);

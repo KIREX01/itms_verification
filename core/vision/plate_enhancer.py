@@ -144,54 +144,62 @@ def enhance_whole_image(
         output_path = image_path
 
     try:
-        img = Image.open(image_path)
-        img = ImageOps.exif_transpose(img)
-        img = img.convert("RGB")
+        with Image.open(image_path) as raw_img:
+            transposed = ImageOps.exif_transpose(raw_img)
+            img = transposed.convert("RGB")
+            if transposed is not raw_img:
+                transposed.close()
     except Exception as exc:
         logger.warning("enhance_whole_image: cannot open %s: %s", image_path, exc)
         return image_path  # return original path unchanged
 
-    # 1. Autocontrast
-    img = ImageOps.autocontrast(img, cutoff=0.5)
-
-    # 2. Dynamic contrast scaling
-    gray_arr = np.array(img.convert("L"), dtype=np.float32)
-    std_dev = float(np.std(gray_arr))
-
-    if std_dev > 60:
-        contrast_factor = 1.05
-    elif std_dev < 30:
-        contrast_factor = 1.25
-    else:
-        contrast_factor = 1.12
-
-    img = ImageEnhance.Contrast(img).enhance(contrast_factor)
-
-    # 3. Enhance Color (Vibrance/Saturation)
-    img = ImageEnhance.Color(img).enhance(saturation_factor)
-
-    # 4. Enhance Sharpness
-    img = ImageEnhance.Sharpness(img).enhance(sharpness_factor)
-
-    # 5. Dynamic Brightness
-    mean_brightness = float(np.mean(gray_arr))
-    if mean_brightness < 90:
-        brightness_factor = 1.12
-    elif mean_brightness > 180:
-        brightness_factor = 0.92
-    else:
-        brightness_factor = 1.0
-
-    if brightness_factor != 1.0:
-        img = ImageEnhance.Brightness(img).enhance(brightness_factor)
-
     try:
+        # 1. Autocontrast
+        img = ImageOps.autocontrast(img, cutoff=0.5)
+
+        # 2. Dynamic contrast scaling
+        gray_img = img.convert("L")
+        gray_arr = np.array(gray_img, dtype=np.float32)
+        gray_img.close()
+        std_dev = float(np.std(gray_arr))
+
+        if std_dev > 60:
+            contrast_factor = 1.05
+        elif std_dev < 30:
+            contrast_factor = 1.25
+        else:
+            contrast_factor = 1.12
+
+        img = ImageEnhance.Contrast(img).enhance(contrast_factor)
+
+        # 3. Enhance Color (Vibrance/Saturation)
+        img = ImageEnhance.Color(img).enhance(saturation_factor)
+
+        # 4. Enhance Sharpness
+        img = ImageEnhance.Sharpness(img).enhance(sharpness_factor)
+
+        # 5. Dynamic Brightness
+        mean_brightness = float(np.mean(gray_arr))
+        del gray_arr
+
+        if mean_brightness < 90:
+            brightness_factor = 1.12
+        elif mean_brightness > 180:
+            brightness_factor = 0.92
+        else:
+            brightness_factor = 1.0
+
+        if brightness_factor != 1.0:
+            img = ImageEnhance.Brightness(img).enhance(brightness_factor)
+
         img.save(output_path, quality=95)
         logger.debug("Enhanced image saved to %s (contrast=%.2f, brightness=%.2f)",
                       output_path, contrast_factor, brightness_factor)
     except Exception as exc:
         logger.warning("enhance_whole_image: save failed for %s: %s", output_path, exc)
         return image_path
+    finally:
+        img.close()
 
     return output_path
 

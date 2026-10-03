@@ -260,32 +260,63 @@ def submit_approved_pairs(
     If retry_failed=True, resets complete FAILED pairs to APPROVED.
     """
     if retry_failed:
-        failed_candidates = VehicleInstallationPair.objects.filter(
+        failed_candidates = list(VehicleInstallationPair.objects.filter(
             verification_status=VehicleInstallationPair.VerificationStatus.FAILED,
             is_complete=True,
             order__isnull=False,
-        )
-        for pair in failed_candidates:
-            pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
-            pair.save(update_fields=["verification_status"])
-            if pair.order:
-                pair.order.status = InstallationOrder.Status.PENDING
-                pair.order.save(update_fields=["status"])
-            _log(pair, SubmissionAuditLog.Action.OPERATOR_APPROVE, SubmissionAuditLog.ResultStatus.INFO,
-                 "Reset from FAILED to APPROVED for retry submission.", operator=operator)
+        ).select_related("order"))
+        if failed_candidates:
+            op_user = operator if (operator and getattr(operator, "is_authenticated", False)) else None
+            op_name = getattr(op_user, "username", str(operator)) if operator else "System"
+            logs_to_create = []
+            orders_to_update = set()
+            now = timezone.now()
+            for pair in failed_candidates:
+                pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
+                if pair.order and pair.order.status != InstallationOrder.Status.PENDING:
+                    pair.order.status = InstallationOrder.Status.PENDING
+                    orders_to_update.add(pair.order)
+                logs_to_create.append(SubmissionAuditLog(
+                    pair=pair,
+                    action=SubmissionAuditLog.Action.OPERATOR_APPROVE,
+                    result=SubmissionAuditLog.ResultStatus.INFO,
+                    message="Reset from FAILED to APPROVED for retry submission.",
+                    operator=op_user,
+                    operator_username=op_name,
+                    timestamp=now,
+                ))
+            with transaction.atomic():
+                VehicleInstallationPair.objects.bulk_update(failed_candidates, ["verification_status"], batch_size=200)
+                if orders_to_update:
+                    InstallationOrder.objects.bulk_update(list(orders_to_update), ["status"], batch_size=200)
+                SubmissionAuditLog.objects.bulk_create(logs_to_create, batch_size=200)
 
     if auto_approve:
-        candidates = VehicleInstallationPair.objects.filter(
+        candidates = list(VehicleInstallationPair.objects.filter(
             verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW,
             is_complete=True,
             match_type__in=[VehicleInstallationPair.MatchType.EXACT, VehicleInstallationPair.MatchType.FUZZY],
             order__isnull=False,
-        )
-        for pair in candidates:
-            pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
-            pair.save(update_fields=["verification_status"])
-            _log(pair, SubmissionAuditLog.Action.OPERATOR_APPROVE, SubmissionAuditLog.ResultStatus.INFO,
-                 "Auto-approved by --auto-approve batch run (high-confidence match).", operator=operator)
+        ))
+        if candidates:
+            op_user = operator if (operator and getattr(operator, "is_authenticated", False)) else None
+            op_name = getattr(op_user, "username", str(operator)) if operator else "System"
+            logs_to_create = []
+            now = timezone.now()
+            for pair in candidates:
+                pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
+                logs_to_create.append(SubmissionAuditLog(
+                    pair=pair,
+                    action=SubmissionAuditLog.Action.OPERATOR_APPROVE,
+                    result=SubmissionAuditLog.ResultStatus.INFO,
+                    message="Auto-approved by --auto-approve batch run (high-confidence match).",
+                    operator=op_user,
+                    operator_username=op_name,
+                    timestamp=now,
+                ))
+            with transaction.atomic():
+                VehicleInstallationPair.objects.bulk_update(candidates, ["verification_status"], batch_size=200)
+                SubmissionAuditLog.objects.bulk_create(logs_to_create, batch_size=200)
 
     outcomes = []
     approved_qs = list(

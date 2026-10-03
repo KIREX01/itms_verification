@@ -183,81 +183,110 @@ class OrderSyncService:
 
         # 3. Synchronize active orders to database
         seen_order_numbers: Set[str] = set()
-        created_count = 0
-        updated_count = 0
+        parsed_orders: Dict[str, Dict[str, Any]] = {}
+
+        now_dt = timezone.now()
+        session_obj = getattr(getattr(self.client, "session_store", None), "session", None)
+        email_val = getattr(session_obj, "user_email", "")
+        uuid_val = getattr(session_obj, "user_uuid", "")
+        curr_email = email_val.strip().lower() if isinstance(email_val, str) else ""
+        curr_uuid = str(uuid_val) if isinstance(uuid_val, str) else ""
+
+        for o in all_active_orders:
+            order_num = o.get("order_number", "").strip()
+            reg_num = o.get("registration_number", "").strip()
+            if not order_num or not reg_num:
+                continue
+
+            seen_order_numbers.add(order_num)
+            canonical_reg = normalizer.canonicalize(reg_num) or reg_num.replace(" ", "").upper()
+            order_status = o.get("order_status") or o.get("status", "")
+            action_url = o.get("action_url", "")
+
+            # Detect stage from action URL or status
+            if "/confirmation" in action_url:
+                stage = "STAGE_3_CONFIRMATION"
+            elif "/approve" in action_url:
+                stage = "STAGE_2_APPROVE"
+            elif "/installation" in action_url:
+                stage = "STAGE_1_INSTALLATION"
+            else:
+                stage = "STAGE_UNKNOWN"
+
+            is_installed = "installed" in order_status.lower()
+            is_arch = is_installed
+            is_act = not is_installed
+
+            if is_installed:
+                local_status = InstallationOrder.Status.INSTALLED
+            elif "approve" in order_status.lower() or stage in ("STAGE_2_APPROVE", "STAGE_3_CONFIRMATION"):
+                local_status = InstallationOrder.Status.SUBMITTED
+            else:
+                local_status = InstallationOrder.Status.PENDING
+
+            defaults = {
+                "registration_number": canonical_reg,
+                "sales_order": o.get("sales_order", ""),
+                "service_type": o.get("service_type", ""),
+                "vin": o.get("vin", ""),
+                "old_registration_number": o.get("old_registration_number", ""),
+                "warehouse_name": o.get("warehouse", ""),
+                "warehouse_id": o.get("warehouse_id", ""),
+                "order_status": order_status,
+                "registration_status": o.get("registration_status", ""),
+                "installation_officer": o.get("officer", ""),
+                "installation_date": o.get("installation_date", ""),
+                "itms_order_uuid": o.get("order_key", ""),
+                "itms_action_url": action_url,
+                "is_archived": is_arch,
+                "is_active_on_itms": is_act,
+                "itms_stage": stage,
+                "status": local_status,
+                "last_synced_at": now_dt,
+            }
+            if curr_email:
+                defaults["account_email"] = curr_email
+            if curr_uuid:
+                defaults["account_uuid"] = curr_uuid
+
+            parsed_orders[order_num] = defaults
+
+        # Preload existing orders in one single query to eliminate N+1 DB operations
+        existing_orders = {
+            ord_obj.order_number: ord_obj
+            for ord_obj in InstallationOrder.objects.filter(order_number__in=parsed_orders.keys())
+        }
+
+        orders_to_create = []
+        orders_to_update = []
+        update_fields = [
+            "registration_number", "sales_order", "service_type", "vin", "old_registration_number",
+            "warehouse_name", "warehouse_id", "order_status", "registration_status",
+            "installation_officer", "installation_date", "itms_order_uuid", "itms_action_url",
+            "is_archived", "is_active_on_itms", "itms_stage", "status", "last_synced_at"
+        ]
+        if curr_email:
+            update_fields.append("account_email")
+        if curr_uuid:
+            update_fields.append("account_uuid")
+
+        for order_num, defaults in parsed_orders.items():
+            if order_num in existing_orders:
+                ord_obj = existing_orders[order_num]
+                for k, v in defaults.items():
+                    setattr(ord_obj, k, v)
+                orders_to_update.append(ord_obj)
+            else:
+                orders_to_create.append(InstallationOrder(order_number=order_num, **defaults))
 
         with transaction.atomic():
-            for o in all_active_orders:
-                order_num = o.get("order_number", "").strip()
-                reg_num = o.get("registration_number", "").strip()
-                if not order_num or not reg_num:
-                    continue
+            if orders_to_create:
+                InstallationOrder.objects.bulk_create(orders_to_create, batch_size=200)
+            if orders_to_update:
+                InstallationOrder.objects.bulk_update(orders_to_update, update_fields, batch_size=200)
 
-                seen_order_numbers.add(order_num)
-                canonical_reg = normalizer.canonicalize(reg_num) or reg_num.replace(" ", "").upper()
-                order_status = o.get("order_status") or o.get("status", "")
-                action_url = o.get("action_url", "")
-
-                # Detect stage from action URL or status
-                if "/confirmation" in action_url:
-                    stage = "STAGE_3_CONFIRMATION"
-                elif "/approve" in action_url:
-                    stage = "STAGE_2_APPROVE"
-                elif "/installation" in action_url:
-                    stage = "STAGE_1_INSTALLATION"
-                else:
-                    stage = "STAGE_UNKNOWN"
-
-                is_installed = "installed" in order_status.lower()
-                is_arch = is_installed
-                is_act = not is_installed
-
-                if is_installed:
-                    local_status = InstallationOrder.Status.INSTALLED
-                elif "approve" in order_status.lower() or stage in ("STAGE_2_APPROVE", "STAGE_3_CONFIRMATION"):
-                    local_status = InstallationOrder.Status.SUBMITTED
-                else:
-                    local_status = InstallationOrder.Status.PENDING
-
-                defaults = {
-                    "registration_number": canonical_reg,
-                    "sales_order": o.get("sales_order", ""),
-                    "service_type": o.get("service_type", ""),
-                    "vin": o.get("vin", ""),
-                    "old_registration_number": o.get("old_registration_number", ""),
-                    "warehouse_name": o.get("warehouse", ""),
-                    "warehouse_id": o.get("warehouse_id", ""),
-                    "order_status": order_status,
-                    "registration_status": o.get("registration_status", ""),
-                    "installation_officer": o.get("officer", ""),
-                    "installation_date": o.get("installation_date", ""),
-                    "itms_order_uuid": o.get("order_key", ""),
-                    "itms_action_url": action_url,
-                    "is_archived": is_arch,
-                    "is_active_on_itms": is_act,
-                    "itms_stage": stage,
-                    "status": local_status,
-                    "last_synced_at": timezone.now(),
-                }
-
-                session_obj = getattr(getattr(self.client, "session_store", None), "session", None)
-                email_val = getattr(session_obj, "user_email", "")
-                uuid_val = getattr(session_obj, "user_uuid", "")
-                curr_email = email_val.strip().lower() if isinstance(email_val, str) else ""
-                curr_uuid = str(uuid_val) if isinstance(uuid_val, str) else ""
-                if curr_email:
-                    defaults["account_email"] = curr_email
-                if curr_uuid:
-                    defaults["account_uuid"] = curr_uuid
-
-                obj, was_created = InstallationOrder.objects.update_or_create(
-                    order_number=order_num,
-                    defaults=defaults,
-                )
-                if was_created:
-                    created_count += 1
-                else:
-                    updated_count += 1
+        created_count = len(orders_to_create)
+        updated_count = len(orders_to_update)
 
         # 4. Detect Orders that Disappeared from Active Index (Completed / Uploaded)
         # Only run if we actually fetched ALL pages of the active index without early pagination termination
@@ -313,10 +342,13 @@ class OrderSyncService:
 
                         # Cross-verify and mark any matching vehicle installation pairs as SUBMITTED
                         # Prevents local operators from attempting to submit photos to an already closed order!
-                        pairs = VehicleInstallationPair.objects.filter(
+                        pairs = list(VehicleInstallationPair.objects.filter(
                             Q(order=dis_order) | Q(registration_number_detected=dis_order.registration_number)
-                        )
+                        ).select_related("front_image", "rear_image"))
                         now = timezone.now()
+                        pairs_to_update = []
+                        images_to_update = []
+                        audit_logs_to_create = []
                         for pair in pairs:
                             if pair.verification_status != VehicleInstallationPair.VerificationStatus.SUBMITTED:
                                 pair.verification_status = VehicleInstallationPair.VerificationStatus.SUBMITTED
@@ -328,15 +360,15 @@ class OrderSyncService:
                                     f"Order #{dis_order.order_number} closed on ITMS {closer_str}{dt_str}. "
                                     f"Local evidence verified and finalized in archive."
                                 ).strip()
-                                pair.save(update_fields=["verification_status", "order", "submitted_at", "operator_note"])
+                                pairs_to_update.append(pair)
 
                                 for img in (pair.front_image, pair.rear_image):
                                     if img and img.status != EvidenceImage.Status.SUBMITTED:
                                         img.status = EvidenceImage.Status.SUBMITTED
                                         img.submitted_at = img.submitted_at or now
-                                        img.save(update_fields=["status", "submitted_at"])
+                                        images_to_update.append(img)
 
-                                SubmissionAuditLog.objects.create(
+                                audit_logs_to_create.append(SubmissionAuditLog(
                                     pair=pair,
                                     action=SubmissionAuditLog.Action.ARCHIVE_VERIFY,
                                     result=SubmissionAuditLog.ResultStatus.SUCCESS,
@@ -344,7 +376,22 @@ class OrderSyncService:
                                         f"Order #{dis_order.order_number} verified completed in ITMS Archive "
                                         f"({closer_str}{dt_str}). Local pair marked SUBMITTED."
                                     ),
-                                )
+                                ))
+
+                        if pairs_to_update:
+                            VehicleInstallationPair.objects.bulk_update(
+                                pairs_to_update,
+                                ["verification_status", "order", "submitted_at", "operator_note"],
+                                batch_size=200,
+                            )
+                        if images_to_update:
+                            EvidenceImage.objects.bulk_update(
+                                images_to_update,
+                                ["status", "submitted_at"],
+                                batch_size=200,
+                            )
+                        if audit_logs_to_create:
+                            SubmissionAuditLog.objects.bulk_create(audit_logs_to_create, batch_size=200)
 
                     disappeared_count += 1
 
@@ -412,12 +459,13 @@ class OrderSyncService:
         target_dt = parse_target_date(target_date)
         target_dt_str = target_dt.strftime("%d.%m.%Y")
         target_dt_compact = target_dt.strftime("%d%m%y")
+        search_filter = str(target_date).strip() if (target_date and str(target_date).strip().upper() not in ("TODAY", "ALL", "")) else None
 
         page = 1
         reached_prior_date = False
 
         while page <= max_pages:
-            fetch_res = self.client.fetch_installation_orders(page=page, archive=True)
+            fetch_res = self.client.fetch_installation_orders(page=page, search_params=search_filter, archive=True)
             if not fetch_res.get("success"):
                 if page == 1:
                     return {"success": False, "error": fetch_res.get("error", "Archive fetch failed")}

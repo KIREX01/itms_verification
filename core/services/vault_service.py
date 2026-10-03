@@ -92,36 +92,60 @@ def set_vault_root(new_path: Union[str, Path]) -> Path:
 def resolve_vault_path(rel_or_abs: Union[str, Path]) -> Path:
     """
     Safely resolves an EvidenceImage vault_file path to an absolute path on disk,
-    checking active vault_root, MEDIA_ROOT, and absolute paths.
+    checking active vault_root, MEDIA_ROOT, and absolute paths with strict path traversal guards (CWE-22).
     """
+    vault_root = get_vault_root().resolve()
     if not rel_or_abs:
-        return get_vault_root()
+        return vault_root
 
-    p = Path(rel_or_abs)
-    if p.is_absolute() and p.exists():
-        return p
+    raw_str = str(rel_or_abs).strip()
+    if not raw_str or "\x00" in raw_str:
+        return vault_root
 
-    vault_root = get_vault_root()
-    clean_str = str(rel_or_abs).replace("\\", "/").lstrip("/")
+    media_root = Path(getattr(settings, "MEDIA_ROOT", vault_root.parent)).resolve()
 
-    # Check 1: direct in active vault root
-    direct_vault = vault_root / clean_str
-    if direct_vault.exists():
-        return direct_vault
+    p = Path(raw_str)
+    if p.is_absolute():
+        try:
+            resolved_p = p.resolve()
+            if resolved_p.exists() and (resolved_p.is_relative_to(vault_root) or resolved_p.is_relative_to(media_root)):
+                return resolved_p
+        except (ValueError, OSError):
+            pass
 
-    # Check 2: strip 'vault/' prefix if path has it
+    clean_str = raw_str.replace("\\", "/").strip("/")
+    # Disallow path traversal sequences
+    if ".." in clean_str.split("/"):
+        return vault_root
+
+    # Candidate resolution within allowed roots
+    candidates = []
+    # Check 1: strip 'vault/' prefix if path has it
     if clean_str.startswith("vault/"):
-        sub = clean_str[6:]
-        sub_vault = vault_root / sub
-        if sub_vault.exists():
-            return sub_vault
-
+        sub = clean_str[6:].lstrip("/")
+        candidates.append((vault_root / sub, vault_root))
+    # Check 2: direct in active vault root
+    candidates.append((vault_root / clean_str, vault_root))
     # Check 3: fallback to Django settings.MEDIA_ROOT
-    media_path = Path(settings.MEDIA_ROOT) / clean_str
-    if media_path.exists():
-        return media_path
+    candidates.append((media_root / clean_str, media_root))
 
-    return direct_vault
+    for candidate, base_dir in candidates:
+        try:
+            resolved_cand = candidate.resolve()
+            if resolved_cand.is_relative_to(base_dir) and resolved_cand.exists():
+                return resolved_cand
+        except (ValueError, OSError):
+            continue
+
+    # Default fallback within vault_root
+    try:
+        fallback = (vault_root / clean_str).resolve()
+        if fallback.is_relative_to(vault_root):
+            return fallback
+    except (ValueError, OSError):
+        pass
+
+    return vault_root
 
 
 def get_batch_vault_dir(batch: Optional[IngestionBatch] = None) -> Path:
@@ -249,22 +273,28 @@ def generate_thumbnails(vault_abs_path: Union[str, Path]) -> Tuple[str, str]:
 
     try:
         with Image.open(src_path) as img:
-            if img.mode in ("RGBA", "LA", "P"):
-                rgb_img = img.convert("RGB")
-            else:
-                rgb_img = img
+            rgb_img = img.convert("RGB") if img.mode in ("RGBA", "LA", "P") else img
+            try:
+                # 1. Medium Preview (640x480 max bounds)
+                if not preview_path.exists():
+                    preview = rgb_img.copy()
+                    try:
+                        preview.thumbnail((640, 480), Image.Resampling.LANCZOS)
+                        preview.save(preview_path, format="WEBP", quality=80, method=4)
+                    finally:
+                        preview.close()
 
-            # 1. Medium Preview (640x480 max bounds)
-            if not preview_path.exists():
-                preview = rgb_img.copy()
-                preview.thumbnail((640, 480), Image.Resampling.LANCZOS)
-                preview.save(preview_path, format="WEBP", quality=80, method=4)
-
-            # 2. Small Thumbnail (160x120 max bounds)
-            if not thumb_path.exists():
-                thumb = rgb_img.copy()
-                thumb.thumbnail((160, 120), Image.Resampling.BILINEAR)
-                thumb.save(thumb_path, format="WEBP", quality=75, method=2)
+                # 2. Small Thumbnail (160x120 max bounds)
+                if not thumb_path.exists():
+                    thumb = rgb_img.copy()
+                    try:
+                        thumb.thumbnail((160, 120), Image.Resampling.BILINEAR)
+                        thumb.save(thumb_path, format="WEBP", quality=75, method=2)
+                    finally:
+                        thumb.close()
+            finally:
+                if rgb_img is not img:
+                    rgb_img.close()
 
         try:
             thumb_rel = str(thumb_path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
@@ -306,6 +336,7 @@ def ingest_from_disk(
     path: Union[str, Path],
     batch: Optional[IngestionBatch] = None,
     orientation_override: Optional[str] = None,
+    update_batch: bool = True,
 ) -> Tuple[Optional[EvidenceImage], str]:
     """
     Ingests a photo from local disk into the vault.
@@ -318,7 +349,8 @@ def ingest_from_disk(
         if batch:
             batch.total_files += 1
             batch.failed_count += 1
-            batch.save(update_fields=["total_files", "failed_count"])
+            if update_batch:
+                batch.save(update_fields=["total_files", "failed_count"])
         return None, "INVALID_EXT"
 
     try:
@@ -327,7 +359,8 @@ def ingest_from_disk(
         if batch:
             batch.total_files += 1
             batch.failed_count += 1
-            batch.save(update_fields=["total_files", "failed_count"])
+            if update_batch:
+                batch.save(update_fields=["total_files", "failed_count"])
         return None, "READ_ERROR"
 
     # Deduplication check
@@ -336,7 +369,8 @@ def ingest_from_disk(
         if batch:
             batch.total_files += 1
             batch.duplicate_count += 1
-            batch.save(update_fields=["total_files", "duplicate_count"])
+            if update_batch:
+                batch.save(update_fields=["total_files", "duplicate_count"])
         if orientation_override and existing.orientation == EvidenceImage.Orientation.UNKNOWN:
             clean_orient = orientation_override.upper()
             if clean_orient in (EvidenceImage.Orientation.FRONT, EvidenceImage.Orientation.REAR):
@@ -366,7 +400,8 @@ def ingest_from_disk(
         if batch:
             batch.total_files += 1
             batch.duplicate_count += 1
-            batch.save(update_fields=["total_files", "duplicate_count"])
+            if update_batch:
+                batch.save(update_fields=["total_files", "duplicate_count"])
         if orientation_override and existing_final.orientation == EvidenceImage.Orientation.UNKNOWN:
             clean_orient = orientation_override.upper()
             if clean_orient in (EvidenceImage.Orientation.FRONT, EvidenceImage.Orientation.REAR):
@@ -425,13 +460,15 @@ def ingest_from_disk(
         if batch:
             batch.total_files += 1
             batch.duplicate_count += 1
-            batch.save(update_fields=["total_files", "duplicate_count"])
+            if update_batch:
+                batch.save(update_fields=["total_files", "duplicate_count"])
         return existing_dup, "DUPLICATE_SKIPPED"
 
     if batch:
         batch.total_files += 1
         batch.ingested_count += 1
-        batch.save(update_fields=["total_files", "ingested_count"])
+        if update_batch:
+            batch.save(update_fields=["total_files", "ingested_count"])
 
     return image, "INGESTED"
 
@@ -440,6 +477,7 @@ def ingest_uploaded_file(
     uploaded_file,
     batch: Optional[IngestionBatch] = None,
     orientation_override: Optional[str] = None,
+    update_batch: bool = True,
 ) -> Tuple[Optional[EvidenceImage], str]:
     """
     Ingests an in-memory or temporary UploadedFile (from Django request.FILES).
@@ -452,7 +490,8 @@ def ingest_uploaded_file(
         if batch:
             batch.total_files += 1
             batch.failed_count += 1
-            batch.save(update_fields=["total_files", "failed_count"])
+            if update_batch:
+                batch.save(update_fields=["total_files", "failed_count"])
         return None, "INVALID_EXT"
 
     try:
@@ -461,7 +500,8 @@ def ingest_uploaded_file(
         if batch:
             batch.total_files += 1
             batch.failed_count += 1
-            batch.save(update_fields=["total_files", "failed_count"])
+            if update_batch:
+                batch.save(update_fields=["total_files", "failed_count"])
         return None, "READ_ERROR"
 
     existing = EvidenceImage.objects.filter(file_hash=file_hash).first()
@@ -469,7 +509,8 @@ def ingest_uploaded_file(
         if batch:
             batch.total_files += 1
             batch.duplicate_count += 1
-            batch.save(update_fields=["total_files", "duplicate_count"])
+            if update_batch:
+                batch.save(update_fields=["total_files", "duplicate_count"])
         if orientation_override and existing.orientation == EvidenceImage.Orientation.UNKNOWN:
             clean_orient = orientation_override.upper()
             if clean_orient in (EvidenceImage.Orientation.FRONT, EvidenceImage.Orientation.REAR):
@@ -502,7 +543,8 @@ def ingest_uploaded_file(
         if batch:
             batch.total_files += 1
             batch.duplicate_count += 1
-            batch.save(update_fields=["total_files", "duplicate_count"])
+            if update_batch:
+                batch.save(update_fields=["total_files", "duplicate_count"])
         if orientation_override and existing_final.orientation == EvidenceImage.Orientation.UNKNOWN:
             clean_orient = orientation_override.upper()
             if clean_orient in (EvidenceImage.Orientation.FRONT, EvidenceImage.Orientation.REAR):
@@ -562,13 +604,15 @@ def ingest_uploaded_file(
         if batch:
             batch.total_files += 1
             batch.duplicate_count += 1
-            batch.save(update_fields=["total_files", "duplicate_count"])
+            if update_batch:
+                batch.save(update_fields=["total_files", "duplicate_count"])
         return existing_dup, "DUPLICATE_SKIPPED"
 
     if batch:
         batch.total_files += 1
         batch.ingested_count += 1
-        batch.save(update_fields=["total_files", "ingested_count"])
+        if update_batch:
+            batch.save(update_fields=["total_files", "ingested_count"])
 
     return image, "INGESTED"
 

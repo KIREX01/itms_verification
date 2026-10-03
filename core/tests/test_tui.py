@@ -167,7 +167,7 @@ class TUIAppTests(TransactionTestCase):
             app = ITMSOperatorApp()
             async with app.run_test() as pilot:
                 tabs = app.query_one("#tabs-content")
-                await pilot.press("6")
+                await pilot.press("7")
                 self.assertEqual(tabs.active, "tab-settings")
 
                 scroll_body = app.query_one("#settings-scroll-body")

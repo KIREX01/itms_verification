@@ -36,14 +36,14 @@ class InstallationOrder(models.Model):
     )
     plate_serial = models.CharField(max_length=64, blank=True)
     tracker_id = models.CharField(max_length=64, blank=True)
-    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True)
 
     # ITMS WebApp Registry & Archive Metadata
     sales_order = models.CharField(max_length=64, blank=True, default="")
     service_type = models.CharField(max_length=64, blank=True, default="")
     vin = models.CharField(max_length=64, blank=True, default="", db_index=True)
     old_registration_number = models.CharField(max_length=32, blank=True, default="")
-    warehouse_name = models.CharField(max_length=128, blank=True, default="")
+    warehouse_name = models.CharField(max_length=128, blank=True, default="", db_index=True)
     warehouse_id = models.CharField(max_length=64, blank=True, default="")
     order_status = models.CharField(max_length=64, blank=True, default="", help_text="e.g. Under installation, Ready for approve, Installed")
     registration_status = models.CharField(max_length=64, blank=True, default="", help_text="e.g. Active")
@@ -86,11 +86,16 @@ class InstallationOrder(models.Model):
     photos_json = models.JSONField(default=list, blank=True)
     info_fetched_at = models.DateTimeField(null=True, blank=True)
 
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status", "-created_at"]),
+            models.Index(fields=["registration_number", "status"]),
+            models.Index(fields=["is_active_on_itms", "is_archived"]),
+        ]
 
     def __str__(self):
         return f"{self.order_number} ({self.registration_number})"
@@ -214,7 +219,7 @@ class EvidenceImage(models.Model):
     )
 
     orientation = models.CharField(
-        max_length=16, choices=Orientation.choices, default=Orientation.UNKNOWN
+        max_length=16, choices=Orientation.choices, default=Orientation.UNKNOWN, db_index=True
     )
     orientation_confidence = models.FloatField(null=True, blank=True)
 
@@ -237,7 +242,7 @@ class EvidenceImage(models.Model):
         blank=True,
         help_text="Orientation inferred from folder structure (FRONT or REAR).",
     )
-    ingested_at = models.DateTimeField(default=timezone.now)
+    ingested_at = models.DateTimeField(default=timezone.now, db_index=True)
     processed_at = models.DateTimeField(null=True, blank=True)
     submitted_at = models.DateTimeField(
         null=True,
@@ -258,6 +263,8 @@ class EvidenceImage(models.Model):
             models.Index(fields=["detected_plate", "orientation"]),
             models.Index(fields=["status"]),
             models.Index(fields=["status", "submitted_at"]),
+            models.Index(fields=["batch", "orientation"]),
+            models.Index(fields=["batch", "status"]),
         ]
 
     def __str__(self):
@@ -311,6 +318,7 @@ class VehicleInstallationPair(models.Model):
     verification_status = models.CharField(
         max_length=20, choices=VerificationStatus.choices,
         default=VerificationStatus.PENDING_REVIEW,
+        db_index=True,
     )
     match_type = models.CharField(max_length=8, choices=MatchType.choices, default=MatchType.NONE)
     match_score = models.FloatField(null=True, blank=True)
@@ -337,7 +345,7 @@ class VehicleInstallationPair(models.Model):
         db_index=True,
         help_text="ITMS account email associated with this pair.",
     )
-    is_complete = models.BooleanField(default=False)
+    is_complete = models.BooleanField(default=False, db_index=True)
 
     operator_note = models.TextField(blank=True)
 
@@ -348,11 +356,17 @@ class VehicleInstallationPair(models.Model):
         help_text="Timestamp when this pair was successfully submitted to ITMS.",
     )
 
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True, db_index=True)
 
     class Meta:
         ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["verification_status", "is_complete"]),
+            models.Index(fields=["verification_status", "-updated_at"]),
+            models.Index(fields=["registration_number_detected", "verification_status"]),
+            models.Index(fields=["-updated_at"]),
+        ]
 
     def __str__(self):
         return f"Pair<{self.registration_number_detected}> {self.verification_status}"
@@ -405,14 +419,18 @@ class SubmissionAuditLog(models.Model):
         related_name="audit_logs",
     )
     operator_username = models.CharField(max_length=150, blank=True, default="System")
-    action = models.CharField(max_length=32, choices=Action.choices)
-    result = models.CharField(max_length=8, choices=ResultStatus.choices)
+    action = models.CharField(max_length=32, choices=Action.choices, db_index=True)
+    result = models.CharField(max_length=8, choices=ResultStatus.choices, db_index=True)
     message = models.TextField(blank=True)
     simulated_token = models.CharField(max_length=64, blank=True)
     timestamp = models.DateTimeField(default=timezone.now, db_index=True)
 
     class Meta:
         ordering = ["-timestamp"]
+        indexes = [
+            models.Index(fields=["pair", "action", "-timestamp"]),
+            models.Index(fields=["action", "-timestamp"]),
+        ]
 
     def __str__(self):
         return f"[{self.timestamp:%Y-%m-%d %H:%M:%S}] {self.action} -> {self.result}"
@@ -590,6 +608,9 @@ class StockDeliveryItem(models.Model):
 
     class Meta:
         ordering = ["id"]
+        indexes = [
+            models.Index(fields=["delivery", "registration_number"]),
+        ]
 
     def __str__(self):
         return f"{self.registration_number} ({self.plate_category}) [Delivery #{self.delivery.delivery_number}]"
@@ -689,6 +710,10 @@ class StockDispatchScan(models.Model):
     class Meta:
         ordering = ["-dispatched_at"]
         verbose_name_plural = "Stock dispatch scans"
+        indexes = [
+            models.Index(fields=["work_date", "status"]),
+            models.Index(fields=["work_date_suffix", "status"]),
+        ]
 
     def __str__(self):
         return f"{self.registration_number} ({self.plate_category}) Dispatched {self.work_date_suffix}"
@@ -734,6 +759,10 @@ class StockReturnScan(models.Model):
     class Meta:
         ordering = ["-returned_at"]
         verbose_name_plural = "Stock return scans"
+        indexes = [
+            models.Index(fields=["work_date", "reason"]),
+            models.Index(fields=["work_date_suffix", "reason"]),
+        ]
 
     def __str__(self):
         return f"{self.registration_number} ({self.plate_category}) Returned: {self.reason}"

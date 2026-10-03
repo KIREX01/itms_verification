@@ -1825,6 +1825,10 @@ class ITMSWebClient:
                 return o
             if po_plate and o_reg == po_plate:
                 return o
+            o_po_m = re.search(r"PO-([A-Za-z0-9]+)-", o_num, re.IGNORECASE)
+            o_po_plate = normalizer.canonicalize(o_po_m.group(1)) if o_po_m else ""
+            if clean_reg and o_po_plate and o_po_plate == clean_reg:
+                return o
 
             # Priority 4: VIN match
             if clean_ident and o_vin == clean_ident:

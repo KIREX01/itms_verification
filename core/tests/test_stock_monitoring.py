@@ -15,6 +15,7 @@ Tests:
 10. CSV Report generation with PSV, PMO, and Total Combined columns.
 """
 from datetime import date
+from unittest.mock import MagicMock, patch
 from django.test import Client, TestCase
 from django.utils import timezone
 
@@ -846,6 +847,151 @@ class StockMonitoringTests(TestCase):
         self.assertEqual(data["tab"], "kits")
         self.assertIn("kits", data)
         self.assertTrue(any(k["kit_code"] == "IK-UMA999PW" for k in data["kits"]))
+
+    def test_two_tier_kit_verification_local_stock(self):
+        """Tier 1: Kit in local synced stock is immediately verified."""
+        InstallationKit.objects.create(
+            kit_code="IK-UMA338PZ",
+            registration_number="UMA338PZ",
+            status="New",
+            warehouse="AGM SPIRO",
+        )
+        res = kit_provisioning_service.verify_scanned_kits_stock(
+            ["UMA 338PZ"],
+            check_itms_live=False,
+        )
+        self.assertTrue(res["success"])
+        self.assertEqual(res["verified_plates"], ["UMA338PZ"])
+        self.assertEqual(res["rejected_not_on_stock"], [])
+
+    @patch("core.services.kit_provisioning_service.get_web_client")
+    def test_two_tier_kit_verification_itms_live_fallback(self, mock_get_client):
+        """Tier 2: Kit missing locally is fetched from ITMS live and synced."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.fetch_installation_kits.return_value = {
+            "success": True,
+            "count": 1,
+            "kits": [
+                {
+                    "kit_code": "IK-UMA577PQ",
+                    "registration_number": "UMA 577PQ",
+                    "front_plate": "001200991",
+                    "rear_plate": "001200992",
+                    "gps_tracker": "8BAE4707ABCD",
+                    "warehouse": "AGM SPIRO",
+                    "status": "New",
+                    "created_date": "02.10.2026",
+                    "kit_uuid": "test-uuid-577",
+                }
+            ],
+        }
+
+        def fake_sync(kits):
+            for k in kits:
+                InstallationKit.objects.update_or_create(
+                    kit_code=k["kit_code"],
+                    defaults={
+                        "registration_number": k["registration_number"],
+                        "front_plate": k["front_plate"],
+                        "rear_plate": k["rear_plate"],
+                        "gps_tracker": k["gps_tracker"],
+                        "status": k["status"],
+                        "warehouse": k["warehouse"],
+                    },
+                )
+            return {"success": True, "created": len(kits)}
+        mock_client.sync_kits_to_local_db.side_effect = fake_sync
+
+        self.assertFalse(InstallationKit.objects.filter(registration_number="UMA 577PQ").exists())
+
+        res = kit_provisioning_service.verify_scanned_kits_stock(
+            ["UMA 577PQ"],
+            check_itms_live=True,
+        )
+        self.assertTrue(res["success"])
+        self.assertEqual(res["verified_plates"], ["UMA577PQ"])
+        self.assertEqual(res["synced_from_itms"], ["UMA577PQ"])
+        self.assertEqual(res["rejected_not_on_stock"], [])
+
+        kit = InstallationKit.objects.get(kit_code="IK-UMA577PQ")
+        self.assertEqual(kit.gps_tracker, "8BAE4707ABCD")
+        self.assertEqual(kit.status, "New")
+
+    @patch("core.services.kit_provisioning_service.get_web_client")
+    def test_two_tier_kit_verification_rejects_non_stock(self, mock_get_client):
+        """Tier 2 rejection: Kit missing locally and NOT found on ITMS is blocked."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.fetch_installation_kits.return_value = {
+            "success": True,
+            "count": 0,
+            "kits": [],
+        }
+
+        res = kit_provisioning_service.verify_scanned_kits_stock(
+            ["UZZ 999ZZ"],
+            check_itms_live=True,
+        )
+        self.assertFalse(res["success"])
+        self.assertEqual(res["verified_plates"], [])
+        self.assertEqual(res["rejected_not_on_stock"], ["UZZ999ZZ"])
+        self.assertFalse(InstallationKit.objects.filter(registration_number="UZZ999ZZ").exists())
+
+    @patch("core.services.kit_provisioning_service.get_web_client")
+    def test_dispatch_scans_blocks_non_stock_and_allows_valid(self, mock_get_client):
+        """Mixed dispatch: Only verified stock is dispatched; non-stock plates are blocked."""
+        InstallationKit.objects.create(
+            kit_code="IK-UMA111AA",
+            registration_number="UMA111AA",
+            status="New",
+            warehouse="AGM SPIRO",
+        )
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.fetch_installation_kits.return_value = {
+            "success": True,
+            "count": 0,
+            "kits": [],
+        }
+
+        res = stock_monitoring_service.record_dispatch_scans(
+            plates=["UMA111AA", "UZZ999ZZ"],
+            target_date_suffix=self.test_suffix,
+            require_stock_verification=True,
+            check_itms_live=True,
+        )
+        self.assertTrue(res["success"])
+        self.assertEqual(res["newly_dispatched"], 1)
+        self.assertEqual(res["verified_plates"], ["UMA111AA"])
+        self.assertEqual(res["rejected_not_on_stock"], ["UZZ999ZZ"])
+        self.assertIn("warning", res)
+
+        self.assertTrue(StockDispatchScan.objects.filter(registration_number="UMA111AA").exists())
+        self.assertFalse(StockDispatchScan.objects.filter(registration_number="UZZ999ZZ").exists())
+
+    @patch("core.services.kit_provisioning_service.get_web_client")
+    def test_api_stock_dispatch_returns_400_for_non_stock(self, mock_get_client):
+        """POST /api/stock/dispatch/ returns 400 when all plates are not on stock."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.fetch_installation_kits.return_value = {
+            "success": True,
+            "count": 0,
+            "kits": [],
+        }
+
+        resp = self.client.post(
+            "/api/stock/dispatch/",
+            data={"plates": "UZZ888ZZ"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        data = resp.json()
+        self.assertFalse(data["success"])
+        self.assertEqual(data["rejected_not_on_stock"], ["UZZ888ZZ"])
+        self.assertIn("cannot be taken out", data["error"])
 
 
 

@@ -26,6 +26,7 @@ from core.models import (
 )
 from core.services import bond_service
 from core.services.itms_web_client import get_web_client
+from core.services.plate_lifecycle_service import format_display_plate
 from core.vision import normalizer
 
 logger = logging.getLogger(__name__)
@@ -261,48 +262,256 @@ def sync_and_provision_warehouse_kits(
     }
 
 
-def validate_morning_dispatch_readiness(
+def verify_scanned_kits_stock(
     scanned_plates: Iterable[str],
-    auto_enroll_missing: bool = True,
+    check_itms_live: bool = True,
     facility_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Validates a list of plates being scanned for morning dispatch against stock kits.
-    If any plate is missing from InstallationKit, automatically enrolls it as 'New'
-    so the morning scanning workflow never blocks or fails.
+    Two-tier verification of plates scanned for dispatch/issuance:
+    - Tier 1: Search local synced InstallationKit table.
+    - Tier 2: If missing locally and check_itms_live=True, query ITMS /installation-kits live.
+      If matched on ITMS: auto-syncs the kit into the local database and approves dispatch.
+      If not found on ITMS: rejects the kit (not on stock, cannot be taken out).
+
+    Returns:
+    {
+        "success": bool,
+        "total_scanned": int,
+        "verified_plates": List[str],
+        "verified_kits": List[InstallationKit],
+        "synced_from_itms": List[str],
+        "rejected_not_on_stock": List[str],
+        "already_installed": List[str],
+        "details": Dict[str, Dict[str, Any]],
+        "warehouse": str,
+        "message": str,
+    }
     """
     active_bond = bond_service.get_active_bond()
     wh_name = facility_name or active_bond.get("name", "AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)")
 
-    clean_plates = []
-    for p in scanned_plates:
-        c = normalizer.canonicalize(p)
+    clean_plates: List[str] = []
+    for raw_p in scanned_plates:
+        c = normalizer.canonicalize(raw_p)
         if c and c not in clean_plates:
             clean_plates.append(c)
 
-    existing_kits_map = {
-        normalizer.canonicalize(k.registration_number): k
-        for k in InstallationKit.objects.filter(registration_number__in=clean_plates)
-    }
+    if not clean_plates:
+        return {
+            "success": True,
+            "total_scanned": 0,
+            "verified_plates": [],
+            "verified_kits": [],
+            "synced_from_itms": [],
+            "rejected_not_on_stock": [],
+            "already_installed": [],
+            "details": {},
+            "warehouse": wh_name,
+            "message": "No valid license plates provided for stock verification.",
+        }
 
-    already_in_stock_new = 0
-    already_allocated_or_installed = 0
-    missing_plates = []
+    # Step 1: Query local synced InstallationKit records
+    target_codes = [f"IK-{p}" for p in clean_plates]
+    local_kits_qs = InstallationKit.objects.filter(
+        Q(registration_number__in=clean_plates) | Q(kit_code__in=target_codes)
+    )
 
-    today_str = timezone.localdate().strftime("%d.%m.%Y")
+    local_map: Dict[str, InstallationKit] = {}
+    for k in local_kits_qs:
+        c = normalizer.canonicalize(k.registration_number)
+        if c:
+            local_map[c] = k
+        if k.kit_code:
+            local_map[k.kit_code.strip().upper()] = k
+
+    # Pre-check for orders that are already installed or archived
+    installed_orders = set(
+        InstallationOrder.objects.filter(
+            Q(registration_number__in=clean_plates),
+            Q(is_archived=True) | Q(order_status__iexact="Installed"),
+        ).values_list("registration_number", flat=True)
+    )
+    installed_orders_canonical = {normalizer.canonicalize(x) for x in installed_orders if x}
+
+    verified_plates: List[str] = []
+    verified_kits: List[InstallationKit] = []
+    synced_from_itms: List[str] = []
+    rejected_not_on_stock: List[str] = []
+    already_installed: List[str] = []
+    details: Dict[str, Dict[str, Any]] = {}
+    missing_locally: List[str] = []
 
     for p in clean_plates:
-        kit = existing_kits_map.get(p)
-        if kit:
-            st = (kit.status or "").strip().lower()
-            if st == "new":
-                already_in_stock_new += 1
-            else:
-                already_allocated_or_installed += 1
+        kit = local_map.get(p) or local_map.get(f"IK-{p}")
+        if p in installed_orders_canonical or (kit and (kit.status or "").strip().lower() in ("installed", "archived")):
+            already_installed.append(p)
+            details[p] = {
+                "valid": False,
+                "status": "ALREADY_INSTALLED",
+                "kit": kit,
+                "reason": f"Plate {p} has already been installed / archived on an order.",
+            }
+        elif kit:
+            verified_plates.append(p)
+            verified_kits.append(kit)
+            details[p] = {
+                "valid": True,
+                "status": "VERIFIED_LOCAL",
+                "kit": kit,
+                "reason": f"Verified in local warehouse stock ({kit.warehouse or wh_name}).",
+            }
         else:
-            missing_plates.append(p)
+            missing_locally.append(p)
+
+    # Step 2: Live ITMS Check for Plates Missing Locally
+    if missing_locally and check_itms_live:
+        try:
+            client = get_web_client()
+            for p in missing_locally:
+                found_match = False
+                display_p = format_display_plate(p)
+                queries_to_try = [display_p] if display_p != p else [p]
+                if p not in queries_to_try:
+                    queries_to_try.append(p)
+
+                for q_term in queries_to_try:
+                    try:
+                        res = client.fetch_installation_kits(page=1, search_params=q_term, allow_local_fallback=False)
+                        if res.get("success"):
+                            kits = res.get("kits", [])
+                            for k in kits:
+                                k_reg = normalizer.canonicalize(k.get("registration_number", ""))
+                                k_code = (k.get("kit_code") or "").strip().upper()
+                                if k_reg == p or k_code == f"IK-{p}":
+                                    found_match = True
+                                    # Sync into local DB
+                                    client.sync_kits_to_local_db([k])
+                                    new_kit = InstallationKit.objects.filter(
+                                        Q(registration_number=p) | Q(kit_code=f"IK-{p}")
+                                    ).first()
+
+                                    k_st = (k.get("status") or "").strip().lower()
+                                    if k_st in ("installed", "archived"):
+                                        already_installed.append(p)
+                                        details[p] = {
+                                            "valid": False,
+                                            "status": "ALREADY_INSTALLED",
+                                            "kit": new_kit,
+                                            "reason": f"Kit {p} in ITMS is already marked as '{k.get('status')}'.",
+                                        }
+                                    else:
+                                        verified_plates.append(p)
+                                        synced_from_itms.append(p)
+                                        if new_kit:
+                                            verified_kits.append(new_kit)
+                                        details[p] = {
+                                            "valid": True,
+                                            "status": "VERIFIED_ITMS",
+                                            "kit": new_kit,
+                                            "reason": "Found on ITMS installation kits and synced to local database.",
+                                        }
+                                    break
+                        if found_match:
+                            break
+                    except Exception as itms_exc:
+                        logger.debug("ITMS live query failed for %s (%s): %s", p, q_term, itms_exc)
+
+                if not found_match:
+                    rejected_not_on_stock.append(p)
+                    details[p] = {
+                        "valid": False,
+                        "status": "NOT_ON_STOCK",
+                        "kit": None,
+                        "reason": f"Kit {p} not found on ITMS installation kits (Not on stock).",
+                    }
+        except Exception as client_exc:
+            logger.warning("Failed to initialize ITMS web client for stock verification: %s", client_exc)
+            for p in missing_locally:
+                if p not in details:
+                    rejected_not_on_stock.append(p)
+                    details[p] = {
+                        "valid": False,
+                        "status": "NOT_ON_STOCK",
+                        "kit": None,
+                        "reason": f"Kit {p} not found in local stock and ITMS query failed ({client_exc}).",
+                    }
+    elif missing_locally:
+        for p in missing_locally:
+            rejected_not_on_stock.append(p)
+            details[p] = {
+                "valid": False,
+                "status": "NOT_ON_STOCK",
+                "kit": None,
+                "reason": f"Kit {p} not found in local stock and ITMS live check was disabled.",
+            }
+
+    success = len(rejected_not_on_stock) == 0 and len(already_installed) == 0
+    return {
+        "success": success,
+        "total_scanned": len(clean_plates),
+        "verified_plates": verified_plates,
+        "verified_kits": verified_kits,
+        "synced_from_itms": synced_from_itms,
+        "rejected_not_on_stock": rejected_not_on_stock,
+        "already_installed": already_installed,
+        "details": details,
+        "warehouse": wh_name,
+        "message": (
+            f"Verified {len(verified_plates)}/{len(clean_plates)} kits. "
+            f"({len(synced_from_itms)} synced from ITMS, {len(rejected_not_on_stock)} not on stock, "
+            f"{len(already_installed)} already installed)."
+        ),
+    }
+
+
+def verify_scanned_kit_stock(
+    plate: str,
+    check_itms_live: bool = True,
+    facility_name: Optional[str] = None,
+) -> Tuple[bool, Optional[InstallationKit], str]:
+    """
+    Two-tier verification for a single scanned kit before dispatch/issuance:
+    1. Tier 1: Search local synced InstallationKit table.
+    2. Tier 2: If missing locally and check_itms_live=True, query ITMS /installation-kits/index live.
+       If found on ITMS: auto-sync kit into local DB and approve.
+       If not found on ITMS: reject (kit is not on stock, cannot be taken out).
+    Returns: (is_valid, kit_instance, reason)
+    """
+    res = verify_scanned_kits_stock([plate], check_itms_live=check_itms_live, facility_name=facility_name)
+    c = normalizer.canonicalize(plate)
+    dt = res.get("details", {}).get(c, {})
+    return dt.get("valid", False), dt.get("kit"), dt.get("reason", "Verification failed")
+
+
+def validate_morning_dispatch_readiness(
+    scanned_plates: Iterable[str],
+    auto_enroll_missing: bool = False,
+    check_itms_live: bool = True,
+    facility_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Validates a list of plates being scanned for morning dispatch against stock kits.
+    Uses two-tier verification (local synced DB + ITMS live fallback).
+    If auto_enroll_missing is True, any remaining unverified plates are auto-enrolled.
+    """
+    active_bond = bond_service.get_active_bond()
+    wh_name = facility_name or active_bond.get("name", "AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)")
+
+    verify_res = verify_scanned_kits_stock(
+        scanned_plates,
+        check_itms_live=check_itms_live,
+        facility_name=wh_name,
+    )
+
+    clean_plates = verify_res["verified_plates"] + verify_res["rejected_not_on_stock"] + verify_res["already_installed"]
+    already_in_stock_new = len(verify_res["verified_plates"])
+    already_allocated_or_installed = len(verify_res["already_installed"])
+    missing_plates = list(verify_res["rejected_not_on_stock"])
 
     auto_enrolled_count = 0
+    today_str = timezone.localdate().strftime("%d.%m.%Y")
+
     if auto_enroll_missing and missing_plates:
         kits_to_create = [
             InstallationKit(
@@ -316,17 +525,24 @@ def validate_morning_dispatch_readiness(
         ]
         InstallationKit.objects.bulk_create(kits_to_create, ignore_conflicts=True)
         auto_enrolled_count = len(kits_to_create)
+        missing_plates = []
 
     return {
-        "success": True,
-        "total_scanned": len(clean_plates),
+        "success": verify_res["success"] or (auto_enroll_missing and auto_enrolled_count > 0),
+        "total_scanned": verify_res["total_scanned"],
         "already_in_stock_new": already_in_stock_new,
         "already_allocated_or_installed": already_allocated_or_installed,
         "missing_plates_count": len(missing_plates),
         "missing_count": len(missing_plates),
         "auto_enrolled_as_new": auto_enrolled_count,
         "kits_auto_enrolled": auto_enrolled_count,
+        "synced_from_itms_count": len(verify_res["synced_from_itms"]),
+        "synced_from_itms": verify_res["synced_from_itms"],
+        "rejected_not_on_stock": missing_plates,
+        "already_installed": verify_res["already_installed"],
+        "verified_plates": verify_res["verified_plates"],
         "warehouse": wh_name,
+        "verification_details": verify_res["details"],
     }
 
 

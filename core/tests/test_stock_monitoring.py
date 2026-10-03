@@ -540,7 +540,7 @@ class StockMonitoringTests(TestCase):
         floor = recon["floor_operations"]
         scale = floor["graduated_scale"]
 
-        # Verify all 5 tiers of the Graduated Discrepancy Scale
+        # Verify Graduated Discrepancy Scale
         self.assertEqual(scale["reconciled_installed"]["count"], 1)
         self.assertIn("UMA201PW", scale["reconciled_installed"]["plates"])
 
@@ -550,23 +550,22 @@ class StockMonitoringTests(TestCase):
         self.assertEqual(scale["on_line_active"]["count"], 1)
         self.assertIn("UMA203PW", scale["on_line_active"]["plates"])
 
-        self.assertEqual(scale["pending_system_sync"]["count"], 1)
-        self.assertIn("UMA204PW", scale["pending_system_sync"]["plates"])
+        self.assertEqual(scale["pending_system_sync"]["count"], 0)
 
-        # Unresolved discrepancy must ONLY be UMA205PW (no order, no return, no photos)
-        self.assertEqual(scale["unresolved_discrepancy"]["count"], 1)
+        # Unresolved discrepancy must include both UMA204PW & UMA205PW (dispatched, not returned, no ITMS order)
+        self.assertEqual(scale["unresolved_discrepancy"]["count"], 2)
+        self.assertIn("UMA204PW", scale["unresolved_discrepancy"]["plates"])
         self.assertIn("UMA205PW", scale["unresolved_discrepancy"]["plates"])
-        self.assertEqual(floor["unallocated_discrepancy"], 1)
+        self.assertEqual(floor["unallocated_discrepancy"], 2)
 
         # Verify MVR Docket formatting
         docket = stock_monitoring_service.get_mvr_unallocated_docket(self.test_suffix)
         fmt = docket["formatted_docket"]
         self.assertIn("GRADUATED DISCREPANCY AUDIT SCALE:", fmt)
         self.assertIn("1. Reconciled Installed:", fmt)
-        self.assertIn("4. Pending System Sync:", fmt)
         self.assertIn("5. UNRESOLVED DISCREPANCY:", fmt)
+        self.assertIn("UMA204PW", docket["raw_plates"])
         self.assertIn("UMA205PW", docket["raw_plates"])
-        self.assertIn("UMA204PW", fmt)  # Pending sync plate mentioned in notice
 
     def test_itms_warehouses_rest_api(self):
         # GET warehouses

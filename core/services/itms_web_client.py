@@ -1634,8 +1634,7 @@ class ITMSWebClient:
                     changed = True
 
                 obj.last_synced_at = now
-                if changed:
-                    to_update.append(obj)
+                to_update.append(obj)
             else:
                 to_create.append(
                     InstallationKit(

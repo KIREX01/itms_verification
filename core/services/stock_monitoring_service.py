@@ -42,7 +42,6 @@ from core.models import (
     StockDispatchScan,
     StockReturnScan,
     SubmissionAuditLog,
-    VehicleInstallationPair,
 )
 from core.services import bond_service
 from core.services.plate_lifecycle_service import format_display_plate
@@ -1110,20 +1109,6 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         if o.registration_number
     }
 
-    # Query local companion verification pairs / evidence photos to identify physical fitments
-    evidence_plates_set: Set[str] = {
-        normalizer.canonicalize(p)
-        for p in VehicleInstallationPair.objects.exclude(registration_number_detected="").values_list(
-            "registration_number_detected", flat=True
-        )
-        if p
-    }
-    evidence_plates_set.update({
-        normalizer.canonicalize(p)
-        for p in EvidenceImage.objects.exclude(detected_plate="").values_list("detected_plate", flat=True)
-        if p
-    })
-
     reconciled_installed: List[str] = []
     returned_to_safe: List[str] = []
     on_line_active: List[str] = []
@@ -1153,16 +1138,13 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
                     scan.status = StockDispatchScan.Status.ON_LINE_ACTIVE
                     scans_to_update.append(scan)
         else:
-            if c_plate in evidence_plates_set:
-                pending_system_sync.append(orig_plate)
-                if scan.status != StockDispatchScan.Status.PENDING_SYSTEM_SYNC:
-                    scan.status = StockDispatchScan.Status.PENDING_SYSTEM_SYNC
-                    scans_to_update.append(scan)
-            else:
-                unresolved_discrepancy.append(orig_plate)
-                if scan.status != StockDispatchScan.Status.UNRESOLVED_DISCREPANCY:
-                    scan.status = StockDispatchScan.Status.UNRESOLVED_DISCREPANCY
-                    scans_to_update.append(scan)
+            # Physical plate was dispatched to line, not returned to safe room,
+            # and has NO matching active order or archive record in ITMS.
+            # Strictly classified as an Unallocated Floor Discrepancy (no vision OCR noise).
+            unresolved_discrepancy.append(orig_plate)
+            if scan.status != StockDispatchScan.Status.UNRESOLVED_DISCREPANCY:
+                scan.status = StockDispatchScan.Status.UNRESOLVED_DISCREPANCY
+                scans_to_update.append(scan)
 
     if scans_to_update:
         StockDispatchScan.objects.bulk_update(scans_to_update, ["status"])

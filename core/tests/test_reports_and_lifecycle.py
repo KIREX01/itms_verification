@@ -178,7 +178,7 @@ class ReportsAndLifecycleTests(TestCase):
         mock_table = MagicMock()
         mock_table.has_focus = False
 
-        def mock_query_one(selector, expected_type=None):
+        def mock_query_one(selector, *args, **kwargs):
             if selector == "#input-plate":
                 return mock_input
             elif selector == "#table-active-orders":
@@ -191,8 +191,15 @@ class ReportsAndLifecycleTests(TestCase):
 
         modal.query_one = mock_query_one
 
-        # Execute confirm plate
-        modal.action_confirm_plate()
+        from unittest.mock import patch
+        with patch("core.services.plate_lifecycle_service.get_web_client") as mock_get_client:
+            mock_client = MagicMock()
+            mock_client.fetch_archive_orders.return_value = {"success": True, "orders": []}
+            mock_client.fetch_installation_orders.return_value = {"success": True, "orders": []}
+            mock_get_client.return_value = mock_client
+
+            # Execute confirm plate
+            modal.action_confirm_plate()
 
         # Verify pair was updated as UNREGISTERED without a fake dummy order
         self.pair.refresh_from_db()
@@ -244,8 +251,17 @@ class ReportsAndLifecycleTests(TestCase):
         Verifies the 3 core date-driven categories:
         1. Category 1: Installed / In Archive
         2. Category 2: Pending Installation
-        3. Category 3: Unallocated Plates (failed linking & stock kits 'New')
+        3. Category 3: Unallocated Plates (dispatched to floor without ITMS order/archive)
         """
+        from core.models import StockDispatchScan, PlateCategory
+
+        # Physically dispatch UMA 300PW to the line for this shift
+        StockDispatchScan.objects.create(
+            registration_number="UMA300PW",
+            work_date_suffix="260926",
+            plate_category=PlateCategory.PSV,
+        )
+
         dd = report_service.get_date_driven_plate_totals(target_date="260926")
 
         self.assertEqual(dd["selected_date_suffix"], "260926")
@@ -263,11 +279,27 @@ class ReportsAndLifecycleTests(TestCase):
         self.assertEqual(pend["items"][0]["plate"], "UMA 696PU")
         self.assertEqual(pend["items"][0]["stage"], "STAGE_1_INSTALLATION")
 
-        # Category 3: Unallocated Plates
+        # Category 3: Unallocated Plates (strictly floor dispatches)
         unalloc = dd["unallocated_plates"]
-        self.assertGreaterEqual(unalloc["total_count"], 1)
+        self.assertEqual(unalloc["total_count"], 1)
         unalloc_plates = [it["plate"] for it in unalloc["items"]]
         self.assertIn("UMA300PW", unalloc_plates)
+
+    def test_warehouse_safe_room_stock_kits_not_included_in_unallocated_table(self):
+        """Verifies warehouse stock kits (status='New') in safe room are NOT included in floor unallocated discrepancy table."""
+        # Create a new warehouse kit in stock that is NOT dispatched
+        InstallationKit.objects.create(
+            kit_code="IK-UMA999NEW",
+            registration_number="UMA 999NEW",
+            status="New",
+            warehouse="AGM Bonded Warehouse",
+        )
+        dd = report_service.get_date_driven_plate_totals(target_date="260926")
+        unalloc = dd["unallocated_plates"]
+        unalloc_plates = [it["plate"] for it in unalloc["items"]]
+
+        # Warehouse stock kit must NOT appear in floor unallocated discrepancy table
+        self.assertNotIn("UMA999NEW", unalloc_plates)
 
     def test_unallocated_plates_excludes_invalid_ocr_noise(self):
         """Verifies unlinked photo pairs with OCR noise that do NOT match physical kits are excluded."""
@@ -299,6 +331,14 @@ class ReportsAndLifecycleTests(TestCase):
 
     def test_api_reports_totals_with_date_param(self):
         """Verifies GET /api/reports/totals/?date=260926 returns date_driven payload."""
+        from core.models import StockDispatchScan, PlateCategory
+
+        StockDispatchScan.objects.create(
+            registration_number="UMA888PW",
+            work_date_suffix="260926",
+            plate_category=PlateCategory.PSV,
+        )
+
         url = reverse("core:api_reports_totals")
         response = self.client.get(url, {"scope": "ALL", "date": "260926"})
         self.assertEqual(response.status_code, 200)

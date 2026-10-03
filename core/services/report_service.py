@@ -202,12 +202,7 @@ def get_date_driven_plate_totals(target_date: Optional[str] = None) -> Dict[str,
     )
 
     # 3. Category 3: Unallocated Plates
-    # Plates attempted to link and failed, plus new kits in stock
-    all_order_plates = set(
-        normalizer.canonicalize(p)
-        for p in InstallationOrder.objects.values_list("registration_number", flat=True)
-        if p
-    )
+    # Plates physically scanned out for the shift that have no active ITMS order and are not in archive
 
     unallocated_items: List[Dict[str, Any]] = []
     seen_unallocated_plates = set()
@@ -295,33 +290,11 @@ def get_date_driven_plate_totals(target_date: Optional[str] = None) -> Dict[str,
             },
         })
 
+    # Source B (Stock Installation Kits 'New' in warehouse safe-room) is intentionally excluded from
+    # floor unallocated plates. Safe-room stock belongs exclusively in warehouse inventory stats,
+    # NOT in the floor unallocated discrepancy audit (which strictly tracks kits physically taken out to the line).
     failed_linking_count = 0
     stock_kits_count = 0
-
-    # Source B: Stock Installation Kits with status 'New' in warehouse
-    # Physical hardware kits in stock that have not been assigned to any ITMS order.
-    new_kits_qs = InstallationKit.objects.filter(status__iexact="New").exclude(registration_number="")
-    for kit in new_kits_qs:
-        c_k = normalizer.canonicalize(kit.registration_number)
-        if c_k and c_k not in all_order_plates and c_k not in seen_unallocated_plates:
-            seen_unallocated_plates.add(c_k)
-            stock_kits_count += 1
-            unallocated_items.append({
-                "plate": c_k,
-                "display_plate": format_display_plate(c_k),
-                "source": "STOCK_KIT_NEW",
-                "source_type_label": "Stock Kit (Unassigned)",
-                "source_id": kit.kit_code or f"IK-{c_k}",
-                "reason": "Installation kit in warehouse stock; no order created yet",
-                "status": "In Warehouse Safe Room",
-                "warehouse": kit.warehouse or "Warehouse Stock",
-                "date": kit.created_date or formatted_date,
-                "serials": {
-                    "front_plate": kit.front_plate or "—",
-                    "rear_plate": kit.rear_plate or "—",
-                    "gps": kit.gps_tracker or "—",
-                },
-            })
 
 
     return {

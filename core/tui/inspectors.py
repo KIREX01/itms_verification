@@ -484,3 +484,192 @@ class InspectorPane(Static):
         ]
         self.update("\n".join(lines))
 
+    def show_stock_kit_details(
+        self,
+        plate: Optional[str] = None,
+        dispatch_scan: Optional[Any] = None,
+        kit: Optional[Any] = None,
+        verification_result: Optional[Dict[str, Any]] = None,
+        error_message: Optional[str] = None,
+    ) -> None:
+        """
+        Displays comprehensive hardware profile, stock verification status,
+        and ITMS order linkage for a plate scanned or selected in the Stock tab.
+        """
+        if not plate and not dispatch_scan and not kit:
+            self.update(
+                "[dim]No Plate or Kit selected.\n\n"
+                "⚡ Rapid scan a plate QR/barcode or select a row in the table.\n"
+                "Full hardware serials (GPS tracker, BLE beacons), warehouse location,\n"
+                "and live stock verification will appear here automatically.[/dim]"
+            )
+            return
+
+        from core.vision import normalizer
+        from core.models import InstallationKit, StockDispatchScan, InstallationOrder
+
+        norm_plate = normalizer.normalize_plate(plate) if plate else None
+        if not norm_plate and dispatch_scan:
+            norm_plate = normalizer.normalize_plate(getattr(dispatch_scan, "registration_number", ""))
+        if not norm_plate and kit:
+            norm_plate = normalizer.normalize_plate(getattr(kit, "registration_number", ""))
+
+        # If kit not passed directly, look up locally
+        if not kit and norm_plate:
+            from django.db.models import Q
+            kit = InstallationKit.objects.filter(
+                Q(registration_number=norm_plate) | Q(kit_code__icontains=norm_plate)
+            ).first()
+
+        # If dispatch_scan not passed, find latest
+        if not dispatch_scan and norm_plate:
+            dispatch_scan = StockDispatchScan.objects.filter(registration_number=norm_plate).order_by("-dispatched_at").first()
+
+        # Linked order lookup
+        order = None
+        if norm_plate:
+            order = InstallationOrder.objects.filter(registration_number=norm_plate).first()
+
+        # Category determination
+        cat_badge = "[bold white on dark_blue] PSV White [/]"
+        if dispatch_scan and getattr(dispatch_scan, "plate_category", "") == "PMO":
+            cat_badge = "[bold black on gold1] PMO Yellow [/]"
+        elif kit and "PMO" in getattr(kit, "kit_code", "").upper():
+            cat_badge = "[bold black on gold1] PMO Yellow [/]"
+
+        # Verification Status Badge
+        is_blocked = bool(error_message)
+        if not is_blocked and verification_result is not None:
+            if isinstance(verification_result, tuple):
+                is_blocked = not verification_result[0]
+                if is_blocked and len(verification_result) > 2 and verification_result[2]:
+                    error_message = verification_result[2]
+            elif isinstance(verification_result, dict):
+                is_blocked = not (verification_result.get("is_valid") or verification_result.get("valid"))
+                if is_blocked:
+                    error_message = verification_result.get("error") or verification_result.get("reason")
+            elif hasattr(verification_result, "is_valid"):
+                is_blocked = not verification_result.is_valid
+                if is_blocked:
+                    error_message = getattr(verification_result, "reason", "")
+
+        if is_blocked:
+            err_lower = (error_message or "").lower()
+            if "awaiting" in err_lower or "transfer" in err_lower:
+                status_badge = "[bold white on dark_red] ⏳ AWAITING ITMS TRANSFER [/]"
+            else:
+                status_badge = "[bold white on dark_red] ⛔ NOT ON STOCK (BLOCKED) [/]"
+            status_desc = f"[red]{escape(error_message or 'Not found on stock in Safe Room or ITMS')}[/red]"
+
+
+        elif dispatch_scan:
+            status_badge = "[bold black on gold1] 📤 DISPATCHED TO LINE [/]"
+            t_dt = getattr(dispatch_scan, "dispatched_at", None) or getattr(dispatch_scan, "created_at", None)
+            t_str = t_dt.strftime("%H:%M:%S") if t_dt else "Today"
+            op = getattr(dispatch_scan, "operator_name", "") or getattr(dispatch_scan, "operator_username", "Operator")
+            status_desc = f"[yellow]Dispatched at {t_str} by {escape(op)}[/yellow]"
+        elif kit:
+            k_stat = getattr(kit, "status", "New")
+            if k_stat.lower() == "new":
+                status_badge = "[bold white on dark_green] ✓ ON STOCK (Safe Room) [/]"
+                status_desc = "[green]Ready in warehouse safe stock. Clean to dispatch.[/green]"
+            elif "installed" in k_stat.lower():
+                status_badge = "[bold white on dark_blue] 🏆 INSTALLED / ARCHIVED [/]"
+                status_desc = f"[cyan]Order completed on {escape(str(getattr(kit, 'created_date', '')))}[/cyan]"
+            else:
+                status_badge = f"[bold yellow] ⏳ {escape(k_stat.upper())} [/]"
+                status_desc = f"[yellow]Status in ITMS: {escape(k_stat)}[/yellow]"
+        else:
+            status_badge = "[bold white on dark_blue] ℹ️ UNVERIFIED [/]"
+            status_desc = "[dim]Scan barcode or query ITMS to verify stock status.[/dim]"
+
+        lines = [
+            "[b cyan]═══ 📦 Stock & Kit Inspector ═══[/b cyan]",
+            f"[b]Plate:[/b]          [bold yellow]{escape(norm_plate or 'UNKNOWN')}[/bold yellow]  {cat_badge}",
+            f"[b]Stock Status:[/b]   {status_badge}",
+            f"               {status_desc}",
+            "",
+            "[b underline]ITMS Installation Kit Profile[/b underline]:",
+        ]
+
+        if kit:
+            wh = (
+                getattr(kit, "warehouse", "")
+                or getattr(kit, "warehouse_facility", "")
+                or "Warehouse Stock"
+            )
+            gps = (
+                getattr(kit, "gps_tracker", "")
+                or getattr(kit, "gps_tracker_id", "")
+                or getattr(kit, "imei", "")
+                or "—"
+            )
+            f_ble = (
+                getattr(kit, "front_tracker", "")
+                or getattr(kit, "ble_beacon_front", "")
+                or "—"
+            )
+            r_ble = (
+                getattr(kit, "rear_tracker", "")
+                or getattr(kit, "ble_beacon_rear", "")
+                or "—"
+            )
+            f_plate = (
+                getattr(kit, "front_plate", "")
+                or getattr(kit, "front_plate_serial", "")
+                or "—"
+            )
+            r_plate = (
+                getattr(kit, "rear_plate", "")
+                or getattr(kit, "rear_plate_serial", "")
+                or "—"
+            )
+
+            lines.extend([
+                f" [b]Kit Code:[/b]      [bold white]{escape(getattr(kit, 'kit_code', '—'))}[/bold white]",
+                f" [b]Warehouse:[/b]     {escape(wh[:32])}",
+                f" [b]GPS Tracker:[/b]   [bold cyan]{escape(gps)}[/bold cyan]",
+                f" [b]Front BLE:[/b]     {escape(f_ble)}",
+                f" [b]Rear BLE:[/b]      {escape(r_ble)}",
+                f" [b]Front Plate:[/b]   {escape(f_plate)}",
+                f" [b]Rear Plate:[/b]    {escape(r_plate)}",
+            ])
+        else:
+            lines.append(" [dim]No linked kit record found in local inventory.[/dim]")
+
+        # Order Linkage section
+        lines.append("")
+        lines.append("[b underline]ITMS Order Linkage[/b underline]:")
+        if order:
+            o_num = escape(getattr(order, "order_number", "—"))
+            o_stat = escape(getattr(order, "status", "Active"))
+            lines.extend([
+                f" [b]Order Number:[/b]  [bold green]#{o_num}[/bold green] ([yellow]{o_stat}[/yellow])",
+                f" [b]Owner / Fleet:[/b] {escape(getattr(order, 'owner_name', '—')[:30])}",
+                f" [b]Motorcycle:[/b]    {escape(getattr(order, 'motorcycle_model', '—'))} [dim]({escape(getattr(order, 'chassis_number', '—'))})[/dim]",
+            ])
+        else:
+            lines.append(" [bold green]● Unallocated Kit[/bold green] [dim](Available for line allocation)[/dim]")
+
+        # Line Dispatch details
+        if dispatch_scan:
+            lines.append("")
+            lines.append("[b underline]Line Dispatch Record[/b underline]:")
+            t_dt = getattr(dispatch_scan, "dispatched_at", None) or getattr(dispatch_scan, "created_at", None)
+            lines.extend([
+                f" [b]Dispatched At:[/b] {t_dt.strftime('%Y-%m-%d %H:%M:%S') if t_dt else '—'}",
+                f" [b]Category:[/b]      {escape(getattr(dispatch_scan, 'plate_category', 'PSV'))}",
+                f" [b]Shift Suffix:[/b]  {escape(getattr(dispatch_scan, 'work_date_suffix', '—'))}",
+                f" [b]Status:[/b]        {escape(getattr(dispatch_scan, 'status', 'ON_LINE_ACTIVE'))}",
+            ])
+
+        lines.extend([
+            "",
+            "[b]Quick Actions:[/b]",
+            " [b green]Enter[/b green]: Scan next plate barcode",
+            " [b cyan]Tab[/b cyan]: Switch between inputs and tables",
+        ])
+
+        self.update("\n".join(lines))
+
+

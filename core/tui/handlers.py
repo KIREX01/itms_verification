@@ -19,6 +19,8 @@ class NavigationHandlersMixin:
             if event.row_key and event.row_key.value:
                 self._selected_image_id = event.row_key.value
             self._update_batch_image_inspector(event.row_key)
+        elif event.data_table.id == "table-stock-dispatch":
+            self._update_stock_inspector(event.row_key)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id in ("table-batch-images", "table-queue", "table-history"):
@@ -28,11 +30,18 @@ class NavigationHandlersMixin:
         try:
             activity = self.query_one("#activity-container")
             pane_id = getattr(event.pane, "id", "")
-            if pane_id in ("tab-settings", "tab-reports"):
+            if pane_id in ("tab-settings", "tab-reports", "tab-stock"):
                 activity.display = False
                 if pane_id == "tab-reports":
                     try:
                         self.query_one("#reports-pane").refresh_reports()
+                    except Exception:
+                        pass
+                elif pane_id == "tab-stock":
+                    try:
+                        stock_p = self.query_one("#stock-pane")
+                        if hasattr(stock_p, "action_refresh_stock"):
+                            stock_p.action_refresh_stock()
                     except Exception:
                         pass
                 try:
@@ -55,6 +64,16 @@ class NavigationHandlersMixin:
                         pass
         except Exception:
             pass
+
+    def _update_stock_inspector(self, row_key=None):
+        try:
+            inspector = self.query_one("#inspector-stock", InspectorPane)
+        except Exception:
+            return
+        key_val = getattr(row_key, "value", str(row_key)) if row_key else None
+        if key_val and key_val != "—":
+            inspector.show_stock_kit_details(plate=key_val)
+
 
     def _get_active_pair(self, table_id: Optional[str] = None) -> Optional[VehicleInstallationPair]:
         if not table_id:

@@ -993,6 +993,250 @@ class StockMonitoringTests(TestCase):
         self.assertEqual(data["rejected_not_on_stock"], ["UZZ888ZZ"])
         self.assertIn("cannot be taken out", data["error"])
 
+    def test_stocktake_audit_links_hardware_and_isolates_unregistered(self):
+        """Monthly stocktaking separates verified kits with hardware serials from unregistered kits."""
+        InstallationKit.objects.create(
+            kit_code="IK-UMA501AA",
+            registration_number="UMA501AA",
+            status="New",
+            gps_tracker="IMEI-8675309",
+            front_tracker="BLE-F-1111",
+            rear_tracker="BLE-R-2222",
+            warehouse="AGM SPIRO",
+        )
+
+        audit_res = stock_monitoring_service.record_stock_taking_audit(
+            scanned_plates="UMA501AA\nUMA502BB",
+            target_date_suffix=self.test_suffix,
+        )
+
+        self.assertTrue(audit_res["success"])
+        self.assertEqual(audit_res["total_scanned"], 2)
+        self.assertEqual(audit_res["verified_count"], 1)
+        self.assertEqual(audit_res["unregistered_count"], 1)
+        self.assertEqual(audit_res["verified_plates"], ["UMA501AA"])
+        self.assertEqual(audit_res["unregistered_plates"], ["UMA502BB"])
+
+        hw_profiles = audit_res["hardware_profiles"]
+        self.assertEqual(len(hw_profiles), 1)
+        self.assertEqual(hw_profiles[0]["plate"], "UMA501AA")
+        self.assertEqual(hw_profiles[0]["gps_tracker"], "IMEI-8675309")
+        self.assertEqual(hw_profiles[0]["front_ble"], "BLE-F-1111")
+        self.assertEqual(hw_profiles[0]["rear_ble"], "BLE-R-2222")
+
+    def test_export_blocked_and_unregistered_csv(self):
+        """Generates actionable CSVs for the ITMS Stock Transfer Officer."""
+        blocked_path, blocked_name, blocked_cnt = stock_monitoring_service.export_blocked_kits_csv(
+            blocked_plates=["UMA999XX", "UMA998YY"],
+            target_date_suffix=self.test_suffix,
+        )
+        self.assertEqual(blocked_cnt, 2)
+        self.assertTrue(blocked_name.startswith("blocked_dispatch_kits_"))
+        import os
+        self.assertTrue(os.path.exists(blocked_path))
+        with open(blocked_path, "r", encoding="utf-8") as f:
+            content = f.read()
+            self.assertIn("UMA999XX", content)
+            self.assertIn("UMA998YY", content)
+            self.assertIn("Awaiting ITMS Stock Transfer Officer", content)
+
+        unreg_path, unreg_name, unreg_cnt = stock_monitoring_service.export_unregistered_stocktake_csv(
+            unregistered_plates=["UMA777ZZ"],
+            target_date_suffix=self.test_suffix,
+        )
+        self.assertEqual(unreg_cnt, 1)
+        self.assertTrue(unreg_name.startswith("unregistered_stocktake_kits_"))
+        self.assertTrue(os.path.exists(unreg_path))
+        with open(unreg_path, "r", encoding="utf-8") as f:
+            content = f.read()
+            self.assertIn("UMA777ZZ", content)
+            self.assertIn("Physical kit box in safe room", content)
+            self.assertIn("NOT ON ITMS STOCK", content)
+
+    @patch("core.services.kit_provisioning_service.get_web_client")
+    def test_bulk_verify_scanned_kits_stock_skips_live_itms(self, mock_get_client):
+        """Bulk verify with > 3 missing plates skips live ITMS HTTP calls to prevent UI freezes."""
+        plates = [f"UMA90{i}AA" for i in range(10)]
+        res = kit_provisioning_service.verify_scanned_kits_stock(plates, check_itms_live=True)
+        # mock_get_client should NOT have been called because len(missing) == 10 > 3
+        mock_get_client.assert_not_called()
+        self.assertEqual(len(res["rejected_not_on_stock"]), 10)
+        self.assertIn("Awaiting ITMS Stock Transfer Officer", res["details"]["UMA900AA"]["reason"])
+
+    def test_unallocated_kit_reconciliation_and_configured_export_directory(self):
+        """
+        Verifies that kits dispatched to line without ITMS allocation (e.g. UMA058QK)
+        are categorized as unallocated discrepancies and exported to the configured directory.
+        """
+        import tempfile
+        from core.services import config_service
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_service.set_setting("sync.default_export_directory", temp_dir)
+            configured_dir = stock_monitoring_service.get_configured_export_dir()
+            self.assertEqual(str(configured_dir), temp_dir)
+
+            # 1. Dispatch UMA058QK to bike on the floor (status New in InstallationKit)
+            InstallationKit.objects.create(
+                registration_number="UMA058QK",
+                kit_code="IK-UMA058QK",
+                status="New",
+                warehouse="AGM SPIRO",
+            )
+            StockDispatchScan.objects.create(
+                registration_number="UMA058QK",
+                plate_category="PSV",
+                work_date_suffix=self.test_suffix,
+                status=StockDispatchScan.Status.ON_LINE_ACTIVE,
+                notes="Dispatched to bike. Awaiting MVR allocation in orders.",
+            )
+
+            # 2. Run daily reconciliation
+            recon = stock_monitoring_service.compute_daily_reconciliation(self.test_suffix)
+            self.assertIn("UMA058QK", recon["unallocated_plates"])
+            floor = recon.get("floor_operations", {})
+            self.assertIn("UMA058QK", floor.get("unallocated_plates", []))
+
+            # 3. Export unallocated/blocked kits CSV
+            file_path, filename, cnt = stock_monitoring_service.export_blocked_kits_csv(
+                blocked_plates=["UMA058QK"],
+                target_date_suffix=self.test_suffix,
+            )
+            self.assertEqual(cnt, 1)
+            self.assertTrue(file_path.startswith(temp_dir))
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+                self.assertIn("UMA058QK", content)
+                self.assertIn("Awaiting MVR Allocation in Orders (Dispatched to Line)", content)
+
+            # 4. Check category CSV content for unallocated
+            csv_content = stock_monitoring_service.generate_category_csv_content("unallocated", self.test_suffix)
+            self.assertIn("UMA058QK", csv_content)
+            self.assertIn("New / Unallocated", csv_content)
+
+            # 5. Check MVR exception docket
+            docket = stock_monitoring_service.get_mvr_unallocated_docket(self.test_suffix)
+            self.assertIn("UMA058QK", docket["unallocated_plates"])
+            self.assertIn("UMA058QK", docket["formatted_docket"])
+
+    def test_accumulated_blocked_plates_end_of_day_export(self):
+        """
+        Verifies that plates blocked throughout the day (from single scans or Excel)
+        are accumulated persistently and exported in the end-of-day report.
+        """
+        import os
+        import tempfile
+        from core.services import config_service
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_service.set_setting("sync.default_export_directory", temp_dir)
+
+            # Record blocked plates from batch 1 (e.g. 9 AM scan)
+            stock_monitoring_service.record_blocked_plates(["UMA101AA", "UMA102BB"], target_date_suffix=self.test_suffix)
+
+            # Record blocked plates from batch 2 (e.g. 2 PM Excel paste)
+            stock_monitoring_service.record_blocked_plates(["UMA103CC", "UMA101AA"], target_date_suffix=self.test_suffix)
+
+            accumulated = stock_monitoring_service.get_blocked_plates_for_date(self.test_suffix)
+            self.assertEqual(len(accumulated), 3)
+            self.assertIn("UMA101AA", accumulated)
+            self.assertIn("UMA102BB", accumulated)
+            self.assertIn("UMA103CC", accumulated)
+
+            # Export via export_shift_csvs at end of day
+            shift_files = stock_monitoring_service.export_shift_csvs(self.test_suffix)
+            self.assertIn("blocked", shift_files)
+            blocked_file = shift_files["blocked"]
+            self.assertTrue(os.path.exists(blocked_file))
+            with open(blocked_file, "r", encoding="utf-8") as f:
+                content = f.read()
+                self.assertIn("UMA101AA", content)
+                self.assertIn("UMA102BB", content)
+                self.assertIn("UMA103CC", content)
+
+            # Check category CSV generator
+            csv_text = stock_monitoring_service.generate_category_csv_content("blocked", self.test_suffix)
+            self.assertIn("UMA101AA", csv_text)
+            self.assertIn("NOT ON ITMS STOCK", csv_text)
+
+    def test_kit_sync_daemon_interval_and_rate_limit_cooldown(self):
+        """
+        Verifies that MorningKitSyncDaemon defaults to 3 hours (10,800s)
+        and enforces the 10-minute cooldown window to protect the ITMS API.
+        """
+        daemon = kit_provisioning_service.MorningKitSyncDaemon.get_instance()
+        status = daemon.get_status()
+        self.assertEqual(status["interval_seconds"], 10800)
+        self.assertEqual(status["interval_hours"], 3.0)
+
+        # Trigger sync pass 1
+        with patch.object(kit_provisioning_service, "sync_and_provision_warehouse_kits") as mock_sync:
+            mock_sync.return_value = {"success": True, "new_kits_ready_count": 5}
+            res1 = daemon.trigger_sync(sync_itms=False, force=True)
+            self.assertTrue(res1["success"])
+            self.assertEqual(mock_sync.call_count, 1)
+
+            # Trigger sync pass 2 immediately without force -> should be blocked by cooldown
+            res2 = daemon.trigger_sync(sync_itms=False, force=False)
+            self.assertEqual(res2.get("status"), "cooldown_active")
+            # Should NOT have invoked sync_and_provision_warehouse_kits again
+            self.assertEqual(mock_sync.call_count, 1)
+
+            # Trigger sync pass 3 with force=True -> bypasses cooldown
+            res3 = daemon.trigger_sync(sync_itms=False, force=True)
+            self.assertEqual(mock_sync.call_count, 2)
+
+    def test_crawler_bulk_database_upserts_and_protection(self):
+        """
+        Verifies that sync_kits_to_local_db properly performs bulk atomic upserts
+        for installation kits without row-by-row locking.
+        """
+        from core.services.itms_web_client import get_web_client
+        client = get_web_client()
+
+        sample_kits = [
+            {
+                "kit_code": "IK-UMA888TEST",
+                "registration_number": "UMA 888TEST",
+                "front_plate": "FP-888",
+                "rear_plate": "RP-888",
+                "warehouse": "AGM SPIRO",
+                "status": "New",
+                "created_date": "04.10.2026",
+            },
+            {
+                "kit_code": "IK-UMA999TEST",
+                "registration_number": "UMA 999TEST",
+                "front_plate": "FP-999",
+                "rear_plate": "RP-999",
+                "warehouse": "AGM SPIRO",
+                "status": "New",
+                "created_date": "04.10.2026",
+            },
+        ]
+
+        # 1. First insert
+        res = client.sync_kits_to_local_db(sample_kits)
+        self.assertTrue(res["success"])
+        self.assertEqual(res["created"], 2)
+        self.assertEqual(res["updated"], 0)
+
+        kit1 = InstallationKit.objects.get(kit_code="IK-UMA888TEST")
+        self.assertEqual(kit1.registration_number, "UMA 888TEST")
+        self.assertEqual(kit1.status, "New")
+
+        # 2. Update status of existing kit
+        sample_kits[0]["status"] = "Allocated"
+        res_update = client.sync_kits_to_local_db(sample_kits)
+        self.assertTrue(res_update["success"])
+        self.assertEqual(res_update["created"], 0)
+        self.assertEqual(res_update["updated"], 1)
+
+        kit1.refresh_from_db()
+        self.assertEqual(kit1.status, "Allocated")
+
+
+
 
 
 

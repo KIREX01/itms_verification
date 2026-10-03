@@ -1415,7 +1415,7 @@ class ITMSConnectionPane(Vertical):
             res = kit_provisioning_service.sync_and_provision_warehouse_kits(
                 target_date_suffix=None,
                 sync_itms=True,
-                max_pages=35,
+                max_pages=100,
                 log_callback=_on_log,
             )
             count = res.get("new_kits_ready_count", 0)

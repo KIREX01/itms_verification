@@ -37,7 +37,9 @@ def sync_and_provision_warehouse_kits(
     source_plates: Optional[Iterable[str]] = None,
     sync_itms: bool = True,
     facility_name: Optional[str] = None,
-    max_pages: int = 35,
+    max_pages: Optional[int] = None,
+    delay: float = 0.35,
+    force_all_pages: bool = False,
     log_callback: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
@@ -46,7 +48,7 @@ def sync_and_provision_warehouse_kits(
     Collects plates globally (unconstrained by shift date) from:
     1. Inbound deliveries (StockDeliveryItem).
     2. Physical safe room stock-taking / retaking scans.
-    3. Central ITMS web portal (/installation-kits) supporting full multi-page crawl (20+ pages)
+    3. Central ITMS web portal (/installation-kits) supporting full multi-page crawl (min 100 pages = 2000+ kits)
        and targeted search for candidate plates.
     4. Optional explicit source_plates.
 
@@ -59,6 +61,14 @@ def sync_and_provision_warehouse_kits(
     start_time = time.time()
     active_bond = bond_service.get_active_bond()
     wh_name = facility_name or active_bond.get("name", "AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)")
+
+    if max_pages is None:
+        try:
+            from core.services import config_service
+            max_pages = int(config_service.get_setting("crawl.max_kit_pages", 100) or 100)
+        except Exception:
+            max_pages = 100
+    max_pages = max(int(max_pages), 100)
 
     candidate_plates: Set[str] = set()
 
@@ -97,12 +107,13 @@ def sync_and_provision_warehouse_kits(
             client = get_web_client()
             session = client.session_store.session
             if session and session.is_cookie_valid():
-                # A. Multi-page crawling first across all 20+ pages on ITMS
+                # A. Multi-page crawling first across all 100+ pages on ITMS
                 if log_callback:
                     log_callback(f"Starting ITMS installation kits multi-page crawl (up to {max_pages} pages)...")
                 crawl_res = client.fetch_and_sync_all_kits(
                     max_pages=max_pages,
-                    delay=0.12,
+                    delay=delay,
+                    force_all_pages=force_all_pages,
                     log_callback=log_callback,
                     allow_local_fallback=False,
                 )
@@ -365,7 +376,10 @@ def verify_scanned_kits_stock(
             missing_locally.append(p)
 
     # Step 2: Live ITMS Check for Plates Missing Locally
-    if missing_locally and check_itms_live:
+    # Fast Floor Protection: Only attempt live synchronous ITMS queries for small batches (<= 3 plates).
+    # In bulk Excel pastes (e.g. 50, 100, 1300 plates), NEVER block the UI thread with sequential HTTP requests.
+    # Instead, mark as NOT_ON_STOCK (Awaiting ITMS Stock Transfer) immediately.
+    if missing_locally and check_itms_live and len(missing_locally) <= 3:
         try:
             client = get_web_client()
             for p in missing_locally:
@@ -423,7 +437,7 @@ def verify_scanned_kits_stock(
                         "valid": False,
                         "status": "NOT_ON_STOCK",
                         "kit": None,
-                        "reason": f"Kit {p} not found on ITMS installation kits (Not on stock).",
+                        "reason": f"Kit {p} not found on ITMS installation kits (Awaiting Stock Transfer Officer).",
                     }
         except Exception as client_exc:
             logger.warning("Failed to initialize ITMS web client for stock verification: %s", client_exc)
@@ -443,8 +457,9 @@ def verify_scanned_kits_stock(
                 "valid": False,
                 "status": "NOT_ON_STOCK",
                 "kit": None,
-                "reason": f"Kit {p} not found in local stock and ITMS live check was disabled.",
+                "reason": f"Kit {p} not confirmed in local stock (Awaiting ITMS Stock Transfer Officer).",
             }
+
 
     success = len(rejected_not_on_stock) == 0 and len(already_installed) == 0
     return {
@@ -465,23 +480,66 @@ def verify_scanned_kits_stock(
     }
 
 
+class KitVerificationResult(tuple):
+    """
+    Dual-interface verification result: behaves both as a 3-tuple
+    (is_valid, kit_instance, reason) for legacy tuple unpacking, and as a
+    dictionary/object with .get(), .is_valid, .kit, .reason, .source, .status.
+    """
+    def __new__(cls, is_valid: bool, kit: Optional[InstallationKit] = None, reason: str = "", source: str = "local_db", status: str = ""):
+        return super().__new__(cls, (bool(is_valid), kit, reason))
+
+    def __init__(self, is_valid: bool, kit: Optional[InstallationKit] = None, reason: str = "", source: str = "local_db", status: str = ""):
+        self.is_valid = bool(is_valid)
+        self.valid = self.is_valid
+        self.kit = kit
+        self.reason = reason
+        self.error = reason if not is_valid else ""
+        self.source = source
+        self.status = status
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key in ("is_valid", "valid"):
+            return self.is_valid
+        elif key == "kit":
+            return self.kit
+        elif key in ("reason", "error"):
+            return self.error or self.reason or default
+        elif key == "source":
+            return self.source
+        elif key == "status":
+            return self.status
+        return default
+
+    def __getitem__(self, item: Any) -> Any:
+        if isinstance(item, str):
+            return self.get(item)
+        return super().__getitem__(item)
+
+
 def verify_scanned_kit_stock(
     plate: str,
     check_itms_live: bool = True,
     facility_name: Optional[str] = None,
-) -> Tuple[bool, Optional[InstallationKit], str]:
+) -> KitVerificationResult:
     """
     Two-tier verification for a single scanned kit before dispatch/issuance:
     1. Tier 1: Search local synced InstallationKit table.
-    2. Tier 2: If missing locally and check_itms_live=True, query ITMS /installation-kits/index live.
+    2. Tier 2: If missing locally and check_itms_live=True, query ITMS /installation-kits live.
        If found on ITMS: auto-sync kit into local DB and approve.
        If not found on ITMS: reject (kit is not on stock, cannot be taken out).
-    Returns: (is_valid, kit_instance, reason)
+    Returns: KitVerificationResult(is_valid, kit_instance, reason)
     """
     res = verify_scanned_kits_stock([plate], check_itms_live=check_itms_live, facility_name=facility_name)
     c = normalizer.canonicalize(plate)
     dt = res.get("details", {}).get(c, {})
-    return dt.get("valid", False), dt.get("kit"), dt.get("reason", "Verification failed")
+    is_val = dt.get("valid", False)
+    kit = dt.get("kit")
+    status = dt.get("status", "")
+    source = "itms_live" if status == "VERIFIED_ITMS" else "local_db"
+    reason = dt.get("reason", "Verification failed")
+    return KitVerificationResult(is_val, kit, reason, source=source, status=status)
+
 
 
 def validate_morning_dispatch_readiness(
@@ -546,29 +604,51 @@ def validate_morning_dispatch_readiness(
     }
 
 
+DEFAULT_KIT_SYNC_INTERVAL_SECONDS = 10800  # 3 hours (3 * 3600 seconds)
+MIN_KIT_SYNC_INTERVAL_SECONDS = 300        # 5 minutes minimum safety floor
+COOLDOWN_WINDOW_SECONDS = 600              # 10 minutes cooldown between sync passes
+
+
 class MorningKitSyncDaemon:
     """
-    Thread-safe background daemon worker for recurring morning installation kit
+    Thread-safe background daemon worker for recurring installation kit
     synchronization and warehouse stock readiness.
+
+    Ensures local database updates while protecting ITMS API limits:
+    - Default recurring interval: 3 hours (10,800s).
+    - Rate-limiting protection: Minimum 600s cooldown between full passes.
+    - Gentle background crawling: 0.35s delay with jitter, adaptive backoff on 429.
+    - Non-blocking daemon thread: never freezes TUI or dispatch scanning.
     """
 
     _instance: Optional["MorningKitSyncDaemon"] = None
     _lock = threading.Lock()
 
-    def __init__(self, interval_seconds: int = 900):  # Default 15 minutes
-        self.interval = interval_seconds
+    def __init__(self, interval_seconds: Optional[int] = None):
+        if interval_seconds is None:
+            try:
+                from core.services import config_service
+                interval_seconds = int(
+                    config_service.get_setting("sync.kit_sync_interval_seconds", DEFAULT_KIT_SYNC_INTERVAL_SECONDS)
+                )
+            except Exception:
+                interval_seconds = DEFAULT_KIT_SYNC_INTERVAL_SECONDS
+        self.interval = max(int(interval_seconds or DEFAULT_KIT_SYNC_INTERVAL_SECONDS), MIN_KIT_SYNC_INTERVAL_SECONDS)
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._is_running = False
         self._last_run_time: Optional[datetime] = None
         self._last_result: Optional[Dict[str, Any]] = None
+        self._last_sync_timestamp: float = 0.0
         self._run_count = 0
 
     @classmethod
-    def get_instance(cls, interval_seconds: int = 900) -> "MorningKitSyncDaemon":
+    def get_instance(cls, interval_seconds: Optional[int] = None) -> "MorningKitSyncDaemon":
         with cls._lock:
             if cls._instance is None:
                 cls._instance = cls(interval_seconds=interval_seconds)
+            elif interval_seconds is not None:
+                cls._instance.interval = max(int(interval_seconds), MIN_KIT_SYNC_INTERVAL_SECONDS)
             return cls._instance
 
     def start(self) -> bool:
@@ -583,7 +663,7 @@ class MorningKitSyncDaemon:
             )
             self._is_running = True
             self._thread.start()
-            logger.info("MorningKitSyncDaemon started in background (interval: %ds).", self.interval)
+            logger.info("MorningKitSyncDaemon started in background (interval: %ds / %.1fh).", self.interval, self.interval / 3600.0)
             return True
 
     def stop(self) -> None:
@@ -594,10 +674,42 @@ class MorningKitSyncDaemon:
             self._is_running = False
             logger.info("MorningKitSyncDaemon stopping...")
 
-    def trigger_sync(self, sync_itms: bool = True) -> Dict[str, Any]:
-        """Runs an immediate synchronous pass and caches result."""
-        res = sync_and_provision_warehouse_kits(sync_itms=sync_itms)
+    def trigger_sync(
+        self,
+        sync_itms: bool = True,
+        force: bool = False,
+        max_pages: Optional[int] = None,
+        log_callback: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Runs a sync pass and caches result.
+        Enforces a 10-minute cooldown window unless force=True to protect server API limits.
+        """
+        now_ts = time.time()
+        elapsed_since_last = now_ts - self._last_sync_timestamp
+        if not force and self._last_sync_timestamp > 0 and elapsed_since_last < COOLDOWN_WINDOW_SECONDS:
+            rem = int(COOLDOWN_WINDOW_SECONDS - elapsed_since_last)
+            msg = f"Kit sync cooldown active: last pass finished {int(elapsed_since_last)}s ago. Next pass eligible in {rem}s."
+            logger.info(msg)
+            if log_callback:
+                log_callback(f"ℹ️ {msg}")
+            res = dict(self._last_result) if self._last_result else {
+                "success": True,
+                "total_candidates_processed": 0,
+                "new_kits_ready_count": 0,
+            }
+            res["status"] = "cooldown_active"
+            res["cooldown_remaining_seconds"] = rem
+            res["message"] = msg
+            return res
+
+        res = sync_and_provision_warehouse_kits(
+            sync_itms=sync_itms,
+            max_pages=max_pages,
+            log_callback=log_callback,
+        )
         self._last_run_time = timezone.now()
+        self._last_sync_timestamp = time.time()
         self._last_result = res
         self._run_count += 1
         return res
@@ -606,6 +718,7 @@ class MorningKitSyncDaemon:
         return {
             "is_running": self._is_running,
             "interval_seconds": self.interval,
+            "interval_hours": round(self.interval / 3600.0, 2),
             "run_count": self._run_count,
             "last_run_time": self._last_run_time.isoformat() if self._last_run_time else None,
             "last_result": self._last_result,
@@ -613,25 +726,26 @@ class MorningKitSyncDaemon:
 
     def _run_loop(self) -> None:
         from django.db import connection, close_old_connections
-        # Initial pass on startup
-        try:
-            close_old_connections()
-            self.trigger_sync(sync_itms=True)
-        except Exception as exc:
-            logger.warning("Initial morning kit sync error: %s", exc)
-        finally:
+        # Initial pass on startup with brief 3s initial delay for clean boot
+        if not self._stop_event.wait(timeout=3.0):
             try:
-                connection.close()
-            except Exception:
-                pass
+                close_old_connections()
+                self.trigger_sync(sync_itms=True, force=True)
+            except Exception as exc:
+                logger.warning("Initial morning kit sync error: %s", exc)
+            finally:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
 
         while not self._stop_event.is_set():
-            # Wait for interval or stop event
+            # Wait for 3-hour interval or stop event
             if self._stop_event.wait(timeout=self.interval):
                 break
             try:
                 close_old_connections()
-                self.trigger_sync(sync_itms=True)
+                self.trigger_sync(sync_itms=True, force=False)
             except Exception as exc:
                 logger.warning("Periodic morning kit sync error: %s", exc)
             finally:

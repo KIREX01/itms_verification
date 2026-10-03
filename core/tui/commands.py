@@ -92,8 +92,9 @@ class ITMSCommandProvider(Provider):
             ("Navigate: BATCHES (Tab 3)", app.action_tab_batches, "Switch to Ingestion Batches tab"),
             ("Navigate: REVIEW (Tab 4)", app.action_tab_queue, "Switch to Review Queue tab"),
             ("Navigate: AUDIT (Tab 5)", app.action_tab_history, "Switch to Audit & History tab"),
-            ("Navigate: REPORTS (Tab 6)", app.action_tab_reports, "Switch to Reports tab for shift metrics, totals, kit breakdowns, and export"),
-            ("Navigate: System Settings & Config (Tab 7)", app.action_tab_settings, "Switch to Settings tab for safety guardrails, OCR engines, and developer options"),
+            ("Navigate: STOCK (Tab 6) [K / 6]", app.action_tab_stock, "Switch to Rapid Line-Out Dispatch, Bond Recon & Kit Inspector"),
+            ("Navigate: REPORTS (Tab 7)", app.action_tab_reports, "Switch to Reports tab for shift metrics, totals, kit breakdowns, and export"),
+            ("Navigate: System Settings & Config (Tab 8)", app.action_tab_settings, "Switch to Settings tab for safety guardrails, OCR engines, and developer options"),
             
             # 6. Filters & Storage
             ("Filter: Cycle History Status Filter [F]", app.action_cycle_filter, "Toggle between All, Submitted, Failed, and Audit Logs"),

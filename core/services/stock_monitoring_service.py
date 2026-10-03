@@ -18,6 +18,7 @@ accounting descriptions and balances:
 """
 import csv
 import io
+import json
 import logging
 import os
 import re
@@ -825,6 +826,34 @@ def record_stock_taking_audit(
         else:
             scanned_psv_count += 1
 
+    # Separate physical plates into verified on-stock with hardware serials vs unregistered
+    target_codes = [f"IK-{p}" for p in clean_plates]
+    local_kits = {
+        k.registration_number: k
+        for k in InstallationKit.objects.filter(
+            Q(registration_number__in=clean_plates) | Q(kit_code__in=target_codes)
+        )
+    }
+
+    verified_plates: List[str] = []
+    unregistered_plates: List[str] = []
+    hardware_profiles: List[Dict[str, Any]] = []
+
+    for p in clean_plates:
+        kit = local_kits.get(p) or local_kits.get(f"IK-{p}")
+        if kit:
+            verified_plates.append(p)
+            hardware_profiles.append({
+                "plate": p,
+                "kit_code": kit.kit_code or f"IK-{p}",
+                "gps_tracker": getattr(kit, "gps_tracker", "") or getattr(kit, "gps_tracker_id", "") or "—",
+                "front_ble": getattr(kit, "front_tracker", "") or getattr(kit, "ble_beacon_front", "") or "—",
+                "rear_ble": getattr(kit, "rear_tracker", "") or getattr(kit, "ble_beacon_rear", "") or "—",
+                "status": kit.status or "New",
+            })
+        else:
+            unregistered_plates.append(p)
+
     total_scanned = len(clean_plates)
     total_variance = total_scanned - book_closing_total
     variance_psv = scanned_psv_count - book_closing_psv
@@ -859,6 +888,11 @@ def record_stock_taking_audit(
         "work_date_suffix": suffix,
         "physical_count": total_scanned,
         "total_scanned": total_scanned,
+        "verified_count": len(verified_plates),
+        "unregistered_count": len(unregistered_plates),
+        "verified_plates": verified_plates,
+        "unregistered_plates": unregistered_plates,
+        "hardware_profiles": hardware_profiles,
         "physical_psv": scanned_psv_count,
         "physical_pmo": scanned_pmo_count,
         "book_closing_stock": book_closing_total,
@@ -875,6 +909,7 @@ def record_stock_taking_audit(
         "kits_provisioned": prov_res,
         "reconciliation": updated_recon,
     }
+
 
 
 def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Dict[str, Any]:
@@ -1408,6 +1443,189 @@ def export_stock_reconciliation_csv(target_date_suffix: Optional[str] = None) ->
     return out.getvalue()
 
 
+def get_configured_export_dir(exports_dir: Optional[str] = None) -> Path:
+    """
+    Resolves the standardized directory where CSV and shift reports are exported,
+    strictly adhering to the user's configured export directory setting.
+    """
+    from django.conf import settings
+    if exports_dir:
+        out_dir = Path(exports_dir)
+    else:
+        from core.services import config_service
+        def_dir = str(config_service.get_setting("sync.default_export_directory", "exports")).strip() or "exports"
+        out_dir = Path(def_dir) if os.path.isabs(def_dir) else Path(settings.BASE_DIR) / def_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir
+
+
+def get_blocked_plates_cache_file(target_date_suffix: Optional[str] = None) -> Path:
+    _, suffix = resolve_date_and_suffix(target_date_suffix)
+    out_dir = get_configured_export_dir()
+    return out_dir / f".blocked_kits_{suffix}.json"
+
+
+def record_blocked_plates(
+    plates: Iterable[str],
+    target_date_suffix: Optional[str] = None,
+    reason: str = "NOT ON ITMS STOCK",
+) -> List[str]:
+    """
+    Persistently records plates that were blocked at dispatch for a shift.
+    Merges with previously recorded blocked plates so that end-of-day reports
+    retain all non-stock plates from both single barcode scans and Excel batch pastes.
+    """
+    _, suffix = resolve_date_and_suffix(target_date_suffix)
+    new_clean = parse_plate_input(plates)
+    cache_file = get_blocked_plates_cache_file(suffix)
+
+    existing: List[str] = []
+    if cache_file.exists():
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    existing = [p for p in data if isinstance(p, str)]
+                elif isinstance(data, dict):
+                    existing = data.get("plates", [])
+        except Exception as exc:
+            logger.warning("Error reading blocked plates cache: %s", exc)
+
+    combined = parse_plate_input(existing + new_clean)
+    try:
+        with open(cache_file, "w", encoding="utf-8") as f:
+            json.dump({
+                "work_date_suffix": suffix,
+                "count": len(combined),
+                "updated_at": timezone.now().isoformat(),
+                "plates": combined,
+            }, f, indent=2)
+    except Exception as exc:
+        logger.warning("Error saving blocked plates cache: %s", exc)
+
+    return combined
+
+
+def get_blocked_plates_for_date(target_date_suffix: Optional[str] = None) -> List[str]:
+    """Returns all accumulated plates blocked at dispatch for the target date."""
+    _, suffix = resolve_date_and_suffix(target_date_suffix)
+    cache_file = get_blocked_plates_cache_file(suffix)
+    if cache_file.exists():
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return [p for p in data if isinstance(p, str)]
+                elif isinstance(data, dict):
+                    return data.get("plates", [])
+        except Exception as exc:
+            logger.warning("Error reading blocked plates cache: %s", exc)
+    return []
+
+
+def export_blocked_kits_csv(
+    blocked_plates: Optional[Iterable[str]] = None,
+    reason: str = "Awaiting ITMS Stock Transfer Officer",
+    target_date_suffix: Optional[str] = None,
+    bond_name: Optional[str] = None,
+    exports_dir: Optional[str] = None,
+) -> Tuple[str, str, int]:
+    """
+    Exports a clean CSV file containing plates blocked at dispatch because they are
+    not on stock / awaiting ITMS stock transfer.
+    Returns: (absolute_file_path, filename, row_count)
+    """
+    work_d, suffix = resolve_date_and_suffix(target_date_suffix)
+    if blocked_plates is None:
+        blocked_plates = get_blocked_plates_for_date(suffix)
+    clean_plates = parse_plate_input(blocked_plates)
+    if not clean_plates:
+        return "", "", 0
+
+    active_bond = bond_service.get_active_bond()
+    b_name = bond_name or active_bond.get("name", "AGM SPIRO")
+
+    timestamp_str = timezone.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"blocked_dispatch_kits_{suffix}_{timestamp_str}.csv"
+    out_dir = get_configured_export_dir(exports_dir)
+    file_path = str(out_dir / filename)
+
+    target_codes = [f"IK-{p}" for p in clean_plates]
+    known_kits = {
+        k.registration_number: k
+        for k in InstallationKit.objects.filter(
+            Q(registration_number__in=clean_plates) | Q(kit_code__in=target_codes)
+        )
+    }
+
+    with open(file_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["#", "Registration Plate", "Plate Category", "Kit Code", "Warehouse Bond", "Status / Reason", "Exported At"])
+        for idx, p in enumerate(clean_plates, start=1):
+            cat = "PMO" if "PMO" in p.upper() else "PSV"
+            kit = known_kits.get(p) or known_kits.get(f"IK-{p}")
+            plate_reason = reason
+            if kit and (kit.status or "").lower() == "new":
+                plate_reason = "Awaiting MVR Allocation in Orders (Dispatched to Line)"
+            elif kit and (kit.status or "").lower() in ("installed", "archived"):
+                plate_reason = "ALREADY INSTALLED in Archive (Blocked from Line)"
+            writer.writerow([
+                idx,
+                p,
+                cat,
+                f"IK-{p}",
+                b_name,
+                plate_reason,
+                timezone.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ])
+
+    return file_path, filename, len(clean_plates)
+
+
+def export_unregistered_stocktake_csv(
+    unregistered_plates: Iterable[str],
+    target_date_suffix: Optional[str] = None,
+    bond_name: Optional[str] = None,
+    exports_dir: Optional[str] = None,
+) -> Tuple[str, str, int]:
+    """
+    Exports a clean CSV file containing physical plates audited in the safe room that
+    have zero record in ITMS installation kits / local database.
+    Returns: (absolute_file_path, filename, row_count)
+    """
+    work_d, suffix = resolve_date_and_suffix(target_date_suffix)
+    clean_plates = parse_plate_input(unregistered_plates)
+    if not clean_plates:
+        return "", "", 0
+
+    active_bond = bond_service.get_active_bond()
+    b_name = bond_name or active_bond.get("name", "AGM SPIRO")
+
+    timestamp_str = timezone.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"unregistered_stocktake_kits_{suffix}_{timestamp_str}.csv"
+    out_dir = get_configured_export_dir(exports_dir)
+    file_path = str(out_dir / filename)
+
+    with open(file_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["#", "Registration Plate", "Plate Category", "Kit Code", "Warehouse Facility", "Audit Verdict", "Notes", "Audited At"])
+        for idx, p in enumerate(clean_plates, start=1):
+            cat = "PMO" if "PMO" in p.upper() else "PSV"
+            writer.writerow([
+                idx,
+                p,
+                cat,
+                f"IK-{p}",
+                b_name,
+                "NOT ON ITMS STOCK",
+                "Physical kit box in safe room; missing from ITMS installation kits",
+                timezone.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ])
+
+    return file_path, filename, len(clean_plates)
+
+
+
 def get_delivery_notes_for_date(target_date_suffix: Optional[Any] = None) -> List[Dict[str, Any]]:
     """
     Returns all stored delivery notes for a specific date or suffix, with itemized
@@ -1742,6 +1960,30 @@ def generate_category_csv_content(category: str, target_date_suffix: Optional[st
             ])
         return out.getvalue()
 
+    if cat_lower in ("blocked", "not_on_stock", "rejected"):
+        blocked_plates = get_blocked_plates_for_date(suffix)
+        writer.writerow([
+            "#",
+            "Registration Plate",
+            "Plate Category",
+            "Kit Code",
+            "Operating Facility",
+            "Audit Verdict",
+            "Action Required",
+        ])
+        for idx, p in enumerate(blocked_plates, start=1):
+            cat = "PMO" if "PMO" in p.upper() else "PSV"
+            writer.writerow([
+                idx,
+                p,
+                cat,
+                f"IK-{p}",
+                active_name,
+                "NOT ON ITMS STOCK",
+                "Set physical box aside in safe room; awaiting ITMS Stock Transfer Officer registration",
+            ])
+        return out.getvalue()
+
     # Fallback default: unallocated
     return generate_category_csv_content("unallocated", target_date_suffix)
 
@@ -1758,19 +2000,14 @@ def export_shift_csvs(
     4. shift_{suffix}_unallocated_kits_{count}.csv
     5. shift_{suffix}_reconciliation_master.csv
     6. shift_{suffix}_returned_to_stock_{count}.csv (if any returns exist)
+    7. blocked_dispatch_kits_{suffix}_{timestamp}.csv (all non-stock kits set aside)
 
     Returns dictionary of {category_key: absolute_file_path}.
     """
     from django.conf import settings
     _, suffix = resolve_date_and_suffix(target_date_suffix)
 
-    if exports_dir:
-        out_dir = Path(exports_dir)
-    else:
-        from core.services import config_service
-        def_dir = str(config_service.get_setting("sync.default_export_directory", "exports")).strip() or "exports"
-        out_dir = Path(def_dir) if os.path.isabs(def_dir) else Path(settings.BASE_DIR) / def_dir
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = get_configured_export_dir(exports_dir)
 
     recon = compute_daily_reconciliation(suffix)
     floor = recon.get("floor_operations", {})
@@ -1820,6 +2057,16 @@ def export_shift_csvs(
     master_path = out_dir / f"shift_{suffix}_reconciliation_master.csv"
     master_path.write_text(master_csv, encoding="utf-8")
     files_generated["master"] = str(master_path)
+
+    # 7. Blocked / Not-On-Stock Kits CSV (for ITMS Stock Transfer Officer)
+    blocked_plates = get_blocked_plates_for_date(suffix)
+    if blocked_plates:
+        blocked_path, _, _ = export_blocked_kits_csv(
+            blocked_plates=blocked_plates,
+            target_date_suffix=suffix,
+            exports_dir=str(out_dir),
+        )
+        files_generated["blocked"] = blocked_path
 
     return files_generated
 

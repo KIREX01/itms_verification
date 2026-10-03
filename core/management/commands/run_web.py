@@ -203,6 +203,16 @@ class Command(BaseCommand):
             t = threading.Thread(target=_run_https_background, daemon=True, name="ITMS-HTTPS-Listener")
             t.start()
 
+        # Start background warehouse installation kits sync daemon (3-hour periodic sync)
+        if (is_reloader_child or is_noreload) and config_service.get_setting("sync.auto_sync_enabled", True):
+            try:
+                from core.services import kit_provisioning_service
+                kit_daemon = kit_provisioning_service.MorningKitSyncDaemon.get_instance()
+                kit_daemon.start()
+                self.stdout.write(self.style.NOTICE("    [✓] Background Kit Sync Daemon active (3-hour cycle, min 100 pages)"))
+            except Exception as d_err:
+                logger.debug("Could not start MorningKitSyncDaemon in Web: %s", d_err)
+
         # 6. Start Primary Server
         try:
             if enable_ssl_primary and ssl_context:

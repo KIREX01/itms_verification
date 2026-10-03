@@ -55,14 +55,19 @@ class Command(BaseCommand):
         parser.add_argument(
             "--interval",
             type=int,
-            default=900,
-            help="Interval in seconds between periodic background syncs in daemon mode (default: 900s).",
+            default=10800,
+            help="Interval in seconds between periodic background syncs in daemon mode (default: 10800s = 3 hours).",
         )
         parser.add_argument(
             "--max-pages",
             type=int,
-            default=25,
-            help="Maximum number of installation kit pages to crawl on ITMS (default: 25 pages, covers all 20+ pages).",
+            default=100,
+            help="Maximum number of installation kit pages to crawl on ITMS (default: 100 pages = 2000+ kits).",
+        )
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Force full crawl bypassing the 10-minute cooldown window.",
         )
 
     def handle(self, *args, **options):
@@ -71,8 +76,9 @@ class Command(BaseCommand):
         suffix = options.get("suffix")
         plates_input = options.get("plates")
         is_daemon = options.get("daemon", False)
-        interval = options.get("interval", 900)
-        max_pages = options.get("max_pages", 25)
+        interval = options.get("interval", 10800)
+        max_pages = options.get("max_pages", 100)
+        force = options.get("force", False)
 
         # Parse plates if provided
         source_plates = None
@@ -102,6 +108,7 @@ class Command(BaseCommand):
             source_plates=source_plates,
             sync_itms=sync_itms or morning_prep,
             max_pages=max_pages,
+            force_all_pages=force,
         )
 
         self.stdout.write(self.style.SUCCESS(f"✓ {res['message']}"))

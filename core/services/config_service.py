@@ -30,11 +30,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "shift_target_date_mode": "today",     # "today", "yesterday", or "manual"
         "manual_target_date": "",              # e.g. "30.09.2026" or "300926"
         "default_export_directory": "exports", # Shift reconciliation spreadsheet export folder
+        "kit_sync_interval_seconds": 10800,    # Installation kit warehouse catalog background sync interval (3 hours = 10800s)
     },
     "crawl": {
         "max_active_pages": 25,                # Max pages to crawl for active orders (20 records/page)
         "max_archive_pages": 50,               # Max pages to crawl for archive orders
-        "max_kit_pages": 25,                   # Max pages to crawl for installation kits
+        "max_kit_pages": 100,                  # Max pages to crawl for installation kits (min 100 pages = 2000+ kits)
     },
     "database": {
         "engine": "sqlite",                    # "sqlite" (default for all machines) or "postgresql"
@@ -168,6 +169,13 @@ USER_SETTINGS_SCHEMA: Dict[str, Dict[str, Any]] = {
         "default": "exports",
         "category": "Shift & Synchronization",
     },
+    "sync.kit_sync_interval_seconds": {
+        "label": "Stock Kits Sync Interval (seconds)",
+        "description": "Background interval for crawling ITMS installation kits into local database (default: 10800s = 3 hours).",
+        "type": "int",
+        "default": 10800,
+        "category": "Shift & Synchronization",
+    },
     "storage.vault_path": {
         "label": "Evidence Vault Folder",
         "description": "Local directory where photographic evidence and camera files are stored.",
@@ -216,9 +224,9 @@ DEVELOPER_SETTINGS_SCHEMA: Dict[str, Dict[str, Any]] = {
     },
     "crawl.max_kit_pages": {
         "label": "Max Kit Catalog Pages",
-        "description": "Maximum pages crawled when scanning warehouse stock kits (default: 25).",
+        "description": "Maximum pages crawled when scanning warehouse stock kits (min 100 pages = 2,000+ kits).",
         "type": "int",
-        "default": 25,
+        "default": 100,
         "category": "Crawl & Pagination",
     },
     "network.http_timeout_seconds": {
@@ -389,18 +397,30 @@ def load_config(base_dir: Optional[Path] = None) -> Dict[str, Any]:
 
 def save_config(config_data: Dict[str, Any], base_dir: Optional[Path] = None) -> bool:
     """Saves configuration dictionary solely to secure/config.json."""
+    import time
     cfg_path = get_config_path(base_dir)
+    temp_path = None
     try:
         cfg_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = cfg_path.with_suffix(".tmp")
+        temp_path = cfg_path.parent / f"{cfg_path.stem}_{os.getpid()}_{time.time_ns()}.tmp"
         with open(temp_path, "w", encoding="utf-8") as f:
             json.dump(config_data, f, indent=2, ensure_ascii=False)
-        temp_path.replace(cfg_path)
+        try:
+            temp_path.replace(cfg_path)
+        except OSError:
+            import shutil
+            shutil.move(str(temp_path), str(cfg_path))
         logger.info("System configuration saved to %s", cfg_path)
         return True
     except Exception as exc:
         logger.error("Failed to save configuration to %s: %s", cfg_path, exc)
         return False
+    finally:
+        if temp_path and temp_path.is_file():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
 
 
 CONFIG_ALIASES: Dict[str, str] = {
@@ -417,6 +437,8 @@ CONFIG_ALIASES: Dict[str, str] = {
     "yolo_weights": "vision.yolo_weights",
     "plate_yolo_weights": "vision.yolo_weights",
     "vision.weights": "vision.yolo_weights",
+    "sync.kit_sync_interval_hours": "sync.kit_sync_interval_seconds",
+    "crawl.kit_pages": "crawl.max_kit_pages",
 }
 
 

@@ -54,6 +54,7 @@ from textual.widgets import (
 from core.tui.dashboard_pane import DashboardPane
 from core.tui.inspectors import InspectorPane
 from core.tui.itms_pane import ITMSConnectionPane
+from core.tui.stock_pane import StockPane
 from core.tui.reports_pane import ReportsPane
 from core.tui.settings_pane import SettingsPane
 from core.tui.tables import TableLoaderMixin, HISTORY_FILTERS
@@ -76,29 +77,33 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         ("3", "tab_batches", "Batches"),
         ("4", "tab_queue", "Review"),
         ("5", "tab_history", "Audit"),
-        ("6", "tab_reports", "Reports"),
-        ("7", "tab_settings", "Settings"),
+        ("6", "tab_stock", "Stock [6/K]"),
+        ("7", "tab_reports", "Reports"),
+        ("8", "tab_settings", "Settings"),
         ("f1", "tab_dashboard", "Dashboard"),
         ("f2", "tab_itms", "ITMS"),
         ("f3", "tab_batches", "Batches"),
         ("f4", "tab_queue", "Review"),
         ("f5", "tab_history", "Audit"),
-        ("f6", "tab_reports", "Reports"),
-        ("f7", "tab_settings", "Settings"),
+        ("f6", "tab_stock", "Stock"),
+        ("f7", "tab_reports", "Reports"),
+        ("f8", "tab_settings", "Settings"),
         ("ctrl+1", "tab_dashboard", "Dashboard"),
         ("ctrl+2", "tab_itms", "ITMS"),
         ("ctrl+3", "tab_batches", "Batches"),
         ("ctrl+4", "tab_queue", "Review"),
         ("ctrl+5", "tab_history", "Audit"),
-        ("ctrl+6", "tab_reports", "Reports"),
-        ("ctrl+7", "tab_settings", "Settings"),
+        ("ctrl+6", "tab_stock", "Stock"),
+        ("ctrl+7", "tab_reports", "Reports"),
+        ("ctrl+8", "tab_settings", "Settings"),
         ("i", "native_ingest", "Add Photos (Dialog)"),
         ("w", "open_upload_ui", "Web Upload"),
         ("p", "process_vision", "Run Vision"),
         ("j", "joint_rescan", "Joint Re-Scan"),
         ("m", "match_pairs", "Match Pairs"),
         ("t", "quick_type_plate", "Type Plate"),
-        ("k", "open_stock_manager", "Stock Manager (K)"),
+        ("k", "tab_stock", "Stock Manager (K)"),
+
         ("y", "sync_itms_orders", "Sync Orders"),
         ("u", "submit_pair", "Submit Order"),
         ("b", "batch_submit", "Batch Submit"),
@@ -191,11 +196,15 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
                     yield DataTable(id="table-history", classes="table-panel")
                     yield InspectorPane(id="inspector-history", classes="inspector-panel")
 
+            with TabPane("STOCK", id="tab-stock"):
+                yield StockPane(id="stock-pane")
+
             with TabPane("REPORTS", id="tab-reports"):
                 yield ReportsPane(id="reports-pane")
 
             with TabPane("SETTINGS", id="tab-settings"):
                 yield SettingsPane(id="settings-pane")
+
 
         with Vertical(id="activity-container"):
             yield Static(
@@ -259,6 +268,15 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
             self.push_screen(LandingAuthScreen(), self._on_auth_completed)
 
         self.log_message("[dim]Press [1-7] workflow tabs │ [I] Photos │ [P] Vision │ [M] Match │ [B] Batch Submit │ [O] Drain Outbox │ [X] Sign Out[/dim]")
+
+        # Start background warehouse installation kits sync daemon (3-hour periodic sync)
+        if config_service.get_setting("sync.auto_sync_enabled", True):
+            try:
+                from core.services import kit_provisioning_service
+                kit_daemon = kit_provisioning_service.MorningKitSyncDaemon.get_instance()
+                kit_daemon.start()
+            except Exception as d_err:
+                logger.debug("Could not start MorningKitSyncDaemon in TUI: %s", d_err)
 
         # Periodically refresh dashboard and outbox monitor every 15s
         self.set_interval(15.0, self._auto_refresh_dashboard_and_outbox)

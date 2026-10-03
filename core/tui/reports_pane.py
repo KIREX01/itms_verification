@@ -101,10 +101,11 @@ class ReportsPane(VerticalScroll):
                 yield Static("[bold green]📁 Categorized Shift CSV Exports (Directory: exports/)[/bold green]", classes="card-title")
                 yield Static(id="reports-csv-exports-summary")
                 with Horizontal(classes="csv-actions-row"):
-                    yield Button("🚀 Export All 5 CSVs [E]", variant="primary", id="btn-export-all-csvs")
+                    yield Button("🚀 Export Shift CSVs [E]", variant="primary", id="btn-export-all-csvs")
                     yield Button("📂 Export Folder", variant="default", id="btn-change-reports-folder")
                     yield Button("📊 Master Ledger CSV", variant="success", id="btn-export-master-csv")
-                    yield Button("🔴 Unallocated CSV", variant="error", id="btn-export-unalloc-csv")
+                    yield Button("⛔ Not On Stock CSV", variant="error", id="btn-export-blocked-csv")
+                    yield Button("🔴 Unallocated CSV", variant="default", id="btn-export-unalloc-csv")
                     yield Button("🔵 Archive CSV", variant="default", id="btn-export-arch-csv")
                     yield Button("🟡 Pending CSV", variant="warning", id="btn-export-pend-csv")
                     yield Button("⚪ Dispatched CSV", variant="default", id="btn-export-disp-csv")
@@ -383,17 +384,24 @@ class ReportsPane(VerticalScroll):
         inst_cnt = dd.get("installed_orders", {}).get("count") or dd.get("installed_archive", {}).get("count", 258)
         pend_cnt = dd.get("pending_orders", {}).get("count", 87)
 
+        from core.services import stock_monitoring_service
+        exports_dir = str(stock_monitoring_service.get_configured_export_dir())
+        blocked_plates = stock_monitoring_service.get_blocked_plates_for_date(suf)
+        blocked_cnt = len(blocked_plates)
+
         lines = [
-            f"[bold white]All categorized shift spreadsheets are saved in the [cyan]exports/[/cyan] directory:[/bold white]",
-            f"  1. [bold green]📊 Master Shift Reconciliation Ledger:[/bold green] [underline]exports/shift_{suf}_reconciliation_master.csv[/underline]",
+            f"[bold white]All categorized shift spreadsheets are saved in [cyan]{exports_dir}[/cyan]:[/bold white]",
+            f"  1. [bold green]📊 Master Shift Reconciliation Ledger:[/bold green] [underline]{exports_dir}/shift_{suf}_reconciliation_master.csv[/underline]",
             f"     [dim]Web URL: http://localhost:8000/api/stock/export/category/master/?suffix={suf}[/dim]",
-            f"  2. [bold red]🔴 Unallocated Kits Docket ({unalloc_cnt} Plates):[/bold red] [underline]exports/shift_{suf}_unallocated_kits_{unalloc_cnt}.csv[/underline]",
+            f"  2. [bold red]⛔ Kits Not On Stock ({blocked_cnt} Set Aside):[/bold red] [underline]{exports_dir}/shift_{suf}_blocked_not_on_stock.csv[/underline]",
+            f"     [dim]Web URL: http://localhost:8000/api/stock/export/category/blocked/?suffix={suf}[/dim]",
+            f"  3. [bold yellow]🔴 Unallocated Kits Docket ({unalloc_cnt} Plates):[/bold yellow] [underline]{exports_dir}/shift_{suf}_unallocated_kits_{unalloc_cnt}.csv[/underline]",
             f"     [dim]Web URL: http://localhost:8000/api/stock/export/category/unallocated/?suffix={suf}[/dim]",
-            f"  3. [bold blue]🔵 Completed Archive Fitments ({inst_cnt} Orders):[/bold blue] [underline]exports/shift_{suf}_itms_archived_{inst_cnt}.csv[/underline]",
+            f"  4. [bold blue]🔵 Completed Archive Fitments ({inst_cnt} Orders):[/bold blue] [underline]{exports_dir}/shift_{suf}_itms_archived_{inst_cnt}.csv[/underline]",
             f"     [dim]Web URL: http://localhost:8000/api/stock/export/category/archived/?suffix={suf}[/dim]",
-            f"  4. [bold yellow]🟡 Active Pending Queue ({pend_cnt} Orders):[/bold yellow] [underline]exports/shift_{suf}_itms_active_pending_{pend_cnt}.csv[/underline]",
+            f"  5. [bold yellow]🟡 Active Pending Queue ({pend_cnt} Orders):[/bold yellow] [underline]{exports_dir}/shift_{suf}_itms_active_pending_{pend_cnt}.csv[/underline]",
             f"     [dim]Web URL: http://localhost:8000/api/stock/export/category/pending/?suffix={suf}[/dim]",
-            f"  5. [bold white]⚪ Morning Dispatched Plates ({dispatched_cnt} Counted):[/bold white] [underline]exports/shift_{suf}_morning_dispatched_{dispatched_cnt}.csv[/underline]",
+            f"  6. [bold white]⚪ Morning Dispatched Plates ({dispatched_cnt} Counted):[/bold white] [underline]{exports_dir}/shift_{suf}_morning_dispatched_{dispatched_cnt}.csv[/underline]",
             f"     [dim]Web URL: http://localhost:8000/api/stock/export/category/dispatched/?suffix={suf}[/dim]",
         ]
         try:
@@ -407,6 +415,8 @@ class ReportsPane(VerticalScroll):
             self.action_export_report()
         elif btn_id == "btn-export-master-csv":
             self.action_export_category_csv("master")
+        elif btn_id == "btn-export-blocked-csv":
+            self.action_export_category_csv("blocked")
         elif btn_id == "btn-export-unalloc-csv":
             self.action_export_category_csv("unallocated")
         elif btn_id == "btn-export-arch-csv":
@@ -476,7 +486,7 @@ class ReportsPane(VerticalScroll):
             res = kit_provisioning_service.sync_and_provision_warehouse_kits(
                 target_date_suffix=None,  # No date constraint; sync global catalog
                 sync_itms=True,
-                max_pages=35,
+                max_pages=100,
                 log_callback=_on_progress,
             )
             count = res.get("new_kits_ready_count", 0)
@@ -515,16 +525,15 @@ class ReportsPane(VerticalScroll):
             self.app.call_from_thread(_set_btn_state, "📦 Sync Stock Kits", False)
 
     def action_open_stock_manager(self) -> None:
-        """Opens the Bond Physical Stock & Reconciliation Manager Dialog."""
-        from core.tui.dialogs import StockManagerModal
-
-        def _on_modal_close(result):
-            self.refresh_reports()
-
-        self.app.push_screen(
-            StockManagerModal(target_date_suffix=self.current_target_date),
-            _on_modal_close,
-        )
+        """Navigates directly to the dedicated Stock & Reconciliation Workspace (Tab 6)."""
+        if hasattr(self.app, "action_tab_stock"):
+            self.app.action_tab_stock()
+        else:
+            from core.tui.dialogs import StockManagerModal
+            self.app.push_screen(
+                StockManagerModal(target_date_suffix=self.current_target_date),
+                lambda res: self.refresh_reports(),
+            )
 
     def action_sync_orders(self) -> None:
         """Triggers ITMS order synchronization via main app."""
@@ -575,13 +584,12 @@ class ReportsPane(VerticalScroll):
             content = stock_monitoring_service.generate_category_csv_content(category, self.current_target_date)
             recon = stock_monitoring_service.compute_daily_reconciliation(self.current_target_date)
             suf = recon.get("work_date_suffix", "shift")
-            exports_dir = os.path.join(settings.BASE_DIR, "exports")
-            os.makedirs(exports_dir, exist_ok=True)
-            fname = f"shift_{suf}_{category}.csv"
-            fpath = os.path.join(exports_dir, fname)
+            exports_dir = stock_monitoring_service.get_configured_export_dir()
+            fname = f"shift_{suf}_blocked_not_on_stock.csv" if category in ("blocked", "not_on_stock") else f"shift_{suf}_{category}.csv"
+            fpath = exports_dir / fname
             with open(fpath, "w", encoding="utf-8") as f:
                 f.write(content)
-            self.notify(f"✓ Saved exports/{fname}!", severity="information")
+            self.notify(f"✓ Saved {fname} to {exports_dir}!", severity="information")
             self.refresh_reports()
         except Exception as exc:
             self.notify(f"Error exporting {category} CSV: {exc}", severity="error")

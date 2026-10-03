@@ -320,6 +320,8 @@ class ITMSWebClient:
     and read-only preview of ITMS modules.
     """
 
+    _global_kit_crawl_lock = threading.Lock()
+
     def __init__(
         self,
         base_url: Optional[str] = None,
@@ -428,7 +430,26 @@ class ITMSWebClient:
                     resp = s.request(method, url, **kwargs)
 
                 # Retry on transient server errors or rate limits
-                if resp.status_code in (429, 502, 503, 504) and attempt < max_attempts:
+                if resp.status_code == 429 and attempt < max_attempts:
+                    retry_after = resp.headers.get("Retry-After")
+                    sleep_time = None
+                    if retry_after:
+                        try:
+                            sleep_time = float(retry_after)
+                        except (ValueError, TypeError):
+                            pass
+                    if sleep_time is None:
+                        sleep_time = min(30.0, (2 ** attempt) * 2.0 + random.uniform(0.5, 1.5))
+                    else:
+                        sleep_time = min(60.0, max(1.0, sleep_time))
+                    logger.warning(
+                        "ITMS WebApp rate limit reached (HTTP 429) on %s (attempt %d/%d). Backing off for %.2fs...",
+                        url, attempt, max_attempts, sleep_time
+                    )
+                    time.sleep(sleep_time)
+                    continue
+
+                if resp.status_code in (502, 503, 504) and attempt < max_attempts:
                     sleep_time = min(10.0, (2 ** (attempt - 1)) + random.uniform(0.1, 0.5))
                     logger.warning(
                         "ITMS WebApp server error HTTP %d on %s (attempt %d/%d). Retrying in %.2fs...",
@@ -1533,118 +1554,288 @@ class ITMSWebClient:
         }
 
     def sync_kits_to_local_db(self, kits: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Saves or updates fetched ITMS installation kits into the local Django database."""
+        """
+        Saves or updates fetched ITMS installation kits into the local Django database.
+        Uses optimized bulk operations with atomic chunking to avoid SQLite database locking.
+        """
         from django.utils import timezone
         from django.db import transaction
         from core.models import InstallationKit
 
-        created_count = 0
-        updated_count = 0
+        if not kits:
+            return {"success": True, "created": 0, "updated": 0, "total": 0}
+
+        now = timezone.now()
+        code_map: Dict[str, Dict[str, Any]] = {}
+        for k in kits:
+            code = (k.get("kit_code") or k.get("number") or "").strip()
+            if code:
+                code_map[code] = k
+
+        if not code_map:
+            return {"success": True, "created": 0, "updated": 0, "total": 0}
+
+        existing_kits = {
+            k.kit_code: k
+            for k in InstallationKit.objects.filter(kit_code__in=list(code_map.keys()))
+        }
+
+        to_create: List[InstallationKit] = []
+        to_update: List[InstallationKit] = []
+
+        for code, k in code_map.items():
+            reg_num = k.get("registration_number", "")
+            front_p = k.get("front_plate", "")
+            rear_p = k.get("rear_plate", "")
+            front_t = k.get("front_tracker", "")
+            rear_t = k.get("rear_tracker", "")
+            gps_t = k.get("gps_tracker", "")
+            wh = k.get("warehouse", "")
+            st = k.get("status", "New")
+            c_date = k.get("created_date", "")
+            k_uuid = k.get("kit_uuid", "")
+            d_url = k.get("detail_url", "")
+
+            if code in existing_kits:
+                obj = existing_kits[code]
+                changed = False
+                if reg_num and obj.registration_number != reg_num:
+                    obj.registration_number = reg_num
+                    changed = True
+                if front_p and obj.front_plate != front_p:
+                    obj.front_plate = front_p
+                    changed = True
+                if rear_p and obj.rear_plate != rear_p:
+                    obj.rear_plate = rear_p
+                    changed = True
+                if front_t and obj.front_tracker != front_t:
+                    obj.front_tracker = front_t
+                    changed = True
+                if rear_t and obj.rear_tracker != rear_t:
+                    obj.rear_tracker = rear_t
+                    changed = True
+                if gps_t and obj.gps_tracker != gps_t:
+                    obj.gps_tracker = gps_t
+                    changed = True
+                if wh and obj.warehouse != wh:
+                    obj.warehouse = wh
+                    changed = True
+                if st and obj.status != st:
+                    obj.status = st
+                    changed = True
+                if c_date and obj.created_date != c_date:
+                    obj.created_date = c_date
+                    changed = True
+                if k_uuid and obj.kit_uuid != k_uuid:
+                    obj.kit_uuid = k_uuid
+                    changed = True
+                if d_url and obj.detail_url != d_url:
+                    obj.detail_url = d_url
+                    changed = True
+
+                obj.last_synced_at = now
+                if changed:
+                    to_update.append(obj)
+            else:
+                to_create.append(
+                    InstallationKit(
+                        kit_code=code,
+                        registration_number=reg_num,
+                        front_plate=front_p,
+                        rear_plate=rear_p,
+                        front_tracker=front_t,
+                        rear_tracker=rear_t,
+                        gps_tracker=gps_t,
+                        warehouse=wh,
+                        status=st or "New",
+                        created_date=c_date,
+                        kit_uuid=k_uuid,
+                        detail_url=d_url,
+                        last_synced_at=now,
+                    )
+                )
 
         with transaction.atomic():
-            for k in kits:
-                code = (k.get("kit_code") or k.get("number") or "").strip()
-                if not code:
-                    continue
-                defaults = {
-                    "registration_number": k.get("registration_number", ""),
-                    "front_plate": k.get("front_plate", ""),
-                    "rear_plate": k.get("rear_plate", ""),
-                    "front_tracker": k.get("front_tracker", ""),
-                    "rear_tracker": k.get("rear_tracker", ""),
-                    "gps_tracker": k.get("gps_tracker", ""),
-                    "warehouse": k.get("warehouse", ""),
-                    "status": k.get("status", "New"),
-                    "created_date": k.get("created_date", ""),
-                    "kit_uuid": k.get("kit_uuid", ""),
-                    "detail_url": k.get("detail_url", ""),
-                    "last_synced_at": timezone.now(),
-                }
-                obj, was_created = InstallationKit.objects.update_or_create(
-                    kit_code=code,
-                    defaults=defaults,
+            if to_create:
+                InstallationKit.objects.bulk_create(to_create, ignore_conflicts=True, batch_size=200)
+            if to_update:
+                InstallationKit.objects.bulk_update(
+                    to_update,
+                    [
+                        "registration_number", "front_plate", "rear_plate",
+                        "front_tracker", "rear_tracker", "gps_tracker",
+                        "warehouse", "status", "created_date", "kit_uuid",
+                        "detail_url", "last_synced_at",
+                    ],
+                    batch_size=200,
                 )
-                if was_created:
-                    created_count += 1
-                else:
-                    updated_count += 1
 
         return {
             "success": True,
-            "created": created_count,
-            "updated": updated_count,
+            "created": len(to_create),
+            "updated": len(to_update),
             "total": len(kits),
         }
 
     def fetch_and_sync_all_kits(
         self,
-        max_pages: int = 35,
+        max_pages: Optional[int] = None,
         search_params: Optional[Any] = None,
-        delay: float = 0.12,
+        delay: float = 0.35,
         log_callback: Optional[Any] = None,
         allow_local_fallback: bool = False,
+        stop_on_unchanged_pages: int = 5,
+        force_all_pages: bool = False,
     ) -> Dict[str, Any]:
         """
-        Crawls through multiple or all pages of /installation-kits (supports 20+ pages)
+        Crawls through installation kits pages (minimum 100 pages, 2000+ kits)
         and synchronizes every kit into the local Django database.
+
+        Guardrails to prevent hitting API rate limits:
+        1. Thread lock (`_global_kit_crawl_lock`) prevents concurrent crawling passes.
+        2. Gentle inter-page pacing (default 0.35s + random jitter) prevents request bursts.
+        3. Adaptive delay & backoff on HTTP 429 or server latency.
+        4. Circuit breaker: safely stops after 3 consecutive failures while saving all fetched kits.
+        5. Smart incremental stopping: once local DB has at least 2,000 kits, can stop after
+           `stop_on_unchanged_pages` consecutive pages with 0 modifications unless `force_all_pages=True`.
         """
-        start_time = time.time()
-        total_created = 0
-        total_updated = 0
-        all_kits: List[Dict[str, Any]] = []
-        pages_crawled = 0
+        import random
+        from core.models import InstallationKit
 
-        for page in range(1, max_pages + 1):
+        if not self._global_kit_crawl_lock.acquire(blocking=False):
+            logger.info("ITMS kit crawl already active in background. Skipping duplicate pass.")
             if log_callback:
-                log_callback(f"Fetching ITMS installation kits page {page} of {max_pages}...")
-            res = self.fetch_installation_kits(page=page, search_params=search_params, allow_local_fallback=allow_local_fallback)
-            if not res.get("success"):
-                if page == 1:
-                    return {
-                        "success": False,
-                        "error": res.get("error", f"Failed on page {page}"),
-                        "is_expired": res.get("is_expired", False),
-                        "total_fetched": 0,
-                        "created": 0,
-                        "updated": 0,
-                        "pages_crawled": 0,
-                    }
+                log_callback("⏳ Background ITMS kit crawl is already in progress...")
+            return {
+                "success": True,
+                "status": "already_running",
+                "message": "ITMS kit crawl is already active in background.",
+                "total_fetched": 0,
+                "created": 0,
+                "updated": 0,
+                "pages_crawled": 0,
+            }
+
+        try:
+            start_time = time.time()
+            if max_pages is None:
+                try:
+                    from core.services import config_service
+                    max_pages = int(config_service.get_setting("crawl.max_kit_pages", 100) or 100)
+                except Exception:
+                    max_pages = 100
+            # Ensure minimum 100 pages (2,000+ kits)
+            max_pages = max(int(max_pages), 100)
+
+            total_created = 0
+            total_updated = 0
+            all_kits: List[Dict[str, Any]] = []
+            pages_crawled = 0
+            consecutive_errors = 0
+            consecutive_unchanged_pages = 0
+            rate_limit_encountered = False
+
+            # Check existing count in local DB
+            initial_db_count = InstallationKit.objects.count()
+            # If DB has less than 2,000 kits (100 pages), always force full crawl across all 100 pages!
+            must_crawl_all = force_all_pages or (initial_db_count < 2000)
+
+            current_delay = max(0.25, float(delay))
+
+            for page in range(1, max_pages + 1):
                 if log_callback:
-                    log_callback(f"Notice: Crawl stopped at page {page}: {res.get('error')}")
-                break
+                    log_callback(f"Fetching ITMS installation kits page {page} of {max_pages}...")
+                
+                res = self.fetch_installation_kits(
+                    page=page,
+                    search_params=search_params,
+                    allow_local_fallback=allow_local_fallback,
+                )
 
-            kits = res.get("kits", [])
-            if not kits:
-                break
+                if not res.get("success"):
+                    consecutive_errors += 1
+                    err_msg = res.get("error", f"Failed on page {page}")
+                    if "429" in err_msg or "rate limit" in err_msg.lower():
+                        rate_limit_encountered = True
+                        current_delay = min(1.5, current_delay + 0.3)  # Adaptively slow down
+                    
+                    if page == 1:
+                        return {
+                            "success": False,
+                            "error": err_msg,
+                            "is_expired": res.get("is_expired", False),
+                            "total_fetched": 0,
+                            "created": 0,
+                            "updated": 0,
+                            "pages_crawled": 0,
+                        }
+                    
+                    if consecutive_errors >= 3:
+                        if log_callback:
+                            log_callback(f"⚠️ ITMS crawl paused after 3 consecutive errors: {err_msg}. Preserved {total_created} new kits in DB.")
+                        break
+                    
+                    # Backoff before trying next page
+                    time.sleep(min(10.0, 2.0 * consecutive_errors))
+                    continue
 
-            pages_crawled += 1
-            all_kits.extend(kits)
-            sync_res = self.sync_kits_to_local_db(kits)
-            total_created += sync_res.get("created", 0)
-            total_updated += sync_res.get("updated", 0)
+                consecutive_errors = 0
+                kits = res.get("kits", [])
+                if not kits:
+                    break
 
-            if log_callback:
-                log_callback(f"Page {page}/{max_pages}: {len(kits)} kits fetched ({total_created} created, {total_updated} updated so far)...")
+                pages_crawled += 1
+                all_kits.extend(kits)
+                sync_res = self.sync_kits_to_local_db(kits)
+                p_created = sync_res.get("created", 0)
+                p_updated = sync_res.get("updated", 0)
+                total_created += p_created
+                total_updated += p_updated
 
-            if not res.get("has_next_page") or len(kits) < 20:
-                break
+                if p_created == 0 and p_updated == 0:
+                    consecutive_unchanged_pages += 1
+                else:
+                    consecutive_unchanged_pages = 0
 
-            if delay > 0:
-                time.sleep(delay)
+                if log_callback:
+                    log_callback(
+                        f"Page {page}/{max_pages}: {len(kits)} kits fetched "
+                        f"({total_created} new, {total_updated} updated so far)..."
+                    )
 
-        duration_ms = int((time.time() - start_time) * 1000)
-        return {
-            "success": True,
-            "total_fetched": len(all_kits),
-            "created": total_created,
-            "updated": total_updated,
-            "pages_crawled": pages_crawled,
-            "duration_ms": duration_ms,
-            "message": (
-                f"Crawled {pages_crawled} pages of installation kits: "
-                f"{len(all_kits)} total kits synced ({total_created} new, {total_updated} updated) in {duration_ms}ms."
-            ),
-        }
+                # Check if end of catalog reached
+                if not res.get("has_next_page") or len(kits) < 20:
+                    break
+
+                # Smart stop: if DB already has >=2,000 kits and 5 pages in a row had 0 changes
+                if not must_crawl_all and stop_on_unchanged_pages > 0 and consecutive_unchanged_pages >= stop_on_unchanged_pages:
+                    if log_callback:
+                        log_callback(
+                            f"✓ Reached previously synced kits at page {page} "
+                            f"({consecutive_unchanged_pages} consecutive unchanged pages). Local DB is up-to-date."
+                        )
+                    break
+
+                # Safe pacing with polite jitter to prevent triggering server rate-limits
+                sleep_sec = current_delay + random.uniform(0.05, 0.15)
+                time.sleep(sleep_sec)
+
+            duration_ms = int((time.time() - start_time) * 1000)
+            return {
+                "success": True,
+                "total_fetched": len(all_kits),
+                "created": total_created,
+                "updated": total_updated,
+                "pages_crawled": pages_crawled,
+                "rate_limit_encountered": rate_limit_encountered,
+                "duration_ms": duration_ms,
+                "message": (
+                    f"Crawled {pages_crawled} pages of installation kits: "
+                    f"{len(all_kits)} total kits synced ({total_created} new, {total_updated} updated) in {duration_ms}ms."
+                ),
+            }
+        finally:
+            self._global_kit_crawl_lock.release()
 
     def search_and_sync_kits_for_plates(
         self,

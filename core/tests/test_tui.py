@@ -116,14 +116,34 @@ class TUIAppTests(TransactionTestCase):
                 batches_table = app.query_one("#table-batches")
                 self.assertGreaterEqual(batches_table.row_count, 1)
 
-                # 6. Test Web Upload action via 'w' (mocked dialog to avoid blocking GUI prompt)
+                # 6. Test Tab Navigation to Stock via '6'
+                await pilot.press("6")
+                self.assertEqual(tabs.active, "tab-stock")
+                stock_panel = app.query_one("#stock-pane")
+                self.assertIsNotNone(stock_panel)
+                inspector_stock = app.query_one("#inspector-stock")
+                self.assertIsNotNone(inspector_stock)
+
+                # 7. Test Tab Navigation to Reports via '7'
+                await pilot.press("7")
+                self.assertEqual(tabs.active, "tab-reports")
+
+                # 8. Test Tab Navigation to Settings via '8'
+                await pilot.press("8")
+                self.assertEqual(tabs.active, "tab-settings")
+
+                # 9. Test Hotkey 'k' to jump straight back to Stock
+                await pilot.press("k")
+                self.assertEqual(tabs.active, "tab-stock")
+
+                # 10. Test Web Upload action via 'w' (mocked dialog to avoid blocking GUI prompt)
                 from unittest.mock import patch
                 with patch("core.services.file_dialog.prompt_native_photo_selection", return_value=[]), \
                      patch("webbrowser.open", return_value=True):
                     await pilot.press("w")
                     await pilot.pause(0.1)
 
-                # 7. Test logging to Activity Log
+                # 11. Test logging to Activity Log
                 log_widget = app.query_one("#activity-log")
                 app.log_message("Automated pilot test passed.", level="SUCCESS")
 
@@ -167,7 +187,7 @@ class TUIAppTests(TransactionTestCase):
             app = ITMSOperatorApp()
             async with app.run_test() as pilot:
                 tabs = app.query_one("#tabs-content")
-                await pilot.press("7")
+                await pilot.press("8")
                 self.assertEqual(tabs.active, "tab-settings")
 
                 scroll_body = app.query_one("#settings-scroll-body")
@@ -356,6 +376,108 @@ class TUIAppTests(TransactionTestCase):
         # Test duplicate scan ignored
         modal.on_input_submitted(event)
         self.assertTrue(modal.notify.called)
+
+    def test_stock_pane_instant_scan_and_inspector(self):
+        """Verifies instant barcode scan verification and InspectorPane formatting in StockPane."""
+        from unittest.mock import MagicMock, patch
+        from core.models import InstallationKit, StockDispatchScan
+        from core.tui.stock_pane import StockPane
+        from core.tui.inspectors import InspectorPane
+
+        # Create test stock kit
+        kit = InstallationKit.objects.create(
+            kit_code="IK-TEST-001",
+            registration_number="UMA 888TK",
+            status="New",
+            warehouse="Warehouse Stock",
+            gps_tracker="GPS-888-TK",
+            front_tracker="BLE-F-888",
+            rear_tracker="BLE-R-888",
+            front_plate="FP-888",
+            rear_plate="RP-888",
+        )
+
+        pane = StockPane(target_date_suffix="260929")
+        pane.notify = MagicMock()
+        pane._app = MagicMock()
+
+        # Test InspectorPane.show_stock_kit_details
+        inspector = InspectorPane()
+        inspector.show_stock_kit_details(plate="UMA 888TK", kit=kit)
+        content = str(inspector.render())
+        self.assertIn("UMA 888TK", content)
+        self.assertIn("IK-TEST-001", content)
+        self.assertIn("GPS-888-TK", content)
+        self.assertIn("BLE-F-888", content)
+
+        # Test InspectorPane with non-stock error
+        inspector.show_stock_kit_details(plate="UZZ 999ZZ", error_message="Not found on stock")
+        err_content = str(inspector.render())
+        self.assertIn("NOT ON STOCK", err_content)
+        self.assertIn("Not found on stock", err_content)
+
+        # Test instant scan valid plate
+        mock_input = MagicMock()
+        mock_input.value = "UMA 888TK"
+        mock_feedback = MagicMock()
+        mock_table = MagicMock()
+        mock_category = MagicMock()
+        mock_category.value = "PSV"
+
+        def mock_query(selector, expected_type=None):
+            if "feedback" in selector:
+                return mock_feedback
+            elif "table" in selector:
+                return mock_table
+            elif "category" in selector:
+                return mock_category
+            elif "inspector" in selector:
+                return inspector
+            return MagicMock()
+
+        pane.query_one = mock_query
+
+        with patch("core.services.kit_provisioning_service.verify_scanned_kit_stock", return_value={"is_valid": True, "kit": kit, "source": "local_db"}):
+            pane._handle_instant_dispatch_scan("UMA 888TK", mock_input)
+
+        # Verify dispatch record created
+        dispatch = StockDispatchScan.objects.filter(registration_number="UMA888TK").first()
+        self.assertIsNotNone(dispatch)
+        self.assertEqual(dispatch.plate_category, "PSV")
+        self.assertEqual(mock_input.value, "")  # Input cleared for next scan
+
+        # Test instant scan of plate not on stock (e.g. UMA027QK) is strictly set aside
+        from core.services.kit_provisioning_service import KitVerificationResult
+        tuple_result = KitVerificationResult(False, None, "Kit UMA027QK not found on ITMS installation kits (Not on stock).")
+        mock_input_unalloc = MagicMock()
+        mock_input_unalloc.value = "UMA027QK"
+        with patch("core.services.kit_provisioning_service.verify_scanned_kit_stock", return_value=tuple_result):
+            pane._handle_instant_dispatch_scan("UMA027QK", mock_input_unalloc)
+
+        # Verify plate is NOT dispatched, is set aside, and added to blocked list for Stock Officer
+        self.assertFalse(StockDispatchScan.objects.filter(registration_number="UMA027QK").exists())
+        self.assertIn("UMA027QK", pane._last_blocked_dispatch)
+
+        # Test instant scan of ALREADY_INSTALLED plate is strictly blocked (double-fitting protection)
+        already_installed_result = KitVerificationResult(False, None, "Plate UMA999ZZ is already installed in ITMS Archive!", status="ALREADY_INSTALLED")
+        mock_input_installed = MagicMock()
+        mock_input_installed.value = "UMA999ZZ"
+        with patch("core.services.kit_provisioning_service.verify_scanned_kit_stock", return_value=already_installed_result):
+            pane._handle_instant_dispatch_scan("UMA999ZZ", mock_input_installed)
+
+        # Verify NO dispatch created for already installed plate
+        self.assertFalse(StockDispatchScan.objects.filter(registration_number="UMA999ZZ").exists())
+
+        # Test KitVerificationResult dual behavior (tuple unpacking + dict .get)
+        k_res = KitVerificationResult(False, None, "Kit UMA027QK not found on ITMS installation kits (Not on stock).")
+        unpacked_val, unpacked_kit, unpacked_err = k_res
+        self.assertFalse(unpacked_val)
+        self.assertIsNone(unpacked_kit)
+        self.assertEqual(unpacked_err, "Kit UMA027QK not found on ITMS installation kits (Not on stock).")
+        self.assertFalse(k_res.get("is_valid"))
+        self.assertEqual(k_res.get("error"), "Kit UMA027QK not found on ITMS installation kits (Not on stock).")
+
+
 
 
 

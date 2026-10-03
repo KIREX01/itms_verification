@@ -59,11 +59,14 @@ class OperatorActionsMixin:
         except Exception:
             pass
 
-    def action_tab_settings(self):
+    def action_tab_stock(self):
         tabs = self.query_one("#tabs-content", TabbedContent)
-        tabs.active = "tab-settings"
+        tabs.active = "tab-stock"
         self._set_activity_visibility(False)
         try:
+            stock_pane = self.query_one("#stock-pane")
+            if hasattr(stock_pane, "action_refresh_stock"):
+                stock_pane.action_refresh_stock()
             self.set_focus(None)
         except Exception:
             pass
@@ -79,6 +82,16 @@ class OperatorActionsMixin:
             self.set_focus(None)
         except Exception:
             pass
+
+    def action_tab_settings(self):
+        tabs = self.query_one("#tabs-content", TabbedContent)
+        tabs.active = "tab-settings"
+        self._set_activity_visibility(False)
+        try:
+            self.set_focus(None)
+        except Exception:
+            pass
+
 
     @work(thread=True)
     def action_drain_outbox(self) -> None:
@@ -1404,19 +1417,5 @@ class OperatorActionsMixin:
             pass
 
     def action_open_stock_manager(self) -> None:
-        """Opens the Bond Physical Stock & Reconciliation Manager Dialog."""
-        from core.tui.dialogs import StockManagerModal
-        try:
-            reports_pane = self.query_one("#reports-pane")
-            target_date = getattr(reports_pane, "current_target_date", None)
-        except Exception:
-            target_date = None
-
-        def _on_close(result):
-            try:
-                p = self.query_one("#reports-pane")
-                p.refresh_reports()
-            except Exception:
-                pass
-
-        self.push_screen(StockManagerModal(target_date_suffix=target_date), _on_close)
+        """Navigates directly to the dedicated Stock & Reconciliation Workspace (Tab 6)."""
+        self.action_tab_stock()

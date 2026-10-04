@@ -338,44 +338,57 @@ class TUIAppTests(TransactionTestCase):
         modal._handle_manual_submit()
         modal.dismiss.assert_called_with("ALL")
 
-    def test_stock_manager_modal_stocktake_audit_tab(self):
-        """Verifies rapid USB scanner handling and audit saving in StockManagerModal Tab 7."""
+    def test_opening_target_modal_and_stock_pane_modes(self):
+        """Verifies OpeningTargetModal loading/saving and StockPane mode navigation."""
         from unittest.mock import MagicMock
-        from core.tui.dialogs import StockManagerModal
+        from core.tui.dialogs import OpeningTargetModal
+        from core.tui.stock_pane import StockPane
 
-        modal = StockManagerModal(target_date_suffix="260929")
+        modal = OpeningTargetModal(target_date_suffix="260929")
         modal.notify = MagicMock()
+        modal.dismiss = MagicMock()
 
-        # Test rapid scanning single plate adds to bulk text with duplicate prevention
-        mock_area = MagicMock()
-        mock_area.text = "UMA100PW"
-        mock_single = MagicMock()
-        mock_single.value = "UMA101PW"
-        mock_badge = MagicMock()
+        mock_target = MagicMock()
+        mock_target.value = "1500"
+        mock_pmo = MagicMock()
+        mock_pmo.value = "500"
+        mock_psv = MagicMock()
+        mock_psv.value = "800"
+        mock_remarks = MagicMock()
+        mock_remarks.value = "Handover test note"
 
         def mock_query(selector, expected_type=None):
-            if "bulk" in selector:
-                return mock_area
-            elif "single" in selector:
-                return mock_single
-            elif "staged" in selector or "summary" in selector:
-                return mock_badge
+            if "sched-target" in selector:
+                return mock_target
+            elif "open-pmo" in selector:
+                return mock_pmo
+            elif "open-psv" in selector:
+                return mock_psv
+            elif "remarks" in selector:
+                return mock_remarks
             return MagicMock()
 
         modal.query_one = mock_query
+        modal.action_save_values()
+        self.assertTrue(modal.dismiss.called)
+        dismiss_arg = modal.dismiss.call_args[0][0]
+        self.assertEqual(dismiss_arg.get("scheduled_target"), 1500)
+        self.assertEqual(dismiss_arg.get("opening_pmo"), 500)
+        self.assertEqual(dismiss_arg.get("opening_psv"), 800)
 
-        # Simulate USB scanner Enter event
-        event = MagicMock()
-        event.input.id = "input-stocktake-single"
-        event.input.value = "UMA101PW"
-        event.value = "UMA101PW"
+        # Test StockPane mode navigation
+        pane = StockPane(target_date_suffix="260929")
+        pane.notify = MagicMock()
+        mock_switcher = MagicMock()
+        mock_switcher.active = "mode-dispatch"
+        pane.query_one = lambda selector, expected_type=None: mock_switcher if "switcher" in selector else MagicMock()
 
-        modal.on_input_submitted(event)
-        self.assertIn("UMA101PW", mock_area.text)
-
-        # Test duplicate scan ignored
-        modal.on_input_submitted(event)
-        self.assertTrue(modal.notify.called)
+        pane.action_mode_2()
+        self.assertEqual(mock_switcher.active, "mode-movements")
+        pane.action_mode_3()
+        self.assertEqual(mock_switcher.active, "mode-audit")
+        pane.action_mode_4()
+        self.assertEqual(mock_switcher.active, "mode-ledger")
 
     def test_stock_pane_instant_scan_and_inspector(self):
         """Verifies instant barcode scan verification and InspectorPane formatting in StockPane."""

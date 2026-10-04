@@ -57,8 +57,7 @@ class ReportsPane(VerticalScroll):
             # 2. Operational Actions Bar
             with Horizontal(id="reports-actions-bar"):
                 yield Button("🗓️ Select Date [T]", variant="primary", id="btn-report-date")
-                yield Button("📦 Stock Manager & Safe Audit [K]", variant="success", id="btn-report-stock")
-                yield Button("⚡ Sync Stock Kits", variant="primary", id="btn-sync-stock-kits-ribbon")
+                yield Button("📦 Stock Workspace [K]", variant="success", id="btn-report-stock")
                 yield Button("🔄 Sync Orders [S]", variant="warning", id="btn-report-sync")
                 yield Button("📑 Export Report [E]", variant="default", id="btn-report-export")
                 yield Button("🔄 Refresh [R]", variant="default", id="btn-report-refresh")
@@ -427,8 +426,6 @@ class ReportsPane(VerticalScroll):
             self.action_export_category_csv("dispatched")
         elif btn_id == "btn-change-reports-folder":
             self.action_change_reports_folder()
-        elif btn_id == "btn-sync-stock-kits-ribbon":
-            self.action_sync_stock_kits()
         elif btn_id == "btn-report-stock":
             self.action_open_stock_manager()
         elif btn_id == "btn-report-sync":
@@ -453,87 +450,12 @@ class ReportsPane(VerticalScroll):
 
         self.app.push_screen(ReportsDirectoryDialog(), _on_dir_selected)
 
-    @work(thread=True)
-    def action_sync_stock_kits(self) -> None:
-        """Synchronizes installation kits from ITMS, deliveries, and safe audits in a non-blocking thread."""
-        if getattr(self, "_is_syncing_kits", False):
-            self.app.call_from_thread(self.notify, "Installation kit sync is already in progress...", severity="warning")
-            return
-        self._is_syncing_kits = True
-
-        def _set_btn_state(text: str, disabled: bool):
-            try:
-                btn = self.query_one("#btn-sync-stock-kits-ribbon", Button)
-                btn.label = text
-                btn.disabled = disabled
-            except Exception:
-                pass
-
-        self.app.call_from_thread(_set_btn_state, "⏳ Syncing Kits...", True)
-        self.app.call_from_thread(self.notify, "🔄 Synchronizing installation kits from ITMS, deliveries, and safe audits...")
-        self.app.call_from_thread(
-            self.app.log_message,
-            "Starting installation kits synchronization & morning provisioning (unconstrained by date)...",
-            level="ITMS",
-        )
-
-        from core.services import kit_provisioning_service
-
-        def _on_progress(msg: str):
-            self.app.call_from_thread(self.app.log_message, msg, level="ITMS")
-
-        try:
-            res = kit_provisioning_service.sync_and_provision_warehouse_kits(
-                target_date_suffix=None,  # No date constraint; sync global catalog
-                sync_itms=True,
-                max_pages=100,
-                log_callback=_on_progress,
-            )
-            count = res.get("new_kits_ready_count", 0)
-            wh = res.get("warehouse_facility", "Warehouse Stock")
-            itms_synced = res.get("itms_kits_synced", 0)
-            pages = res.get("itms_pages_crawled", 0)
-            created = res.get("kits_created", 0)
-            updated = res.get("kits_updated", 0)
-            total_stock = res.get("total_warehouse_new_stock", 0)
-            itms_status = res.get("itms_status", "")
-            itms_error = res.get("itms_error")
-
-            summary_msg = (
-                f"✓ Kits Sync Complete: {itms_synced} fetched from ITMS ({pages} pgs), "
-                f"{created} created, {updated} updated. Total ready in stock: {count} ({total_stock} total 'New')."
-            )
-            self.app.call_from_thread(self.notify, summary_msg, severity="information", timeout=8)
-            self.app.call_from_thread(self.app.log_message, f"[bold green]{summary_msg}[/bold green]", level="SUCCESS")
-
-            if itms_error:
-                self.app.call_from_thread(
-                    self.notify,
-                    f"Notice: {itms_status}",
-                    severity="warning",
-                    timeout=8,
-                )
-
-            self.app.call_from_thread(self.refresh_reports)
-            self.app.call_from_thread(self.app.reload_data)
-        except Exception as exc:
-            err_msg = f"Error syncing kits: {exc}"
-            self.app.call_from_thread(self.notify, err_msg, severity="error")
-            self.app.call_from_thread(self.app.log_message, f"[bold red]{err_msg}[/bold red]", level="ERROR")
-        finally:
-            self._is_syncing_kits = False
-            self.app.call_from_thread(_set_btn_state, "📦 Sync Stock Kits", False)
-
     def action_open_stock_manager(self) -> None:
         """Navigates directly to the dedicated Stock & Reconciliation Workspace (Tab 6)."""
         if hasattr(self.app, "action_tab_stock"):
             self.app.action_tab_stock()
         else:
-            from core.tui.dialogs import StockManagerModal
-            self.app.push_screen(
-                StockManagerModal(target_date_suffix=self.current_target_date),
-                lambda res: self.refresh_reports(),
-            )
+            self.notify("Stock workspace not available.", severity="warning")
 
     def action_sync_orders(self) -> None:
         """Triggers ITMS order synchronization via main app."""

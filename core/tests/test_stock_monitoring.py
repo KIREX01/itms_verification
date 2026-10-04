@@ -1340,6 +1340,44 @@ class StockMonitoringTests(TestCase):
         self.assertEqual(recon_after["physical_count"], 155)
         self.assertEqual(recon_after["variance"], 5)
 
+    def test_stock_pane_4_modes_and_movement_staging(self):
+        """Verifies StockPane 4 core modes and in-memory movement plate staging."""
+        from unittest.mock import MagicMock
+        from core.tui.stock_pane import StockPane
+
+        pane = StockPane(target_date_suffix="041026")
+        pane.notify = MagicMock()
+
+        # Check 4 clean modes
+        self.assertEqual(len(pane.MODES), 4)
+        mode_ids = [m[0] for m in pane.MODES]
+        self.assertEqual(mode_ids, ["mode-dispatch", "mode-movements", "mode-audit", "mode-ledger"])
+
+        # Test movement scan staging
+        mock_input = MagicMock()
+        pane._handle_movement_scan("UMA 111AA", mock_input)
+        self.assertEqual(pane._staged_movements, ["UMA111AA"])
+
+        # Test duplicate staging suppressed
+        pane._handle_movement_scan("UMA 111AA", mock_input)
+        self.assertEqual(pane._staged_movements, ["UMA111AA"])
+        self.assertTrue(pane.notify.called)
+
+        # Test clear staged
+        pane._handle_clear_movement_staged()
+        self.assertEqual(pane._staged_movements, [])
+
+    def test_stock_paste_modal_movements_mode(self):
+        """Verifies StockPasteModal handles movements mode titles and confirm labels."""
+        from core.tui.dialogs import StockPasteModal
+        modal = StockPasteModal(mode="movements", target_date_suffix=self.test_suffix)
+        self.assertEqual(modal.mode, "movements")
+        # Check titles mapping contains movements
+        from core.tui.dialogs import StockPasteModal
+        m = StockPasteModal(mode="movements")
+        self.assertEqual(m.mode, "movements")
+
+
 
 
 

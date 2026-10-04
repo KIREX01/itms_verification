@@ -1836,1048 +1836,174 @@ class DateSelectModal(ModalScreen[Optional[str]]):
 
 
 # ============================================================================
-# Stock Monitoring & Daily Plate Reconciliation Manager Modal
+# Opening Balances & Shift Targets Modal Dialog
 # ============================================================================
 
-class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
+class OpeningTargetModal(ModalScreen[Optional[Dict[str, Any]]]):
     """
-    Interactive Stock Monitoring & Bond Reconciliation Modal Dialog.
-    Allows operators to:
-    1. Scan / paste plates dispatched to the installation line (PSV White & PMO Yellow) with instant duplicate prevention.
-    2. Record inbound deliveries received from supplier/factory with rapid scan and auto-kit creation.
-    3. Record Bond Transfers In and Bond Transfers Out.
-    4. Record uninstalled returned plates (bike no-show, defective plate, cancelled).
-    5. Feed in manual Scheduled targets and Opening Stock balances.
-    6. View the real-time PSV vs PMO Bond Reconciliation Table and export to CSV.
+    Focused dialog to adjust Opening Balances, Shift Targets, and Remarks for a given shift date.
+    Replaces the legacy full StockManagerModal.
     """
     DEFAULT_CSS = """
-    StockManagerModal {
+    OpeningTargetModal {
         align: center middle;
     }
-    StockManagerModal #modal-dialog {
-        width: 95%;
-        max-width: 122;
-        height: 92%;
-        max-height: 48;
+    OpeningTargetModal #modal-dialog {
+        width: 64;
+        max-width: 72;
+        height: auto;
+        max-height: 28;
         background: #0d1117;
         border: thick #0284c7;
         padding: 1 2;
     }
-    StockManagerModal #modal-header {
+    OpeningTargetModal #modal-header {
         height: auto;
         margin-bottom: 1;
         background: #161b22;
         padding: 0 1;
         border-bottom: solid #30363d;
     }
-    StockManagerModal #stock-tabbed-content {
-        height: 1fr;
-    }
-    StockManagerModal .stock-tab-pane {
-        height: 1fr;
-        padding: 1 0;
-    }
-    StockManagerModal .stock-row {
+    OpeningTargetModal .field-row {
         height: 3;
         margin-bottom: 1;
         align-vertical: middle;
     }
-    StockManagerModal .stock-input-field {
-        width: 1fr;
-        margin-right: 1;
-    }
-    StockManagerModal .stock-staged-badge {
-        width: auto;
-        min-width: 18;
-        padding: 0 1;
+    OpeningTargetModal .field-label {
+        width: 26;
         align-vertical: middle;
+    }
+    OpeningTargetModal .field-input {
+        width: 1fr;
+    }
+    OpeningTargetModal #lbl-modal-open-total {
+        width: 1fr;
         text-align: right;
-    }
-    StockManagerModal .stock-textarea {
-        height: 7;
-        border: solid #30363d;
-        margin-bottom: 1;
-    }
-    StockManagerModal #table-modal-stock-report {
-        height: 1fr;
-        min-height: 10;
-        border: solid #30363d;
-        margin-bottom: 1;
-    }
-    StockManagerModal #table-modal-deliv-notes {
-        height: 6;
-        min-height: 4;
-        border: solid #30363d;
-        margin-bottom: 1;
-    }
-    StockManagerModal #lbl-stocktake-summary {
-        height: auto;
-        margin-top: 1;
-        padding: 0 1;
-    }
-    StockManagerModal .stock-label-fixed {
-        width: 25;
-        min-width: 25;
         align-vertical: middle;
         padding-right: 1;
     }
-    StockManagerModal .stock-section-title {
-        height: auto;
-        margin-top: 1;
-        margin-bottom: 0;
-        padding: 0 1;
-    }
-    StockManagerModal #lbl-sched-status-card {
-        height: 3;
-        background: #161b22;
-        border: solid #0284c7;
-        padding: 0 1;
-        margin-bottom: 1;
-        align-vertical: middle;
-    }
-    StockManagerModal .stock-textarea-remarks {
-        height: 4;
-        border: solid #30363d;
-        margin-bottom: 1;
-    }
-    StockManagerModal #modal-footer {
+    OpeningTargetModal #modal-footer {
         height: 3;
         align: right middle;
         margin-top: 1;
     }
-    StockManagerModal #modal-footer Button {
+    OpeningTargetModal #modal-footer Button {
         margin-left: 1;
-        min-width: 16;
     }
     """
 
     BINDINGS = [
-        Binding("escape", "dismiss_modal", "Close / Cancel", priority=True),
-        Binding("p", "show_phone_scanner", "Phone Scanner"),
-        Binding("e", "export_csv", "Export CSV"),
-        Binding("r", "refresh_stock", "Refresh"),
+        Binding("escape", "dismiss_modal", "Cancel / Esc", priority=True),
+        Binding("enter", "save_values", "Save & Apply"),
     ]
 
     def __init__(self, target_date_suffix: Optional[str] = None, **kwargs):
         super().__init__(**kwargs)
         self.target_date_suffix = target_date_suffix or timezone.localdate().strftime("%d%m%y")
-        self._cached_recon: Optional[Dict[str, Any]] = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal-dialog"):
-            yield Static(id="modal-header")
+            yield Static(
+                f"[bold cyan]═══ 🎯 Opening Balances & Shift Target ═══[/bold cyan]\n"
+                f"[dim]Shift Date: {self.target_date_suffix} │ Set opening physical counts and shift production target.[/dim]",
+                id="modal-header",
+            )
+            with Horizontal(classes="field-row"):
+                yield Button("⚡ Auto-Carry Previous Closing", id="btn-modal-autofill-open", variant="default")
+                yield Static("", id="lbl-modal-open-total")
 
-            with TabbedContent(id="stock-tabbed-content"):
-                # TAB 1: Live Stock Report Table (PSV vs PMO)
-                with TabPane("📊 Stock Report (PSV / PMO)", id="tab-report-view"):
-                    with Vertical(classes="stock-tab-pane"):
-                        yield Static(
-                            "[bold cyan]📋 Daily Bond Physical Stock & Reconciliation Balance[/bold cyan]  │  "
-                            "[dim]Opening + Received + Transfer In - Transfer Out - Installed = Closing Balance[/dim]",
-                            id="stock-report-intro",
-                        )
-                        with Horizontal(classes="stock-row", id="row-stock-kits-prep"):
-                            yield Button("📦 Sync & Prep Morning Stock Kits", variant="success", id="btn-sync-stock-kits")
-                            yield Static("[dim]Safe Room Ready: [bold green]Checking...[/bold green][/dim]", id="lbl-stock-ready-badge", classes="stock-staged-badge")
-                        yield DataTable(id="table-modal-stock-report")
-                        yield Static(id="stock-floor-summary")
+            with Horizontal(classes="field-row"):
+                yield Static("[bold white]Opening PMO (Yellow):[/bold white]", classes="field-label")
+                yield Input(placeholder="0", id="input-modal-open-pmo", type="integer", classes="field-input")
 
-                # TAB 2: Dispatched (Taking Out to Line)
-                with TabPane("📤 Dispatch (Line Out)", id="tab-dispatch-pane"):
-                    with Vertical(classes="stock-tab-pane"):
-                        yield Static(
-                            "[bold yellow]📤 Record Plates Dispatched to Assembly Line[/bold yellow]  │  "
-                            "[dim]Scan plate QR or paste multi-line list (e.g. UMA711PW, UMA993PW...)[/dim]"
-                        )
-                        with Horizontal(classes="stock-row"):
-                            yield Button("⚡ Prep & Provision Stock Kits", variant="success", id="btn-sync-stock-kits-tab2")
-                            yield Static("[dim]Ready in Stock: [bold green]Checking...[/bold green][/dim]", id="lbl-dispatch-stock-status", classes="stock-staged-badge")
-                        with Horizontal(classes="stock-row"):
-                            yield Select(
-                                [("Public White (PSV)", "PSV"), ("Private Yellow (PMO)", "PMO")],
-                                value="PSV",
-                                id="sel-dispatch-category",
-                                prompt="Select Plate Category",
-                            )
-                            yield Input(
-                                placeholder="⚡ Rapid scan plate QR code [Enter to add]...",
-                                id="input-dispatch-single",
-                                classes="stock-input-field",
-                            )
-                            yield Static("[dim]Staged: 0 plates[/dim]", id="lbl-dispatch-staged", classes="stock-staged-badge")
-                        yield TextArea(
-                            id="text-dispatch-bulk",
-                            classes="stock-textarea",
-                        )
-                        with Horizontal(classes="stock-row"):
-                            yield Button("📋 Paste from Clipboard (Excel)", variant="success", id="btn-modal-paste-dispatch")
-                            yield Button("💾 Record Dispatched Plates [Enter]", variant="primary", id="btn-save-dispatch")
-                            yield Button("Clear Batch", variant="default", id="btn-clear-dispatch")
+            with Horizontal(classes="field-row"):
+                yield Static("[bold white]Opening PSV (White):[/bold white]", classes="field-label")
+                yield Input(placeholder="0", id="input-modal-open-psv", type="integer", classes="field-input")
 
-                # TAB 3: Inbound Deliveries
-                with TabPane("📥 Inbound Delivery", id="tab-delivery-pane"):
-                    with Vertical(classes="stock-tab-pane"):
-                        yield Static(
-                            "[bold green]📥 Record Inbound Delivery Note Manifest[/bold green]  │  "
-                            "[dim]Date-anchored deliveries for shift  │  Increases warehouse stock (+Received)[/dim]"
-                        )
-                        with Horizontal(classes="stock-row"):
-                            yield Static("[bold white]Delivery Identifier:[/bold white] ", classes="stock-label-fixed")
-                            yield Input(
-                                placeholder="Auto: DN-YYYYMMDD-01",
-                                id="input-deliv-number",
-                                classes="stock-input-field",
-                            )
-                            yield Static("[bold white]Category:[/bold white] ", classes="stock-label-fixed")
-                            yield Select(
-                                [("Public White (PSV)", "PSV"), ("Private Yellow (PMO)", "PMO")],
-                                value="PSV",
-                                id="sel-deliv-category",
-                            )
-                        with Horizontal(classes="stock-row"):
-                            yield Static("[bold white]Note Photo / File:[/bold white] ", classes="stock-label-fixed")
-                            yield Input(
-                                placeholder="Optional image file path (or uploaded from phone companion)",
-                                id="input-deliv-photo-path",
-                                classes="stock-input-field",
-                            )
-                        with Horizontal(classes="stock-row"):
-                            yield Input(
-                                placeholder="⚡ Rapid scan plate QR / barcode with USB scanner [Enter to add]...",
-                                id="input-deliv-single",
-                                classes="stock-input-field",
-                            )
-                            yield Static("[bold green]📦 Scanned: 0 plates[/bold green]", id="lbl-deliv-staged", classes="stock-staged-badge")
-                        yield TextArea(
-                            id="text-deliv-bulk",
-                            classes="stock-textarea",
-                        )
-                        with Horizontal(classes="stock-row"):
-                            yield Button("📥 Ingest Delivery into Stock", variant="success", id="btn-save-delivery")
-                            yield Button("Clear Scans", variant="default", id="btn-clear-deliv")
-                            yield Button("👁️ View Selected Delivery Note & Plates", variant="primary", id="btn-view-deliv-note")
-                        yield Static("[bold white]📋 Stored Delivery Notes for Shift Work Date (Select row to view details & plates):[/bold white]")
-                        yield DataTable(id="table-modal-deliv-notes")
+            with Horizontal(classes="field-row"):
+                yield Static("[bold white]Scheduled Target (Bikes):[/bold white]", classes="field-label")
+                yield Input(placeholder="0", id="input-modal-sched-target", type="integer", classes="field-input")
 
-                # TAB 4: Bond Transfers (In / Out)
-                with TabPane("🔄 Bond Transfers", id="tab-transfers-pane"):
-                    with Vertical(classes="stock-tab-pane"):
-                        yield Static(
-                            "[bold magenta]🔄 Record Inter-Bond Transfers (Transfer In / Transfer Out)[/bold magenta]  │  "
-                            "[dim]Transfer In (+Stock) from another bond  │  Transfer Out (-Stock) to another bond[/dim]"
-                        )
-                        with Horizontal(classes="stock-row"):
-                            yield Select(
-                                [
-                                    ("Bond Transfer In (Received from another bond)", "TRANSFER_IN"),
-                                    ("Bond Transfer Out (Sent to another bond)", "TRANSFER_OUT"),
-                                ],
-                                value="TRANSFER_IN",
-                                id="sel-transfer-type",
-                            )
-                            yield Select(
-                                [("Public White (PSV)", "PSV"), ("Private Yellow (PMO)", "PMO")],
-                                value="PSV",
-                                id="sel-transfer-category",
-                            )
-                        with Horizontal(classes="stock-row"):
-                            yield Input(
-                                placeholder="Other Bond Location / Name (e.g. Kampala Central Bond)",
-                                id="input-transfer-bond",
-                                classes="stock-input-field",
-                            )
-                            yield Input(
-                                placeholder="Plates Count (e.g. 50)",
-                                id="input-transfer-count",
-                                classes="stock-input-field",
-                            )
-                        with Horizontal(classes="stock-row"):
-                            yield Input(
-                                placeholder="⚡ Rapid scan transfer plate QR [Enter to add]...",
-                                id="input-transfer-single",
-                                classes="stock-input-field",
-                            )
-                            yield Static("[dim]Staged: 0 plates[/dim]", id="lbl-transfer-staged", classes="stock-staged-badge")
-                        yield TextArea(
-                            id="text-transfer-bulk",
-                            classes="stock-textarea",
-                        )
-                        with Horizontal(classes="stock-row"):
-                            yield Button("🔄 Record Bond Transfer", variant="primary", id="btn-save-transfer")
-                            yield Button("Clear Transfer", variant="default", id="btn-clear-transfer")
-
-                # TAB 5: Returns (Line In)
-                with TabPane("↩️ Returns (Line In)", id="tab-returns-pane"):
-                    with Vertical(classes="stock-tab-pane"):
-                        yield Static(
-                            "[bold red]↩️ Record Uninstalled Plates Returned to Stock[/bold red]  │  "
-                            "[dim]Scan plate QR or paste returned plates (Bike No-Show, Defective, Cancelled)[/dim]"
-                        )
-                        with Horizontal(classes="stock-row"):
-                            yield Select(
-                                [("Public White (PSV)", "PSV"), ("Private Yellow (PMO)", "PMO")],
-                                value="PSV",
-                                id="sel-return-category",
-                            )
-                            yield Select(
-                                [
-                                    ("Bike No-Show (Owner did not arrive)", "BIKE_NO_SHOW"),
-                                    ("Defective Plate (Damaged / Bad Print)", "DEFECTIVE_PLATE"),
-                                    ("Cancelled Order", "CANCELLED_ORDER"),
-                                    ("Line Rollover (Shift End)", "LINE_ROLLOVER"),
-                                ],
-                                value="BIKE_NO_SHOW",
-                                id="sel-return-reason",
-                            )
-                        with Horizontal(classes="stock-row"):
-                            yield Input(
-                                placeholder="⚡ Rapid scan returned plate QR code [Enter to add]...",
-                                id="input-return-single",
-                                classes="stock-input-field",
-                            )
-                            yield Static("[dim]Staged: 0 plates[/dim]", id="lbl-return-staged", classes="stock-staged-badge")
-                        yield TextArea(
-                            id="text-return-bulk",
-                            classes="stock-textarea",
-                        )
-                        with Horizontal(classes="stock-row"):
-                            yield Button("↩️ Record Returned Plates", variant="warning", id="btn-save-return")
-                            yield Button("Clear Returns", variant="default", id="btn-clear-return")
-
-                # TAB 6: Scheduled Installation Target & Opening Balance Entry
-                with TabPane("🎯 Scheduled & Opening Balance", id="tab-scheduled-pane"):
-                    with Vertical(classes="stock-tab-pane", id="pane-scheduled-container"):
-                        yield Static(
-                            "[bold cyan]🎯 Scheduled Installation Target & Opening Balance Entry[/bold cyan]  │  "
-                            "[dim]Operational Target for shift (does not alter physical stock)  │  Opening is physical safe inventory[/dim]",
-                            id="header-scheduled-pane"
-                        )
-
-                        # SECTION A: Scheduled Installation Target (Single Input)
-                        yield Static(
-                            "[bold yellow]1. 🎯 SCHEDULED INSTALLATION TARGET (Single Combined Target)[/bold yellow]\n"
-                            "[dim]Enter the total planned target plates to be installed under bond today (covers both Private Yellow & Public White). Operational goal only.[/dim]",
-                            classes="stock-section-title"
-                        )
-                        with Horizontal(classes="stock-row"):
-                            yield Static("[bold white]Scheduled Target (Total):[/bold white] ", classes="stock-label-fixed")
-                            yield Input(value="0", placeholder="e.g. 500 (Single target for shift)", id="input-sched-target", classes="stock-input-field")
-
-                        yield Static(
-                            "[bold green]📊 Live Status:[/bold green] Target: 0  │  Installed: 0  │  Daily Performance: 0%  │  Backlog: 0",
-                            id="lbl-sched-status-card"
-                        )
-
-                        # SECTION B: Physical Opening Stock Balances
-                        yield Static(
-                            "\n[bold green]2. 📦 PHYSICAL OPENING STOCK BALANCES (Safe Room / Storage Box at 06:00)[/bold green]\n"
-                            "[dim]Physical number plates in safe room at start of shift. Formula: Closing = Opening + Received + Transfer In - Transfer Out - Installed.[/dim]",
-                            classes="stock-section-title"
-                        )
-                        with Horizontal(classes="stock-row"):
-                            yield Static("[bold white]PRIVATE (Yellow):[/bold white] ", classes="stock-label-fixed")
-                            yield Input(value="0", placeholder="Opening PMO count", id="input-open-pmo", classes="stock-input-field")
-                            yield Static("[bold white]PUBLIC (White):[/bold white] ", classes="stock-label-fixed")
-                            yield Input(value="0", placeholder="Opening PSV count", id="input-open-psv", classes="stock-input-field")
-                            yield Static("[bold cyan]Total Opening: 0[/bold cyan]", id="lbl-open-total", classes="stock-staged-badge")
-
-                        # SECTION C: Shift Remarks
-                        yield Static(
-                            "\n[bold white]3. 📝 SHIFT REMARKS (Handover Notes / Audit Remarks from Official Report):[/bold white]",
-                            classes="stock-section-title"
-                        )
-                        yield TextArea(
-                            id="text-stock-remarks",
-                            classes="stock-textarea-remarks",
-                        )
-
-                        with Horizontal(classes="stock-row"):
-                            yield Button("💾 Save Scheduled Target, Balances & Remarks", variant="success", id="btn-save-scheduled")
-                            yield Button("🔄 Auto-Carry Previous Day Closing Stock", variant="primary", id="btn-autofill-opening")
-
-                # TAB 7: Safe Room Stock Taking & Physical Audit
-                with TabPane("🔒 Safe Stock Taking", id="tab-stocktake-pane"):
-                    with Vertical(classes="stock-tab-pane"):
-                        yield Static(
-                            "[bold cyan]🔒 Physical Stock Taking & Safe Room Audit[/bold cyan]  │  "
-                            "[dim]Physically count/scan all number plates currently inside the safe room or storage box to reconcile with book stock[/dim]"
-                        )
-                        with Horizontal(classes="stock-row"):
-                            yield Input(
-                                placeholder="⚡ Rapid scan safe room plate QR [Enter to add]...",
-                                id="input-stocktake-single",
-                                classes="stock-input-field",
-                            )
-                            yield Static("[dim]Staged: 0 plates[/dim]", id="lbl-stocktake-staged", classes="stock-staged-badge")
-                        yield TextArea(
-                            id="text-stocktake-bulk",
-                            classes="stock-textarea",
-                        )
-                        with Horizontal(classes="stock-row"):
-                            yield Button("📋 Paste from Clipboard (Excel)", variant="success", id="btn-modal-paste-stocktake")
-                            yield Button("🔒 Perform Safe Stock Taking Audit", variant="primary", id="btn-save-stocktake")
-                            yield Button("Clear Scans", variant="default", id="btn-clear-stocktake")
-                        with Horizontal(classes="stock-row"):
-                            yield Static("[bold white]Or enter manual physical count:[/bold white] ", classes="stock-input-field")
-                            yield Input(value="0", placeholder="e.g. 850", id="input-stocktake-manual-count", classes="stock-input-field")
-                            yield Button("💾 Set Physical Count", variant="success", id="btn-stocktake-set-manual")
-                        yield Static(id="lbl-stocktake-summary")
+            with Horizontal(classes="field-row"):
+                yield Static("[bold white]Shift Handover Remarks:[/bold white]", classes="field-label")
+                yield Input(placeholder="Optional handover remarks...", id="input-modal-remarks", classes="field-input")
 
             with Horizontal(id="modal-footer"):
-                yield Button("📱 Phone Scanner [P]", variant="warning", id="btn-stock-phone-scanner")
-                yield Button("📑 Export CSV [E]", variant="default", id="btn-stock-export")
-                yield Button("🔄 Refresh [R]", variant="primary", id="btn-stock-refresh")
-                yield Button("Close [Esc]", variant="error", id="btn-stock-close")
+                yield Button("Cancel (Esc)", id="btn-modal-cancel", variant="default")
+                yield Button("✓ Save Balances", id="btn-modal-save", variant="primary")
 
     def on_mount(self) -> None:
-        table = self.query_one("#table-modal-stock-report", DataTable)
-        table.add_columns("DESCRIPTION", "PRIVATE (PMO)", "PUBLIC (PSV)", "Total Combined", "REMARKS / Formula Note")
-        table.cursor_type = "row"
-
-        table_deliv = self.query_one("#table-modal-deliv-notes", DataTable)
-        table_deliv.add_columns("Delivery Identifier", "Category", "Plates Count", "Note Photo", "Delivered Plates Sample", "Logged At")
-        table_deliv.cursor_type = "row"
-
-        self.action_refresh_stock()
-
-    def action_refresh_stock(self) -> None:
-        """Fetches fresh reconciliation from stock service and updates all widgets."""
         from core.services import stock_monitoring_service
         try:
-            recon = stock_monitoring_service.compute_daily_reconciliation(self.target_date_suffix)
-            self._cached_recon = recon
-            self._render_header(recon)
-            self._render_report_table(recon)
-            self._render_delivery_notes_table()
-            self._load_inputs(recon)
+            summary = stock_monitoring_service.get_stock_reconciliation_summary(self.target_date_suffix)
+            sched = summary.get("scheduled_target", 0)
+            pmo_open = summary.get("pmo", {}).get("opening", 0)
+            psv_open = summary.get("psv", {}).get("opening", 0)
+            remarks = summary.get("shift_remarks", "")
 
-            from core.models import InstallationKit
-            new_cnt = InstallationKit.objects.filter(status__iexact="New").count()
-            try:
-                self.query_one("#lbl-stock-ready-badge", Static).update(
-                    f"[bold green]📦 Safe Room Ready: {new_cnt:,} kits ('New' in warehouse stock)[/bold green]"
-                )
-            except Exception:
-                pass
-            try:
-                self.query_one("#lbl-dispatch-stock-status", Static).update(
-                    f"[bold green]📦 Ready in Stock: {new_cnt:,} 'New' kits[/bold green]"
-                )
-            except Exception:
-                pass
-        except Exception as exc:
-            self.notify(f"Stock reconciliation error: {exc}", severity="error")
-
-    def _render_delivery_notes_table(self) -> None:
-        from core.services import stock_monitoring_service
-        try:
-            table = self.query_one("#table-modal-deliv-notes", DataTable)
-            table.clear()
-            notes = stock_monitoring_service.get_delivery_notes_for_date(self.target_date_suffix)
-            if not notes:
-                table.add_row("No delivery notes logged for this shift", "—", "—", "—", "—", "—")
-                return
-            for n in notes:
-                cat_badge = "[bold white on dark_blue] PSV [/]" if n["plate_category"] == "PSV" else "[bold black on gold1] PMO [/]"
-                has_photo = "[bold green]✓ Attached[/bold green]" if n.get("has_image") else "[dim]No photo[/dim]"
-                plates = n.get("plates", [])
-                sample = ", ".join(plates[:4]) + (f" (+{len(plates)-4} more)" if len(plates) > 4 else "")
-                table.add_row(
-                    f"[bold green]{n['delivery_number']}[/bold green]",
-                    cat_badge,
-                    f"[bold cyan]{n['total_plates_count']:,}[/bold cyan]",
-                    has_photo,
-                    f"[dim]{sample}[/dim]",
-                    f"[dim]{n['created_at']}[/dim]",
-                    key=str(n["id"]),
-                )
-        except Exception:
-            pass
-
-
-    def _render_header(self, r: Dict[str, Any]) -> None:
-        fmt_date = r.get("formatted_date", "")
-        suf = r.get("work_date_suffix", "")
-        wh = r.get("storage_bond_name") or r.get("warehouse_name") or "AGM SPIRO/8/2"
-        self.query_one("#modal-header", Static).update(
-            f"[bold cyan]═══ 📦 ITMS BOND PHYSICAL STOCK & RECONCILIATION MANAGER ═══[/bold cyan]\n"
-            f"[bold white]Shift Work Date:[/bold white] [bold yellow]{fmt_date}[/bold yellow] ([cyan]{suf}[/cyan])  │  "
-            f"[bold white]Warehouse / Bond:[/bold white] [bold white]{wh}[/bold white]  │  "
-            f"[dim]Synced: {r.get('last_reconciled_at', '')}[/dim]"
-        )
-
-    def _render_report_table(self, r: Dict[str, Any]) -> None:
-        table = self.query_one("#table-modal-stock-report", DataTable)
-        table.clear()
-
-        rows = r.get("report_table", {}).get("rows", [])
-        for row in rows:
-            metric = row.get("metric", "")
-            pmo = row.get("pmo", 0)
-            psv = row.get("psv", 0)
-            tot = row.get("total", 0)
-            note = row.get("note", "")
-
-            # Highlight specific rows
-            if "Closing Balance" in metric:
-                m_str = f"[bold green]{metric}[/bold green]"
-                y_str = f"[bold green]{pmo:,}[/bold green]" if isinstance(pmo, int) else f"[bold green]{pmo}[/bold green]"
-                p_str = f"[bold green]{psv:,}[/bold green]" if isinstance(psv, int) else f"[bold green]{psv}[/bold green]"
-                t_str = f"[bold white on dark_green] {tot:,} [/bold white on dark_green]" if isinstance(tot, int) else f"[bold white on dark_green] {tot} [/bold white on dark_green]"
-            elif "SCHEDULED" in metric or "Scheduled" in metric:
-                m_str = f"[bold cyan]{metric}[/bold cyan]"
-                y_str = f"[bold cyan]{pmo:,}[/bold cyan]" if isinstance(pmo, int) else f"[bold cyan]{pmo}[/bold cyan]"
-                p_str = f"[bold cyan]{psv:,}[/bold cyan]" if isinstance(psv, int) else f"[bold cyan]{psv}[/bold cyan]"
-                t_str = f"[bold cyan]{tot:,}[/bold cyan]" if isinstance(tot, int) else f"[bold cyan]{tot}[/bold cyan]"
-            elif "Installed" in metric:
-                m_str = f"[bold yellow]{metric}[/bold yellow]"
-                y_str = f"[bold yellow]{pmo:,}[/bold yellow]" if isinstance(pmo, int) else f"[bold yellow]{pmo}[/bold yellow]"
-                p_str = f"[bold yellow]{psv:,}[/bold yellow]" if isinstance(psv, int) else f"[bold yellow]{psv}[/bold yellow]"
-                t_str = f"[bold yellow]{tot:,}[/bold yellow]" if isinstance(tot, int) else f"[bold yellow]{tot}[/bold yellow]"
-            elif "perfomance" in metric.lower() or "performance" in metric.lower():
-                m_str = f"[bold magenta]{metric}[/bold magenta]"
-                y_str = f"{pmo}"
-                p_str = f"{psv}"
-                t_str = f"[bold magenta]{tot}[/bold magenta]"
-            elif "Backlog" in metric:
-                color = "red" if (isinstance(tot, int) and tot > 0) else "green"
-                m_str = f"[{color}]{metric}[/{color}]"
-                y_str = f"[{color}]{pmo:,}[/{color}]" if isinstance(pmo, int) else f"[{color}]{pmo}[/{color}]"
-                p_str = f"[{color}]{psv:,}[/{color}]" if isinstance(psv, int) else f"[{color}]{psv}[/{color}]"
-                t_str = f"[{color}]{tot:,}[/{color}]" if isinstance(tot, int) else f"[{color}]{tot}[/{color}]"
-            elif "Variance" in metric:
-                color = "green" if (isinstance(tot, int) and tot >= 0) else "red"
-                m_str = f"[{color}]{metric}[/{color}]"
-                y_str = f"[{color}]{pmo:+d}[/{color}]" if isinstance(pmo, int) else f"[dim]{pmo}[/dim]"
-                p_str = f"[{color}]{psv:+d}[/{color}]" if isinstance(psv, int) else f"[dim]{psv}[/dim]"
-                t_str = f"[{color}]{tot:+d}[/{color}]" if isinstance(tot, int) else f"[{color}]{tot}[/{color}]"
-            else:
-                m_str = f"[bold white]{metric}[/bold white]"
-                y_str = f"{pmo:,}" if isinstance(pmo, int) else str(pmo)
-                p_str = f"{psv:,}" if isinstance(psv, int) else str(psv)
-                t_str = f"[bold white]{tot:,}[/bold white]" if isinstance(tot, int) else str(tot)
-
-            table.add_row(m_str, y_str, p_str, t_str, f"[dim]{note}[/dim]")
-
-        floor = r.get("floor_operations", {})
-        unalloc = floor.get("unallocated_discrepancy", 0)
-        unalloc_style = "[bold red]" if unalloc > 0 else "[bold green]"
-        self.query_one("#stock-floor-summary", Static).update(
-            f" [b]Floor Operations:[/b] Dispatched: [cyan]{floor.get('dispatched_count', 0)}[/cyan]  │  "
-            f"Returned: [yellow]{floor.get('returned_count', 0)}[/yellow]  │  "
-            f"Net on Line: [white]{floor.get('net_dispatched', 0)}[/white]  │  "
-            f"Pending Orders: [gold1]{floor.get('itms_pending_count', 0)}[/gold1]  │  "
-            f"{unalloc_style}⚠️ Unallocated Discrepancy: {unalloc} plates{unalloc_style}"
-        )
-
-    def _load_inputs(self, r: Dict[str, Any]) -> None:
-        try:
-            from core.models import DailyStockLedger
-            work_d = r.get("work_date")
-            ledger = DailyStockLedger.objects.filter(work_date=work_d).first()
-            if ledger:
-                target_val = ledger.scheduled_total if ledger.scheduled_total > 0 else (ledger.scheduled_psv + ledger.scheduled_pmo)
-                try:
-                    self.query_one("#input-sched-target", Input).value = str(target_val)
-                except Exception:
-                    pass
-                try:
-                    self.query_one("#input-open-pmo", Input).value = str(ledger.opening_balance_pmo)
-                    self.query_one("#input-open-psv", Input).value = str(ledger.opening_balance_psv)
-                    tot_open = ledger.opening_balance_pmo + ledger.opening_balance_psv
-                    self.query_one("#lbl-open-total", Static).update(f"[bold cyan]Total Opening: {tot_open:,}[/bold cyan]")
-                except Exception:
-                    pass
-                try:
-                    self.query_one("#text-stock-remarks", TextArea).text = ledger.notes or ""
-                except Exception:
-                    pass
-
-                # Live status banner
-                sched_sum = r.get("scheduled_summary", {})
-                inst_tot = sched_sum.get("installed_total", 0)
-                inst_pmo = sched_sum.get("installed_pmo", 0)
-                inst_psv = sched_sum.get("installed_psv", 0)
-                perf = sched_sum.get("daily_performance_pct", 0.0)
-                backlog = sched_sum.get("backlog_level", 0)
-                try:
-                    self.query_one("#lbl-sched-status-card", Static).update(
-                        f"[bold green]📊 Live Status:[/bold green] Target: [bold cyan]{target_val:,}[/bold cyan]  │  "
-                        f"Installed: [bold yellow]{inst_tot:,}[/bold yellow] (PRIVATE: {inst_pmo}, PUBLIC: {inst_psv})  │  "
-                        f"Performance: [bold magenta]{perf}%[/bold magenta]  │  "
-                        f"Backlog: [bold red]{backlog:,} remaining[/bold red]"
-                    )
-                except Exception:
-                    pass
-
-                try:
-                    self.query_one("#input-stocktake-manual-count", Input).value = str(ledger.physical_count) if ledger.physical_count is not None else ""
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        try:
-            from core.services import stock_monitoring_service
-            auto_ref = stock_monitoring_service.generate_delivery_note_reference(self.target_date_suffix)
-            deliv_inp = self.query_one("#input-deliv-number", Input)
-            deliv_inp.placeholder = f"Auto: {auto_ref}"
-            if not deliv_inp.value.strip():
-                deliv_inp.value = auto_ref
+            self.query_one("#input-modal-open-pmo", Input).value = str(pmo_open)
+            self.query_one("#input-modal-open-psv", Input).value = str(psv_open)
+            self.query_one("#input-modal-sched-target", Input).value = str(sched)
+            self.query_one("#input-modal-remarks", Input).value = remarks or ""
+            self._update_total_label(pmo_open + psv_open)
         except Exception:
             pass
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         btn_id = event.button.id
-        if btn_id == "btn-stock-close":
+        if btn_id == "btn-modal-cancel":
             self.action_dismiss_modal()
-        elif btn_id == "btn-stock-phone-scanner":
-            self.action_show_phone_scanner()
-        elif btn_id == "btn-stock-refresh":
-            self.action_refresh_stock()
-        elif btn_id == "btn-stock-export":
-            self.action_export_csv()
-        elif btn_id == "btn-save-dispatch":
-            self._handle_save_dispatch()
-        elif btn_id == "btn-clear-dispatch":
-            self.query_one("#text-dispatch-bulk", TextArea).text = ""
-            self.query_one("#input-dispatch-single", Input).value = ""
-            try:
-                self.query_one("#lbl-dispatch-staged", Static).update("[dim]Staged: 0 plates[/dim]")
-            except Exception:
-                pass
-        elif btn_id == "btn-save-delivery":
-            self._handle_save_delivery()
-        elif btn_id == "btn-clear-deliv":
-            self.query_one("#text-deliv-bulk", TextArea).text = ""
-            try:
-                self.query_one("#input-deliv-single", Input).value = ""
-                self.query_one("#input-deliv-number", Input).value = ""
-                self.query_one("#input-deliv-paper-ref", Input).value = ""
-                self.query_one("#lbl-deliv-staged", Static).update("[dim]Staged: 0 plates[/dim]")
-            except Exception:
-                pass
-        elif btn_id == "btn-save-transfer":
-            self._handle_save_transfer()
-        elif btn_id == "btn-clear-transfer":
-            self.query_one("#text-transfer-bulk", TextArea).text = ""
-            try:
-                self.query_one("#input-transfer-single", Input).value = ""
-                self.query_one("#lbl-transfer-staged", Static).update("[dim]Staged: 0 plates[/dim]")
-            except Exception:
-                pass
-        elif btn_id == "btn-save-return":
-            self._handle_save_return()
-        elif btn_id == "btn-clear-return":
-            self.query_one("#text-return-bulk", TextArea).text = ""
-            try:
-                self.query_one("#input-return-single", Input).value = ""
-                self.query_one("#lbl-return-staged", Static).update("[dim]Staged: 0 plates[/dim]")
-            except Exception:
-                pass
-        elif btn_id == "btn-save-scheduled":
-            self._handle_save_scheduled()
-        elif btn_id == "btn-autofill-opening":
-            self._handle_autofill_opening()
-        elif btn_id == "btn-save-stocktake":
-            self._handle_save_stocktake()
-        elif btn_id == "btn-clear-stocktake":
-            self.query_one("#text-stocktake-bulk", TextArea).text = ""
-            try:
-                self.query_one("#input-stocktake-single", Input).value = ""
-                self.query_one("#lbl-stocktake-staged", Static).update("[dim]Staged: 0 plates[/dim]")
-            except Exception:
-                pass
-        elif btn_id == "btn-modal-paste-dispatch":
-            self._handle_clipboard_paste_to_textarea("#text-dispatch-bulk", "#lbl-dispatch-staged")
-        elif btn_id == "btn-modal-paste-stocktake":
-            self._handle_clipboard_paste_to_textarea("#text-stocktake-bulk", "#lbl-stocktake-staged")
-        elif btn_id == "btn-stocktake-set-manual":
-            self._handle_set_manual_physical_count()
-        elif btn_id in ("btn-sync-stock-kits", "btn-sync-stock-kits-tab2"):
-            self._handle_sync_stock_kits()
-
-    def _handle_clipboard_paste_to_textarea(self, text_area_id: str, badge_id: str) -> None:
-        from core.services import clipboard_service, stock_monitoring_service
-        clean_plates, dup_count, dup_plates, raw_text = clipboard_service.get_clipboard_plates()
-        if not clean_plates:
-            self.notify("⚠️ Clipboard contains no valid license plates.", severity="warning")
-            return
-        t_area = self.query_one(text_area_id, TextArea)
-        existing_text = t_area.text.strip()
-        if existing_text:
-            existing_plates, _, _ = stock_monitoring_service.parse_plate_input_with_stats(existing_text)
-            merged = list(dict.fromkeys(existing_plates + clean_plates))
-            t_area.text = "\n".join(merged)
-            cnt = len(merged)
-        else:
-            t_area.text = "\n".join(clean_plates)
-            cnt = len(clean_plates)
-        self.notify(f"📋 Ingested {len(clean_plates)} plates from Excel clipboard! (Total: {cnt})", severity="information")
-        try:
-            self.query_one(badge_id, Static).update(f"[bold green]Staged: {cnt} plates[/bold green]")
-        except Exception:
-            pass
-
-    @work(thread=True)
-    def _handle_sync_stock_kits(self) -> None:
-        if getattr(self, "_is_syncing_kits", False):
-            self.app.call_from_thread(self.notify, "Kit sync is already in progress...", severity="warning")
-            return
-        self._is_syncing_kits = True
-
-        def _update_btn_state(text: str, disabled: bool):
-            for bid in ("#btn-sync-stock-kits", "#btn-sync-stock-kits-tab2"):
-                try:
-                    btn = self.query_one(bid, Button)
-                    btn.label = text
-                    btn.disabled = disabled
-                except Exception:
-                    pass
-
-        self.app.call_from_thread(_update_btn_state, "⏳ Syncing Kits...", True)
-        self.app.call_from_thread(self.notify, "🔄 Synchronizing installation kits from ITMS, deliveries, and safe audits...")
-
-        from core.services import kit_provisioning_service
-
-        def _on_progress(msg: str):
-            if hasattr(self.app, "log_message"):
-                self.app.call_from_thread(self.app.log_message, msg, level="ITMS")
-
-        try:
-            res = kit_provisioning_service.sync_and_provision_warehouse_kits(
-                target_date_suffix=None,
-                sync_itms=True,
-                max_pages=100,
-                log_callback=_on_progress,
-            )
-            count = res.get("new_kits_ready_count", 0)
-            wh = res.get("warehouse_facility", "Warehouse Stock")
-            itms_cnt = res.get("itms_kits_synced", 0)
-            pages = res.get("itms_pages_crawled", 0)
-            created = res.get("kits_created", 0)
-            updated = res.get("kits_updated", 0)
-            self.app.call_from_thread(
-                self.notify,
-                f"✓ Synced kits: {itms_cnt} from ITMS ({pages} pgs), {created} created, {updated} updated ({count} ready as 'New' in {wh})",
-                severity="information",
-                timeout=8,
-            )
-            self.app.call_from_thread(self.action_refresh_stock)
-        except Exception as exc:
-            self.app.call_from_thread(self.notify, f"Error syncing kits: {exc}", severity="error")
-        finally:
-            self._is_syncing_kits = False
-            self.app.call_from_thread(_update_btn_state, "📦 Sync & Prep Stock Kits", False)
+        elif btn_id == "btn-modal-save":
+            self.action_save_values()
+        elif btn_id == "btn-modal-autofill-open":
+            self._handle_autofill()
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        inp_id = event.input.id
-        if inp_id in ("input-open-pmo", "input-open-psv"):
-            try:
-                pmo_val = self.query_one("#input-open-pmo", Input).value.strip()
-                psv_val = self.query_one("#input-open-psv", Input).value.strip()
-                pmo = int(pmo_val) if pmo_val.isdigit() else 0
-                psv = int(psv_val) if psv_val.isdigit() else 0
-                self.query_one("#lbl-open-total", Static).update(f"[bold cyan]Total Opening: {pmo + psv:,}[/bold cyan]")
-            except Exception:
-                pass
-        elif inp_id == "input-sched-target":
-            try:
-                t_val = event.value.strip()
-                target_cnt = int(t_val) if t_val.isdigit() else 0
-                sched_sum = (self._cached_recon or {}).get("scheduled_summary", {})
-                inst_tot = sched_sum.get("installed_total", 0)
-                inst_pmo = sched_sum.get("installed_pmo", 0)
-                inst_psv = sched_sum.get("installed_psv", 0)
-                perf = round((inst_tot / target_cnt) * 100.0, 1) if target_cnt > 0 else 0.0
-                backlog = max(0, target_cnt - inst_tot)
-                self.query_one("#lbl-sched-status-card", Static).update(
-                    f"[bold green]📊 Live Status:[/bold green] Target: [bold cyan]{target_cnt:,}[/bold cyan]  │  "
-                    f"Installed: [bold yellow]{inst_tot:,}[/bold yellow] (PRIVATE: {inst_pmo}, PUBLIC: {inst_psv})  │  "
-                    f"Performance: [bold magenta]{perf}%[/bold magenta]  │  "
-                    f"Backlog: [bold red]{backlog:,} remaining[/bold red]"
-                )
-            except Exception:
-                pass
+        if event.input.id in ("input-modal-open-pmo", "input-modal-open-psv"):
+            pmo_val = self.query_one("#input-modal-open-pmo", Input).value.strip()
+            psv_val = self.query_one("#input-modal-open-psv", Input).value.strip()
+            pmo = int(pmo_val) if pmo_val.isdigit() else 0
+            psv = int(psv_val) if psv_val.isdigit() else 0
+            self._update_total_label(pmo + psv)
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Rapid USB barcode scanner handler with automatic deduplication."""
-        from core.services import stock_monitoring_service
-        from core.models import StockDispatchScan, StockDeliveryItem, StockReturnScan
-        inp_id = event.input.id
-        raw_val = event.value.strip()
-
-        if not raw_val:
-            return
-
-        plate = stock_monitoring_service.extract_single_plate(raw_val)
-        if not plate:
-            self.notify(f"⚠️ Invalid plate QR/barcode format: '{raw_val}'", severity="warning")
-            event.input.value = ""
-            event.input.focus()
-            return
-
-        target_area_id = None
-        target_badge_id = None
-        db_check = None
-
-        if inp_id == "input-dispatch-single":
-            target_area_id = "#text-dispatch-bulk"
-            target_badge_id = "#lbl-dispatch-staged"
-            db_check = ("dispatch", StockDispatchScan.objects.filter(work_date_suffix=self.target_date_suffix, registration_number=plate).exists())
-        elif inp_id == "input-deliv-single":
-            target_area_id = "#text-deliv-bulk"
-            target_badge_id = "#lbl-deliv-staged"
-            db_check = ("delivery", StockDeliveryItem.objects.filter(registration_number=plate).exists())
-        elif inp_id == "input-transfer-single":
-            target_area_id = "#text-transfer-bulk"
-            target_badge_id = "#lbl-transfer-staged"
-        elif inp_id == "input-return-single":
-            target_area_id = "#text-return-bulk"
-            target_badge_id = "#lbl-return-staged"
-            db_check = ("return", StockReturnScan.objects.filter(work_date_suffix=self.target_date_suffix, registration_number=plate).exists())
-        elif inp_id == "input-stocktake-single":
-            target_area_id = "#text-stocktake-bulk"
-            target_badge_id = "#lbl-stocktake-staged"
-
-        if not target_area_id:
-            return
-
-        text_area = self.query_one(target_area_id, TextArea)
-        curr_text = text_area.text
-        existing_plates, _, _ = stock_monitoring_service.parse_plate_input_with_stats(curr_text)
-
-        # Check 1: In-staging duplicate prevention
-        if plate in existing_plates:
-            self.notify(f"⚠️ Duplicate ignored: Plate {plate} is ALREADY in staging batch!", severity="warning")
-            event.input.value = ""
-            event.input.focus()
-            return
-
-        # Check 2: Database existing check advisory
-        if db_check:
-            kind, exists = db_check
-            if exists:
-                if kind == "dispatch":
-                    self.notify(f"⚠️ Advisory: Plate {plate} was already dispatched today!", severity="warning")
-                elif kind == "delivery":
-                    self.notify(f"⚠️ Advisory: Plate {plate} already exists in warehouse stock!", severity="warning")
-                elif kind == "return":
-                    self.notify(f"⚠️ Advisory: Plate {plate} was already returned today!", severity="warning")
-
-        # Append plate cleanly
-        text_area.text = f"{curr_text}\n{plate}".strip()
-        event.input.value = ""
-        event.input.focus()
-
-        staged_count = len(existing_plates) + 1
-        if target_badge_id:
-            try:
-                self.query_one(target_badge_id, Static).update(f"[bold green]Staged: {staged_count} plates[/bold green]")
-            except Exception:
-                pass
-        self.notify(f"✓ Scanned {plate} (Total Staged: {staged_count})", severity="information")
-
-    def _handle_save_dispatch(self) -> None:
-        from core.services import stock_monitoring_service
-        bulk_text = self.query_one("#text-dispatch-bulk", TextArea).text
-        single_text = self.query_one("#input-dispatch-single", Input).value
-        combined = f"{bulk_text}\n{single_text}".strip()
-        cat_select = self.query_one("#sel-dispatch-category", Select)
-        category = str(cat_select.value or "PSV")
-
-        if not combined:
-            self.notify("Please scan or paste plate numbers first.", severity="warning")
-            return
-
+    def _update_total_label(self, total: int) -> None:
         try:
-            res = stock_monitoring_service.record_dispatch_scans(
-                plates=combined,
-                plate_category=category,
-                target_date_suffix=self.target_date_suffix,
+            self.query_one("#lbl-modal-open-total", Static).update(
+                f"[bold cyan]Total Opening: {total:,}[/bold cyan]"
             )
-            if not res.get("success"):
-                err = res.get("error", "Failed to dispatch plates.")
-                self.notify(f"⛔ {err}", severity="error")
-                return
+        except Exception:
+            pass
 
-            new_cnt = res.get("newly_dispatched", 0)
-            dup_cnt = res.get("duplicate_scans_skipped", 0)
-            already_cnt = res.get("already_dispatched", 0)
-            rejected = res.get("rejected_not_on_stock", [])
-            synced = res.get("synced_from_itms", [])
+    def _handle_autofill(self) -> None:
+        from core.services import stock_monitoring_service
+        try:
+            carried = stock_monitoring_service.get_previous_shift_closing_balances(self.target_date_suffix)
+            pmo = carried.get("pmo", 0)
+            psv = carried.get("psv", 0)
+            tot = carried.get("total", 0)
+            prev_suf = carried.get("previous_date_suffix") or "previous shift"
 
-            msg = f"✓ Dispatched {new_cnt} {category} plates."
-            if synced:
-                msg += f" ({len(synced)} synced live from ITMS)"
-            if dup_cnt > 0 or already_cnt > 0:
-                msg += f" ({dup_cnt} duplicate scans, {already_cnt} already dispatched skipped)"
-            self.notify(msg, severity="information")
+            self.query_one("#input-modal-open-pmo", Input).value = str(pmo)
+            self.query_one("#input-modal-open-psv", Input).value = str(psv)
+            self._update_total_label(tot)
 
-            if rejected:
-                self.notify(
-                    f"⛔ BLOCKED: {len(rejected)} plate(s) not on ITMS stock ({', '.join(rejected)})",
-                    severity="error",
-                )
-                self.query_one("#text-dispatch-bulk", TextArea).text = "\n".join(rejected)
+            if carried.get("source_ledger_exists"):
+                self.notify(f"✓ Carried previous shift ({prev_suf}) closing: {tot:,} plates (PMO: {pmo}, PSV: {psv})", severity="information")
             else:
-                self.query_one("#text-dispatch-bulk", TextArea).text = ""
-
-            self.query_one("#input-dispatch-single", Input).value = ""
-            try:
-                self.query_one("#lbl-dispatch-staged", Static).update("[dim]Staged: 0 plates[/dim]")
-            except Exception:
-                pass
-            self.action_refresh_stock()
+                self.notify(f"⚠️ No previous shift closing stock found before {self.target_date_suffix}.", severity="warning")
         except Exception as exc:
-            self.notify(f"Error saving dispatch scans: {exc}", severity="error")
+            self.notify(f"Error auto-filling: {exc}", severity="error")
 
-    def _handle_save_delivery(self) -> None:
-        from core.services import stock_monitoring_service
-        deliv_no = self.query_one("#input-deliv-number", Input).value.strip()
-        paper_ref = ""
-        try:
-            paper_ref = self.query_one("#input-deliv-paper-ref", Input).value.strip()
-        except Exception:
-            pass
-        supplier = self.query_one("#input-deliv-supplier", Input).value.strip()
-        cat_select = self.query_one("#sel-deliv-category", Select)
-        category = str(cat_select.value or "PSV")
-        bulk_text = self.query_one("#text-deliv-bulk", TextArea).text.strip()
-        single_text = ""
-        try:
-            single_text = self.query_one("#input-deliv-single", Input).value.strip()
-        except Exception:
-            pass
-        combined = f"{bulk_text}\n{single_text}".strip()
-        auto_kits = self.query_one("#chk-deliv-kits", Checkbox).value
-
-        if not combined:
-            self.notify("Please scan or paste incoming plates for this delivery.", severity="warning")
-            return
-
-        try:
-            res = stock_monitoring_service.record_delivery(
-                delivery_number=deliv_no,
-                paper_note_reference=paper_ref,
-                supplier=supplier,
-                plates=combined,
-                plate_category=category,
-                target_date_suffix=self.target_date_suffix,
-                auto_create_kits=auto_kits,
-            )
-            p_cnt = res.get("plates_count", 0)
-            k_cnt = res.get("created_kits_count", 0)
-            dup_cnt = res.get("duplicate_scans_skipped", 0)
-            msg = f"✓ Ingested delivery {res.get('delivery_number')} with {p_cnt} unique {category} plates ({k_cnt} new kits created)!"
-            if dup_cnt > 0:
-                msg += f" ({dup_cnt} duplicate scans skipped)"
-            self.notify(msg, severity="information")
-
-            self.query_one("#text-deliv-bulk", TextArea).text = ""
-            try:
-                self.query_one("#input-deliv-single", Input).value = ""
-                self.query_one("#input-deliv-number", Input).value = ""
-                self.query_one("#input-deliv-paper-ref", Input).value = ""
-                self.query_one("#lbl-deliv-staged", Static).update("[dim]Staged: 0 plates[/dim]")
-            except Exception:
-                pass
-            self.action_refresh_stock()
-        except Exception as exc:
-            self.notify(f"Error saving delivery: {exc}", severity="error")
-
-    def _handle_save_transfer(self) -> None:
-        from core.services import stock_monitoring_service
-        t_type = str(self.query_one("#sel-transfer-type", Select).value or "TRANSFER_IN")
-        cat = str(self.query_one("#sel-transfer-category", Select).value or "PSV")
-        bond_name = self.query_one("#input-transfer-bond", Input).value.strip() or "Other Bond"
-        cnt_val = self.query_one("#input-transfer-count", Input).value.strip()
-        bulk_text = self.query_one("#text-transfer-bulk", TextArea).text.strip()
-        single_text = ""
-        try:
-            single_text = self.query_one("#input-transfer-single", Input).value.strip()
-        except Exception:
-            pass
-        combined = f"{bulk_text}\n{single_text}".strip()
-
-        count = int(cnt_val) if cnt_val.isdigit() else 0
-        if not count and not combined:
-            self.notify("Please enter plates count or scan transfer plates.", severity="warning")
-            return
-
-        try:
-            res = stock_monitoring_service.record_bond_transfer(
-                transfer_type=t_type,
-                plate_category=cat,
-                plates_count=count,
-                other_bond_name=bond_name,
-                plates=combined if combined else None,
-                target_date_suffix=self.target_date_suffix,
-            )
-            lbl = "Transfer In" if t_type == "TRANSFER_IN" else "Transfer Out"
-            self.notify(f"Recorded {lbl} of {res.get('plates_count')} {cat} plates ({bond_name})!")
-            self.query_one("#text-transfer-bulk", TextArea).text = ""
-            try:
-                self.query_one("#input-transfer-single", Input).value = ""
-                self.query_one("#lbl-transfer-staged", Static).update("[dim]Staged: 0 plates[/dim]")
-            except Exception:
-                pass
-            self.query_one("#input-transfer-count", Input).value = ""
-            self.action_refresh_stock()
-        except Exception as exc:
-            self.notify(f"Error saving bond transfer: {exc}", severity="error")
-
-    def _handle_save_return(self) -> None:
-        from core.services import stock_monitoring_service
-        cat_select = self.query_one("#sel-return-category", Select)
-        category = str(cat_select.value or "PSV")
-        reason_select = self.query_one("#sel-return-reason", Select)
-        reason = str(reason_select.value or "BIKE_NO_SHOW")
-        bulk_text = self.query_one("#text-return-bulk", TextArea).text.strip()
-        single_text = ""
-        try:
-            single_text = self.query_one("#input-return-single", Input).value.strip()
-        except Exception:
-            pass
-        combined = f"{bulk_text}\n{single_text}".strip()
-
-        if not combined:
-            self.notify("Please scan or paste returned plates first.", severity="warning")
-            return
-
-        try:
-            res = stock_monitoring_service.record_return_scans(
-                plates=combined,
-                plate_category=category,
-                reason=reason,
-                target_date_suffix=self.target_date_suffix,
-            )
-            new_cnt = res.get("newly_returned", 0)
-            dup_cnt = res.get("duplicate_scans_skipped", 0)
-            already_cnt = res.get("already_returned", 0)
-            msg = f"✓ Recorded {new_cnt} returned {category} plates."
-            if dup_cnt > 0 or already_cnt > 0:
-                msg += f" ({dup_cnt} duplicates, {already_cnt} already returned skipped)"
-            self.notify(msg, severity="information")
-
-            self.query_one("#text-return-bulk", TextArea).text = ""
-            try:
-                self.query_one("#input-return-single", Input).value = ""
-                self.query_one("#lbl-return-staged", Static).update("[dim]Staged: 0 plates[/dim]")
-            except Exception:
-                pass
-            self.action_refresh_stock()
-        except Exception as exc:
-            self.notify(f"Error saving return scans: {exc}", severity="error")
-
-    def _handle_save_scheduled(self) -> None:
+    def action_save_values(self) -> None:
         from core.services import stock_monitoring_service
         try:
-            target_raw = self.query_one("#input-sched-target", Input).value.strip()
+            target_raw = self.query_one("#input-modal-sched-target", Input).value.strip()
             s_target = int(target_raw) if target_raw.isdigit() else 0
-            o_pmo = int(self.query_one("#input-open-pmo", Input).value.strip() or 0)
-            o_psv = int(self.query_one("#input-open-psv", Input).value.strip() or 0)
-            remarks_text = self.query_one("#text-stock-remarks", TextArea).text.strip()
+            pmo_raw = self.query_one("#input-modal-open-pmo", Input).value.strip()
+            o_pmo = int(pmo_raw) if pmo_raw.isdigit() else 0
+            psv_raw = self.query_one("#input-modal-open-psv", Input).value.strip()
+            o_psv = int(psv_raw) if psv_raw.isdigit() else 0
+            remarks_text = self.query_one("#input-modal-remarks", Input).value.strip()
 
             stock_monitoring_service.set_scheduled_target(
                 scheduled_target=s_target,
@@ -2893,124 +2019,23 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                     remarks=remarks_text,
                     target_date_suffix=self.target_date_suffix,
                 )
-            self.notify(f"✓ Saved scheduled target ({s_target:,}), opening balances (Total: {o_pmo + o_psv:,}) & remarks!", severity="information")
-            self.action_refresh_stock()
+            res = {
+                "scheduled_target": s_target,
+                "opening_pmo": o_pmo,
+                "opening_psv": o_psv,
+                "remarks": remarks_text,
+            }
+            self.notify(f"✓ Saved opening balances & target for shift {self.target_date_suffix}!", severity="information")
+            self.dismiss(res)
         except Exception as exc:
-            self.notify(f"Error saving scheduled values: {exc}", severity="error")
-
-    def _handle_autofill_opening(self) -> None:
-        from core.services import stock_monitoring_service
-        try:
-            carried = stock_monitoring_service.get_previous_shift_closing_balances(self.target_date_suffix)
-            pmo = carried.get("pmo", 0)
-            psv = carried.get("psv", 0)
-            tot = carried.get("total", 0)
-            prev_suf = carried.get("previous_date_suffix") or "previous shift"
-
-            self.query_one("#input-open-pmo", Input).value = str(pmo)
-            self.query_one("#input-open-psv", Input).value = str(psv)
-            self.query_one("#lbl-open-total", Static).update(f"[bold cyan]Total Opening: {tot:,}[/bold cyan]")
-
-            if carried.get("source_ledger_exists"):
-                self.notify(f"✓ Auto-carried previous shift ({prev_suf}) closing stock: {tot:,} plates (PMO: {pmo:,}, PSV: {psv:,})", severity="information")
-            else:
-                self.notify(f"⚠️ No previous shift closing stock found before {self.target_date_suffix}. Opening set to 0.", severity="warning")
-        except Exception as exc:
-            self.notify(f"Error auto-carrying previous closing stock: {exc}", severity="error")
-
-    def _handle_save_stocktake(self) -> None:
-        from core.services import stock_monitoring_service
-        bulk_text = self.query_one("#text-stocktake-bulk", TextArea).text.strip()
-        single_text = ""
-        try:
-            single_text = self.query_one("#input-stocktake-single", Input).value.strip()
-        except Exception:
-            pass
-        combined = f"{bulk_text}\n{single_text}".strip()
-
-        if not combined:
-            self.notify("Please scan or paste safe room physical plates first.", severity="warning")
-            return
-
-        try:
-            res = stock_monitoring_service.record_stock_taking_audit(
-                scanned_plates=combined,
-                target_date_suffix=self.target_date_suffix,
-            )
-            scanned = res.get("total_scanned", 0)
-            book = res.get("book_closing_total", 0)
-            variance = res.get("variance", 0)
-            var_color = "green" if variance == 0 else ("yellow" if variance > 0 else "red")
-            summary_text = (
-                f"[bold cyan]Safe Audit Summary:[/bold cyan]  Physical Scanned: [bold white]{scanned:,}[/bold white]  │  "
-                f"Book Closing: [bold white]{book:,}[/bold white]  │  "
-                f"Variance: [bold {var_color}]{variance:+d}[/bold {var_color}]"
-            )
-            try:
-                self.query_one("#lbl-stocktake-summary", Static).update(summary_text)
-            except Exception:
-                pass
-
-            msg = f"✓ Safe stock taking complete: Scanned {scanned} plates. Variance: {variance:+d}."
-            self.notify(msg, severity="information" if variance >= 0 else "warning")
-            self.action_refresh_stock()
-        except Exception as exc:
-            self.notify(f"Error performing stock taking audit: {exc}", severity="error")
-
-    def _handle_set_manual_physical_count(self) -> None:
-        from core.services import stock_monitoring_service
-        cnt_val = self.query_one("#input-stocktake-manual-count", Input).value.strip()
-        if not cnt_val.isdigit():
-            self.notify("Please enter a valid numeric physical count.", severity="warning")
-            return
-
-        try:
-            res = stock_monitoring_service.set_physical_count(
-                physical_count=int(cnt_val),
-                target_date_suffix=self.target_date_suffix,
-            )
-            cnt = res.get("physical_count", 0)
-            variance = res.get("variance", 0)
-            self.notify(f"✓ Physical count set to {cnt}. Audit variance: {variance:+d}.", severity="information")
-            self.action_refresh_stock()
-        except Exception as exc:
-            self.notify(f"Error setting physical count: {exc}", severity="error")
-
-    def action_export_csv(self) -> None:
-        from core.services import stock_monitoring_service
-        try:
-            content = stock_monitoring_service.export_stock_reconciliation_csv(self.target_date_suffix)
-            date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"itms_bond_stock_{self.target_date_suffix}_{date_str}.csv"
-            out_dir = os.path.join(settings.BASE_DIR, "exports")
-            os.makedirs(out_dir, exist_ok=True)
-            out_path = os.path.join(out_dir, filename)
-            with open(out_path, "w", encoding="utf-8") as f:
-                f.write(content)
-            self.notify(f"Exported stock report to exports/{filename}!", severity="information")
-        except Exception as exc:
-            self.notify(f"Error exporting CSV: {exc}", severity="error")
+            self.notify(f"Error saving balances: {exc}", severity="error")
 
     def action_dismiss_modal(self) -> None:
-        self.dismiss(self._cached_recon)
+        self.dismiss(None)
 
-    def action_show_phone_scanner(self) -> None:
-        import socket
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            local_ip = s.getsockname()[0]
-            s.close()
-        except Exception:
-            local_ip = "127.0.0.1"
 
-        url = f"http://{local_ip}:8000/mobile/"
-        self.notify(f"📱 Phone Scanner URL: {url}\nSelect Mode 3 (WAREHOUSE & BOND STOCK SCANNER) for live camera QR scanning.", severity="information", timeout=8)
-        if hasattr(self.app, "log_message"):
-            self.app.log_message(
-                f"[bold cyan]📱 Mobile Phone Stock Scanner:[/bold cyan] Open [bold yellow]{url}[/bold yellow] on your smartphone camera (Select Mode 3: WAREHOUSE & BOND STOCK SCANNER for auto-scan intake).",
-                level="INFO",
-            )
+# Backwards compatibility alias
+StockManagerModal = OpeningTargetModal
 
 
 # ============================================================================
@@ -3117,6 +2142,11 @@ class StockPasteModal(ModalScreen[Optional[Dict[str, Any]]]):
                 "↩️ Line Returns Manifest Import",
                 "Paste plates returned from assembly line uninstalled (bike no-show, defect, cancelled).",
                 "↩️ Record Returned Plates",
+            ),
+            "movements": (
+                "🔄 Movements Manifest Import",
+                "Paste plate numbers for deliveries, transfers, or returns. Staged for movement recording.",
+                "🔄 Ingest Movement Plates",
             ),
         }
         title, desc, confirm_lbl = titles.get(

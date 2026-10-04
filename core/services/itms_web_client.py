@@ -1633,8 +1633,9 @@ class ITMSWebClient:
                     obj.detail_url = d_url
                     changed = True
 
-                obj.last_synced_at = now
-                to_update.append(obj)
+                if changed:
+                    obj.last_synced_at = now
+                    to_update.append(obj)
             else:
                 to_create.append(
                     InstallationKit(

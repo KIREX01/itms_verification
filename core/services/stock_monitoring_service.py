@@ -107,7 +107,7 @@ def extract_single_plate(text: Any) -> Optional[str]:
     canon = normalizer.canonicalize(raw)
     if canon and len(canon) in (7, 8) and canon.startswith("U"):
         return canon
-    return canon if canon else None
+    return None
 
 
 def parse_plate_input_with_stats(raw_input: Any) -> Tuple[List[str], int, List[str]]:
@@ -1285,6 +1285,26 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
                     "total": total_closing,
                     "note": "Opening + Received + Transfer In - Transfer Out - Installed",
                 },
+                *(
+                    [
+                        {
+                            "metric": "Physical Count (Safe Room Audit)",
+                            "pmo": "—",
+                            "psv": "—",
+                            "total": ledger.physical_count or 0,
+                            "note": "Physical number plates audited in safe room / storage box",
+                        },
+                        {
+                            "metric": "Variance (Physical vs Closing)",
+                            "pmo": "—",
+                            "psv": "—",
+                            "total": f"{ledger.variance:+d}" if (ledger.variance or 0) != 0 else "0 (Balanced)",
+                            "note": "Exact match with book closing" if (ledger.variance or 0) == 0 else ("Surplus in safe room" if (ledger.variance or 0) > 0 else "Shortage in safe room"),
+                        },
+                    ]
+                    if (ledger.physical_count is not None and ledger.physical_count > 0)
+                    else []
+                ),
             ],
             # Aliases dictionary for backward-compatible lookups
             "rows_by_metric": {
@@ -1302,8 +1322,12 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
                 "Bond Transfer Out": {"metric": "Bond transfer OUT", "pmo": transfer_out_pmo, "psv": transfer_out_psv, "total": total_transfer_out},
                 "Backlog level": {"metric": "Backlog level", "pmo": backlog_pmo, "psv": backlog_psv, "total": backlog_total},
                 "Closing Balance": {"metric": "Closing Balance", "pmo": closing_pmo, "psv": closing_psv, "total": total_closing},
+                "Physical Count": {"metric": "Physical Count (Safe Room Audit)", "pmo": "—", "psv": "—", "total": ledger.physical_count or 0},
+                "Variance": {"metric": "Variance (Physical vs Closing)", "pmo": "—", "psv": "—", "total": ledger.variance or 0},
             },
         },
+
+
         # Floor Operations & Graduated Discrepancy Audit
         "floor_operations": {
             "dispatched_count": dispatched_count,
@@ -1349,7 +1373,11 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         "is_closed": ledger.is_closed,
         "last_reconciled_at": ledger.last_reconciled_at.strftime("%Y-%m-%d %H:%M:%S") if ledger.last_reconciled_at else "",
         "unallocated_plates": unresolved_discrepancy,
+        "physical_count": ledger.physical_count or 0,
+        "variance": ledger.variance or 0,
+        "has_physical_count": bool(ledger.physical_count is not None and ledger.physical_count > 0),
     }
+
 
 
 def export_stock_reconciliation_csv(target_date_suffix: Optional[str] = None) -> str:

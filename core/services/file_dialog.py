@@ -539,8 +539,25 @@ if file_path:
     return None
 
 
+def prompt_plate_file_selection(initial_dir: Optional[str] = None) -> Optional[str]:
+    """Opens a native desktop file picker to select an Excel (.xlsx, .xls), CSV, or text file of plates."""
+    file_types = [
+        ("Excel & CSV Files (*.xlsx;*.xls;*.csv;*.txt)", "*.xlsx;*.xls;*.csv;*.txt"),
+        ("Excel Spreadsheets (*.xlsx;*.xls)", "*.xlsx;*.xls"),
+        ("CSV Files (*.csv)", "*.csv"),
+        ("Text Files (*.txt)", "*.txt"),
+        ("All Files (*.*)", "*.*"),
+    ]
+    return prompt_native_file(
+        title="Select Excel or CSV File containing License Plates",
+        initial_dir=initial_dir,
+        file_types=file_types,
+    )
+
+
 if __name__ == "__main__":
     results = _run_native_picker_gui()
     print(json.dumps(results))
+
 
 

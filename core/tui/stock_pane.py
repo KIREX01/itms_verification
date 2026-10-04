@@ -17,7 +17,7 @@ Provides an expansive, two-column workspace designed for warehouse floor operati
      warehouse location, stock verification status, and ITMS order linkage for any
      scanned or selected plate.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 from typing import Any, Dict, List, Optional
 
@@ -55,10 +55,40 @@ class StockPane(Vertical):
     """Full-featured Stock & Reconciliation Workspace Pane (Tab 6)."""
 
     BINDINGS = [
-        Binding("r", "refresh_stock", "Refresh"),
-        Binding("p", "show_phone_scanner", "Phone Scanner"),
-        Binding("e", "export_csv", "Export CSV"),
+        Binding("f", "cycle_subtab", "Cycle Sub-Tab (F)"),
+        Binding("d", "select_date", "Shift Date (D)"),
+        Binding("v", "paste_clipboard", "Paste Excel (V)"),
+        Binding("r", "refresh_stock", "Refresh (R)"),
+        Binding("p", "show_phone_scanner", "Phone Scanner (P)"),
+        Binding("e", "export_csv", "Export CSV (E)"),
+        Binding("1", "tab_1", "Dispatch [1]", show=False),
+        Binding("2", "tab_2", "Recon [2]", show=False),
+        Binding("3", "tab_3", "Inbound [3]", show=False),
+        Binding("4", "tab_4", "Transfers [4]", show=False),
+        Binding("5", "tab_5", "Returns [5]", show=False),
+        Binding("6", "tab_6", "Scheduled [6]", show=False),
+        Binding("7", "tab_7", "Safe Audit [7]", show=False),
     ]
+
+    SUBTABS = [
+        "subtab-dispatch",
+        "subtab-recon",
+        "subtab-delivery",
+        "subtab-transfers",
+        "subtab-returns",
+        "subtab-scheduled",
+        "subtab-stocktake",
+    ]
+
+    SUBTAB_LABELS = {
+        "subtab-dispatch": "1. 📤 Dispatch",
+        "subtab-recon": "2. 📊 Reconciliation",
+        "subtab-delivery": "3. 📥 Inbound",
+        "subtab-transfers": "4. 🔄 Transfers",
+        "subtab-returns": "5. ↩️ Returns",
+        "subtab-scheduled": "6. 🎯 Scheduled",
+        "subtab-stocktake": "7. 🔒 Safe Audit",
+    }
 
     def __init__(self, target_date_suffix: Optional[str] = None, **kwargs):
         super().__init__(**kwargs)
@@ -67,10 +97,27 @@ class StockPane(Vertical):
         self._is_syncing_kits: bool = False
         self._last_blocked_dispatch: List[str] = []
         self._last_unregistered_stocktake: List[str] = []
+        self._last_stocktake_profiles: List[Dict[str, Any]] = []
 
     def compose(self) -> ComposeResult:
-        # Header banner (Date, Bond Name, Total kits ready)
+        # Header banner (Date, Bond Name, Total kits ready, Physical Audited, Variance)
         yield Static(id="stock-header-banner")
+
+        # Top action ribbon (Shift Date, Prev/Next, Today, View Cycle [F], Paste [V], Sync Kits, Sync Orders, Refresh, Export)
+        with Horizontal(classes="stock-top-actions-bar", id="stock-top-bar"):
+            yield Button("🗓️ Shift Date: [D]", variant="primary", id="btn-stock-date")
+            yield Button("◀ Prev", variant="default", id="btn-stock-prev-day")
+            yield Button("Today", variant="default", id="btn-stock-today")
+            yield Button("Next ▶", variant="default", id="btn-stock-next-day")
+            yield Button("🔀 Next View [F]", variant="primary", id="btn-stock-cycle-view")
+            yield Button("📋 Paste Excel [V]", variant="success", id="btn-stock-paste-top")
+            yield Button("📦 Sync ITMS Kits", variant="default", id="btn-stock-sync-kits-top")
+            yield Button("🛒 Sync Orders", variant="default", id="btn-stock-sync-orders-top")
+            yield Button("🔄 Refresh [R]", variant="default", id="btn-stock-refresh-top")
+            yield Button("📑 Export CSV [E]", variant="default", id="btn-stock-export-top")
+
+        # Subtabs indicator banner
+        yield Static(id="stock-subtabs-indicator")
 
         with Horizontal(classes="tab-horizontal"):
             # LEFT PANEL (65% width): Operational Sub-Tabs
@@ -80,14 +127,14 @@ class StockPane(Vertical):
                     with TabPane("📤 Rapid Dispatch (Line Out)", id="subtab-dispatch"):
                         with Vertical(classes="stock-subtab-container"):
                             yield Static(
-                                "[bold yellow]📤 Rapid Dispatch & Physical Stock Verification[/bold yellow]  │  "
-                                "[dim]Scan barcode or paste Excel column. Instant <50ms stock check blocks non-stock kits on the spot.[/dim]",
+                                "[bold yellow]📤 Rapid Dispatch & Floor Issue Verification[/bold yellow]  │  "
+                                "[dim]Scan barcode or paste Excel column [V]. Instant <50ms stock check blocks non-stock kits on the spot.[/dim]",
                                 classes="stock-subtab-header",
                             )
 
                             # Instant Scan Verdict Alert Banner
                             yield Static(
-                                "[bold green]⚡ READY FOR SCANNING:[/bold green] Scan plate barcode/QR code or paste Excel column below.",
+                                "[bold green]⚡ READY FOR SCANNING:[/bold green] Scan plate barcode/QR code or click [b]📋 Paste Excel [V][/b].",
                                 id="lbl-stock-instant-feedback",
                             )
 
@@ -104,24 +151,19 @@ class StockPane(Vertical):
                                     id="input-stock-dispatch-single",
                                     classes="stock-input-field",
                                 )
+                                yield Button("📋 Paste Excel [V]", variant="primary", id="btn-open-dispatch-paste-modal")
+                                yield Button("📂 Import File", variant="default", id="btn-import-file-dispatch")
+                                yield Button("📥 Export Blocked", variant="warning", id="btn-export-blocked-dispatch")
+                                yield Button("🧹 Clear", variant="default", id="btn-clear-dispatch-pane")
                                 yield Static("[bold green]✓ Dispatched: 0 kits[/bold green]", id="lbl-stock-dispatch-count", classes="stock-staged-badge")
 
-                            # Excel Bulk Paste Section
-                            yield Static("[dim]Optional: Paste multi-line Excel column below for instant batch dispatch (no commas required):[/dim]", classes="stock-table-title")
+                            # Preserved hidden TextArea for DOM compatibility and test hooks
                             yield TextArea(
                                 id="text-stock-dispatch-bulk",
-                                classes="stock-textarea",
+                                classes="stock-textarea-hidden",
                             )
 
-                            # Actions Row
-                            with Horizontal(classes="stock-row"):
-                                yield Button("⚡ Verify & Dispatch Excel Column", variant="primary", id="btn-process-excel-dispatch")
-                                yield Button("📥 Export Blocked Kits (CSV)", variant="warning", id="btn-export-blocked-dispatch")
-                                yield Button("🔍 Pre-verify Stock Only", variant="default", id="btn-preverify-stock")
-                                yield Button("🧹 Clear Input", variant="default", id="btn-clear-dispatch-pane")
-                                yield Button("📦 Sync ITMS Installation Kits", variant="success", id="btn-sync-stock-kits-tab1")
-
-                            # Real-Time Live Dispatched Table for Shift
+                            # Real-Time Live Dispatched Table for Shift (Maximized Height)
                             yield Static("[bold white]📋 Today's Dispatched Plates (Select row to inspect hardware serials & kit details):[/bold white]", classes="stock-table-title")
                             yield DataTable(id="table-stock-dispatch")
 
@@ -134,7 +176,6 @@ class StockPane(Vertical):
                                 classes="stock-subtab-header",
                             )
                             with Horizontal(classes="stock-row"):
-                                yield Button("📦 Sync & Prep Morning Stock Kits", variant="success", id="btn-sync-stock-kits-recon")
                                 yield Static("[dim]Safe Room Ready: [bold green]Checking...[/bold green][/dim]", id="lbl-stock-ready-badge", classes="stock-staged-badge")
                             yield DataTable(id="table-stock-report")
                             yield Static(id="stock-floor-summary")
@@ -252,26 +293,41 @@ class StockPane(Vertical):
                         with Vertical(classes="stock-subtab-container"):
                             yield Static(
                                 "[bold cyan]🔒 Monthly Physical Stock Taking & Safe Room Audit[/bold cyan]  │  "
-                                "[dim]Paste ~1,300 plates to audit safe storage, link hardware serials & reconcile with book stock[/dim]",
+                                "[dim]Audit safe storage plates, link hardware serials & reconcile with book closing stock[/dim]",
                                 classes="stock-subtab-header",
                             )
+
+                            # Input & Primary Action Row
                             with Horizontal(classes="stock-row"):
-                                yield Input(placeholder="⚡ Scan safe room plate QR [Enter to add]...", id="input-stocktake-single", classes="stock-input-field")
-                                yield Static("[bold cyan]Audit Scans: 0 plates[/bold cyan]", id="lbl-stocktake-staged", classes="stock-staged-badge")
-                            yield Static("[dim]Paste multi-line Excel column of physical plates audited in Safe Room (~1,300 plates):[/dim]", classes="stock-table-title")
-                            yield TextArea(id="text-stocktake-bulk", classes="stock-textarea")
-                            with Horizontal(classes="stock-row"):
-                                yield Button("🔒 Run Safe Room Stock Audit", variant="primary", id="btn-save-stocktake")
-                                yield Button("📥 Export Unregistered Kits (CSV)", variant="warning", id="btn-export-unregistered-stocktake")
-                                yield Button("📦 Sync ITMS Installation Kits", variant="success", id="btn-sync-itms-stocktake")
+                                yield Input(
+                                    placeholder="⚡ Scan safe room plate QR [Enter to add]...",
+                                    id="input-stocktake-single",
+                                    classes="stock-input-field",
+                                )
+                                yield Button("📋 Paste Excel [V]", variant="primary", id="btn-open-stocktake-paste-modal")
+                                yield Button("📂 Import File", variant="default", id="btn-import-file-stocktake")
+                                yield Button("🔒 Run Safe Audit", variant="success", id="btn-save-stocktake")
+                                yield Button("📥 Export Unregistered", variant="warning", id="btn-export-unregistered-stocktake")
                                 yield Button("🧹 Clear Scans", variant="default", id="btn-clear-stocktake")
+                                yield Static("[bold cyan]Audit Scans: 0 plates[/bold cyan]", id="lbl-stocktake-staged", classes="stock-staged-badge")
+
+                            # Audit Count & Summary Row
                             with Horizontal(classes="stock-row"):
-                                yield Static("[bold white]Manual Physical Count:[/bold white] ", classes="stock-label-fixed")
-                                yield Input(value="0", placeholder="e.g. 1300", id="input-stocktake-manual-count", classes="stock-input-field")
-                                yield Button("💾 Set Physical Count", variant="success", id="btn-stocktake-set-manual")
-                            yield Static(id="lbl-stocktake-summary")
+                                yield Static("[bold white]Physical Count:[/bold white] ", classes="stock-label-compact")
+                                yield Input(value="0", placeholder="e.g. 1200", id="input-stocktake-manual-count", classes="stock-input-compact")
+                                yield Button("💾 Set Count", variant="success", id="btn-stocktake-set-manual")
+                                yield Static(id="lbl-stocktake-summary", classes="stock-summary-inline")
+
+                            # Preserved hidden TextArea for DOM compatibility and test hooks
+                            yield TextArea(
+                                id="text-stocktake-bulk",
+                                classes="stock-textarea-hidden",
+                            )
+
+                            # DataTable with Maximized Screen Real Estate
                             yield Static("[bold white]📋 Audited Physical Stock (Hardware Linking & Verification):[/bold white]", classes="stock-table-title")
                             yield DataTable(id="table-stocktake-results")
+
 
             # RIGHT PANEL (35% width): Persistent Live Kit Inspector
             yield InspectorPane(id="inspector-stock", classes="inspector-panel")
@@ -303,10 +359,13 @@ class StockPane(Vertical):
         try:
             recon = stock_monitoring_service.compute_daily_reconciliation(self.target_date_suffix)
             self._cached_recon = recon
+            if not getattr(self, "is_mounted", False):
+                return
             self._render_header(recon)
             self._render_recon_table(recon)
             self._render_dispatch_table()
             self._render_delivery_notes_table()
+            self._render_stocktake_table(recon)
             self._load_inputs(recon)
 
             from core.models import InstallationKit
@@ -318,7 +377,8 @@ class StockPane(Vertical):
             except Exception:
                 pass
         except Exception as exc:
-            self.notify(f"Stock refresh error: {exc}", severity="error")
+            if getattr(self, "is_mounted", False):
+                self.notify(f"Stock refresh error: {exc}", severity="error")
 
     def _render_header(self, r: Dict[str, Any]) -> None:
         fmt_date = r.get("formatted_date", "")
@@ -328,13 +388,49 @@ class StockPane(Vertical):
         new_cnt = InstallationKit.objects.filter(status__iexact="New").count()
         today_dispatched = StockDispatchScan.objects.filter(work_date_suffix=self.target_date_suffix).count()
 
+        has_phys = r.get("has_physical_count", False)
+        phys_cnt = r.get("physical_count", 0)
+        variance = r.get("variance", 0)
+        var_color = "green" if variance == 0 else ("yellow" if variance > 0 else "red")
+        phys_badge = (
+            f"[bold white on dark_cyan] Physical Safe Count: {phys_cnt:,} plates [/]  │  "
+            f"[bold white]Safe Variance:[/bold white] [bold {var_color}]{variance:+d}[/bold {var_color}]"
+            if has_phys
+            else "[dim]Safe Room Audit: Not Performed Today[/dim]"
+        )
+
         self.query_one("#stock-header-banner", Static).update(
             f"[bold cyan]═══ 📦 ITMS BOND PHYSICAL STOCK & RECONCILIATION MANAGER ═══[/bold cyan]\n"
             f"[bold white]Shift Work Date:[/bold white] [bold yellow]{fmt_date}[/bold yellow] ([cyan]{suf}[/cyan])  │  "
             f"[bold white]Warehouse / Bond:[/bold white] [bold white]{wh}[/bold white]  │  "
             f"[bold green]Safe Room Ready:[/bold green] [bold green]{new_cnt:,} kits[/bold green]  │  "
-            f"[bold yellow]Dispatched Today:[/bold yellow] [bold yellow]{today_dispatched:,} kits[/bold yellow]"
+            f"[bold yellow]Dispatched Today:[/bold yellow] [bold yellow]{today_dispatched:,} kits[/bold yellow]\n"
+            f"{phys_badge}"
         )
+
+        try:
+            self.query_one("#btn-stock-date", Button).label = f"🗓️ Date: {suf} [D]"
+        except Exception:
+            pass
+
+        self._update_subtab_indicator()
+
+    def _update_subtab_indicator(self) -> None:
+        try:
+            tabs = self.query_one("#stock-sub-tabs", TabbedContent)
+            active = tabs.active
+            pills = []
+            for sid, lbl in self.SUBTAB_LABELS.items():
+                if sid == active:
+                    pills.append(f"[bold green]▶ {lbl}[/bold green]")
+                else:
+                    pills.append(f"[dim]{lbl}[/dim]")
+            ind_str = "   ".join(pills)
+            self.query_one("#stock-subtabs-indicator", Static).update(
+                f"[b]Views:[/b] {ind_str}   [dim](Press [b]F[/b] to Cycle │ [b]1-7[/b] Jump)[/dim]"
+            )
+        except Exception:
+            pass
 
     def _render_dispatch_table(self) -> None:
         """Populates the real-time live dispatch table for today."""
@@ -401,6 +497,18 @@ class StockPane(Vertical):
                 y_str = f"[bold green]{pmo:,}[/bold green]" if isinstance(pmo, int) else f"[bold green]{pmo}[/bold green]"
                 p_str = f"[bold green]{psv:,}[/bold green]" if isinstance(psv, int) else f"[bold green]{psv}[/bold green]"
                 t_str = f"[bold white on dark_green] {tot:,} [/bold white on dark_green]" if isinstance(tot, int) else f"[bold white on dark_green] {tot} [/bold white on dark_green]"
+            elif "Physical Count" in metric:
+                m_str = f"[bold cyan]{metric}[/bold cyan]"
+                y_str = f"[bold cyan]{pmo}[/bold cyan]"
+                p_str = f"[bold cyan]{psv}[/bold cyan]"
+                t_str = f"[bold white on dark_cyan] {tot:,} [/bold white on dark_cyan]" if isinstance(tot, int) else f"[bold white on dark_cyan] {tot} [/bold white on dark_cyan]"
+            elif "Variance (Physical" in metric:
+                var_str = str(tot)
+                var_style = "bold green" if ("0" in var_str or "Balanced" in var_str) else ("bold yellow" if "+" in var_str else "bold red")
+                m_str = f"[{var_style}]{metric}[/{var_style}]"
+                y_str = "—"
+                p_str = "—"
+                t_str = f"[{var_style}] {var_str} [/{var_style}]"
             elif "SCHEDULED" in metric or "Scheduled" in metric:
                 m_str = f"[bold cyan]{metric}[/bold cyan]"
                 y_str = f"[bold cyan]{pmo:,}[/bold cyan]" if isinstance(pmo, int) else f"[bold cyan]{pmo}[/bold cyan]"
@@ -422,13 +530,82 @@ class StockPane(Vertical):
         floor = r.get("floor_operations", {})
         unalloc = floor.get("unallocated_discrepancy", 0)
         unalloc_style = "[bold red]" if unalloc > 0 else "[bold green]"
-        self.query_one("#stock-floor-summary", Static).update(
-            f" [b]Floor Operations:[/b] Dispatched: [cyan]{floor.get('dispatched_count', 0)}[/cyan]  │  "
-            f"Returned: [yellow]{floor.get('returned_count', 0)}[/yellow]  │  "
-            f"Net on Line: [white]{floor.get('net_dispatched', 0)}[/white]  │  "
-            f"Pending Orders: [gold1]{floor.get('itms_pending_count', 0)}[/gold1]  │  "
-            f"{unalloc_style}⚠️ Unallocated Discrepancy: {unalloc} plates{unalloc_style}"
-        )
+        try:
+            self.query_one("#stock-floor-summary", Static).update(
+                f" [b]Floor Operations:[/b] Dispatched: [cyan]{floor.get('dispatched_count', 0)}[/cyan]  │  "
+                f"Returned: [yellow]{floor.get('returned_count', 0)}[/yellow]  │  "
+                f"Net on Line: [white]{floor.get('net_dispatched', 0)}[/white]  │  "
+                f"Pending Orders: [gold1]{floor.get('itms_pending_count', 0)}[/gold1]  │  "
+                f"{unalloc_style}⚠️ Unallocated Discrepancy: {unalloc} plates{unalloc_style}"
+            )
+        except Exception:
+            pass
+
+    def _render_stocktake_table(self, r: Dict[str, Any]) -> None:
+        """Populates the audited safe stock table with hardware serials."""
+        try:
+            tbl = self.query_one("#table-stocktake-results", DataTable)
+        except Exception:
+            return
+
+        tbl.clear()
+
+        # 1. In-memory results from current session
+        profiles = getattr(self, "_last_stocktake_profiles", None)
+        unreg = getattr(self, "_last_unregistered_stocktake", None)
+
+        if profiles or unreg:
+            row_idx = 1
+            if profiles:
+                for p_info in profiles:
+                    plate = p_info.get("plate", "")
+                    tbl.add_row(
+                        str(row_idx),
+                        f"[bold green]{plate}[/bold green]",
+                        "[bold green]✓ ON STOCK[/bold green]",
+                        f"[white]{p_info.get('kit_code', '—')}[/white]",
+                        f"[cyan]{p_info.get('gps_tracker', '—')}[/cyan]",
+                        f"[dim]{p_info.get('front_ble', '—')}[/dim]",
+                        f"[dim]{p_info.get('rear_ble', '—')}[/dim]",
+                        key=plate,
+                    )
+                    row_idx += 1
+            if unreg:
+                for u_plate in unreg:
+                    tbl.add_row(
+                        str(row_idx),
+                        f"[bold red]{u_plate}[/bold red]",
+                        "[bold white on dark_red] ⛔ UNREGISTERED [/]",
+                        "[dim]Awaiting Registration[/dim]",
+                        "—",
+                        "—",
+                        "—",
+                        key=u_plate,
+                    )
+                    row_idx += 1
+            return
+
+        # 2. Database active safe room stock kits
+        from core.models import InstallationKit
+        kits = InstallationKit.objects.filter(status__iexact="New").order_by("-updated_at")[:2000]
+        if kits.exists():
+            for idx, kit in enumerate(kits, 1):
+                plate = kit.registration_number or (kit.kit_code.replace("IK-", "") if kit.kit_code else "—")
+                gps = getattr(kit, "gps_tracker", "") or getattr(kit, "gps_tracker_id", "") or "—"
+                front_ble = getattr(kit, "front_tracker", "") or getattr(kit, "ble_beacon_front", "") or "—"
+                rear_ble = getattr(kit, "rear_tracker", "") or getattr(kit, "ble_beacon_rear", "") or "—"
+                tbl.add_row(
+                    str(idx),
+                    f"[bold green]{plate}[/bold green]",
+                    "[bold green]✓ SAFE ROOM STOCK[/bold green]",
+                    f"[white]{kit.kit_code or '—'}[/white]",
+                    f"[cyan]{gps}[/cyan]",
+                    f"[dim]{front_ble}[/dim]",
+                    f"[dim]{rear_ble}[/dim]",
+                    key=plate,
+                )
+        else:
+            tbl.add_row("—", "No stock audits recorded yet.", "Click '📋 Paste Excel [V]' or press V to audit safe room kits", "—", "—", "—", "—")
 
     def _render_delivery_notes_table(self) -> None:
         from core.services import stock_monitoring_service
@@ -469,8 +646,23 @@ class StockPane(Vertical):
                     tot_open = ledger.opening_balance_pmo + ledger.opening_balance_psv
                     self.query_one("#lbl-open-total", Static).update(f"[bold cyan]Total Opening: {tot_open:,}[/bold cyan]")
                     self.query_one("#text-stock-remarks", TextArea).text = ledger.notes or ""
+
+                    phys_val = ledger.physical_count if ledger.physical_count is not None else 0
+                    self.query_one("#input-stocktake-manual-count", Input).value = str(phys_val)
+                    if phys_val > 0:
+                        book_closing = r.get("closing_stock", 0)
+                        variance = ledger.variance if ledger.variance is not None else (phys_val - book_closing)
+                        var_color = "green" if variance == 0 else ("yellow" if variance > 0 else "red")
+                        self.query_one("#lbl-stocktake-summary", Static).update(
+                            f"[bold cyan]Safe Audit Summary:[/bold cyan]  Physical Audited: [bold white]{phys_val:,}[/bold white]  │  "
+                            f"Book Closing: [bold white]{book_closing:,}[/bold white]  │  "
+                            f"Variance: [bold {var_color}]{variance:+d}[/bold {var_color}]"
+                        )
+                    else:
+                        self.query_one("#lbl-stocktake-summary", Static).update("[dim]Physical Count: Not entered yet. Press [b]V[/b] to paste Excel.[/dim]")
                 except Exception:
                     pass
+
 
                 sched_sum = r.get("scheduled_summary", {})
                 inst_tot = sched_sum.get("installed_total", 0)
@@ -520,6 +712,8 @@ class StockPane(Vertical):
             self._append_to_textarea("#text-return-bulk", "#lbl-return-staged", raw_val, event.input)
         elif inp_id == "input-stocktake-single":
             self._append_to_textarea("#text-stocktake-bulk", "#lbl-stocktake-staged", raw_val, event.input)
+        elif inp_id == "input-stocktake-manual-count":
+            self._handle_set_manual_physical_count()
 
     def _append_to_textarea(self, text_area_id: str, badge_id: str, raw_val: str, input_widget: Input) -> None:
         from core.services import stock_monitoring_service
@@ -943,7 +1137,42 @@ class StockPane(Vertical):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         bid = event.button.id
-        if bid == "btn-process-excel-dispatch":
+        # Top action ribbon
+        if bid == "btn-stock-date":
+            self.action_select_date()
+        elif bid == "btn-stock-prev-day":
+            self.action_prev_day()
+        elif bid == "btn-stock-today":
+            self.action_today()
+        elif bid == "btn-stock-next-day":
+            self.action_next_day()
+        elif bid == "btn-stock-cycle-view":
+            self.action_cycle_subtab()
+        elif bid == "btn-stock-paste-top":
+            self.action_paste_clipboard()
+        elif bid == "btn-stock-sync-kits-top":
+            self._handle_sync_stock_kits()
+        elif bid == "btn-stock-sync-orders-top":
+            self._handle_sync_stock_orders()
+        elif bid == "btn-stock-refresh-top":
+            self.action_refresh_stock()
+        elif bid == "btn-stock-export-top":
+            self.action_export_csv()
+        # Direct paste / modal triggers
+        elif bid == "btn-open-dispatch-paste-modal":
+            self.open_paste_modal("dispatch")
+        elif bid == "btn-open-stocktake-paste-modal":
+            self.open_paste_modal("stocktake")
+        elif bid == "btn-paste-dispatch-clipboard":
+            self._handle_clipboard_paste_dispatch()
+        elif bid == "btn-import-file-dispatch":
+            self._handle_import_file_dispatch()
+        elif bid == "btn-paste-stocktake-clipboard":
+            self._handle_clipboard_paste_stocktake()
+        elif bid == "btn-import-file-stocktake":
+            self._handle_import_file_stocktake()
+        # Sub-tab 1 buttons
+        elif bid == "btn-process-excel-dispatch":
             self._handle_batch_excel_dispatch()
         elif bid == "btn-export-blocked-dispatch":
             self._handle_export_blocked_dispatch()
@@ -988,6 +1217,19 @@ class StockPane(Vertical):
         elif bid == "btn-stocktake-set-manual":
             self._handle_set_manual_physical_count()
 
+    @work(thread=True)
+    def _handle_sync_stock_orders(self) -> None:
+        """Trigger shift order and archive synchronization from top bar."""
+        self.app.call_from_thread(self.notify, "🔄 Synchronizing ITMS orders & archives for shift...")
+        try:
+            from core.services.order_sync import OrderSyncService
+            svc = OrderSyncService()
+            res = svc.sync_shift_scoped(target_date=self.target_date_suffix)
+            msg = res.get("message", "Orders synced.")
+            self.app.call_from_thread(self.notify, f"✓ {msg}", severity="information")
+            self.app.call_from_thread(self.action_refresh_stock)
+        except Exception as exc:
+            self.app.call_from_thread(self.notify, f"Order sync error: {exc}", severity="error")
 
     @work(thread=True)
     def _handle_sync_stock_kits(self) -> None:
@@ -997,7 +1239,7 @@ class StockPane(Vertical):
         self._is_syncing_kits = True
 
         def _update_btn_state(text: str, disabled: bool):
-            for bid in ("#btn-sync-stock-kits-tab1", "#btn-sync-stock-kits-recon", "#btn-sync-itms-stocktake"):
+            for bid in ("#btn-sync-stock-kits-tab1", "#btn-sync-stock-kits-recon", "#btn-sync-itms-stocktake", "#btn-sync-stock-kits-top"):
                 try:
                     btn = self.query_one(bid, Button)
                     btn.label = text
@@ -1018,7 +1260,7 @@ class StockPane(Vertical):
             res = kit_provisioning_service.sync_and_provision_warehouse_kits(
                 target_date_suffix=None,
                 sync_itms=True,
-                max_pages=35,
+                max_pages=100,
                 log_callback=_on_progress,
             )
             count = res.get("new_kits_ready_count", 0)
@@ -1042,6 +1284,7 @@ class StockPane(Vertical):
                     ("#btn-sync-stock-kits-tab1", "📦 Sync ITMS Installation Kits"),
                     ("#btn-sync-stock-kits-recon", "📦 Sync & Prep Stock Kits"),
                     ("#btn-sync-itms-stocktake", "📦 Sync ITMS Installation Kits"),
+                    ("#btn-sync-stock-kits-top", "📦 Sync ITMS Kits"),
                 ):
                     try:
                         btn = self.query_one(bid, Button)
@@ -1235,6 +1478,11 @@ class StockPane(Vertical):
             tbl.clear()
 
             hardware_profiles = res.get("hardware_profiles", [])
+            self._last_stocktake_profiles = hardware_profiles
+            try:
+                self.query_one("#input-stocktake-manual-count", Input).value = str(scanned)
+            except Exception:
+                pass
             row_idx = 1
             for p_info in hardware_profiles:
                 plate = p_info.get("plate", "")
@@ -1353,3 +1601,393 @@ class StockPane(Vertical):
 
         url = f"http://{local_ip}:8000/mobile/"
         self.notify(f"📱 Phone Scanner URL: {url}\nSelect Mode 3 (WAREHOUSE & BOND STOCK SCANNER).", severity="information", timeout=8)
+
+    def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        if event.tabbed_content.id == "stock-sub-tabs":
+            self._update_subtab_indicator()
+
+    def action_cycle_subtab(self, forward: bool = True) -> None:
+        """Cycles through operational sub-tabs using [F] key."""
+        try:
+            tabs = self.query_one("#stock-sub-tabs", TabbedContent)
+            cur = tabs.active
+            if cur in self.SUBTABS:
+                idx = self.SUBTABS.index(cur)
+                next_idx = (idx + 1) % len(self.SUBTABS) if forward else (idx - 1) % len(self.SUBTABS)
+            else:
+                next_idx = 0
+            tabs.active = self.SUBTABS[next_idx]
+            self._update_subtab_indicator()
+            lbl = self.SUBTAB_LABELS.get(self.SUBTABS[next_idx], self.SUBTABS[next_idx])
+            self.notify(f"Switched view to: {lbl}")
+        except Exception:
+            pass
+
+    def set_subtab(self, subtab_id: str) -> None:
+        try:
+            tabs = self.query_one("#stock-sub-tabs", TabbedContent)
+            tabs.active = subtab_id
+            self._update_subtab_indicator()
+        except Exception:
+            pass
+
+    def action_tab_1(self) -> None:
+        self.set_subtab("subtab-dispatch")
+
+    def action_tab_2(self) -> None:
+        self.set_subtab("subtab-recon")
+
+    def action_tab_3(self) -> None:
+        self.set_subtab("subtab-delivery")
+
+    def action_tab_4(self) -> None:
+        self.set_subtab("subtab-transfers")
+
+    def action_tab_5(self) -> None:
+        self.set_subtab("subtab-returns")
+
+    def action_tab_6(self) -> None:
+        self.set_subtab("subtab-scheduled")
+
+    def action_tab_7(self) -> None:
+        self.set_subtab("subtab-stocktake")
+
+    def action_select_date(self) -> None:
+        """Opens interactive Shift Date Selector modal to switch shift date."""
+        from core.tui.dialogs import DateSelectModal
+
+        def _on_date_selected(selected_date: Optional[str]) -> None:
+            if not selected_date:
+                return
+            from core.services import stock_monitoring_service
+            _, clean_suf = stock_monitoring_service.resolve_date_and_suffix(selected_date)
+            self.target_date_suffix = clean_suf
+            self.action_refresh_stock()
+            self.notify(f"✓ Stock shift date switched to: {clean_suf}", severity="information")
+
+        self.app.push_screen(DateSelectModal(current_suffix=self.target_date_suffix), _on_date_selected)
+
+    def action_prev_day(self) -> None:
+        """Steps shift date backward by 1 calendar day."""
+        try:
+            curr_d = datetime.strptime(self.target_date_suffix, "%d%m%y").date()
+            prev_d = curr_d - timedelta(days=1)
+            self.target_date_suffix = prev_d.strftime("%d%m%y")
+            self.action_refresh_stock()
+            if getattr(self, "is_mounted", False):
+                self.notify(f"Shift date stepped back to: {self.target_date_suffix}")
+        except Exception as exc:
+            if getattr(self, "is_mounted", False):
+                self.notify(f"Could not step date: {exc}", severity="warning")
+
+    def action_next_day(self) -> None:
+        """Steps shift date forward by 1 calendar day."""
+        try:
+            curr_d = datetime.strptime(self.target_date_suffix, "%d%m%y").date()
+            next_d = curr_d + timedelta(days=1)
+            self.target_date_suffix = next_d.strftime("%d%m%y")
+            self.action_refresh_stock()
+            if getattr(self, "is_mounted", False):
+                self.notify(f"Shift date stepped forward to: {self.target_date_suffix}")
+        except Exception as exc:
+            if getattr(self, "is_mounted", False):
+                self.notify(f"Could not step date: {exc}", severity="warning")
+
+    def action_today(self) -> None:
+        """Resets shift date directly to today's local date."""
+        self.target_date_suffix = timezone.localdate().strftime("%d%m%y")
+        self.action_refresh_stock()
+        if getattr(self, "is_mounted", False):
+            self.notify(f"Shift date set to today: {self.target_date_suffix}")
+
+    def action_paste_clipboard(self) -> None:
+        """Context-sensitive paste action: opens StockPasteModal for active view."""
+        try:
+            tabs = self.query_one("#stock-sub-tabs", TabbedContent)
+            cur = tabs.active
+        except Exception:
+            cur = "subtab-dispatch"
+
+        mode = "dispatch"
+        if cur == "subtab-stocktake":
+            mode = "stocktake"
+        elif cur == "subtab-delivery":
+            mode = "delivery"
+        elif cur == "subtab-transfers":
+            mode = "transfers"
+        elif cur == "subtab-returns":
+            mode = "returns"
+
+        self.open_paste_modal(mode)
+
+    def open_paste_modal(self, mode: str = "dispatch") -> None:
+        """Opens dedicated StockPasteModal to paste or import large batches (~1,200+ plates)."""
+        from core.tui.dialogs import StockPasteModal
+
+        def _on_modal_result(result: Optional[Dict[str, Any]]) -> None:
+            if not result or not result.get("plates"):
+                return
+            plates = result.get("plates", [])
+            if mode == "stocktake":
+                self._apply_stocktake_plates(plates)
+            elif mode == "dispatch":
+                self._apply_dispatch_plates(plates)
+            elif mode == "delivery":
+                self._apply_delivery_plates(plates)
+            elif mode == "transfers":
+                self._apply_transfer_plates(plates)
+            elif mode == "returns":
+                self._apply_return_plates(plates)
+
+        self.app.push_screen(
+            StockPasteModal(mode=mode, target_date_suffix=self.target_date_suffix),
+            _on_modal_result,
+        )
+
+    def _apply_stocktake_plates(self, plates: List[str]) -> None:
+        """Applies plates from StockPasteModal into Safe Room Stock Taking audit."""
+        from core.services import stock_monitoring_service
+        try:
+            t_area = self.query_one("#text-stocktake-bulk", TextArea)
+            t_area.text = "\n".join(plates)
+        except Exception:
+            pass
+
+        try:
+            self.query_one("#lbl-stocktake-staged", Static).update(f"[bold cyan]Audit Scans: {len(plates):,} plates[/bold cyan]")
+            self.query_one("#input-stocktake-manual-count", Input).value = str(len(plates))
+        except Exception:
+            pass
+
+        self.notify(f"🔒 Running Safe Room Audit on {len(plates):,} plates...", severity="information")
+
+        try:
+            res = stock_monitoring_service.record_stock_taking_audit(
+                scanned_plates=plates,
+                target_date_suffix=self.target_date_suffix,
+            )
+            scanned = res.get("total_scanned", 0)
+            verified = res.get("verified_count", 0)
+            unregistered = res.get("unregistered_count", 0)
+            unreg_plates = res.get("unregistered_plates", [])
+            self._last_unregistered_stocktake = unreg_plates
+            hardware_profiles = res.get("hardware_profiles", [])
+            self._last_stocktake_profiles = hardware_profiles
+
+            book = res.get("book_closing_total", 0)
+            variance = res.get("variance", 0)
+            var_color = "green" if variance == 0 else ("yellow" if variance > 0 else "red")
+            summary_text = (
+                f"[bold cyan]Safe Audit Summary:[/bold cyan]  Physical Audited: [bold white]{scanned:,}[/bold white]  │  "
+                f"Verified on Stock: [bold green]{verified:,}[/bold green]  │  "
+                f"Book Closing: [bold white]{book:,}[/bold white]  │  "
+                f"Variance: [bold {var_color}]{variance:+d}[/bold {var_color}]"
+            )
+            try:
+                self.query_one("#lbl-stocktake-summary", Static).update(summary_text)
+            except Exception:
+                pass
+
+            self.action_refresh_stock()
+
+            if unregistered > 0:
+                self.notify(
+                    f"⚠️ Stock audit completed: {verified:,} on stock, {unregistered:,} unregistered kits. Click 'Export Unregistered'.",
+                    severity="warning",
+                    timeout=8,
+                )
+            else:
+                self.notify(
+                    f"✓ Safe stock taking complete: All {scanned:,} plates verified and linked! Variance: {variance:+d}.",
+                    severity="information",
+                )
+        except Exception as exc:
+            self.notify(f"Error performing stock audit: {exc}", severity="error")
+
+    def _apply_dispatch_plates(self, plates: List[str]) -> None:
+        """Applies plates from StockPasteModal into batch dispatch."""
+        try:
+            t_area = self.query_one("#text-stock-dispatch-bulk", TextArea)
+            t_area.text = "\n".join(plates)
+        except Exception:
+            pass
+
+        try:
+            self.query_one("#lbl-stock-dispatch-count", Static).update(f"[bold cyan]Pasted: {len(plates):,} plates[/bold cyan]")
+        except Exception:
+            pass
+
+        self._handle_batch_excel_dispatch()
+
+    def _apply_delivery_plates(self, plates: List[str]) -> None:
+        try:
+            t_area = self.query_one("#text-deliv-bulk", TextArea)
+            t_area.text = "\n".join(plates)
+        except Exception:
+            pass
+        try:
+            self.query_one("#lbl-deliv-staged", Static).update(f"[bold green]📦 Staged: {len(plates):,} plates[/bold green]")
+        except Exception:
+            pass
+        self.notify(f"✓ Ingested {len(plates):,} delivery plates. Click 'Ingest Delivery into Stock' to finalize.", severity="information")
+
+    def _apply_transfer_plates(self, plates: List[str]) -> None:
+        try:
+            t_area = self.query_one("#text-transfer-bulk", TextArea)
+            t_area.text = "\n".join(plates)
+        except Exception:
+            pass
+        try:
+            self.query_one("#lbl-transfer-staged", Static).update(f"[dim]Staged: {len(plates):,} plates[/dim]")
+            self.query_one("#input-transfer-count", Input).value = str(len(plates))
+        except Exception:
+            pass
+        self.notify(f"✓ Ingested {len(plates):,} transfer plates. Click 'Record Bond Transfer' to finalize.", severity="information")
+
+    def _apply_return_plates(self, plates: List[str]) -> None:
+        try:
+            t_area = self.query_one("#text-return-bulk", TextArea)
+            t_area.text = "\n".join(plates)
+        except Exception:
+            pass
+        try:
+            self.query_one("#lbl-return-staged", Static).update(f"[dim]Staged: {len(plates):,} plates[/dim]")
+        except Exception:
+            pass
+        self.notify(f"✓ Ingested {len(plates):,} return plates. Click 'Record Returned Plates' to finalize.", severity="information")
+
+    def _handle_clipboard_paste_dispatch(self) -> None:
+        from core.services import clipboard_service, stock_monitoring_service
+        clean_plates, dup_count, dup_plates, raw_text = clipboard_service.get_clipboard_plates()
+        if not clean_plates:
+            self.notify("⚠️ Clipboard is empty or contains no valid license plates.", severity="warning")
+            return
+
+        t_area = self.query_one("#text-stock-dispatch-bulk", TextArea)
+        existing_text = t_area.text.strip()
+        if existing_text:
+            existing_plates, _, _ = stock_monitoring_service.parse_plate_input_with_stats(existing_text)
+            merged = list(dict.fromkeys(existing_plates + clean_plates))
+            t_area.text = "\n".join(merged)
+            total_cnt = len(merged)
+        else:
+            t_area.text = "\n".join(clean_plates)
+            total_cnt = len(clean_plates)
+
+        dup_info = f" ({dup_count} duplicates pruned)" if dup_count > 0 else ""
+        self.notify(f"📋 Ingested {len(clean_plates)} plates from Excel clipboard!{dup_info} (Total staged: {total_cnt})", severity="information")
+        try:
+            self.query_one("#lbl-stock-dispatch-count", Static).update(f"[bold cyan]Pasted: {total_cnt} plates[/bold cyan]")
+        except Exception:
+            pass
+
+    def _handle_import_file_dispatch(self) -> None:
+        from core.services import file_dialog, clipboard_service, stock_monitoring_service
+        file_path = file_dialog.prompt_plate_file_selection()
+        if not file_path:
+            return
+        try:
+            clean_plates, dup_count, dup_plates = clipboard_service.read_plates_from_file(file_path)
+            if not clean_plates:
+                self.notify(f"No valid license plates found in {os.path.basename(file_path)}.", severity="warning")
+                return
+
+            t_area = self.query_one("#text-stock-dispatch-bulk", TextArea)
+            existing_text = t_area.text.strip()
+            if existing_text:
+                existing_plates, _, _ = stock_monitoring_service.parse_plate_input_with_stats(existing_text)
+                merged = list(dict.fromkeys(existing_plates + clean_plates))
+                t_area.text = "\n".join(merged)
+                total_cnt = len(merged)
+            else:
+                t_area.text = "\n".join(clean_plates)
+                total_cnt = len(clean_plates)
+
+            self.notify(f"📂 Imported {len(clean_plates)} plates from {os.path.basename(file_path)}! (Total: {total_cnt})", severity="information")
+            try:
+                self.query_one("#lbl-stock-dispatch-count", Static).update(f"[bold cyan]Imported: {total_cnt} plates[/bold cyan]")
+            except Exception:
+                pass
+        except Exception as exc:
+            self.notify(f"Error importing file: {exc}", severity="error")
+
+    def _handle_clipboard_paste_stocktake(self) -> None:
+        from core.services import clipboard_service, stock_monitoring_service
+        clean_plates, dup_count, dup_plates, raw_text = clipboard_service.get_clipboard_plates()
+        if not clean_plates:
+            self.notify("⚠️ Clipboard is empty or contains no valid license plates.", severity="warning")
+            return
+
+        t_area = self.query_one("#text-stocktake-bulk", TextArea)
+        existing_text = t_area.text.strip()
+        if existing_text:
+            existing_plates, _, _ = stock_monitoring_service.parse_plate_input_with_stats(existing_text)
+            merged = list(dict.fromkeys(existing_plates + clean_plates))
+            t_area.text = "\n".join(merged)
+            total_cnt = len(merged)
+        else:
+            t_area.text = "\n".join(clean_plates)
+            total_cnt = len(clean_plates)
+
+        dup_info = f" ({dup_count} duplicates pruned)" if dup_count > 0 else ""
+        self.notify(f"📋 Ingested {len(clean_plates)} safe room plates from Excel!{dup_info} (Total: {total_cnt})", severity="information")
+        try:
+            self.query_one("#lbl-stocktake-staged", Static).update(f"[bold cyan]Audit Scans: {total_cnt} plates[/bold cyan]")
+            self.query_one("#input-stocktake-manual-count", Input).value = str(total_cnt)
+        except Exception:
+            pass
+
+    def _handle_import_file_stocktake(self) -> None:
+        from core.services import file_dialog, clipboard_service, stock_monitoring_service
+        file_path = file_dialog.prompt_plate_file_selection()
+        if not file_path:
+            return
+        try:
+            clean_plates, dup_count, dup_plates = clipboard_service.read_plates_from_file(file_path)
+            if not clean_plates:
+                self.notify(f"No valid license plates found in {os.path.basename(file_path)}.", severity="warning")
+                return
+
+            t_area = self.query_one("#text-stocktake-bulk", TextArea)
+            existing_text = t_area.text.strip()
+            if existing_text:
+                existing_plates, _, _ = stock_monitoring_service.parse_plate_input_with_stats(existing_text)
+                merged = list(dict.fromkeys(existing_plates + clean_plates))
+                t_area.text = "\n".join(merged)
+                total_cnt = len(merged)
+            else:
+                t_area.text = "\n".join(clean_plates)
+                total_cnt = len(clean_plates)
+
+            self.notify(f"📂 Imported {len(clean_plates)} plates from {os.path.basename(file_path)}! (Total: {total_cnt})", severity="information")
+            try:
+                self.query_one("#lbl-stocktake-staged", Static).update(f"[bold cyan]Audit Scans: {total_cnt} plates[/bold cyan]")
+                self.query_one("#input-stocktake-manual-count", Input).value = str(total_cnt)
+            except Exception:
+                pass
+        except Exception as exc:
+            self.notify(f"Error importing file: {exc}", severity="error")
+
+    def _handle_clipboard_paste_generic(self, text_area_id: str, badge_id: str, label: str) -> None:
+        from core.services import clipboard_service, stock_monitoring_service
+        clean_plates, dup_count, dup_plates, raw_text = clipboard_service.get_clipboard_plates()
+        if not clean_plates:
+            self.notify(f"⚠️ Clipboard contains no valid license plates for {label}.", severity="warning")
+            return
+
+        t_area = self.query_one(text_area_id, TextArea)
+        existing_text = t_area.text.strip()
+        if existing_text:
+            existing_plates, _, _ = stock_monitoring_service.parse_plate_input_with_stats(existing_text)
+            merged = list(dict.fromkeys(existing_plates + clean_plates))
+            t_area.text = "\n".join(merged)
+            total_cnt = len(merged)
+        else:
+            t_area.text = "\n".join(clean_plates)
+            total_cnt = len(clean_plates)
+
+        self.notify(f"📋 Ingested {len(clean_plates)} plates for {label}! (Total: {total_cnt})", severity="information")
+        try:
+            self.query_one(badge_id, Static).update(f"[bold green]Staged: {total_cnt} plates[/bold green]")
+        except Exception:
+            pass

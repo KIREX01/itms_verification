@@ -366,6 +366,14 @@ class OperatorActionsMixin:
             itms_pane = self.query_one("#itms-connection-pane", ITMSConnectionPane)
             itms_pane.action_cycle_filter()
             return
+        if tabs.active == "tab-stock":
+            try:
+                stock_pane = self.query_one("#stock-pane")
+                if hasattr(stock_pane, "action_cycle_subtab"):
+                    stock_pane.action_cycle_subtab()
+            except Exception:
+                pass
+            return
         self.history_filter_index = (self.history_filter_index + 1) % len(HISTORY_FILTERS)
         self.current_history_filter = HISTORY_FILTERS[self.history_filter_index]
         self._update_history_filter_bar()
@@ -383,7 +391,15 @@ class OperatorActionsMixin:
         except Exception:
             active_tab = "tab-queue"
 
-        if active_tab == "tab-batches":
+        if active_tab == "tab-stock":
+            try:
+                stock_pane = self.query_one("#stock-pane")
+                if hasattr(stock_pane, "action_select_date"):
+                    stock_pane.action_select_date()
+            except Exception:
+                pass
+            return
+        elif active_tab == "tab-batches":
             cur = getattr(self, "current_batches_scope", "TODAY")
             idx = BATCHES_SCOPE_FILTERS.index(cur) if cur in BATCHES_SCOPE_FILTERS else 0
             self.current_batches_scope = BATCHES_SCOPE_FILTERS[(idx + 1) % len(BATCHES_SCOPE_FILTERS)]

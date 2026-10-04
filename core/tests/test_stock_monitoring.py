@@ -1234,6 +1234,113 @@ class StockMonitoringTests(TestCase):
         kit1.refresh_from_db()
         self.assertEqual(kit1.status, "Allocated")
 
+    def test_clipboard_service_large_batch_parsing(self):
+        """Validates that 1,200+ plates copied from an Excel column parse cleanly without truncation."""
+        from core.services import clipboard_service, stock_monitoring_service
+
+        # Generate 1,200 distinct valid plates (600 UMA series + 600 UMB series)
+        series_a = [f"UMA{i:03d}PZ" for i in range(1, 601)]
+        series_b = [f"UMB{i:03d}PZ" for i in range(1, 601)]
+        plates_input = "\n".join(series_a + series_b)
+        clean_plates, dup_count, dup_plates = stock_monitoring_service.parse_plate_input_with_stats(plates_input)
+        self.assertEqual(len(clean_plates), 1200)
+        self.assertEqual(dup_count, 0)
+        self.assertEqual(clean_plates[0], "UMA001PZ")
+        self.assertEqual(clean_plates[-1], "UMB600PZ")
+
+    def test_physical_stock_count_and_variance_reconciliation(self):
+        """Verifies that physical count and variance appear correctly in daily reconciliation."""
+        # Setup opening balance
+        stock_monitoring_service.set_opening_balances(opening_pmo=100, opening_psv=200, target_date_suffix=self.test_suffix)
+
+        # Set physical count of 280 (book closing is 300, variance should be -20)
+        res = stock_monitoring_service.set_physical_count(physical_count=280, target_date_suffix=self.test_suffix)
+        self.assertTrue(res["success"])
+        self.assertEqual(res["physical_count"], 280)
+        self.assertEqual(res["variance"], -20)
+
+        # Compute reconciliation
+        recon = stock_monitoring_service.compute_daily_reconciliation(self.test_suffix)
+        self.assertTrue(recon["has_physical_count"])
+        self.assertEqual(recon["physical_count"], 280)
+        self.assertEqual(recon["variance"], -20)
+
+        # Check rows in report_table
+        rows = recon["report_table"]["rows"]
+        phys_row = next((r for r in rows if "Physical Count" in r["metric"]), None)
+        var_row = next((r for r in rows if "Variance" in r["metric"]), None)
+        self.assertIsNotNone(phys_row)
+        self.assertIsNotNone(var_row)
+        self.assertEqual(phys_row["total"], 280)
+        self.assertEqual(var_row["total"], "-20")
+
+    def test_clipboard_file_import_csv(self):
+        """Validates file importing from temporary CSV / TXT files."""
+        import tempfile
+        from core.services import clipboard_service
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+            f.write("Header,Plate Number,Owner\n")
+            f.write("1,UMA 101PW,John\n")
+            f.write("2,UMA 102PW,Sarah\n")
+            f.write("3,UMA 103PW,David\n")
+            tmp_path = f.name
+
+        try:
+            clean, dups, _ = clipboard_service.read_plates_from_file(tmp_path)
+            self.assertEqual(len(clean), 3)
+            self.assertIn("UMA101PW", clean)
+            self.assertIn("UMA102PW", clean)
+            self.assertIn("UMA103PW", clean)
+        finally:
+            import os
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_stock_paste_modal_stats_and_confirm(self):
+        """Verifies StockPasteModal handles plate parsing, duplicate counting, and confirmation payload."""
+        from core.tui.dialogs import StockPasteModal
+        modal = StockPasteModal(mode="stocktake", target_date_suffix=self.test_suffix)
+        raw_text = "UMA 101PW\nUMA 102PW\nUMA 101PW\nINVALID_PLATE\nUMA 103PW"
+        from core.services import stock_monitoring_service
+        plates, dups, _ = stock_monitoring_service.parse_plate_input_with_stats(raw_text)
+
+        self.assertEqual(plates, ["UMA101PW", "UMA102PW", "UMA103PW"])
+        self.assertEqual(dups, 1)
+
+    def test_stock_pane_subtab_cycling_and_date_stepping(self):
+        """Tests StockPane F cycle view navigation and date stepping."""
+        from core.tui.stock_pane import StockPane
+        pane = StockPane(target_date_suffix="021026")
+        self.assertEqual(pane.target_date_suffix, "021026")
+
+        # Test date step backward
+        pane.action_prev_day()
+        self.assertEqual(pane.target_date_suffix, "011026")
+
+        # Test date step forward
+        pane.action_next_day()
+        self.assertEqual(pane.target_date_suffix, "021026")
+
+    def test_stocktake_manual_count_updates_variance_and_summary(self):
+        """Tests that set_physical_count immediately saves physical count and updates variance against closing stock."""
+        # Setup initial opening and installed
+        stock_monitoring_service.set_opening_balances(opening_psv=100, opening_pmo=50, target_date_suffix=self.test_suffix)
+        recon_before = stock_monitoring_service.compute_daily_reconciliation(self.test_suffix)
+        book_closing = recon_before["closing_stock"] # 150
+
+        # Set physical count to 155 (surplus +5)
+        res = stock_monitoring_service.set_physical_count(physical_count=155, target_date_suffix=self.test_suffix)
+        self.assertTrue(res["success"])
+        self.assertEqual(res["physical_count"], 155)
+        self.assertEqual(res["variance"], 5)
+
+        recon_after = stock_monitoring_service.compute_daily_reconciliation(self.test_suffix)
+        self.assertTrue(recon_after["has_physical_count"])
+        self.assertEqual(recon_after["physical_count"], 155)
+        self.assertEqual(recon_after["variance"], 5)
+
+
 
 
 

@@ -2010,6 +2010,7 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                             classes="stock-textarea",
                         )
                         with Horizontal(classes="stock-row"):
+                            yield Button("📋 Paste from Clipboard (Excel)", variant="success", id="btn-modal-paste-dispatch")
                             yield Button("💾 Record Dispatched Plates [Enter]", variant="primary", id="btn-save-dispatch")
                             yield Button("Clear Batch", variant="default", id="btn-clear-dispatch")
 
@@ -2213,6 +2214,7 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                             classes="stock-textarea",
                         )
                         with Horizontal(classes="stock-row"):
+                            yield Button("📋 Paste from Clipboard (Excel)", variant="success", id="btn-modal-paste-stocktake")
                             yield Button("🔒 Perform Safe Stock Taking Audit", variant="primary", id="btn-save-stocktake")
                             yield Button("Clear Scans", variant="default", id="btn-clear-stocktake")
                         with Horizontal(classes="stock-row"):
@@ -2486,10 +2488,36 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                 self.query_one("#lbl-stocktake-staged", Static).update("[dim]Staged: 0 plates[/dim]")
             except Exception:
                 pass
+        elif btn_id == "btn-modal-paste-dispatch":
+            self._handle_clipboard_paste_to_textarea("#text-dispatch-bulk", "#lbl-dispatch-staged")
+        elif btn_id == "btn-modal-paste-stocktake":
+            self._handle_clipboard_paste_to_textarea("#text-stocktake-bulk", "#lbl-stocktake-staged")
         elif btn_id == "btn-stocktake-set-manual":
             self._handle_set_manual_physical_count()
         elif btn_id in ("btn-sync-stock-kits", "btn-sync-stock-kits-tab2"):
             self._handle_sync_stock_kits()
+
+    def _handle_clipboard_paste_to_textarea(self, text_area_id: str, badge_id: str) -> None:
+        from core.services import clipboard_service, stock_monitoring_service
+        clean_plates, dup_count, dup_plates, raw_text = clipboard_service.get_clipboard_plates()
+        if not clean_plates:
+            self.notify("⚠️ Clipboard contains no valid license plates.", severity="warning")
+            return
+        t_area = self.query_one(text_area_id, TextArea)
+        existing_text = t_area.text.strip()
+        if existing_text:
+            existing_plates, _, _ = stock_monitoring_service.parse_plate_input_with_stats(existing_text)
+            merged = list(dict.fromkeys(existing_plates + clean_plates))
+            t_area.text = "\n".join(merged)
+            cnt = len(merged)
+        else:
+            t_area.text = "\n".join(clean_plates)
+            cnt = len(clean_plates)
+        self.notify(f"📋 Ingested {len(clean_plates)} plates from Excel clipboard! (Total: {cnt})", severity="information")
+        try:
+            self.query_one(badge_id, Static).update(f"[bold green]Staged: {cnt} plates[/bold green]")
+        except Exception:
+            pass
 
     @work(thread=True)
     def _handle_sync_stock_kits(self) -> None:
@@ -2983,6 +3011,254 @@ class StockManagerModal(ModalScreen[Optional[Dict[str, Any]]]):
                 f"[bold cyan]📱 Mobile Phone Stock Scanner:[/bold cyan] Open [bold yellow]{url}[/bold yellow] on your smartphone camera (Select Mode 3: WAREHOUSE & BOND STOCK SCANNER for auto-scan intake).",
                 level="INFO",
             )
+
+
+# ============================================================================
+# Excel Column Plate Paste & File Import Modal Dialog
+# ============================================================================
+
+class StockPasteModal(ModalScreen[Optional[Dict[str, Any]]]):
+    """
+    Dedicated dialog for pasting multi-line / multi-column plate numbers from Excel
+    or importing plate files (.xlsx, .xls, .csv, .txt).
+    Bypasses terminal buffer bottlenecks using direct OS-level clipboard ingestion.
+    """
+    DEFAULT_CSS = """
+    StockPasteModal {
+        align: center middle;
+    }
+    StockPasteModal #modal-dialog {
+        width: 90%;
+        max-width: 108;
+        height: 85%;
+        max-height: 40;
+        background: #0d1117;
+        border: thick #0284c7;
+        padding: 1 2;
+    }
+    StockPasteModal #modal-header {
+        height: auto;
+        margin-bottom: 1;
+        background: #161b22;
+        padding: 0 1;
+        border-bottom: solid #30363d;
+    }
+    StockPasteModal .paste-actions-row {
+        height: 3;
+        margin-bottom: 1;
+        align-vertical: middle;
+    }
+    StockPasteModal .paste-actions-row Button {
+        margin-right: 1;
+    }
+    StockPasteModal #lbl-paste-modal-stats {
+        width: 1fr;
+        text-align: right;
+        align-vertical: middle;
+        padding-right: 1;
+    }
+    StockPasteModal #text-paste-modal-content {
+        height: 1fr;
+        min-height: 12;
+        border: solid #30363d;
+        margin-bottom: 1;
+    }
+    StockPasteModal #modal-footer {
+        height: 3;
+        align: right middle;
+    }
+    StockPasteModal #modal-footer Button {
+        margin-left: 1;
+        min-width: 18;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss_modal", "Cancel / Esc", priority=True),
+        Binding("v", "paste_clipboard", "Paste Clipboard"),
+        Binding("enter", "confirm_action", "Confirm & Process"),
+    ]
+
+    def __init__(
+        self,
+        mode: str = "stocktake",
+        target_date_suffix: Optional[str] = None,
+        initial_text: str = "",
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.mode = mode.lower()
+        self.target_date_suffix = target_date_suffix or timezone.localdate().strftime("%d%m%y")
+        self.initial_text = initial_text
+
+    def compose(self) -> ComposeResult:
+        titles = {
+            "stocktake": (
+                "🔒 Safe Stock Taking & Safe Room Physical Audit",
+                "Paste ~1,200 plate numbers from Excel or import file. Audits safe storage & calculates variance against book closing.",
+                "🔒 Run Safe Stock Audit",
+            ),
+            "dispatch": (
+                "📤 Batch Dispatch & Line Issue Verification",
+                "Paste ~1,200 plate numbers from Excel or import file. Instant verification against warehouse stock blocks non-stock plates.",
+                "⚡ Verify & Dispatch",
+            ),
+            "delivery": (
+                "📥 Inbound Delivery Manifest Import",
+                "Paste plate numbers from delivery manifest or packing list. Automatically logs stock receipts.",
+                "📥 Ingest Inbound Plates",
+            ),
+            "transfers": (
+                "🔄 Bond Transfer Manifest Import",
+                "Paste plate numbers transferred between bond locations.",
+                "🔄 Record Transfer Plates",
+            ),
+            "returns": (
+                "↩️ Line Returns Manifest Import",
+                "Paste plates returned from assembly line uninstalled (bike no-show, defect, cancelled).",
+                "↩️ Record Returned Plates",
+            ),
+        }
+        title, desc, confirm_lbl = titles.get(
+            self.mode,
+            ("📋 Bulk Plate Ingestion", "Paste plate numbers or import from file.", "Process Plates")
+        )
+        self.confirm_label = confirm_lbl
+
+        with Vertical(id="modal-dialog"):
+            yield Static(
+                f"[bold cyan]═══ {title} ═══[/bold cyan]\n"
+                f"[dim]{desc}[/dim]  │  Shift: [bold yellow]{self.target_date_suffix}[/bold yellow]",
+                id="modal-header",
+            )
+
+            with Horizontal(classes="paste-actions-row"):
+                yield Button("📋 Paste from Clipboard (Excel)", variant="primary", id="btn-paste-clipboard")
+                yield Button("📂 Import File (.xlsx/.csv/.txt)", variant="default", id="btn-import-file")
+                yield Button("🧹 Clear Input", variant="default", id="btn-clear")
+                yield Static("[dim]Staged: 0 plates[/dim]", id="lbl-paste-modal-stats")
+
+            yield TextArea(
+                id="text-paste-modal-content",
+                classes="stock-textarea",
+            )
+
+            with Horizontal(id="modal-footer"):
+                yield Button("Cancel / Esc", variant="default", id="btn-cancel")
+                yield Button(self.confirm_label, variant="success", id="btn-confirm")
+
+    def on_mount(self) -> None:
+        t_area = self.query_one("#text-paste-modal-content", TextArea)
+        if self.initial_text:
+            t_area.text = self.initial_text
+            self._update_stats_display(self.initial_text)
+        else:
+            # Auto-attempt reading clipboard if it contains valid plates
+            from core.services import clipboard_service
+            clean_plates, dup_count, _, _ = clipboard_service.get_clipboard_plates()
+            if clean_plates:
+                t_area.text = "\n".join(clean_plates)
+                self._update_stats_from_plates(clean_plates, dup_count)
+
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        if event.text_area.id == "text-paste-modal-content":
+            self._update_stats_display(event.text_area.text)
+
+    def _update_stats_display(self, text: str) -> None:
+        from core.services import stock_monitoring_service
+        plates, dups, _ = stock_monitoring_service.parse_plate_input_with_stats(text)
+        self._update_stats_from_plates(plates, dups)
+
+    def _update_stats_from_plates(self, plates: List[str], dups: int) -> None:
+        cnt = len(plates)
+        dup_str = f" [yellow]({dups} dups pruned)[/yellow]" if dups > 0 else ""
+        try:
+            self.query_one("#lbl-paste-modal-stats", Static).update(
+                f"[bold green]✓ Found: {cnt:,} plates[/bold green]{dup_str}" if cnt > 0 else "[dim]Staged: 0 plates[/dim]"
+            )
+        except Exception:
+            pass
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        bid = event.button.id
+        if bid == "btn-cancel":
+            self.action_dismiss_modal()
+        elif bid == "btn-confirm":
+            self.action_confirm_action()
+        elif bid == "btn-paste-clipboard":
+            self.action_paste_clipboard()
+        elif bid == "btn-import-file":
+            self._handle_import_file()
+        elif bid == "btn-clear":
+            self.query_one("#text-paste-modal-content", TextArea).text = ""
+            self._update_stats_from_plates([], 0)
+
+    def action_dismiss_modal(self) -> None:
+        self.dismiss(None)
+
+    def action_paste_clipboard(self) -> None:
+        from core.services import clipboard_service, stock_monitoring_service
+        clean_plates, dup_count, _, _ = clipboard_service.get_clipboard_plates()
+        if not clean_plates:
+            self.notify("⚠️ Clipboard is empty or contains no valid license plate numbers.", severity="warning")
+            return
+
+        t_area = self.query_one("#text-paste-modal-content", TextArea)
+        existing = t_area.text.strip()
+        if existing:
+            existing_plates, _, _ = stock_monitoring_service.parse_plate_input_with_stats(existing)
+            merged = list(dict.fromkeys(existing_plates + clean_plates))
+            t_area.text = "\n".join(merged)
+            self._update_stats_from_plates(merged, dup_count)
+        else:
+            t_area.text = "\n".join(clean_plates)
+            self._update_stats_from_plates(clean_plates, dup_count)
+
+        self.notify(f"📋 Ingested {len(clean_plates):,} plates directly from Excel clipboard!", severity="information")
+
+    def _handle_import_file(self) -> None:
+        from core.services import file_dialog, clipboard_service, stock_monitoring_service
+        file_path = file_dialog.prompt_plate_file_selection()
+        if not file_path:
+            return
+        try:
+            clean_plates, dup_count, _ = clipboard_service.read_plates_from_file(file_path)
+            if not clean_plates:
+                self.notify(f"No valid license plates found in {os.path.basename(file_path)}.", severity="warning")
+                return
+
+            t_area = self.query_one("#text-paste-modal-content", TextArea)
+            existing = t_area.text.strip()
+            if existing:
+                existing_plates, _, _ = stock_monitoring_service.parse_plate_input_with_stats(existing)
+                merged = list(dict.fromkeys(existing_plates + clean_plates))
+                t_area.text = "\n".join(merged)
+                self._update_stats_from_plates(merged, dup_count)
+            else:
+                t_area.text = "\n".join(clean_plates)
+                self._update_stats_from_plates(clean_plates, dup_count)
+
+            self.notify(f"📂 Imported {len(clean_plates):,} plates from {os.path.basename(file_path)}!", severity="information")
+        except Exception as exc:
+            self.notify(f"Error importing file: {exc}", severity="error")
+
+    def action_confirm_action(self) -> None:
+        from core.services import stock_monitoring_service
+        raw_text = self.query_one("#text-paste-modal-content", TextArea).text.strip()
+        plates, dup_count, _ = stock_monitoring_service.parse_plate_input_with_stats(raw_text)
+        if not plates:
+            self.notify("Please paste or import license plates before confirming.", severity="warning")
+            return
+
+        self.dismiss({
+            "action": "confirm",
+            "mode": self.mode,
+            "plates": plates,
+            "raw_text": raw_text,
+            "count": len(plates),
+            "dup_count": dup_count,
+        })
+
 
 
 

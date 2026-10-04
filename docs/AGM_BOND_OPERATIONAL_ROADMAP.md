@@ -123,23 +123,39 @@ flowchart TD
 
 ### Phase 1: Storage for Delivery Notes (Backend & Service)
 - [x] Base `StockDelivery` and `StockDeliveryItem` models exist.
-- [ ] Add `paper_note_reference` (paper invoice/manifest number) to `StockDelivery`.
-- [ ] Add `delivery_note_reference` auto-generator: `DN-YYYYMMDD-XX`.
-- [ ] Add optional photo capture field `delivery_note_image` in Evidence Vault.
-- [ ] Implement `get_delivery_notes_summary(target_date_suffix)` service.
+- [x] Add `paper_note_reference` (paper invoice/manifest number) to `StockDelivery`.
+- [x] Add `delivery_note_reference` auto-generator: `DN-YYYYMMDD-XX`.
+- [x] Add optional photo capture field `delivery_note_image` in Evidence Vault.
+- [x] Implement `get_delivery_notes_summary(target_date_suffix)` service.
 
 ### Phase 2: Dual MVR Copy Actions & Discrepancy UI
-- [ ] Add `[📋 Copy Raw Plates]` (clean multi-line text) and `[📑 Copy MVR Docket]` (formatted text) to TUI `ReportsPane`.
-- [ ] Add matching dual copy buttons to Web Dashboard (`tab_reports.html` / `tab_reports.js`).
-- [ ] Expose REST API endpoint `/api/stock/mvr-docket/` returning both raw and formatted text.
+- [x] Add `[📋 Copy Raw Plates]` (clean multi-line text) and `[📑 Copy MVR Docket]` (formatted text) to TUI `ReportsPane`.
+- [x] Add matching dual copy buttons to Web Dashboard (`tab_reports.html` / `tab_reports.js`).
+- [x] Expose REST API endpoint `/api/stock/mvr-docket/` returning both raw and formatted text.
 
 ### Phase 3: Delivery Notes Archive & Safe Room Browser in TUI
-- [ ] In `StockManagerModal` Tab 3 (Inbound Delivery):
+- [x] In `StockManagerModal` Tab 3 (Inbound Delivery):
   - Add Delivery Note # generator and paper note input.
   - Add a sub-table displaying today's received delivery notes with kit counts and timestamps.
-- [ ] Wire rapid scan to immediately stage items under the active Delivery Note.
+- [x] Wire rapid scan to immediately stage items under the active Delivery Note.
 
 ### Phase 4: Shift End Reconciliation & Sign-Off Wizard
-- [ ] Automated verification matching physical safe counts with digital closing balances.
-- [ ] One-click export of the daily shift closeout CSV for supervisor review.
-- [ ] Verification of all test suites (stock monitoring, regression, event handlers).
+- [x] Automated verification matching physical safe counts with digital closing balances.
+- [x] One-click export of the daily shift closeout CSV for supervisor review.
+- [x] Verification of all test suites (stock monitoring, regression, event handlers).
+
+### Phase 5: High-Capacity Deep Crawling & 3-Hour Safe Room Daemon
+- [x] Scaled crawler default up to 100 pages (min 100 pages = 2,000+ installation kits) for comprehensive safe-room catalog synchronization.
+- [x] Polite crawler pacing (0.35s sleep + jitter), HTTP 429 `Retry-After` parsing, exponential backoff, and circuit breaker.
+- [x] Implemented atomic chunked bulk upserts (`bulk_create` / `bulk_update` in chunks of 200 items) preventing SQLite / PostgreSQL locking.
+- [x] Asynchronous `MorningKitSyncDaemon` running on a 3-hour interval (10,800s) with 10-minute cooldown window.
+
+### Phase 6: Floor Dispatch Discrepancy Isolation & Vision OCR Decoupling
+- [x] Strictly isolated safe-room warehouse stock (`InstallationKit` status "New") from the Floor Unallocated plates table.
+- [x] Eliminated camera OCR / vision detections from the stock discrepancy scale to prevent OCR text fragments and noise from polluting daily ledgers.
+- [x] Ground truth floor liability is strictly anchored to physical barcode/plate scans (`StockDispatchScan`).
+
+### Phase 7: Set-Aside Pre-Dispatch Verification Workflow
+- [x] Pre-dispatch validation against synchronized safe-room ITMS stock.
+- [x] Automatic set-aside blocking for kits not registered in ITMS, preventing unregistered plates from reaching assembly fitters.
+- [x] Substitution workflow: Replace with valid in-stock kit while unlisted plate awaits ITMS Stock Transfer Officer confirmation.

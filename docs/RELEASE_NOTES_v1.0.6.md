@@ -10,6 +10,9 @@
 
 Version 1.0.6 is a comprehensive reliability, usability, and operational release designed for high-throughput vehicle verification and bond warehouse management. It introduces the **Live Mobile Camera Stock Scanner**, an **Asynchronous Multi-Page Installation Kit Crawler**, **Daily Shift Stock Reconciliation**, **Order Unlinking in the Review Queue**, a **Standardized Non-Scrolling TUI Tab Bar**, and **Standardized Developer vs. User Settings**.
 
+> [!NOTE]
+> For the subsequent **v1.0.7** release featuring the 100-page deep crawler, 3-hour background daemon, and floor unallocated discrepancy isolation, see [RELEASE_NOTES_v1.0.7.md](RELEASE_NOTES_v1.0.7.md).
+
 ---
 
 ## 🚀 Key Features & Enhancements

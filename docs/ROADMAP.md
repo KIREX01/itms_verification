@@ -42,6 +42,8 @@ fill in real values locally:
 [x] Level 6: End-to-End Benchmarking & Test Suite
      ↓
 [x] Level 7: Bond Stock Reconciliation, Mobile Camera Scanning & TUI Standardization (v1.0.6)
+     ↓
+[x] Level 8: High-Capacity 100-Page Deep Crawling, 3-Hour Safe Room Daemon & Floor Discrepancy Isolation (v1.0.7)
 ```
 
 Every level below has real, runnable code in this repository (see file paths). The one
@@ -160,4 +162,24 @@ end-to-end on any machine with no extra downloads.
 * `[x]` **System Standardization & User vs. Developer Settings**:
   - Partitioned settings hierarchy into Developer options (YOLO weight selector, confidence thresholds, sync budgets) and User options (reports export directory, batch folder, OCR preferences).
   - Native OS folder selector tool integration for report directories and batch paths.
+
+## Level 8: High-Capacity Deep Crawling, 3-Hour Safe Room Daemon & Floor Discrepancy Isolation (v1.0.7)
+
+* `[x]` **Deep Installation Kit Crawler Scaled to 100 Pages (2,000+ Kits)**:
+  - Scaled default crawler traversal from 35 to 100 pages (`min 100 pages = 2,000+ installation kits`) across all UI tabs, background sync commands, and REST APIs.
+  - Polite crawl pacing (`0.35s` sleep + randomized jitter) to maintain low load against `stock.itms.ug`.
+  - HTTP 429 `Retry-After` header parsing, dynamic exponential backoff, and circuit breaker.
+  - Replaced row-by-row queries with atomic chunked bulk upserts (`bulk_create` / `bulk_update` in chunks of 200 items), eliminating database table locking.
+* `[x]` **3-Hour Asynchronous Safe Room Sync Daemon**:
+  - `MorningKitSyncDaemon` configured with a 3-hour interval (10,800s) and 10-minute cooldown window, auto-starting in `run_web.py` and `app.py`.
+  - Protected by `_global_kit_crawl_lock` to prevent overlapping crawls between UI triggers and background jobs.
+* `[x]` **Floor Discrepancy Isolation & Elimination of Vision Pipeline OCR Noise**:
+  - Completely decoupled safe-room warehouse stock (`InstallationKit` status `"New"`) from `#table-report-unallocated` and MVR exception dockets. Safe-room stock belongs exclusively in inventory ledger balances.
+  - Eliminated camera OCR detections (`EvidenceImage`, `VehicleInstallationPair`) from stock reconciliation, guaranteeing zero partial text fragments or misread plates in stock dockets.
+  - Ground truth floor liabilities are strictly anchored to physical barcode/plate scans (`StockDispatchScan`).
+* `[x]` **Safe-Room "Set Aside" Pre-Dispatch Verification**:
+  - Pre-dispatch validation against synchronized safe-room ITMS stock.
+  - Automatic set-aside blocking for kits not registered in ITMS, preventing unregistered plates from reaching assembly fitters.
+  - Substitution workflow: Replace with valid in-stock kit while unlisted plate awaits ITMS Stock Transfer Officer confirmation.
+
 

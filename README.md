@@ -15,8 +15,8 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process; irm https://raw.gith
 * Adds global system command `itms` (open Web UI) and `itms --tui` (open Terminal UI)
 * Defaults to SQLite zero-setup database with pre-configured `admin` / `admin` login
 * Creates Desktop & Start Menu shortcuts
-* Automatically provisions Python, virtual environment, and AI plate weights
-* Opens `http://127.0.0.1:8000/` in your default browser
+* Automatically provisions Python, virtual environment, AI plate weights, and SSL certificates
+* Opens `https://127.0.0.1/` in your default browser
 
 ### macOS / Linux (Terminal)
 ```bash
@@ -33,11 +33,12 @@ Once installed, use the `itms` command from any PowerShell, CMD, or Terminal win
 
 | Command | Description |
 | :--- | :--- |
-| `itms` | Launches Web Operator Console in default browser (`http://127.0.0.1:8000`) |
+| `itms` | Launches Web Operator Console in default browser (`https://127.0.0.1`) |
 | `itms --tui` | Launches Textual Terminal UI (keyboard-driven operator dashboard) |
-| `itms status` | Runs health diagnostics (verifies database, AI plate weights, OCR) |
-| `itms update` | Checks for and applies latest software updates |
-| `itms uninstall` | Completely uninstalls application, shortcuts, and global commands |
+| `itms service <cmd>` | Manage 24/7 Windows Service (`status`, `install`, `start`, `stop`, `restart`, `remove`) |
+| `itms status` | Runs health diagnostics (verifies database, AI plate weights, OCR, SSL certificates) |
+| `itms update` | Checks for and applies latest software updates (auto-restarts Windows Service) |
+| `itms uninstall` | Completely uninstalls application, background service, shortcuts, and global commands |
 | `itms manage <args>` | Runs Django management commands directly |
 
 ---

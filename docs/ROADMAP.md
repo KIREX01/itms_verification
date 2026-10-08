@@ -44,6 +44,8 @@ fill in real values locally:
 [x] Level 7: Bond Stock Reconciliation, Mobile Camera Scanning & TUI Standardization (v1.0.6)
      ↓
 [x] Level 8: High-Capacity 100-Page Deep Crawling, 3-Hour Safe Room Daemon & Floor Discrepancy Isolation (v1.0.7)
+     ↓
+[x] Level 9: Zero-Config Self-Healing SSL, 24/7 Windows Away Mode Service & Enterprise Hardening (v1.0.8)
 ```
 
 Every level below has real, runnable code in this repository (see file paths). The one
@@ -189,5 +191,21 @@ end-to-end on any machine with no extra downloads.
   - Relocated Queue decision action buttons from fixed bottom sticky bar to natural scroll flow on mobile devices.
   - Responsive Mobile Inspector overlays with dedicated `◀ Back` navigation for ITMS table row inspection and Stock Ledger inspection on phone screens.
 
+## Level 9: Zero-Config Self-Healing SSL, 24/7 Windows Away Mode Service & Enterprise Hardening (v1.0.8)
 
-
+* `[x]` **Repository-Tracked Default Offline SSL Certificates**:
+  - Tracked verified default offline self-signed certificates (`cert.crt`, `cert.key`) in git so production installs receive valid certificates immediately upon update or deployment.
+  - Resolved `runserver_plus` parameter bindings (`cert_path` and `key_file_path`) enabling native HTTPS operation on default port 443 without browser connection failures.
+* `[x]` **Cascading 3-Tier Self-Healing SSL Generation**:
+  - `core/services/ssl_service.py`: Automated zero-config certificate recovery using Python `cryptography`, Windows native PowerShell .NET PKI, or hardcoded verified 10-year fallback certificates.
+  - Synchronizes certificates to root `cert.crt` and `cert.key` on startup.
+* `[x]` **24/7 Windows Background Service with Away Mode**:
+  - `windows_service.py`: Native Windows Service running Django Web Server and 3-hour `MorningKitSyncDaemon` continuously in the background.
+  - Windows Away Mode (`SetThreadExecutionState` with `ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED`): prevents sleep suspension of network sockets and background crawler when laptop lids close.
+  - Service Control Manager (SCM) watchdog recovery with automated restart (5s, 10s, 30s escalation).
+  - Clean process tree shutdown (`taskkill /F /T /PID`) releasing port 443 immediately on stop or restart.
+* `[x]` **Universal CLI Service Management (`itms service`)**:
+  - `itms service [status|install|start|stop|restart|remove]` with automated UAC elevation prompts.
+  - Seamless lifecycle integration: `itms update` automatically stops, updates, and restarts the service; `itms uninstall` automatically removes it.
+* `[x]` **Codebase Clean-Up**:
+  - Purged 13 obsolete scratch scripts and temporary debug files for a clean, lean production repository.

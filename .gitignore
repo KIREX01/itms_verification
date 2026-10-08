@@ -36,8 +36,3 @@ scratch/
 itms_bond_stock_*.csv
 Screenshot*.png
 
-# Local SSL certificates and keys
-*.crt
-*.key
-cert.crt
-cert.key

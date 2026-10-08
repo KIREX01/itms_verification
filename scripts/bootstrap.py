@@ -579,6 +579,14 @@ def main() -> int:
         log_error("Bootstrap completed with warnings. Check logs above.")
         return 1
 
+    # 7. Local HTTPS Certificates
+    try:
+        from core.services.ssl_service import ensure_ssl_certificates
+        c, k = ensure_ssl_certificates()
+        log_success(f"Local HTTPS certificates verified ({c.name}, cert.crt).")
+    except Exception as ssl_err:
+        log_warning(f"SSL certificate notice: {ssl_err}")
+
     print("=" * 65)
     log_success("Bootstrap complete. System is ready to launch.")
     print("=" * 65)

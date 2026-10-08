@@ -113,8 +113,14 @@ def launch_web(extra_args=None, port=443):
         import django
         django.setup()
         from django.core.management import execute_from_command_line
+        from core.services.ssl_service import ensure_ssl_certificates
 
-        cmd = ["manage.py", "runserver_plus", "0.0.0.0:443", "--cert-file", "cert.crt"]
+        cert_file, key_file = ensure_ssl_certificates()
+        cmd = [
+            "manage.py", "runserver_plus", f"0.0.0.0:{port}",
+            "--cert-file", str(cert_file),
+            "--key-file", str(key_file)
+        ]
         if extra_args:
             # Filter out custom args that runserver_plus doesn't understand natively,
             # or map them appropriately if needed. For now just extend.
@@ -136,7 +142,7 @@ def is_service_installed(service_name="ITMSVerificationService"):
         return False
 
 
-def start_daemon(extra_args=None, port=8000):
+def start_daemon(extra_args=None, port=443):
     """Starts the Web Console as an independent background daemon."""
     if is_service_installed():
         import subprocess
@@ -166,9 +172,10 @@ def start_daemon(extra_args=None, port=8000):
                 except ValueError:
                     pass
 
+    protocol = "https" if port == 443 else "http"
     if is_port_in_use(port):
-        url = f"http://127.0.0.1:{port}/"
-        print(f"[+] ITMS Web Console is already running at {url}")
+        url = f"{protocol}://127.0.0.1:{port}/"
+        print(f"[✓] ITMS Web Console is already running at {url}")
         print("[*] Opening browser...")
         import webbrowser
         webbrowser.open(url)
@@ -228,7 +235,7 @@ def start_daemon(extra_args=None, port=8000):
             pid_file.unlink(missing_ok=True)
         return
 
-    url = f"http://127.0.0.1:{port}/"
+    url = f"{protocol}://127.0.0.1:{port}/"
     print(f"[+] ITMS Web Console active in background (PID: {proc.pid}).")
     print(f"[i] URL: {url}")
     print(f"[i] Output logs: {log_file}")
@@ -491,7 +498,7 @@ def main():
             from core.version import __version__
             print(f"ITMS Verification Copilot v{__version__}")
         except (ImportError, AttributeError):
-            print("ITMS Verification Copilot v1.0.7")
+            print("ITMS Verification Copilot v1.0.8")
         return
 
     if first in ("start", "--daemon", "--bg", "-bg", "bg", "daemon"):

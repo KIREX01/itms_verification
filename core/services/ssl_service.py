@@ -21,14 +21,23 @@ import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from django.conf import settings
+try:
+    from django.conf import settings
+    _base_dir = getattr(settings, "BASE_DIR", None)
+except Exception:
+    _base_dir = None
+
+if not _base_dir:
+    _base_dir = Path(__file__).resolve().parent.parent.parent
 
 logger = logging.getLogger(__name__)
 
 # Certificate storage location inside secure/
-DEFAULT_SSL_DIR = Path(settings.BASE_DIR) / "secure" / "ssl"
+DEFAULT_SSL_DIR = Path(_base_dir) / "secure" / "ssl"
 DEFAULT_CERT_FILE = DEFAULT_SSL_DIR / "cert.pem"
 DEFAULT_KEY_FILE = DEFAULT_SSL_DIR / "key.pem"
+ROOT_CERT_FILE = Path(_base_dir) / "cert.crt"
+ROOT_KEY_FILE = Path(_base_dir) / "cert.key"
 
 # Embedded verified fallback certificate & private key (valid through 2036, RSA 2048)
 # Covering: localhost, *.local, 127.0.0.1, 192.168.137.1 (hotspot), 192.168.8.182
@@ -282,8 +291,18 @@ def ensure_ssl_certificates(
     cert_file = Path(cert_path) if cert_path else DEFAULT_CERT_FILE
     key_file = Path(key_path) if key_path else DEFAULT_KEY_FILE
 
+    def _sync_root_files(c: Path, k: Path):
+        try:
+            if not ROOT_CERT_FILE.exists() or ROOT_CERT_FILE.stat().st_size < 100:
+                shutil.copyfile(c, ROOT_CERT_FILE)
+            if not ROOT_KEY_FILE.exists() or ROOT_KEY_FILE.stat().st_size < 100:
+                shutil.copyfile(k, ROOT_KEY_FILE)
+        except Exception as copy_exc:
+            logger.debug("[SSL] Could not sync root cert files: %s", copy_exc)
+
     if not force_regenerate and cert_file.exists() and key_file.exists():
         if cert_file.stat().st_size > 100 and key_file.stat().st_size > 100:
+            _sync_root_files(cert_file, key_file)
             return cert_file, key_file
 
     # Build SAN lists
@@ -301,14 +320,17 @@ def ensure_ssl_certificates(
 
     # Strategy 1: Python cryptography
     if _generate_via_cryptography(cert_file, key_file, default_ips, default_dns):
+        _sync_root_files(cert_file, key_file)
         return cert_file, key_file
 
     # Strategy 2: Windows native PowerShell .NET
     if _generate_via_powershell_net(cert_file, key_file, default_ips, default_dns):
+        _sync_root_files(cert_file, key_file)
         return cert_file, key_file
 
     # Strategy 3: Embedded fallback certificate
     _write_embedded_fallback(cert_file, key_file)
+    _sync_root_files(cert_file, key_file)
     return cert_file, key_file
 
 

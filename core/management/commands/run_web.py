@@ -215,18 +215,12 @@ class Command(BaseCommand):
 
         # 6. Start Primary Server
         # Force standard local launches to automatically use runserver_plus on 443 with cert to fulfill HTTPS requirement
-        cert_path = settings.BASE_DIR / "secure" / "ssl" / "cert.pem"
-        key_path = settings.BASE_DIR / "secure" / "ssl" / "key.pem"
-        
+        cert_file, key_file = ssl_service.ensure_ssl_certificates(san_ips=san_ips)
         runserver_args = {
             "use_reloader": not is_noreload,
+            "cert_file": str(cert_file),
+            "key_file": str(key_file),
         }
-        if cert_path.is_file():
-            runserver_args["cert_file"] = str(cert_path)
-            if key_path.is_file():
-                runserver_args["key_file"] = str(key_path)
-        else:
-            runserver_args["cert_file"] = "cert.crt"
 
         try:
             call_command("runserver_plus", f"{bind_host}:{port}", **runserver_args)

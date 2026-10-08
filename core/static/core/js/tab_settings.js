@@ -383,3 +383,39 @@ function toggleDeveloperSettingsMode(chk) {
     }
     updateSetting("system.developer_mode", chk.checked);
 }
+
+async function browseGenericPath(inputId, type, title, settingKey) {
+    const input = document.getElementById(inputId);
+    showToast(`Opening ${type} browser window...`, "info");
+    
+    try {
+        const payload = {
+            type: type,
+            title: title,
+            initial_dir: input ? input.value : ""
+        };
+        const res = await fetch("/api/settings/browse-path/", { 
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+
+        if (data.success && data.selected_path) {
+            if (input) {
+                input.value = data.selected_path;
+            }
+            if (settingKey) {
+                updateSetting(settingKey, data.selected_path);
+            }
+        } else if (data.canceled) {
+            // canceled
+        } else if (data.error) {
+            showToast("Browse error: " + data.error, "error");
+        }
+    } catch (err) {
+        showToast("Failed to launch browser: " + err, "error");
+    }
+}

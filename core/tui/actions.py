@@ -96,6 +96,16 @@ class OperatorActionsMixin:
     @work(thread=True)
     def action_drain_outbox(self) -> None:
         """Drains any orders waiting in OFFLINE_OUTBOX status."""
+        try:
+            tabs = self.query_one("#tabs-content", TabbedContent)
+            if getattr(tabs, "active", "") == "tab-stock":
+                stock_pane = self.query_one("#stock-pane")
+                if hasattr(stock_pane, "action_open_opening_target_modal"):
+                    self.call_from_thread(stock_pane.action_open_opening_target_modal)
+                return
+        except Exception:
+            pass
+
         from core.models import VehicleInstallationPair
         from core.services.submission_worker import drain_offline_outbox
         from core.services.itms_web_client import get_web_client
@@ -490,6 +500,16 @@ class OperatorActionsMixin:
         self.reload_data()
 
     def action_swap(self):
+        try:
+            tabs = self.query_one("#tabs-content", TabbedContent)
+            if getattr(tabs, "active", "") == "tab-stock":
+                stock_pane = self.query_one("#stock-pane")
+                if hasattr(stock_pane, "action_sync_all"):
+                    stock_pane.action_sync_all()
+                return
+        except Exception:
+            pass
+
         pair = self._get_active_pair()
         if not pair or not (pair.front_image and pair.rear_image):
             self.notify("Need both front and rear images to swap assignments.", severity="warning")
@@ -582,6 +602,15 @@ class OperatorActionsMixin:
     def action_view_evidence(self):
         tabs = self.query_one("#tabs-content", TabbedContent)
         active_tab = tabs.active
+
+        if active_tab == "tab-stock":
+            try:
+                stock_pane = self.query_one("#stock-pane")
+                if hasattr(stock_pane, "action_paste_clipboard"):
+                    stock_pane.action_paste_clipboard()
+            except Exception:
+                pass
+            return
 
         if active_tab == "tab-itms":
             from core.tui.itms_pane import ITMSConnectionPane
@@ -1171,6 +1200,16 @@ class OperatorActionsMixin:
 
     def action_export_shift_report(self) -> None:
         """Exports end-of-shift verification and installation handover report to CSV."""
+        try:
+            tabs = self.query_one("#tabs-content", TabbedContent)
+            if getattr(tabs, "active", "") == "tab-stock":
+                stock_pane = self.query_one("#stock-pane")
+                if hasattr(stock_pane, "action_export_csv"):
+                    stock_pane.action_export_csv()
+                return
+        except Exception:
+            pass
+
         from core.services.export_service import export_shift_report
         try:
             res = export_shift_report()

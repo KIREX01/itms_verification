@@ -299,3 +299,110 @@
     border: none;
     transition: all 0.15s ease;
 }
+
+
+/* Mobile Responsive Overrides for Queue Tab */
+@media (max-width: 768px) {
+    .queue-workspace-split {
+        flex-direction: row;
+    }
+    .queue-column-pane {
+        width: 100%;
+        min-width: 100%;
+        max-width: 100%;
+        border-right: none;
+    }
+    
+    .inspection-studio-pane {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100vw;
+        height: 100dvh;
+        max-height: 100dvh;
+        z-index: 9999;
+        background-color: var(--ug-black-card);
+        display: none;
+        flex-direction: column;
+        padding: 12px 14px 60px 14px;
+        box-sizing: border-box;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    .inspection-studio-pane.mobile-show {
+        display: flex;
+    }
+    
+    .mobile-only-btn {
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
+        padding: 6px 14px;
+        font-size: 0.82rem;
+        font-weight: 700;
+        border-radius: var(--radius-md);
+        background: rgba(252, 220, 4, 0.12);
+        border: 1px solid var(--ug-yellow);
+        color: var(--ug-yellow);
+    }
+    
+    .detail-banner-card {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 12px 14px;
+    }
+    .detail-banner-card > div:last-child {
+        text-align: left;
+        align-items: flex-start;
+        width: 100%;
+    }
+    
+    .evidence-side-by-side {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    .evidence-box {
+        width: 100%;
+    }
+    .evidence-viewport {
+        height: 240px;
+    }
+    
+    .comparison-grid-card {
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        padding: 12px;
+    }
+    
+    /* Operator Decision Bar on Mobile:
+       Not locked/sticky! Flows naturally below the comparison cards with generous margins
+       so the operator can comfortably scroll down to reach and tap them. */
+    .operator-decision-bar {
+        position: relative !important;
+        bottom: auto !important;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        padding: 14px 10px;
+        margin-top: 14px;
+        margin-bottom: 60px; /* Safe distance above mobile screen edge */
+        background-color: var(--ug-black-surface);
+        border: 1px solid var(--ug-border);
+        border-radius: var(--radius-lg);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+        z-index: 10;
+        width: 100%;
+        box-sizing: border-box;
+    }
+    .btn-decision {
+        width: 100%;
+        justify-content: center;
+        min-height: 48px; /* Large, accessible touch target */
+        padding: 12px 8px;
+        font-size: 0.88rem;
+        font-weight: 800;
+    }
+}

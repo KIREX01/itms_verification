@@ -282,3 +282,95 @@
 }
 .telemetry-key { color: var(--ug-text-muted); }
 .telemetry-val { font-family: var(--font-mono); font-weight: 700; color: #ffffff; }
+
+
+/* Mobile Responsive Overrides */
+@media (max-width: 768px) {
+    .dash-metrics-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .dashboard-grid-2col {
+        grid-template-columns: 1fr;
+    }
+    .launchpad-grid {
+        grid-template-columns: 1fr;
+    }
+    .flow-stages-row {
+        overflow-x: auto;
+        padding-bottom: 8px;
+    }
+}
+@media (max-width: 480px) {
+    .dash-metrics-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* QR Code Section Desktop Grid */
+.dash-qr-title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.dash-qr-grid {
+    display: grid;
+    grid-template-columns: 190px 1fr;
+    gap: 20px;
+    align-items: center;
+    margin-top: 10px;
+}
+.dash-qr-modes-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+@media (max-width: 768px) {
+    .dash-qr-grid {
+        grid-template-columns: 1fr;
+    }
+    .dash-qr-modes-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Additional mobile responsiveness */
+@media (max-width: 768px) {
+    .dash-metric-card {
+        padding: 10px 12px;
+    }
+    
+    .dash-metric-val {
+        font-size: 1.3rem;
+    }
+    
+    .dash-shift-banner {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    #dash-mobile-direct-url {
+        font-size: 0.85rem;
+    }
+    
+    .dash-qr-title-row {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
+
+@media (max-width: 480px) {
+    .dash-metrics-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .dash-metric-label {
+        font-size: 0.65rem;
+    }
+    
+    .dash-metric-sub {
+        display: none; /* Hide subtext on very small screens to save space */
+    }
+}

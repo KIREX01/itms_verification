@@ -54,7 +54,7 @@ async function fetchPairs() {
                         <option value="ALL">📦 All Batches (${activeScope})</option>
                         <option value="LATEST">🔥 Latest Ingested Batch (${escapeHtml(latestId)})</option>
                         <option value="CARRYOVER">⏳ Carryover / Previous Batches</option>
-                        ${data.batches.map(b => `<option value="${escapeHtml(b.batch_id)}">${b.is_today ? '●' : '⏳'} ${escapeHtml(b.batch_id)} (${escapeHtml(b.created_at)})</option>`).join("")}
+                        ${data.batches.map(b => `<option value="${escapeHtml(b.batch_id)}">${b.is_today ? '●' : '⏳'} ${escapeHtml(b.source_label || b.batch_id)} (${escapeHtml(b.created_at)})</option>`).join("")}
                     `;
                     select.value = currentVal;
                 }
@@ -190,13 +190,12 @@ function renderQueueCards() {
             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
                 <div style="display:flex; align-items:center; gap:6px;">
                     <span class="item-plate-text">${plate}</span>
-                    ${batchBadge}
+                    
                 </div>
                 <span class="badge badge-yellow" style="font-size:0.65rem;">${status}</span>
             </div>
             <div style="display:flex; align-items:center; justify-content:space-between; font-size:0.75rem; color:var(--ug-text-dim);">
                 <span>${escapeHtml(orderNo)}</span>
-                <span style="font-size:0.7rem; font-family:var(--font-mono);">${escapeHtml(p.batch_id || '')}</span>
                 <span>${p.has_front && p.has_rear ? '✓ 1:1' : '⚠️ Missing'}</span>
             </div>
         </div>`;
@@ -215,6 +214,11 @@ function navigateQueue(delta) {
 async function selectPair(pairId) {
     selectedPairId = pairId;
     renderQueueCards();
+    
+    // Auto-open mobile inspector when a pair is tapped
+    if (typeof openQueueMobileInspector === "function") {
+        openQueueMobileInspector();
+    }
 
     try {
         const res = await fetch(`/api/pairs/${pairId}/`);
@@ -674,12 +678,12 @@ async function searchOrdersForLinking(q) {
                     <tbody>
                         ${data.orders.map(o => `
                             <tr style="cursor:pointer;" onclick="linkOrderToPair(${o.id})" title="Click to link Order #${escapeHtml(o.order_number)}">
-                                <td><strong style="color:var(--ug-yellow); font-family:var(--font-mono);">${escapeHtml(o.order_number)}</strong></td>
-                                <td><strong style="color:#fff;">${escapeHtml(o.registration_number)}</strong></td>
-                                <td style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${escapeHtml(o.vin || '—')}</td>
-                                <td><span class="badge badge-muted">${escapeHtml(o.status || 'Active')}</span></td>
-                                <td style="font-size:0.78rem; color:var(--ug-text-dim);">${escapeHtml(o.warehouse_name || '—')}</td>
-                                <td style="text-align:right;">
+                                <td data-label="Order #"><strong style="color:var(--ug-yellow); font-family:var(--font-mono);">${escapeHtml(o.order_number)}</strong></td>
+                                <td data-label="Plate"><strong style="color:#fff;">${escapeHtml(o.registration_number)}</strong></td>
+                                <td data-label="VIN / Chassis" style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${escapeHtml(o.vin || '—')}</td>
+                                <td data-label="Status"><span class="badge badge-muted">${escapeHtml(o.status || 'Active')}</span></td>
+                                <td data-label="Warehouse" style="font-size:0.78rem; color:var(--ug-text-dim);">${escapeHtml(o.warehouse_name || '—')}</td>
+                                <td data-label="Action" style="text-align:right;">
                                     <button class="btn btn-primary" style="padding:3px 10px; font-size:0.75rem;" onclick="event.stopPropagation(); linkOrderToPair(${o.id})">
                                         Link ➜
                                     </button>
@@ -716,4 +720,20 @@ async function linkOrderToPair(orderId) {
     } catch (err) {
         showToast("Linking error: " + err, "error");
     }
+}
+
+// Mobile Navigation Functions
+function openQueueMobileInspector() {
+    const pane = document.getElementById("queue-inspection-pane");
+    if (pane) pane.classList.add("mobile-show");
+}
+
+function closeQueueMobileInspector() {
+    const pane = document.getElementById("queue-inspection-pane");
+    if (pane) pane.classList.remove("mobile-show");
+}
+
+function exportQueueCSV() {
+    const scope = currentQueueDateScope || "ALL";
+    window.location.href = `/api/pairs/export/csv/?scope=${encodeURIComponent(scope)}`;
 }

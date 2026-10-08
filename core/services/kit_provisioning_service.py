@@ -290,7 +290,6 @@ def verify_scanned_kits_stock(
         "success": bool,
         "total_scanned": int,
         "verified_plates": List[str],
-        "verified_kits": List[InstallationKit],
         "synced_from_itms": List[str],
         "rejected_not_on_stock": List[str],
         "already_installed": List[str],
@@ -313,7 +312,6 @@ def verify_scanned_kits_stock(
             "success": True,
             "total_scanned": 0,
             "verified_plates": [],
-            "verified_kits": [],
             "synced_from_itms": [],
             "rejected_not_on_stock": [],
             "already_installed": [],
@@ -462,11 +460,15 @@ def verify_scanned_kits_stock(
 
 
     success = len(rejected_not_on_stock) == 0 and len(already_installed) == 0
+    
+    # Strip non-serializable Django model instances before returning
+    for p_details in details.values():
+        p_details.pop("kit", None)
+        
     return {
         "success": success,
         "total_scanned": len(clean_plates),
         "verified_plates": verified_plates,
-        "verified_kits": verified_kits,
         "synced_from_itms": synced_from_itms,
         "rejected_not_on_stock": rejected_not_on_stock,
         "already_installed": already_installed,

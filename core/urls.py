@@ -45,6 +45,7 @@ urlpatterns = [
     path("api/settings/toggle-dry-run/", views.api_toggle_dry_run, name="api_toggle_dry_run"),
     path("api/settings/vault-folder/", views.api_vault_folder, name="api_vault_folder"),
     path("api/settings/browse-vault-folder/", views.api_browse_vault_folder, name="api_browse_vault_folder"),
+    path("api/settings/browse-path/", views.api_browse_path, name="api_browse_path"),
     path("api/updates/check/", views.api_check_updates, name="api_check_updates"),
     path("api/updates/apply/", views.api_apply_update, name="api_apply_update"),
     path("media/<path:path>", views.serve_media, name="serve_media"),
@@ -64,10 +65,13 @@ urlpatterns = [
     path("api/mobile/new-batch/", views_mobile.api_mobile_new_batch, name="api_mobile_new_batch"),
     path("api/mobile/status/", views_mobile.api_mobile_status, name="api_mobile_status"),
     path("api/mobile/upload/", views_mobile.api_mobile_upload, name="api_mobile_upload"),
+    path("api/mobile/uturn/finish_batch/", views_mobile.api_mobile_uturn_finish, name="api_mobile_uturn_finish"),
     path("api/network/info/", views_mobile.api_network_info, name="api_network_info"),
 
     # Stock Monitoring & Daily Plate Reconciliation APIs
     path("api/stock/reconciliation/", views.api_stock_reconciliation, name="api_stock_reconciliation"),
+    path("api/stock/shift/dates/", views.api_stock_shift_dates, name="api_stock_shift_dates"),
+    path("api/stock/shift/details/", views.api_stock_shift_details, name="api_stock_shift_details"),
     path("api/stock/shift/reconcile/", views.api_stock_shift_reconcile, name="api_stock_shift_reconcile"),
     path("api/stock/dispatch/", views.api_stock_dispatch, name="api_stock_dispatch"),
     path("api/stock/delivery/", views.api_stock_delivery, name="api_stock_delivery"),
@@ -84,6 +88,15 @@ urlpatterns = [
     path("api/stock/mvr-docket/", views.api_stock_mvr_docket, name="api_stock_mvr_docket"),
     path("api/stock/kits/sync/", views.api_stock_kits_sync, name="api_stock_kits_sync"),
     path("api/stock/kits/readiness/", views.api_stock_kits_readiness, name="api_stock_kits_readiness"),
+    path("api/stock/dispatch/clear/", views.api_stock_dispatch_clear, name="api_stock_dispatch_clear"),
+    path("api/stock/inspect/", views.api_stock_inspect, name="api_stock_inspect"),
+    path("api/stock/audit/", views.api_stock_audit, name="api_stock_audit"),
+    path("api/stock/previous-closing/", views.api_stock_previous_closing, name="api_stock_previous_closing"),
+    path("api/stock/export/unregistered/", views.api_stock_export_unregistered_csv, name="api_stock_export_unregistered_csv"),
+    # URL aliases for web UI compatibility
+    path("api/stock/bond_transfer/", views.api_stock_bond_transfer, name="api_stock_bond_transfer_alias"),
+    path("api/stock/physical_count/", views.api_stock_physical_count, name="api_stock_physical_count_alias"),
+    path("api/stock/export/csv/", views.api_stock_export_csv, name="api_stock_export_csv_alias"),
 ]
 
 

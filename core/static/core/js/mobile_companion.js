@@ -27,6 +27,18 @@ function getDeviceName() {
     return `${os} (${browser})`;
 }
 
+function getInitialUturnBatchIndex() {
+    const saved = localStorage.getItem("itms_uturn_batch_index");
+    if (saved && !isNaN(parseInt(saved, 10))) {
+        return Math.max(1, parseInt(saved, 10));
+    }
+    return 1;
+}
+
+function generateUturnSessionId(batchIndex) {
+    return "UTURN-" + Date.now().toString(36).toUpperCase() + "-" + (batchIndex || 1);
+}
+
 // ============================================================================
 // State Management
 // ============================================================================
@@ -56,8 +68,10 @@ const MobileState = {
         isComplete: false,
     },
 
-    // U-Turn Walk State
+    // U-Turn Walk State (Isolated Batch per Walk Session)
     uturn: {
+        batchIndex: getInitialUturnBatchIndex(),
+        walkSessionId: generateUturnSessionId(getInitialUturnBatchIndex()),
         phase: "REAR", // 'REAR' | 'FRONT'
         rearCount: 0,
         frontCount: 0,
@@ -379,6 +393,15 @@ async function drainOutboxQueue() {
         formData.append("captured_at", item.captured_at);
         formData.append("device_id", MobileState.deviceId);
         formData.append("device_name", MobileState.deviceName);
+        if (item.uturn_session_id) {
+            formData.append("uturn_session_id", item.uturn_session_id);
+        }
+        if (item.uturn_batch_index) {
+            formData.append("uturn_batch_index", String(item.uturn_batch_index));
+        }
+        if (item.batch_label) {
+            formData.append("batch_label", item.batch_label);
+        }
 
         try {
             const resp = await fetch("/api/mobile/upload/", {
@@ -429,6 +452,13 @@ function manualSyncOutbox(e) {
     pingServer().then(() => drainOutboxQueue());
 }
 
+function updateUturnBatchIndicator() {
+    const indicator = document.getElementById("uturn-batch-indicator");
+    if (indicator) {
+        indicator.textContent = `ACTIVE WALK: BATCH #${MobileState.uturn.batchIndex}`;
+    }
+}
+
 // ============================================================================
 // Mode Switching (Conveyor vs U-Turn vs Stock)
 // ============================================================================
@@ -444,7 +474,10 @@ function switchMobileMode(mode) {
         c.style.display = "none";
     });
 
+    const capBar = document.getElementById("batch-capacity-bar");
+
     if (mode === "conveyor") {
+        if (capBar) capBar.style.display = "block";
         const btn = document.getElementById("btn-mode-conveyor");
         if (btn) btn.classList.add("active");
         const cont = document.getElementById("container-conveyor");
@@ -453,6 +486,7 @@ function switchMobileMode(mode) {
             cont.style.display = "block";
         }
     } else if (mode === "uturn") {
+        if (capBar) capBar.style.display = "none";
         const btn = document.getElementById("btn-mode-uturn");
         if (btn) btn.classList.add("active");
         const cont = document.getElementById("container-uturn");
@@ -460,7 +494,9 @@ function switchMobileMode(mode) {
             cont.classList.add("active");
             cont.style.display = "block";
         }
+        updateUturnBatchIndicator();
     } else if (mode === "stock") {
+        if (capBar) capBar.style.display = "none";
         const btn = document.getElementById("btn-mode-stock");
         if (btn) btn.classList.add("active");
         const cont = document.getElementById("container-stock");
@@ -587,16 +623,16 @@ async function startStockCameraScanner() {
     // Check if running on non-secure HTTP context on mobile
     const isLocal = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
     if (!window.isSecureContext && !isLocal) {
-        const httpsUrl = `https://${window.location.hostname}:8443/mobile/`;
-        if (confirm("Live Camera & QR Scanning require HTTPS for browser security permissions.\n\nWould you like to switch to Secure HTTPS (Port 8443) now?\n\n(Note: When prompted by your phone browser, tap 'Advanced' -> 'Proceed').")) {
+        const httpsUrl = `https://${window.location.hostname}:443/mobile/`;
+        if (confirm("Live Camera & QR Scanning require HTTPS for browser security permissions.\n\nWould you like to switch to Secure HTTPS (Port 443) now?\n\n(Note: When prompted by your phone browser, tap 'Advanced' -> 'Proceed').")) {
             window.location.href = httpsUrl;
             return;
         }
     }
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        const httpsUrl = `https://${window.location.hostname}:8443/mobile/`;
-        if (confirm("Camera streaming is blocked by your mobile browser over plain HTTP.\n\nTap OK to switch to HTTPS (:8443) to unlock your camera.")) {
+        const httpsUrl = `https://${window.location.hostname}:443/mobile/`;
+        if (confirm("Camera streaming is blocked by your mobile browser over plain HTTP.\n\nTap OK to switch to HTTPS (:443) to unlock your camera.")) {
             window.location.href = httpsUrl;
         } else {
             alert("Camera access is disabled over HTTP. Please use the manual plate input below or connect via HTTPS.");
@@ -887,6 +923,7 @@ function addBulkStockPlates() {
         }
     });
     textarea.value = "";
+    saveStockQueueToStorage();
     renderStockQueueList();
     if (added > 0 || dups > 0) {
         let msg = `Added ${added} new plates.`;
@@ -897,12 +934,36 @@ function addBulkStockPlates() {
     }
 }
 
+function saveStockQueueToStorage() {
+    try {
+        localStorage.setItem("itms_mobile_stock_queue", JSON.stringify(MobileState.stock.queue));
+    } catch (e) {
+        console.warn("Could not save stock queue to localStorage:", e);
+    }
+}
+
+function loadStockQueueFromStorage() {
+    try {
+        const saved = localStorage.getItem("itms_mobile_stock_queue");
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                MobileState.stock.queue = parsed;
+                renderStockQueueList();
+            }
+        }
+    } catch (e) {
+        console.warn("Could not load stock queue from localStorage:", e);
+    }
+}
+
 function addPlateToStockQueue(plateStr) {
     let clean = plateStr.replace(/^IK-/, "").replace(/[^A-Z0-9]/g, "");
     if (!clean) return;
 
     if (!MobileState.stock.queue.includes(clean)) {
         MobileState.stock.queue.push(clean);
+        saveStockQueueToStorage();
         if (navigator.vibrate) {
             navigator.vibrate(50);
         }
@@ -918,6 +979,7 @@ function addPlateToStockQueue(plateStr) {
 
 function removeStockPlate(idx) {
     MobileState.stock.queue.splice(idx, 1);
+    saveStockQueueToStorage();
     renderStockQueueList();
 }
 
@@ -948,7 +1010,7 @@ function renderStockQueueList() {
 async function syncStockScansToServer() {
     const q = MobileState.stock.queue;
     if (q.length === 0) {
-        alert("No plates in queue to sync.");
+        showMobileToast("No plates in queue to sync.", true);
         return;
     }
 
@@ -963,6 +1025,7 @@ async function syncStockScansToServer() {
         plates: q,
         plate_category: category,
         operator_name: MobileState.deviceName,
+        auto_create_kits: true,
     };
 
     if (subMode === "DELIVERY") {
@@ -984,33 +1047,35 @@ async function syncStockScansToServer() {
         });
         const data = await resp.json();
         if (data.success) {
-            let msg = `✓ Success: Recorded ${data.newly_dispatched !== undefined ? data.newly_dispatched : q.length} plates for ${subMode} (${category})!`;
-            if (data.synced_from_itms && data.synced_from_itms.length > 0) {
-                msg += `\n(${data.synced_from_itms.length} kit(s) verified & synced from ITMS)`;
+            let newlyCount = data.newly_dispatched !== undefined ? data.newly_dispatched : (data.plates_count || q.length);
+            let msg = `✓ Recorded ${newlyCount} plates for ${subMode} (${category})!`;
+            if (data.enriching_in_background || (data.synced_from_itms && data.synced_from_itms.length > 0)) {
+                msg += " (ITMS sync running in background ⚡)";
             }
             if (data.rejected_not_on_stock && data.rejected_not_on_stock.length > 0) {
-                msg += `\n\n⛔ BLOCKED (${data.rejected_not_on_stock.length} NOT ON ITMS STOCK):\n` +
-                       data.rejected_not_on_stock.join(", ") +
-                       "\nKits not on stock cannot be taken out!";
+                msg += ` (⚠️ ${data.rejected_not_on_stock.length} blocked: ${data.rejected_not_on_stock.join(", ")})`;
                 MobileState.stock.queue = data.rejected_not_on_stock;
             } else {
                 MobileState.stock.queue = [];
             }
-            alert(msg);
+            saveStockQueueToStorage();
+            playScanBeep(true);
+            showMobileToast(msg, false);
             renderStockQueueList();
         } else {
-            let errMsg = data.error || "Unknown server error";
+            let errMsg = data.error || "Server rejection";
             if (data.rejected_not_on_stock && data.rejected_not_on_stock.length > 0) {
-                errMsg = `⛔ DISPATCH BLOCKED - NOT ON ITMS STOCK:\n` +
-                         `Kits not on stock cannot be taken out:\n` +
-                         data.rejected_not_on_stock.join(", ");
+                errMsg = `⚠️ ${data.rejected_not_on_stock.length} kit(s) blocked (not on stock): ` + data.rejected_not_on_stock.join(", ");
                 MobileState.stock.queue = data.rejected_not_on_stock;
+                saveStockQueueToStorage();
                 renderStockQueueList();
             }
-            alert(errMsg);
+            playScanBeep(false);
+            showMobileToast(errMsg, true);
         }
     } catch (err) {
-        alert(`Network connection error: ${err.message}`);
+        playScanBeep(false);
+        showMobileToast(`Network connection error: ${err.message} (Scans safely kept on phone)`, true);
     } finally {
         if (btn) btn.disabled = false;
     }
@@ -1569,7 +1634,10 @@ async function handleNativeUturnFileCaptured(inputElem) {
         blob: file,
         filename: `uturn_${orientation.toLowerCase()}_${seqNum}.jpg`,
         captured_at: nowIso,
-        status: "pending"
+        status: "pending",
+        uturn_session_id: MobileState.uturn.walkSessionId,
+        uturn_batch_index: MobileState.uturn.batchIndex,
+        batch_label: `U-Turn Walk Batch #${MobileState.uturn.batchIndex}`,
     };
 
     // Store in recent tiles for undo / retake
@@ -1675,13 +1743,13 @@ async function undoLastUturnSnap() {
     if (navigator.vibrate) navigator.vibrate(50);
 }
 
-function finishUturnBatch() {
+async function finishUturnBatch() {
     const total = MobileState.uturn.totalPhotos;
     const rears = MobileState.uturn.rearCount;
     const fronts = MobileState.uturn.frontCount;
 
     if (total === 0) {
-        alert("No photos captured in this U-Turn walk yet.");
+        showMobileToast("No photos captured in this U-Turn walk yet.", true);
         return;
     }
 
@@ -1690,10 +1758,20 @@ function finishUturnBatch() {
             return;
         }
     } else {
-        if (!confirm(`Submit completed U-Turn batch of ${total} photos (${rears} pairs)?`)) {
+        if (!confirm(`Submit completed U-Turn Batch #${MobileState.uturn.batchIndex} (${total} photos / ${rears} pairs)?`)) {
             return;
         }
     }
+
+    const completedSessionId = MobileState.uturn.walkSessionId;
+    const completedBatchIndex = MobileState.uturn.batchIndex;
+
+    // Advance batch index for next walk session
+    MobileState.uturn.batchIndex += 1;
+    MobileState.uturn.walkSessionId = generateUturnSessionId(MobileState.uturn.batchIndex);
+    try {
+        localStorage.setItem("itms_uturn_batch_index", String(MobileState.uturn.batchIndex));
+    } catch (e) {}
 
     // Reset U-Turn state for next row
     MobileState.uturn.rearCount = 0;
@@ -1725,9 +1803,24 @@ function finishUturnBatch() {
     }
     if (shutterText) shutterText.textContent = "Capture REAR";
 
+    updateUturnBatchIndicator();
     updateUturnShutterCounter();
     drainOutboxQueue();
-    alert("✓ U-Turn walk batch queued and uploading to laptop! Reverse trajectory matching will auto-pair photos.");
+
+    // Seal previous batch and trigger vision processing
+    try {
+        fetch("/api/mobile/uturn/finish_batch/", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                uturn_session_id: completedSessionId,
+                batch_index: completedBatchIndex,
+                device_id: MobileState.deviceId
+            })
+        }).catch(err => console.warn("Notice sealing uturn batch:", err));
+    } catch (e) {}
+
+    showMobileToast(`✓ Batch #${completedBatchIndex} queued for review! Now on Batch #${MobileState.uturn.batchIndex}.`);
 }
 
 // ============================================================================
@@ -1756,7 +1849,7 @@ function checkSecureContextBanner() {
 
     const isLocal = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
     if (window.location.protocol === "http:" && !isLocal) {
-        const httpsUrl = `https://${window.location.hostname}:8443/mobile/`;
+        const httpsUrl = `https://${window.location.hostname}:443/mobile/`;
         if (switchBtn) {
             switchBtn.href = httpsUrl;
         }
@@ -1786,9 +1879,19 @@ function initMobileCompanion() {
         console.error("Error in updateUturnShutterCounter:", e);
     }
     try {
+        updateUturnBatchIndicator();
+    } catch (e) {
+        console.error("Error in updateUturnBatchIndicator:", e);
+    }
+    try {
         refreshOutboxCount();
     } catch (e) {
         console.error("Error in refreshOutboxCount:", e);
+    }
+    try {
+        loadStockQueueFromStorage();
+    } catch (e) {
+        console.error("Error in loadStockQueueFromStorage:", e);
     }
     try {
         startHeartbeat();

@@ -69,9 +69,16 @@ from .bond import (
     api_stock_upload_delivery_note,
     api_stock_mvr_docket,
     api_stock_shift_reconcile,
+    api_stock_shift_details,
+    api_stock_shift_dates,
     api_stock_export_category_csv,
     api_stock_kits_sync,
     api_stock_kits_readiness,
+    api_stock_inspect,
+    api_stock_dispatch_clear,
+    api_stock_audit,
+    api_stock_previous_closing,
+    api_stock_export_unregistered_csv,
 )
 
 from .system import (
@@ -86,6 +93,7 @@ from .system import (
     _get_dir_disk_stats,
     api_vault_folder,
     api_browse_vault_folder,
+    api_browse_path,
     serve_media,
 )
 
@@ -96,6 +104,7 @@ __all__ = [
     "api_batch_submit",
     "api_batches_list",
     "api_browse_vault_folder",
+    "api_browse_path",
     "api_check_updates",
     "api_export_report",
     "api_history_list",
@@ -134,7 +143,14 @@ __all__ = [
     "api_stock_return",
     "api_stock_scheduled",
     "api_stock_shift_reconcile",
+    "api_stock_shift_details",
+    "api_stock_shift_dates",
     "api_stock_upload_delivery_note",
+    "api_stock_inspect",
+    "api_stock_dispatch_clear",
+    "api_stock_audit",
+    "api_stock_previous_closing",
+    "api_stock_export_unregistered_csv",
     "api_stream_events",
     "api_sync_orders",
     "api_toggle_dry_run",

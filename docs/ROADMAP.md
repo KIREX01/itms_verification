@@ -178,8 +178,16 @@ end-to-end on any machine with no extra downloads.
   - Eliminated camera OCR detections (`EvidenceImage`, `VehicleInstallationPair`) from stock reconciliation, guaranteeing zero partial text fragments or misread plates in stock dockets.
   - Ground truth floor liabilities are strictly anchored to physical barcode/plate scans (`StockDispatchScan`).
 * `[x]` **Safe-Room "Set Aside" Pre-Dispatch Verification**:
-  - Pre-dispatch validation against synchronized safe-room ITMS stock.
+  - Pre-dispatch validation against synchronized safe-room ITMS stock with 3-tier flow (Local check -> Live ITMS query & auto-provision -> Audio alert "Not On Stock").
   - Automatic set-aside blocking for kits not registered in ITMS, preventing unregistered plates from reaching assembly fitters.
   - Substitution workflow: Replace with valid in-stock kit while unlisted plate awaits ITMS Stock Transfer Officer confirmation.
+* `[x]` **Mobile Companion U-Turn Walk Isolation & Batch Flow**:
+  - Discrete session batches for off-conveyor walk photos with independent state reset on submit.
+  - Clean pairing algorithm preventing previous batches (rear 1&2, front 2&1) from mixing with new batch images (rear 3&4, front 4&3).
+  - Independent batch limits for off-conveyor walk photos without 100-pair conveyor limit conflicts.
+* `[x]` **Mobile Web Companion Touch UI & Full-Screen Responsive Inspectors**:
+  - Relocated Queue decision action buttons from fixed bottom sticky bar to natural scroll flow on mobile devices.
+  - Responsive Mobile Inspector overlays with dedicated `◀ Back` navigation for ITMS table row inspection and Stock Ledger inspection on phone screens.
+
 
 

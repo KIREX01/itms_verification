@@ -376,19 +376,30 @@ class TUIAppTests(TransactionTestCase):
         self.assertEqual(dismiss_arg.get("opening_pmo"), 500)
         self.assertEqual(dismiss_arg.get("opening_psv"), 800)
 
-        # Test StockPane mode navigation
+        # Test StockPane mode navigation (F key cycle)
         pane = StockPane(target_date_suffix="260929")
         pane.notify = MagicMock()
         mock_switcher = MagicMock()
+        mock_switcher.current = "mode-dispatch"
         mock_switcher.active = "mode-dispatch"
         pane.query_one = lambda selector, expected_type=None: mock_switcher if "switcher" in selector else MagicMock()
 
-        pane.action_mode_2()
-        self.assertEqual(mock_switcher.active, "mode-movements")
-        pane.action_mode_3()
-        self.assertEqual(mock_switcher.active, "mode-audit")
-        pane.action_mode_4()
-        self.assertEqual(mock_switcher.active, "mode-ledger")
+        # F key cycling across all 4 modes
+        pane.action_cycle_subtab()
+        self.assertEqual(mock_switcher.current, "mode-movements")
+        pane.action_cycle_subtab()
+        self.assertEqual(mock_switcher.current, "mode-audit")
+        pane.action_cycle_subtab()
+        self.assertEqual(mock_switcher.current, "mode-ledger")
+        pane.action_cycle_subtab()
+        self.assertEqual(mock_switcher.current, "mode-dispatch")
+
+        # Test action_refresh_stock executes without attribute or query errors
+        pane.action_refresh_stock()
+        self.assertIsNotNone(pane._cached_recon)
+        self.assertIn("total", pane._cached_recon)
+        self.assertIn("pmo", pane._cached_recon)
+        self.assertIn("psv", pane._cached_recon)
 
     def test_stock_pane_instant_scan_and_inspector(self):
         """Verifies instant barcode scan verification and InspectorPane formatting in StockPane."""

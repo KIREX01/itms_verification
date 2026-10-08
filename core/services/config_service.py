@@ -327,6 +327,27 @@ DEVELOPER_SETTINGS_SCHEMA: Dict[str, Dict[str, Any]] = {
         "default": 7,
         "category": "Lifecycle Policies",
     },
+    "submission.backend": {
+        "label": "ITMS Submission Backend",
+        "description": "Switch between real API submissions or simulated stubs (live, stub).",
+        "type": "string",
+        "default": "live",
+        "category": "Testing & Simulation",
+    },
+    "simulation.latency_ms": {
+        "label": "Simulated Latency (ms)",
+        "description": "Artificial delay for stub backend to simulate network lag.",
+        "type": "int",
+        "default": 0,
+        "category": "Testing & Simulation",
+    },
+    "simulation.failure_rate": {
+        "label": "Failure Injection Rate (%)",
+        "description": "Percentage of stub requests that intentionally fail (0-100).",
+        "type": "int",
+        "default": 0,
+        "category": "Testing & Simulation",
+    },
     "storage.export_retention_days": {
         "label": "Export Retention (Days)",
         "description": "Days to retain CSV and Excel exports.",

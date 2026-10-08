@@ -14,7 +14,8 @@ Tests:
 9. REST APIs for stock management.
 10. CSV Report generation with PSV, PMO, and Total Combined columns.
 """
-from datetime import date
+import json
+from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
 from django.test import Client, TestCase
 from django.utils import timezone
@@ -25,6 +26,7 @@ from core.models import (
     InstallationKit,
     InstallationOrder,
     PlateCategory,
+    SafeAuditScan,
     StockBondTransfer,
     StockDelivery,
     StockDeliveryItem,
@@ -992,6 +994,60 @@ class StockMonitoringTests(TestCase):
         self.assertEqual(data["rejected_not_on_stock"], ["UZZ888ZZ"])
         self.assertIn("cannot be taken out", data["error"])
 
+    @patch("core.services.kit_provisioning_service.get_web_client")
+    def test_record_dispatch_scans_syncs_from_itms_and_marks_dispatched(self, mock_get_client):
+        """When kit missing locally but available on ITMS: syncs to local DB and marks dispatched."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.fetch_installation_kits.return_value = {
+            "success": True,
+            "count": 1,
+            "kits": [{
+                "kit_code": "IK-UXX777XX",
+                "registration_number": "UXX777XX",
+                "status": "New",
+                "warehouse": "AGM SPIRO",
+                "gps_tracker": "IMEI-8675309",
+            }],
+        }
+        mock_client.sync_kits_to_local_db.side_effect = lambda kits: [
+            InstallationKit.objects.create(
+                kit_code=k["kit_code"],
+                registration_number=k["registration_number"],
+                status=k.get("status", "New"),
+                warehouse=k.get("warehouse", ""),
+            ) for k in kits
+        ]
+
+        res = stock_monitoring_service.record_dispatch_scans(
+            plates=["UXX777XX"],
+            target_date_suffix=self.test_suffix,
+            require_stock_verification=True,
+            check_itms_live=True,
+        )
+        self.assertTrue(res["success"])
+        self.assertEqual(res["newly_dispatched"], 1)
+        self.assertTrue(InstallationKit.objects.filter(registration_number="UXX777XX", status="Dispatched").exists())
+        self.assertTrue(StockDispatchScan.objects.filter(registration_number="UXX777XX").exists())
+
+    def test_record_dispatch_scans_marks_existing_local_kit_dispatched(self):
+        """When kit exists in local DB: marks dispatched immediately."""
+        InstallationKit.objects.create(
+            kit_code="IK-ULC123AA",
+            registration_number="ULC123AA",
+            status="New",
+        )
+        res = stock_monitoring_service.record_dispatch_scans(
+            plates=["ULC123AA"],
+            target_date_suffix=self.test_suffix,
+            require_stock_verification=True,
+            check_itms_live=False,
+        )
+        self.assertTrue(res["success"])
+        self.assertEqual(res["newly_dispatched"], 1)
+        self.assertTrue(InstallationKit.objects.filter(registration_number="ULC123AA", status="Dispatched").exists())
+        self.assertTrue(StockDispatchScan.objects.filter(registration_number="ULC123AA").exists())
+
     def test_stocktake_audit_links_hardware_and_isolates_unregistered(self):
         """Monthly stocktaking separates verified kits with hardware serials from unregistered kits."""
         InstallationKit.objects.create(
@@ -1376,6 +1432,257 @@ class StockMonitoringTests(TestCase):
         from core.tui.dialogs import StockPasteModal
         m = StockPasteModal(mode="movements")
         self.assertEqual(m.mode, "movements")
+
+    def test_physical_safe_audit_persistence_and_targeted_enrichment(self):
+        """Verifies SafeAuditScan persistence, physical bond inventory filtering, and no ITMS dump."""
+        from unittest.mock import MagicMock
+        from core.models import SafeAuditScan, InstallationKit
+        from core.tui.stock_pane import StockPane
+
+        # 1. Simulate remote ITMS kits synced to database that are NOT at this bond
+        InstallationKit.objects.create(
+            kit_code="IK-REMOTE-001",
+            registration_number="UMA999RM",
+            status="New",
+            warehouse="Other Facility",
+        )
+
+        # 2. Record physical safe room stock audit
+        scanned_sample = ["UMA101SA", "UMA102SA", "UMA103SA"]
+        res = stock_monitoring_service.record_stock_taking_audit(
+            scanned_plates=scanned_sample,
+            target_date_suffix=self.test_suffix,
+        )
+        self.assertTrue(res["success"])
+        self.assertEqual(res["total_scanned"], 3)
+
+        # 3. Verify SafeAuditScan records created and persisted in DB
+        saved_audits = list(SafeAuditScan.objects.filter(work_date_suffix=self.test_suffix).values_list("registration_number", flat=True))
+        self.assertEqual(sorted(saved_audits), sorted(scanned_sample))
+
+        # 4. Verify get_physical_bond_plates returns only physical plates
+        phys_plates = stock_monitoring_service.get_physical_bond_plates(self.test_suffix)
+        self.assertEqual(sorted(phys_plates), sorted(scanned_sample))
+        self.assertNotIn("UMA999RM", phys_plates)  # Remote ITMS kit is NOT in physical bond inventory
+
+        # 5. Verify StockPane._render_stocktake_table renders physical audits and NOT remote ITMS kits
+        pane = StockPane(target_date_suffix=self.test_suffix)
+        pane.notify = MagicMock()
+        mock_table = MagicMock()
+        pane.query_one = lambda selector, expected_type=None: mock_table if "table" in selector else MagicMock()
+
+        pane._render_stocktake_table()
+        # Verify rows added correspond to scanned physical plates
+        added_rows = [call[1].get("key") for call in mock_table.add_row.call_args_list if call[1].get("key")]
+        self.assertIn("UMA101SA", added_rows)
+        self.assertIn("UMA102SA", added_rows)
+        self.assertNotIn("UMA999RM", added_rows)
+
+    def test_api_stock_inspect(self):
+        """Test /api/stock/inspect/ returns complete hardware profile and stock status."""
+        kit = InstallationKit.objects.create(
+            registration_number="UMA888DS",
+            kit_code="IK-UMA888DS",
+            warehouse="AGM Bonded Warehouse",
+            gps_tracker="86420109999",
+            front_tracker="BLE-FRONT-888",
+            rear_tracker="BLE-REAR-888",
+            front_plate="FP-888",
+            rear_plate="RP-888",
+            status="New",
+        )
+        # 1. Un-dispatched kit inspection
+        resp = self.client.get(f"/api/stock/inspect/?plate=UMA 888DS&date_suffix={self.test_suffix}")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["canonical_plate"], "UMA888DS")
+        self.assertEqual(data["stock_status"]["code"], "ON_STOCK")
+        self.assertEqual(data["kit_profile"]["gps_tracker"], "86420109999")
+        self.assertFalse(data["is_blocked"])
+
+        # 2. Dispatch kit
+        StockDispatchScan.objects.create(
+            registration_number="UMA888DS",
+            plate_category=PlateCategory.PSV,
+            work_date_suffix=self.test_suffix,
+            status=StockDispatchScan.Status.ON_LINE_ACTIVE,
+            operator_name="Tester",
+        )
+        resp2 = self.client.get(f"/api/stock/inspect/?plate=UMA 888DS&date_suffix={self.test_suffix}")
+        data2 = resp2.json()
+        self.assertTrue(data2["success"])
+        self.assertEqual(data2["stock_status"]["code"], "DISPATCHED")
+        self.assertTrue(data2["dispatch_record"]["is_dispatched"])
+        self.assertEqual(data2["dispatch_record"]["operator"], "Tester")
+
+    def test_api_stock_dispatch_clear(self):
+        """Test /api/stock/dispatch/clear/ clears dispatches for shift."""
+        StockDispatchScan.objects.create(
+            registration_number="UMA777DS",
+            plate_category=PlateCategory.PSV,
+            work_date_suffix=self.test_suffix,
+            status=StockDispatchScan.Status.ON_LINE_ACTIVE,
+        )
+        resp = self.client.post(
+            "/api/stock/dispatch/clear/",
+            data=json.dumps({"date_suffix": self.test_suffix}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["cleared_count"], 1)
+        self.assertFalse(StockDispatchScan.objects.filter(work_date_suffix=self.test_suffix).exists())
+
+    def test_api_stock_audit(self):
+        """Test /api/stock/audit/ performs physical stocktaking audit."""
+        resp = self.client.post(
+            "/api/stock/audit/",
+            data=json.dumps({"plates": "UMA501SA, UMA502SA", "date_suffix": self.test_suffix}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["total_scanned"], 2)
+        self.assertTrue(SafeAuditScan.objects.filter(work_date_suffix=self.test_suffix, registration_number="UMA501SA").exists())
+
+    def test_api_stock_previous_closing(self):
+        """Test /api/stock/previous-closing/ returns previous shift closing balance."""
+        DailyStockLedger.objects.create(
+            work_date=self.test_date - timedelta(days=1),
+            work_date_suffix="280926",
+            closing_balance_psv=120,
+            closing_balance_pmo=30,
+            closing_stock=150,
+        )
+        resp = self.client.get(f"/api/stock/previous-closing/?date_suffix={self.test_suffix}")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["data"]["opening_psv"], 120)
+        self.assertEqual(data["data"]["opening_pmo"], 30)
+
+    def test_api_stock_export_unregistered_csv(self):
+        """Test /api/stock/export/unregistered/ exports unregistered kits CSV."""
+        SafeAuditScan.objects.create(
+            registration_number="UMA999UNREG",
+            plate_category=PlateCategory.PSV,
+            work_date_suffix=self.test_suffix,
+        )
+        resp = self.client.get(f"/api/stock/export/unregistered/?date_suffix={self.test_suffix}")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "text/csv")
+        content = resp.content.decode("utf-8")
+        self.assertIn("UMA999UNREG", content)
+
+    @patch("core.services.stock_monitoring_service.enrich_physical_plates_with_itms")
+    def test_inbound_delivery_saves_and_triggers_background_enrichment(self, mock_enrich):
+        """
+        Verify inbound delivery prioritizes saving to database immediately,
+        creates local stub InstallationKit records marked 'New', and triggers
+        background enrichment without blocking.
+        """
+        sample_plates = ["UMA301IN", "UMA302IN"]
+        from django.conf import settings
+        with patch.object(settings, "TESTING", False, create=True), patch("sys.argv", ["manage.py", "runserver"]):
+            res = stock_monitoring_service.record_delivery(
+                delivery_number="DEL-TEST-001",
+                plates=sample_plates,
+                supplier="Central Depot",
+                target_date_suffix=self.test_suffix,
+            )
+
+        # 1. Immediate DB persistence verified
+        self.assertTrue(res["success"])
+        self.assertEqual(res["plates_count"], 2)
+        delivery = StockDelivery.objects.get(delivery_number="DEL-TEST-001")
+        self.assertEqual(delivery.items.count(), 2)
+
+        # 2. Local InstallationKit stubs provisioned as 'New'
+        for p in sample_plates:
+            kit = InstallationKit.objects.get(registration_number=p)
+            self.assertEqual(kit.status, "New")
+
+        # 3. Background enrichment thread launched mock check (give daemon thread brief moment)
+        import time
+        time.sleep(0.05)
+        mock_enrich.assert_called_once()
+        called_plates = mock_enrich.call_args[0][0]
+        self.assertEqual(sorted(called_plates), sorted(sample_plates))
+
+    @patch("core.services.stock_monitoring_service.enrich_physical_plates_with_itms")
+    def test_stock_audit_saves_and_triggers_background_enrichment(self, mock_enrich):
+        """
+        Verify safe room physical stock audit prioritizes saving SafeAuditScan
+        and DailyStockLedger immediately, and triggers background ITMS lookup.
+        """
+        sample_plates = ["UMA401SA", "UMA402SA"]
+        from django.conf import settings
+        with patch.object(settings, "TESTING", False, create=True), patch("sys.argv", ["manage.py", "runserver"]):
+            res = stock_monitoring_service.record_stock_taking_audit(
+                scanned_plates=sample_plates,
+                target_date_suffix=self.test_suffix,
+            )
+
+        # 1. Immediate DB persistence verified
+        self.assertTrue(res["success"])
+        self.assertEqual(res["total_scanned"], 2)
+        self.assertEqual(SafeAuditScan.objects.filter(work_date_suffix=self.test_suffix).count(), 2)
+
+        # 2. Ledger updated
+        ledger = DailyStockLedger.objects.get(work_date_suffix=self.test_suffix)
+        self.assertEqual(ledger.physical_count, 2)
+
+        # 3. Background enrichment thread launched
+        import time
+        time.sleep(0.05)
+        mock_enrich.assert_called_once()
+        called_plates = mock_enrich.call_args[0][0]
+        self.assertEqual(sorted(called_plates), sorted(sample_plates))
+
+    def test_sync_kits_to_local_db_matches_and_updates_stub_kit(self):
+        """
+        Verify sync_kits_to_local_db updates an existing stub kit created during
+        delivery or audit (matching by registration_number) without creating duplicate records.
+        """
+        from core.services.itms_web_client import get_web_client
+        # 1. Stub kit created during rapid delivery scan
+        stub = InstallationKit.objects.create(
+            kit_code="IK-UMA555STUB",
+            registration_number="UMA 555STUB",
+            status="New",
+        )
+
+        client = get_web_client()
+        # 2. ITMS returns real kit details with different kit_code
+        itms_kits = [{
+            "kit_code": "ITMS-K-9988",
+            "registration_number": "UMA 555STUB",
+            "gps_tracker": "8642010998877",
+            "front_tracker": "BLE-FRONT-9988",
+            "rear_tracker": "BLE-REAR-9988",
+            "front_plate": "FP-9988",
+            "rear_plate": "RP-9988",
+            "warehouse": "AGM Bonded Warehouse",
+            "status": "New",
+        }]
+
+        res = client.sync_kits_to_local_db(itms_kits)
+        self.assertTrue(res["success"])
+        self.assertEqual(res["updated"], 1)
+        self.assertEqual(res["created"], 0)
+
+        # 3. Check stub was updated and no duplicate was created
+        stub.refresh_from_db()
+        self.assertEqual(stub.kit_code, "ITMS-K-9988")
+        self.assertEqual(stub.gps_tracker, "8642010998877")
+        self.assertEqual(stub.front_tracker, "BLE-FRONT-9988")
+        self.assertEqual(InstallationKit.objects.filter(registration_number="UMA 555STUB").count(), 1)
+
+
+
 
 
 

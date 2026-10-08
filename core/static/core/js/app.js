@@ -25,8 +25,8 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        // Numbers 1 to 7 switch primary navigation tabs (TUI bindings)
-        if (e.key >= "1" && e.key <= "7") {
+        // Numbers 1 to 8 switch primary navigation tabs (TUI bindings)
+        if (e.key >= "1" && e.key <= "8") {
             switchNavTab(parseInt(e.key));
             return;
         }

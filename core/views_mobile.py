@@ -124,6 +124,9 @@ def api_network_info(request: HttpRequest) -> JsonResponse:
     except (ValueError, TypeError):
         port = 8000
 
+    if port == 8443:
+        port = 443
+
     # Default to HTTPS unless explicitly disabled via ?ssl=0
     use_https_arg = request.GET.get("https") or request.GET.get("ssl")
     if use_https_arg is not None:
@@ -223,11 +226,23 @@ def api_mobile_upload(request: HttpRequest) -> JsonResponse:
     photo_file.seek(0)
     quality_report = assess_photo_quality(photo_bytes)
 
-    # Enforce pair affinity and capacity rollover (200 photos / 100 pairs)
-    batch = vault_service.get_or_create_mobile_batch(
-        source_label=batch_label,
-        bike_client_id=bike_client_id,
-    )
+    # Mode-aware batching:
+    # Mode A (Off-Conveyor U-Turn): Each walk session gets its own dedicated IngestionBatch (not bounded by conveyor 200 limit).
+    # Mode B (On-Conveyor): Sequential rolling 200-photo batch preserving pair affinity.
+    uturn_session_id = request.POST.get("uturn_session_id", "").strip()
+    uturn_batch_index = request.POST.get("uturn_batch_index", "").strip()
+
+    if mode == "uturn":
+        batch = vault_service.get_or_create_uturn_batch(
+            uturn_session_id=uturn_session_id,
+            batch_index=int(uturn_batch_index) if uturn_batch_index.isdigit() else None,
+            source_label=batch_label or f"U-Turn Walk Batch #{uturn_batch_index or '1'}",
+        )
+    else:
+        batch = vault_service.get_or_create_mobile_batch(
+            source_label=batch_label,
+            bike_client_id=bike_client_id,
+        )
 
     # Ingest the uploaded photo into the Evidence Vault
     image, status = vault_service.ingest_uploaded_file(
@@ -333,4 +348,56 @@ def api_mobile_new_batch(request: HttpRequest) -> JsonResponse:
         "batch_max_photos": max_photos,
         "batch_remaining_photos": max_photos,
         "batch_is_full": False,
+    })
+
+
+@csrf_exempt
+@require_POST
+def api_mobile_uturn_finish(request: HttpRequest) -> JsonResponse:
+    """
+    Completes / seals an Off-Conveyor U-Turn batch and triggers final association & vision processing.
+    """
+    uturn_session_id = ""
+    batch_index = None
+
+    if request.content_type == "application/json" and request.body:
+        try:
+            body = json.loads(request.body.decode("utf-8"))
+            uturn_session_id = body.get("uturn_session_id", "").strip()
+            batch_index = body.get("batch_index")
+        except Exception:
+            pass
+    if not uturn_session_id:
+        uturn_session_id = request.POST.get("uturn_session_id", "").strip()
+
+    batch = None
+    if uturn_session_id:
+        batch = IngestionBatch.objects.filter(
+            source_type=IngestionBatch.SourceType.MOBILE,
+            source_label__contains=uturn_session_id,
+        ).first()
+
+    if not batch and uturn_session_id:
+        batch = vault_service.get_or_create_uturn_batch(
+            uturn_session_id=uturn_session_id,
+            batch_index=int(batch_index) if batch_index and str(batch_index).isdigit() else None,
+        )
+
+    if batch:
+        try:
+            from core.matcher import association
+            association.run_association(batch_id=batch.batch_id)
+        except Exception as e:
+            logger.warning("U-turn finish association notice: %s", e)
+
+        try:
+            from core.services.pipeline_runner import runner as pipeline_runner
+            pipeline_runner.start_pipeline("vision", batch_id=batch.batch_id)
+        except Exception:
+            pass
+
+    return JsonResponse({
+        "success": True,
+        "batch_id": batch.batch_id if batch else None,
+        "batch_label": batch.source_label if batch else None,
     })

@@ -58,14 +58,14 @@ class TestSslService:
             assert ctx.minimum_version == ssl.TLSVersion.TLSv1_2
 
     def test_network_service_defaults_to_https(self):
-        """Ensures network_service.get_mobile_connection_info defaults to HTTPS and port 8443."""
-        info = network_service.get_mobile_connection_info(port=8000, ssl_port=8443)
+        """Ensures network_service.get_mobile_connection_info defaults to HTTPS and port 443."""
+        info = network_service.get_mobile_connection_info(port=8000, ssl_port=443)
         assert info["success"] is True
         assert info["use_https"] is True
         assert info["scheme"] == "https"
-        assert info["active_port"] == 8443
+        assert info["active_port"] == 443
         assert info["primary_url"].startswith("https://")
-        assert ":8443/mobile/" in info["primary_url"]
+        assert ":443/mobile/" in info["primary_url"]
 
     def test_api_network_info_endpoint_returns_https(self):
         """Tests that /api/network/info/ returns HTTPS pairing URL by default."""
@@ -77,6 +77,6 @@ class TestSslService:
 
         assert data["success"] is True
         assert data["primary_url"].startswith("https://")
-        assert ":8443/mobile/" in data["primary_url"]
+        assert ":443/mobile/" in data["primary_url"]
         assert "https_primary_url" in data
         assert "http_primary_url" in data

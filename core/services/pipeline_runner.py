@@ -96,15 +96,30 @@ class PipelineRunner:
 
     def _run_worker(self, task_type: str, batch_id: Optional[str] = None):
         """Worker thread executing management commands."""
-        out_stream = _InMemoryLogStream(lambda msg: self._append_log(msg, "INFO"))
-        err_stream = _InMemoryLogStream(lambda msg: self._append_log(msg, "ERROR"))
+        def _handle_log_line(msg: str, level: str = "INFO"):
+            self._append_log(msg, level)
+            if "Phase 1:" in msg:
+                with self._lock:
+                    self._status["stage"] = "PRE_PAIRING"
+                    self._status["message"] = "Phase 1: Establishing physical pairs..."
+            elif "Phase 2:" in msg:
+                with self._lock:
+                    self._status["stage"] = "JOINT_VISION"
+                    self._status["message"] = "Phase 2: Running Dual-Stream Joint Vision..."
+            elif "Phase 3:" in msg:
+                with self._lock:
+                    self._status["stage"] = "SINGLE_VISION"
+                    self._status["message"] = "Phase 3: Running Single-Stream OCR..."
+
+        out_stream = _InMemoryLogStream(lambda msg: _handle_log_line(msg, "INFO"))
+        err_stream = _InMemoryLogStream(lambda msg: _handle_log_line(msg, "ERROR"))
 
         try:
             if task_type in ("full_pipeline", "vision"):
                 with self._lock:
-                    self._status["stage"] = "VISION_PROCESSING"
+                    self._status["stage"] = "PRE_PAIRING"
                     self._status["progress_pct"] = 25
-                    self._status["message"] = "Running YOLO plate detection & OCR..."
+                    self._status["message"] = "Starting Vision Pipeline..."
 
                 self._append_log("Executing vision detection & OCR pipeline...", "VISION")
                 vision_args = ["process_vision", "--save-crops", "--include-needs-review", "--reprocess-failed"]
@@ -115,7 +130,7 @@ class PipelineRunner:
 
             if task_type in ("full_pipeline", "matcher"):
                 with self._lock:
-                    self._status["stage"] = "PAIR_ASSOCIATION"
+                    self._status["stage"] = "ORDER_MATCHING"
                     self._status["progress_pct"] = 70
                     self._status["message"] = "Running pair association and order matching..."
 

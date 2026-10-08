@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional
 
 from django.conf import settings
 from django.utils import timezone
-from textual import work
+from textual import events, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -43,6 +43,8 @@ from core.tui.inspectors import InspectorPane, escape_markup, escape
 from core.models import (
     DailyStockLedger,
     InstallationKit,
+    SafeAuditScan,
+    StockBondTransfer,
     StockDelivery,
     StockDeliveryItem,
     StockDispatchScan,
@@ -63,17 +65,13 @@ class StockPane(Vertical):
         Binding("o", "open_opening_target_modal", "Opening / Target (O)"),
         Binding("p", "show_phone_scanner", "Phone Scanner (P)"),
         Binding("slash", "focus_scan_input", "Focus Scan (/)", show=False),
-        Binding("1", "mode_1", "Dispatch [1]", show=False),
-        Binding("2", "mode_2", "Movements [2]", show=False),
-        Binding("3", "mode_3", "Safe Audit [3]", show=False),
-        Binding("4", "mode_4", "Ledger [4]", show=False),
     ]
 
     MODES = [
-        ("mode-dispatch", "btn-mode-dispatch", "1. 📤 Dispatch"),
-        ("mode-movements", "btn-mode-movements", "2. 🔄 Movements"),
-        ("mode-audit", "btn-mode-audit", "3. 🔒 Safe Audit"),
-        ("mode-ledger", "btn-mode-ledger", "4. 📊 Ledger"),
+        ("mode-dispatch", "btn-mode-dispatch", "Dispatch"),
+        ("mode-movements", "btn-mode-movements", "Movements"),
+        ("mode-audit", "btn-mode-audit", "Safe Audit"),
+        ("mode-ledger", "btn-mode-ledger", "Ledger"),
     ]
 
     def __init__(self, target_date_suffix: Optional[str] = None, **kwargs):
@@ -95,10 +93,10 @@ class StockPane(Vertical):
             yield Button("▶", id="btn-stock-next-day", classes="stock-cmd-date-btn")
             yield Static(f"[bold cyan]Shift: {self.target_date_suffix}[/bold cyan]", id="lbl-stock-date-display")
 
-            yield Button("1 Dispatch", id="btn-mode-dispatch", classes="mode-btn -active")
-            yield Button("2 Movements", id="btn-mode-movements", classes="mode-btn")
-            yield Button("3 Safe Audit", id="btn-mode-audit", classes="mode-btn")
-            yield Button("4 Ledger", id="btn-mode-ledger", classes="mode-btn")
+            yield Button("Dispatch", id="btn-mode-dispatch", classes="mode-btn -active")
+            yield Button("Movements", id="btn-mode-movements", classes="mode-btn")
+            yield Button("Safe Audit", id="btn-mode-audit", classes="mode-btn")
+            yield Button("Ledger", id="btn-mode-ledger", classes="mode-btn")
 
             yield Select([("PSV White", "PSV"), ("PMO Yellow", "PMO")], id="sel-stock-category", value="PSV", allow_blank=False)
             yield Input(placeholder="Scan barcode or type plate (/)...", id="input-stock-scan")
@@ -108,7 +106,10 @@ class StockPane(Vertical):
             yield Button("📥 Export (E)", id="btn-stock-export")
 
         # 2. Universal 1-Line Status Strip & Feedback Alert
-        yield Static(id="stock-status-strip")
+        yield Static(
+            "Opening: [bold white]0[/bold white]  ·  Received: [bold cyan]0[/bold cyan]  ·  Dispatched: [bold yellow]0[/bold yellow]  ·  Installed: [bold yellow]0[/bold yellow]  ·  Closing: [bold white]0[/bold white]  ·  Physical: [bold cyan]0[/bold cyan]  ·  Unallocated: [bold green]0[/bold green]",
+            id="stock-status-strip",
+        )
         yield Static(
             "[bold green]⚡ READY FOR SCANNING:[/bold green] Scan plate or press [b]V[/b] to paste from Excel.",
             id="lbl-stock-instant-feedback",
@@ -168,6 +169,7 @@ class StockPane(Vertical):
 
     def on_mount(self) -> None:
         self._init_tables()
+        self.set_mode("mode-dispatch")
         self.action_refresh_stock()
 
     def _init_tables(self) -> None:
@@ -196,29 +198,60 @@ class StockPane(Vertical):
         tbl_rep.cursor_type = "row"
 
     # ------------------------------------------------------------------------
-    # Navigation & Mode Switching
+    # Navigation & Mode Switching (Key F / Click)
     # ------------------------------------------------------------------------
 
     def get_active_mode(self) -> str:
+        for m_id, b_id, _ in self.MODES:
+            try:
+                btn = self.query_one(f"#{b_id}", Button)
+                if "-active" in btn.classes:
+                    return m_id
+            except Exception:
+                pass
         try:
-            return self.query_one("#stock-content-switcher", ContentSwitcher).active or "mode-dispatch"
+            switcher = self.query_one("#stock-content-switcher", ContentSwitcher)
+            return switcher.current or getattr(switcher, "active", None) or "mode-dispatch"
         except Exception:
             return "mode-dispatch"
 
     def set_mode(self, mode_id: str) -> None:
         try:
             switcher = self.query_one("#stock-content-switcher", ContentSwitcher)
+            switcher.current = mode_id
             switcher.active = mode_id
-            for m_id, b_id, _ in self.MODES:
-                try:
-                    btn = self.query_one(f"#{b_id}", Button)
-                    if m_id == mode_id:
-                        btn.add_class("-active")
-                    else:
-                        btn.remove_class("-active")
-                except Exception:
-                    pass
-            self.query_one("#input-stock-scan", Input).focus()
+        except Exception:
+            pass
+
+        # Explicitly toggle display for all 4 containers to guarantee instant visual switch
+        for m_id, b_id, _ in self.MODES:
+            try:
+                btn = self.query_one(f"#{b_id}", Button)
+                if m_id == mode_id:
+                    btn.add_class("-active")
+                else:
+                    btn.remove_class("-active")
+            except Exception:
+                pass
+            try:
+                container = self.query_one(f"#{m_id}")
+                container.display = (m_id == mode_id)
+            except Exception:
+                pass
+
+        self._update_mode_feedback(mode_id)
+
+    def _update_mode_feedback(self, mode_id: str) -> None:
+        try:
+            lbl = self.query_one("#lbl-stock-instant-feedback", Static)
+            if mode_id == "mode-dispatch":
+                lbl.update("[bold green]⚡ DISPATCH MODE:[/bold green] Scan plate or press [b]V[/b] to paste from Excel. Press [b]F[/b] to cycle mode.")
+            elif mode_id == "mode-movements":
+                lbl.update("[bold cyan]🔄 MOVEMENTS MODE:[/bold cyan] Log deliveries, transfers or returns. Press [b]F[/b] to cycle mode.")
+            elif mode_id == "mode-audit":
+                lbl.update("[bold magenta]🔒 SAFE AUDIT MODE:[/bold magenta] Safe room physical count & audit. Press [b]F[/b] to cycle mode.")
+            elif mode_id == "mode-ledger":
+                lbl.update("[bold yellow]📊 LEDGER MODE:[/bold yellow] Press [b]O[/b] to edit Opening & Target. Press [b]F[/b] to cycle mode.")
         except Exception:
             pass
 
@@ -228,21 +261,40 @@ class StockPane(Vertical):
         mode_ids = [m[0] for m in self.MODES]
         idx = mode_ids.index(cur) if cur in mode_ids else 0
         next_idx = (idx + 1) % len(mode_ids) if forward else (idx - 1) % len(mode_ids)
-        self.set_mode(mode_ids[next_idx])
-        lbl = self.MODES[next_idx][2]
-        self.notify(f"Switched mode to: {lbl}")
+        target_mode = mode_ids[next_idx]
+        self.set_mode(target_mode)
+        lbl = dict((m[0], m[2]) for m in self.MODES).get(target_mode, target_mode)
+        self.notify(f"Mode: {lbl}")
+
+    def on_key(self, event: events.Key) -> None:
+        """Handles pane-level key navigation including F to cycle and Escape to unfocus input."""
+        if isinstance(self.app.focused, Input):
+            if event.key == "escape":
+                self.app.set_focus(None)
+                event.prevent_default()
+                event.stop()
+            return
+
+        if event.key.lower() == "f":
+            self.action_cycle_subtab()
+            event.prevent_default()
+            event.stop()
 
     def action_mode_1(self) -> None:
         self.set_mode("mode-dispatch")
+        self.notify("Mode: Dispatch")
 
     def action_mode_2(self) -> None:
         self.set_mode("mode-movements")
+        self.notify("Mode: Movements")
 
     def action_mode_3(self) -> None:
         self.set_mode("mode-audit")
+        self.notify("Mode: Safe Audit")
 
     def action_mode_4(self) -> None:
         self.set_mode("mode-ledger")
+        self.notify("Mode: Ledger")
 
     def action_focus_scan_input(self) -> None:
         try:
@@ -312,45 +364,71 @@ class StockPane(Vertical):
     def action_refresh_stock(self) -> None:
         """Reloads all tables, status strips, and summaries from database."""
         from core.services import stock_monitoring_service
+        recon = {}
         try:
-            recon = stock_monitoring_service.get_stock_reconciliation_summary(self.target_date_suffix)
+            recon = stock_monitoring_service.compute_daily_reconciliation(self.target_date_suffix)
             self._cached_recon = recon
-            self._render_dispatch_table()
-            self._render_movements_table()
-            self._render_stocktake_table()
-            self._render_ledger_table(recon)
-            self._update_status_strip()
         except Exception as exc:
-            self.notify(f"Error refreshing stock data: {exc}", severity="error")
+            self.notify(f"Error computing reconciliation: {exc}", severity="error")
+
+        try:
+            self._render_dispatch_table()
+        except Exception as exc:
+            self.notify(f"Error rendering dispatch table: {exc}", severity="error")
+
+        try:
+            self._render_movements_table()
+        except Exception as exc:
+            self.notify(f"Error rendering movements table: {exc}", severity="error")
+
+        try:
+            self._render_stocktake_table()
+        except Exception as exc:
+            self.notify(f"Error rendering stocktake table: {exc}", severity="error")
+
+        try:
+            self._render_ledger_table(recon)
+        except Exception as exc:
+            self.notify(f"Error rendering ledger table: {exc}", severity="error")
+
+        self._update_status_strip()
 
     def _update_status_strip(self, custom_message: Optional[str] = None) -> None:
         try:
             recon = self._cached_recon or {}
             tot = recon.get("total", {})
-            disp = tot.get("dispatched", 0)
-            pmo_disp = recon.get("pmo", {}).get("dispatched", 0)
-            psv_disp = recon.get("psv", {}).get("dispatched", 0)
-            closing = tot.get("closing_stock", 0)
-            variance = tot.get("variance", 0)
-            var_color = "green" if variance == 0 else ("yellow" if variance > 0 else "red")
+            pmo = recon.get("pmo", {})
+            psv = recon.get("psv", {})
 
-            sync_status = "⟳ Syncing..." if self._is_syncing else "✓ Ready"
+            opening = tot.get("opening", 0)
+            received = tot.get("received", 0)
+            dispatched = tot.get("dispatched", 0)
+            pmo_disp = pmo.get("dispatched", 0)
+            psv_disp = psv.get("dispatched", 0)
+            installed = tot.get("installed", 0)
+            closing = tot.get("closing_stock", 0)
+            physical = tot.get("physical_count", 0)
+            variance = tot.get("variance", 0)
+            unallocated = len(recon.get("unallocated_plates", []))
+
+            var_color = "green" if variance == 0 else ("yellow" if variance > 0 else "red")
+            var_str = f"({variance:+d})" if variance != 0 else "(0)"
+            unalloc_color = "red" if unallocated > 0 else "green"
+
+            # Minimalist one-line status strip adhering strictly to the redesign plan:
+            # Opening 1,200 · Received 0 · Dispatched 42 · Installed 38 · Closing 1,162 · Physical 1,160 (-2) · Unallocated 3
+            status_text = (
+                f"Opening: [bold white]{opening:,}[/bold white]  ·  "
+                f"Received: [bold cyan]{received:,}[/bold cyan]  ·  "
+                f"Dispatched: [bold yellow]{dispatched:,}[/bold yellow] (PSV: {psv_disp:,}, PMO: {pmo_disp:,})  ·  "
+                f"Installed: [bold yellow]{installed:,}[/bold yellow]  ·  "
+                f"Closing: [bold white]{closing:,}[/bold white]  ·  "
+                f"Physical: [bold cyan]{physical:,}[/bold cyan] [bold {var_color}]{var_str}[/bold {var_color}]  ·  "
+                f"Unallocated: [bold {unalloc_color}]{unallocated}[/bold {unalloc_color}]"
+            )
             if custom_message:
-                status_text = (
-                    f"Shift: [bold cyan]{self.target_date_suffix}[/bold cyan] │ "
-                    f"Dispatched: [bold yellow]{disp:,}[/bold yellow] (PSV: {psv_disp:,}, PMO: {pmo_disp:,}) │ "
-                    f"Book Closing: [bold white]{closing:,}[/bold white] │ "
-                    f"Variance: [bold {var_color}]{variance:+d}[/bold {var_color}] │ "
-                    f"[bold yellow]{custom_message}[/bold yellow]"
-                )
-            else:
-                status_text = (
-                    f"Shift: [bold cyan]{self.target_date_suffix}[/bold cyan] │ "
-                    f"Dispatched: [bold yellow]{disp:,}[/bold yellow] (PSV: {psv_disp:,}, PMO: {pmo_disp:,}) │ "
-                    f"Book Closing: [bold white]{closing:,}[/bold white] │ "
-                    f"Variance: [bold {var_color}]{variance:+d}[/bold {var_color}] │ "
-                    f"Sync: [dim]{sync_status}[/dim]"
-                )
+                status_text += f"  ·  [bold yellow]{custom_message}[/bold yellow]"
+
             self.query_one("#stock-status-strip", Static).update(status_text)
         except Exception:
             pass
@@ -409,8 +487,13 @@ class StockPane(Vertical):
 
         # Gather Deliveries
         deliveries = StockDelivery.objects.filter(
-            work_date_suffix=self.target_date_suffix
-        ).order_by("-received_at")[:50]
+            target_date_suffix=self.target_date_suffix
+        ).order_by("-created_at")[:50]
+
+        # Gather Bond Transfers
+        transfers = StockBondTransfer.objects.filter(
+            target_date_suffix=self.target_date_suffix
+        ).order_by("-created_at")[:50]
 
         # Gather Returns
         returns = StockReturnScan.objects.filter(
@@ -419,23 +502,42 @@ class StockPane(Vertical):
 
         row_idx = 1
         for d in deliveries:
-            t_str = d.received_at.strftime("%H:%M:%S") if d.received_at else "—"
+            t_str = d.created_at.strftime("%H:%M:%S") if d.created_at else "—"
             cat_badge = "[bold white on dark_blue] PSV [/]" if d.plate_category == "PSV" else "[bold black on gold1] PMO [/]"
             items = list(StockDeliveryItem.objects.filter(delivery=d).values_list("registration_number", flat=True)[:5])
             sample = ", ".join(items)
             if d.total_plates_count > 5:
                 sample += f" (+{d.total_plates_count - 5} more)"
             first_key = items[0] if items else str(d.id)
+            ref_str = d.paper_note_reference or d.delivery_number or "—"
             table.add_row(
                 str(row_idx),
                 f"[dim]{t_str}[/dim]",
                 "[bold green]INBOUND DELIVERY[/bold green]",
                 cat_badge,
-                "Supplier / Factory",
-                f"[cyan]{d.delivery_note_ref or '—'}[/cyan]",
+                escape(d.supplier or "Supplier / Factory"),
+                f"[cyan]{escape(ref_str)}[/cyan]",
                 f"[bold white]{d.total_plates_count:,}[/bold white]",
-                f"[dim]{sample or '—'}[/dim]",
+                f"[dim]{escape(sample or '—')}[/dim]",
                 key=first_key,
+            )
+            row_idx += 1
+
+        for t in transfers:
+            t_str = t.created_at.strftime("%H:%M:%S") if t.created_at else "—"
+            cat_badge = "[bold white on dark_blue] PSV [/]" if t.plate_category == "PSV" else "[bold black on gold1] PMO [/]"
+            lbl = "BOND TRANSFER IN" if t.transfer_type == "TRANSFER_IN" else "BOND TRANSFER OUT"
+            lbl_styled = f"[bold cyan]{lbl}[/bold cyan]" if t.transfer_type == "TRANSFER_IN" else f"[bold magenta]{lbl}[/bold magenta]"
+            table.add_row(
+                str(row_idx),
+                f"[dim]{t_str}[/dim]",
+                lbl_styled,
+                cat_badge,
+                escape(t.other_bond_name or "Other Bond"),
+                f"[cyan]{escape(t.transfer_number)}[/cyan]",
+                f"[bold white]{t.plates_count:,}[/bold white]",
+                "—",
+                key=t.transfer_number,
             )
             row_idx += 1
 
@@ -447,10 +549,10 @@ class StockPane(Vertical):
                 f"[dim]{t_str}[/dim]",
                 "[bold yellow]LINE RETURN[/bold yellow]",
                 cat_badge,
-                f"[yellow]{r.reason}[/yellow]",
+                f"[yellow]{escape(r.reason)}[/yellow]",
                 "—",
                 "1",
-                f"[bold yellow]{r.registration_number}[/bold yellow]",
+                f"[bold yellow]{escape(r.registration_number)}[/bold yellow]",
                 key=r.registration_number,
             )
             row_idx += 1
@@ -462,6 +564,46 @@ class StockPane(Vertical):
         tbl = self.query_one("#table-stocktake-results", DataTable)
         tbl.clear()
 
+        # 1. Check persistent SafeAuditScan for this shift date
+        audits = list(SafeAuditScan.objects.filter(work_date_suffix=self.target_date_suffix).order_by("-scanned_at")[:1000])
+        if audits:
+            audit_plates = [a.registration_number for a in audits]
+            kit_map = {
+                k.registration_number: k
+                for k in InstallationKit.objects.filter(registration_number__in=audit_plates)
+            }
+            target_codes = [f"IK-{p}" for p in audit_plates]
+            kit_map_by_code = {
+                k.kit_code: k
+                for k in InstallationKit.objects.filter(kit_code__in=target_codes)
+            }
+
+            for idx, a in enumerate(audits, 1):
+                p = a.registration_number
+                kit = kit_map.get(p) or kit_map_by_code.get(f"IK-{p}")
+                gps = (getattr(kit, "gps_tracker", "") or getattr(kit, "gps_tracker_id", "") or "—") if kit else "—"
+                front_ble = (getattr(kit, "front_tracker", "") or getattr(kit, "ble_beacon_front", "") or "—") if kit else "—"
+                rear_ble = (getattr(kit, "rear_tracker", "") or getattr(kit, "ble_beacon_rear", "") or "—") if kit else "—"
+                kit_code = (kit.kit_code or f"IK-{p}") if kit else f"IK-{p}"
+
+                if kit and (gps != "—" or front_ble != "—"):
+                    stat_badge = "[bold green]✓ AUDITED SAFE STOCK[/bold green]"
+                else:
+                    stat_badge = "[bold yellow]⏳ AWAITING ITMS LINK[/bold yellow]"
+
+                tbl.add_row(
+                    str(idx),
+                    f"[bold green]{p}[/bold green]",
+                    stat_badge,
+                    f"[white]{kit_code}[/white]",
+                    f"[cyan]{gps}[/cyan]",
+                    f"[dim]{front_ble}[/dim]",
+                    f"[dim]{rear_ble}[/dim]",
+                    key=p,
+                )
+            return
+
+        # 2. Check in-memory profiles from immediate paste/scan
         profiles = getattr(self, "_last_stocktake_profiles", None)
         unreg = getattr(self, "_last_unregistered_stocktake", None)
 
@@ -496,26 +638,25 @@ class StockPane(Vertical):
                     row_idx += 1
             return
 
-        # Default: show active safe room stock kits
-        kits = InstallationKit.objects.filter(status__iexact="New").order_by("-updated_at")[:1000]
-        if kits.exists():
-            for idx, kit in enumerate(kits, 1):
-                plate = kit.registration_number or (kit.kit_code.replace("IK-", "") if kit.kit_code else "—")
-                gps = getattr(kit, "gps_tracker", "") or getattr(kit, "gps_tracker_id", "") or "—"
-                front_ble = getattr(kit, "front_tracker", "") or getattr(kit, "ble_beacon_front", "") or "—"
-                rear_ble = getattr(kit, "rear_tracker", "") or getattr(kit, "ble_beacon_rear", "") or "—"
+        # 3. If no audit scan yet, check physical stock received via Inbound Deliveries for this shift
+        deliv_items = list(StockDeliveryItem.objects.filter(delivery__target_date_suffix=self.target_date_suffix).order_by("-created_at")[:200])
+        if deliv_items:
+            for idx, item in enumerate(deliv_items, 1):
+                p = item.registration_number
                 tbl.add_row(
                     str(idx),
-                    f"[bold green]{plate}[/bold green]",
-                    "[bold green]✓ SAFE ROOM STOCK[/bold green]",
-                    f"[white]{kit.kit_code or '—'}[/white]",
-                    f"[cyan]{gps}[/cyan]",
-                    f"[dim]{front_ble}[/dim]",
-                    f"[dim]{rear_ble}[/dim]",
-                    key=plate,
+                    f"[bold cyan]{p}[/bold cyan]",
+                    "[bold cyan]✓ INBOUND DELIVERY[/bold cyan]",
+                    item.kit_code or f"IK-{p}",
+                    item.plate_serial or "—",
+                    "—",
+                    "—",
+                    key=p,
                 )
-        else:
-            tbl.add_row("—", "No stock audits recorded yet.", "Click '📋 Paste (V)' to run safe room audit", "—", "—", "—", "—")
+            return
+
+        # 4. Default empty state - never display un-scanned ITMS cloud kits
+        tbl.add_row("—", "No physical stock audited for this shift yet.", "Scan plate (/) or press [V] to paste Safe Room physical audit", "—", "—", "—", "—")
 
     def _render_ledger_table(self, recon: Dict[str, Any]) -> None:
         table = self.query_one("#table-stock-report", DataTable)
@@ -751,12 +892,19 @@ class StockPane(Vertical):
     def _handle_audit_scan(self, raw_val: str, input_widget: Input) -> None:
         """Stages a single scanned plate into Safe Room physical audit."""
         from core.services import stock_monitoring_service
+        from core.models import SafeAuditScan
         plate = stock_monitoring_service.extract_single_plate(raw_val)
         if not plate:
             self.notify(f"⚠️ Invalid plate format: '{raw_val}'", severity="warning")
             input_widget.value = ""
             input_widget.focus()
             return
+
+        if not self._staged_audit:
+            self._staged_audit = list(
+                SafeAuditScan.objects.filter(work_date_suffix=self.target_date_suffix)
+                .values_list("registration_number", flat=True)
+            )
 
         if plate in self._staged_audit:
             self.notify(f"⚠️ Duplicate audit scan: Plate {plate} already recorded!", severity="warning")
@@ -960,13 +1108,14 @@ class StockPane(Vertical):
         plates_str = "\n".join(self._staged_movements)
         try:
             if m_type == "DELIVERY":
-                res = stock_monitoring_service.record_inbound_delivery(
+                res = stock_monitoring_service.record_delivery(
+                    delivery_number=ref or stock_monitoring_service.generate_delivery_note_reference(self.target_date_suffix),
+                    supplier=partner or "Factory / Central Depot",
                     plates=plates_str,
                     plate_category=category,
-                    delivery_note_ref=ref,
                     target_date_suffix=self.target_date_suffix,
                 )
-                self.notify(f"✓ Recorded delivery of {res.get('plates_count')} {category} plates ({res.get('new_kits_created')} new kits created)!", severity="information")
+                self.notify(f"✓ Recorded delivery of {res.get('plates_count')} {category} plates ({res.get('created_kits_count', 0)} new kits created)!", severity="information")
             elif m_type in ("TRANSFER_IN", "TRANSFER_OUT"):
                 lbl = "Transfer In" if m_type == "TRANSFER_IN" else "Transfer Out"
                 res = stock_monitoring_service.record_bond_transfer(
@@ -1025,7 +1174,7 @@ class StockPane(Vertical):
             return
         cnt = int(raw)
         try:
-            stock_monitoring_service.set_manual_physical_count(cnt, self.target_date_suffix)
+            stock_monitoring_service.set_physical_count(cnt, self.target_date_suffix)
             self.notify(f"✓ Updated physical safe stock count to {cnt:,} plates!", severity="information")
             self.action_refresh_stock()
         except Exception as exc:
@@ -1081,17 +1230,21 @@ class StockPane(Vertical):
     @work(exclusive=True, thread=True)
     def _run_sync_worker(self) -> None:
         try:
-            from core.services import kit_provisioning_service
-            res = kit_provisioning_service.sync_and_provision_warehouse_kits(
-                target_date_suffix=None,
-                sync_itms=True,
-                max_pages=100,
-            )
-            synced = res.get("itms_kits_synced", 0)
-            created = res.get("kits_created", 0)
-            updated = res.get("kits_updated", 0)
-            total = res.get("new_kits_ready_count", 0)
-            msg = f"✓ Sync Complete: {synced} ITMS kits ({created} new, {updated} updated). Ready in stock: {total:,}."
+            from core.services import stock_monitoring_service, order_sync
+            # 1. Sync active orders for this shift so dispatches can link to orders
+            try:
+                sync_svc = order_sync.OrderSyncService()
+                sync_svc.sync_active_orders(max_pages=15)
+            except Exception:
+                pass
+
+            # 2. Gather physical plates at this bond for this shift
+            physical_plates = stock_monitoring_service.get_physical_bond_plates(self.target_date_suffix)
+
+            # 3. Targeted ITMS search and sync specifically for physical plates
+            res = stock_monitoring_service.enrich_physical_plates_with_itms(physical_plates)
+            enriched = res.get("total_found", res.get("created", 0) + res.get("updated", 0))
+            msg = f"✓ Physical Stock Sync Complete: {len(physical_plates)} bond plates verified ({enriched} enriched with ITMS hardware details)."
             self.app.call_from_thread(self.notify, msg, severity="information")
             self.app.call_from_thread(self.action_refresh_stock)
         except Exception as exc:
@@ -1160,13 +1313,13 @@ class StockPane(Vertical):
         elif btn_id == "btn-stock-today":
             self.action_today()
         elif btn_id == "btn-mode-dispatch":
-            self.set_mode("mode-dispatch")
+            self.action_mode_1()
         elif btn_id == "btn-mode-movements":
-            self.set_mode("mode-movements")
+            self.action_mode_2()
         elif btn_id == "btn-mode-audit":
-            self.set_mode("mode-audit")
+            self.action_mode_3()
         elif btn_id == "btn-mode-ledger":
-            self.set_mode("mode-ledger")
+            self.action_mode_4()
         elif btn_id == "btn-stock-paste":
             self.action_paste_clipboard()
         elif btn_id == "btn-stock-sync":

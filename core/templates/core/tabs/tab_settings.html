@@ -110,10 +110,13 @@
                     <span class="settings-label-title">Reconciliation CSV Export Directory</span>
                     <span class="settings-label-desc">Directory where timestamped shift reconciliation spreadsheets and dockets are written.</span>
                 </div>
-                <input type="text" id="settings-export-dir-input"
-                       value="{{ user_settings.sync_default_export_directory.value|default:'exports' }}"
-                       style="width: 220px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem; font-family:var(--font-mono);"
-                       onchange="updateSetting('sync.default_export_directory', this.value.trim())">
+                <div style="display:flex; gap:6px;">
+                    <input type="text" id="settings-export-dir-input"
+                           value="{{ user_settings.sync_default_export_directory.value|default:'exports' }}"
+                           style="width: 220px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem; font-family:var(--font-mono);"
+                           onchange="updateSetting('sync.default_export_directory', this.value.trim())">
+                    <button class="btn btn-secondary" style="padding: 6px 10px;" onclick="browseGenericPath('settings-export-dir-input', 'folder', 'Select Export Directory', 'sync.default_export_directory')" title="Browse for folder...">📁</button>
+                </div>
             </div>
         </div>
 
@@ -431,10 +434,13 @@
                         <span class="settings-label-title">YOLOv8 / YOLOv11 Model Weights</span>
                         <span class="settings-label-desc">Neural detector checkpoint (.pt / .onnx) for vehicle license plate localization.</span>
                     </div>
-                    <input type="text" id="input-dev-yolo-weights"
-                           value="{{ developer_settings.vision_yolo_weights.value|default:'models/license-plate-finetune-v1n.pt' }}"
-                           style="width: 260px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem; font-family:var(--font-mono);"
-                           onchange="updateSetting('vision.yolo_weights', this.value.trim())">
+                    <div style="display:flex; gap:6px;">
+                        <input type="text" id="input-dev-yolo-weights"
+                               value="{{ developer_settings.vision_yolo_weights.value|default:'models/license-plate-finetune-v1n.pt' }}"
+                               style="width: 260px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem; font-family:var(--font-mono);"
+                               onchange="updateSetting('vision.yolo_weights', this.value.trim())">
+                        <button class="btn btn-secondary" style="padding: 6px 10px;" onclick="browseGenericPath('input-dev-yolo-weights', 'file', 'Select YOLO Weights Model', 'vision.yolo_weights')" title="Browse for model file...">📁</button>
+                    </div>
                 </div>
 
                 <div class="settings-row">
@@ -497,6 +503,51 @@
                            value="{{ developer_settings.storage_vault_retention_days.value|default:7 }}"
                            style="width: 80px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
                            onchange="updateSetting('storage.vault_retention_days', parseInt(this.value, 10))">
+                </div>
+            </div>
+
+            <!-- Card 2F: Testing & Simulation (Submission Backend) -->
+            <div class="settings-card">
+                <div class="settings-card-header">
+                    <div class="settings-card-title">
+                        <span>🧪 Testing &amp; Simulation Backend</span>
+                    </div>
+                    <span class="badge badge-yellow">Simulation</span>
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">ITMS Submission Backend</span>
+                        <span class="settings-label-desc">Switch between real API submissions or simulated stubs (live, stub).</span>
+                    </div>
+                    <select id="input-dev-submission-backend"
+                            style="padding: 6px 12px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                            onchange="updateSetting('submission.backend', this.value)">
+                        <option value="live" {% if developer_settings.submission_backend.value == 'live' %}selected{% endif %}>Live API</option>
+                        <option value="stub" {% if developer_settings.submission_backend.value == 'stub' %}selected{% endif %}>Stub (Simulated)</option>
+                    </select>
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">Simulated Latency (ms)</span>
+                        <span class="settings-label-desc">Artificial delay for stub backend to simulate network lag.</span>
+                    </div>
+                    <input type="number" id="input-dev-sim-latency" min="0" max="10000" step="100"
+                           value="{{ developer_settings.simulation_latency_ms.value|default:0 }}"
+                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateSetting('simulation.latency_ms', parseInt(this.value, 10))">
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-label-group">
+                        <span class="settings-label-title">Failure Injection Rate (%)</span>
+                        <span class="settings-label-desc">Percentage of stub requests that intentionally fail (0-100).</span>
+                    </div>
+                    <input type="number" id="input-dev-fail-rate" min="0" max="100"
+                           value="{{ developer_settings.simulation_failure_rate.value|default:0 }}"
+                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateSetting('simulation.failure_rate', parseInt(this.value, 10))">
                 </div>
             </div>
 

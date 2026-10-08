@@ -5,19 +5,16 @@
         <div class="itms-subview-bar">
             <div class="itms-subview-tabs">
                 <button class="itms-subview-btn active" id="btn-sub-connect" onclick="switchItmsSubview('CONNECT')">
-                    <span>🔑 Connect Account</span>
+                    <span>🔑 <span>Connect</span></span>
                 </button>
                 <button class="itms-subview-btn" id="btn-sub-orders" onclick="switchItmsSubview('ORDERS')">
-                    <span>📥 Active Orders</span>
-                    <span style="font-size:0.68rem; color:var(--ug-text-dim);">(/index)</span>
+                    <span>📥 <span>Orders</span></span>
                 </button>
                 <button class="itms-subview-btn" id="btn-sub-archive" onclick="switchItmsSubview('ARCHIVE')">
-                    <span>🏛️ Completed Archive</span>
-                    <span style="font-size:0.68rem; color:var(--ug-text-dim);">(/archive)</span>
+                    <span>🏛️ <span>Archive</span></span>
                 </button>
                 <button class="itms-subview-btn" id="btn-sub-kits" onclick="switchItmsSubview('KITS')">
-                    <span>📦 Installation Kits</span>
-                    <span style="font-size:0.68rem; color:var(--ug-text-dim);">(/installation-kits)</span>
+                    <span>📦 <span>Kits</span></span>
                 </button>
             </div>
 
@@ -160,7 +157,10 @@
             <!-- 35% Live Inspector Panel (Hardware & Photo Links - Zero forced download!) -->
             <div class="itms-inspector-panel" id="itms-inspector-panel">
                 <div class="inspector-header">
-                    <div class="inspector-plate-hero" id="itms-insp-plate">SELECT AN ORDER</div>
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                        <div class="inspector-plate-hero" id="itms-insp-plate">SELECT AN ORDER</div>
+                        <button class="btn btn-secondary mobile-only-btn" onclick="closeItmsMobileInspector()" style="display:none; padding:4px 12px; font-size:0.8rem; border-color:var(--ug-yellow); color:var(--ug-yellow);">◀ Back</button>
+                    </div>
                     <div class="inspector-order-num" id="itms-insp-order">Click an order on the left to inspect telematics & photo links</div>
                 </div>
 

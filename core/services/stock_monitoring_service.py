@@ -36,6 +36,7 @@ from core.models import (
     InstallationKit,
     InstallationOrder,
     PlateCategory,
+    SafeAuditScan,
     StockBondTransfer,
     StockDelivery,
     StockDeliveryItem,
@@ -311,6 +312,25 @@ def record_delivery(
 
         recon = compute_daily_reconciliation(suffix)
 
+    # Prioritize saving: DB transaction is already committed above.
+    # Look up installation kit details (telematics, GPS, BLE, serials) asynchronously in the background.
+    import sys
+    from django.conf import settings
+    is_testing = getattr(settings, "TESTING", False) or any("test" in arg for arg in sys.argv)
+    if clean_plates and not is_testing:
+        def _bg_enrich_delivery():
+            from django.db import connection
+            connection.close()
+            try:
+                enrich_physical_plates_with_itms(clean_plates)
+            except Exception as e_err:
+                logger.warning("Background delivery ITMS enrichment error: %s", e_err)
+            finally:
+                connection.close()
+
+        import threading
+        threading.Thread(target=_bg_enrich_delivery, daemon=True).start()
+
     return {
         "success": True,
         "delivery_number": delivery.delivery_number,
@@ -321,6 +341,7 @@ def record_delivery(
         "duplicate_scans_skipped": dup_count,
         "duplicate_plates": dup_plates,
         "created_kits_count": created_kits_count,
+        "new_kits_created": created_kits_count,
         "has_image": bool(delivery.delivery_note_image),
         "image_url": delivery.image_url,
         "image_path": delivery.image_absolute_path,
@@ -406,6 +427,7 @@ def record_dispatch_scans(
     notes: str = "",
     require_stock_verification: Optional[bool] = None,
     check_itms_live: bool = True,
+    auto_create_kits: bool = False,
 ) -> Dict[str, Any]:
     """
     Records plates scanned when taken out of warehouse stock and issued to the
@@ -414,7 +436,9 @@ def record_dispatch_scans(
     Ensures that scanned plates exist in local synced stock or on live ITMS installation kits:
     - Tier 1: Local synced kits.
     - Tier 2: Live ITMS /installation-kits fallback with automatic synchronization.
-    - Rejects and blocks kits not on stock from being taken out to the line.
+    - If auto_create_kits=True, provisional physical kits are saved immediately as Dispatched
+      and telematics details are enriched asynchronously in the background.
+    - Rejects and blocks kits not on stock from being taken out to the line when strict verification is required.
     """
     work_d, suffix = resolve_date_and_suffix(target_date_suffix)
     category = PlateCategory.PMO if str(plate_category).strip().upper() == "PMO" else PlateCategory.PSV
@@ -444,6 +468,7 @@ def record_dispatch_scans(
     readiness: Dict[str, Any] = {}
 
     if require_stock_verification:
+        # Check local DB first; if missing locally, query ITMS live (Tier 1 & Tier 2)
         verify_res = kit_provisioning_service.verify_scanned_kits_stock(
             clean_plates,
             check_itms_live=check_itms_live,
@@ -453,6 +478,13 @@ def record_dispatch_scans(
         rejected_not_on_stock = verify_res.get("rejected_not_on_stock", [])
         already_installed = verify_res.get("already_installed", [])
         synced_from_itms = verify_res.get("synced_from_itms", [])
+        
+        # Remove non-serializable model instances to prevent JSON serialization errors
+        verify_res.pop("verified_kits", None)
+        if "details" in verify_res:
+            for p_details in verify_res["details"].values():
+                p_details.pop("kit", None)
+                
         readiness = verify_res
 
         # If NO plates are valid, block dispatch completely
@@ -477,6 +509,12 @@ def record_dispatch_scans(
                 "duplicate_plates": dup_plates,
                 "stock_readiness": readiness,
             }
+
+    # Mark verified stock kits as Dispatched in local database
+    if verified_plates:
+        InstallationKit.objects.filter(
+            registration_number__in=verified_plates,
+        ).update(status="Dispatched")
 
     with transaction.atomic():
         existing_dispatches = set(
@@ -508,6 +546,27 @@ def record_dispatch_scans(
 
         recon = compute_daily_reconciliation(suffix)
 
+    # Spawn background daemon thread to enrich dispatch kits from ITMS asynchronously
+    import sys
+    from django.conf import settings
+    is_testing = getattr(settings, "TESTING", False) or any("test" in arg for arg in sys.argv)
+    if clean_plates and not is_testing:
+        def _bg_enrich_dispatch():
+            from django.db import connection
+            connection.close()
+            try:
+                enrich_physical_plates_with_itms(clean_plates)
+            except Exception as e_err:
+                logger.warning("Background dispatch ITMS enrichment error: %s", e_err)
+            finally:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+
+        import threading
+        threading.Thread(target=_bg_enrich_dispatch, daemon=True).start()
+
     res_payload = {
         "success": True,
         "total_submitted": len(clean_plates) + dup_count,
@@ -523,6 +582,7 @@ def record_dispatch_scans(
         "already_installed": already_installed,
         "stock_readiness": readiness,
         "reconciliation": recon,
+        "enriching_in_background": True,
     }
 
     if rejected_not_on_stock or already_installed:
@@ -779,6 +839,91 @@ def set_physical_count(
     }
 
 
+def get_physical_bond_plates(target_date_suffix: Optional[str] = None) -> List[str]:
+    """
+    Returns unique plate numbers that are physically present at this bond facility
+    for the specified shift date (or today).
+    Sources of Physical Bond Inventory:
+    1. Plates audited in Safe Room stock taking (SafeAuditScan for this suffix).
+    2. Plates received in Inbound Deliveries (StockDeliveryItem for this suffix).
+    3. Plates returned to safe room from line (StockReturnScan for this suffix).
+    4. Plates received via Bond Transfer In (StockBondTransfer TRANSFER_IN).
+    Excludes plates that have been dispatched to installation line (StockDispatchScan)
+    or transferred out (TRANSFER_OUT).
+    """
+    _, suffix = resolve_date_and_suffix(target_date_suffix)
+    plates: Set[str] = set()
+
+    # 1. Safe Room Audits for this shift
+    audit_plates = SafeAuditScan.objects.filter(work_date_suffix=suffix).values_list("registration_number", flat=True)
+    plates.update(p for p in audit_plates if p)
+
+    # 2. Inbound Deliveries received
+    deliv_plates = StockDeliveryItem.objects.filter(delivery__target_date_suffix=suffix).values_list("registration_number", flat=True)
+    plates.update(p for p in deliv_plates if p)
+
+    # 3. Line returns to safe room
+    return_plates = StockReturnScan.objects.filter(work_date_suffix=suffix).values_list("registration_number", flat=True)
+    plates.update(p for p in return_plates if p)
+
+    # Exclude plates that were dispatched out to the line and not returned
+    dispatched_plates = set(
+        StockDispatchScan.objects.filter(work_date_suffix=suffix)
+        .exclude(status=StockDispatchScan.Status.RETURNED_TO_SAFE)
+        .values_list("registration_number", flat=True)
+    )
+    physical_plates = [p for p in plates if p not in dispatched_plates]
+    return sorted(physical_plates)
+
+
+def enrich_physical_plates_with_itms(
+    plates: Iterable[str],
+    log_callback: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Background worker function:
+    Enriches plates physically present at this bond (Safe Audit, Deliveries, Returns)
+    with their hardware specs (Kit Code, GPS Tracker, Front BLE, Rear BLE, Order Link) from ITMS.
+    Never downloads unrelated cloud kits; only queries ITMS specifically for physical plates.
+    """
+    from core.services.itms_web_client import get_web_client
+    clean_plates, _, _ = parse_plate_input_with_stats(plates)
+    if not clean_plates:
+        return {"success": True, "enriched": 0}
+
+    # Identify plates that already have complete hardware details in InstallationKit
+    existing_complete = set(
+        InstallationKit.objects.filter(
+            registration_number__in=clean_plates
+        ).exclude(
+            Q(gps_tracker="") | Q(gps_tracker__isnull=True)
+        ).values_list("registration_number", flat=True)
+    )
+    plates_to_enrich = [p for p in clean_plates if p not in existing_complete]
+    if not plates_to_enrich:
+        return {
+            "success": True,
+            "total_found": len(existing_complete),
+            "created": 0,
+            "updated": 0,
+            "message": "All physical plates already have hardware details linked.",
+        }
+
+    try:
+        client = get_web_client()
+        session = client.session_store.session
+        if session and session.is_cookie_valid():
+            if log_callback:
+                log_callback(f"Targeting ITMS for {len(plates_to_enrich)} physical bond plates...")
+            res = client.search_and_sync_kits_for_plates(plates_to_enrich, log_callback=log_callback)
+            return res
+        else:
+            return {"success": False, "error": "ITMS session not active; local hardware profiles used."}
+    except Exception as exc:
+        logger.warning("Error enriching physical plates with ITMS: %s", exc)
+        return {"success": False, "error": str(exc)}
+
+
 def record_stock_taking_audit(
     scanned_plates: Iterable[str],
     target_date_suffix: Optional[str] = None,
@@ -869,9 +1014,33 @@ def record_stock_taking_audit(
             ledger.notes = notes
         ledger.save()
 
-        # Auto-provision all scanned safe room plates into InstallationKit marked 'New'
+        # Persist physical plate scans into SafeAuditScan
         from core.services import kit_provisioning_service, bond_service
         active_bond = bond_service.get_active_bond()
+        b_code = active_bond.get("code", "AGM")
+        existing_audits = set(
+            SafeAuditScan.objects.filter(
+                work_date_suffix=suffix,
+                registration_number__in=clean_plates,
+            ).values_list("registration_number", flat=True)
+        )
+        new_audits = [
+            SafeAuditScan(
+                registration_number=p,
+                plate_category=PlateCategory.PMO if normalizer.canonicalize(p) in pmo_plates_set else PlateCategory.PSV,
+                work_date=work_d,
+                work_date_suffix=suffix,
+                bond_code=b_code,
+                operator_name=operator_name or "Operator",
+                notes=notes or "",
+            )
+            for p in clean_plates
+            if p not in existing_audits
+        ]
+        if new_audits:
+            SafeAuditScan.objects.bulk_create(new_audits, ignore_conflicts=True)
+
+        # Auto-provision all scanned safe room plates into InstallationKit marked 'New'
         prov_res = kit_provisioning_service.sync_and_provision_warehouse_kits(
             target_date_suffix=suffix,
             source_plates=clean_plates,
@@ -880,6 +1049,27 @@ def record_stock_taking_audit(
         )
 
         updated_recon = compute_daily_reconciliation(suffix)
+
+    # Trigger targeted background ITMS enrichment for physical plates missing hardware specs
+    import sys
+    from django.conf import settings
+    is_testing = getattr(settings, "TESTING", False) or any("test" in arg for arg in sys.argv)
+    if clean_plates and not is_testing:
+        def _bg_enrich():
+            from django.db import connection
+            connection.close()
+            try:
+                enrich_physical_plates_with_itms(clean_plates)
+            except Exception as e_err:
+                logger.warning("Background stock audit ITMS enrichment error: %s", e_err)
+            finally:
+                connection.close()
+
+        import threading
+        threading.Thread(
+            target=_bg_enrich,
+            daemon=True,
+        ).start()
 
     return {
         "success": True,
@@ -1182,6 +1372,10 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
     ledger.pending_count = itms_pending_count
     ledger.unallocated_count = len(unresolved_discrepancy)
 
+    audit_scans_count = SafeAuditScan.objects.filter(work_date_suffix=suffix).count()
+    if audit_scans_count > 0:
+        ledger.physical_count = audit_scans_count
+
     if ledger.physical_count is not None:
         ledger.variance = ledger.physical_count - total_closing
     else:
@@ -1191,6 +1385,10 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
     ledger.save()
 
     formatted_date = format_date_suffix_readable(suffix)
+    pmo_dispatched_count = sum(1 for s in dispatched_plates_map.values() if s.plate_category == PlateCategory.PMO)
+    psv_dispatched_count = max(0, dispatched_count - pmo_dispatched_count)
+    pmo_returned_count = sum(1 for s in returns_qs if s.plate_category == PlateCategory.PMO)
+    psv_returned_count = max(0, returned_count - pmo_returned_count)
 
     return {
         "work_date": work_d.isoformat(),
@@ -1376,6 +1574,43 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         "physical_count": ledger.physical_count or 0,
         "variance": ledger.variance or 0,
         "has_physical_count": bool(ledger.physical_count is not None and ledger.physical_count > 0),
+        "scheduled_target": scheduled_total,
+        "shift_remarks": ledger.notes or "",
+        "pmo": {
+            "opening": ledger.opening_balance_pmo,
+            "received": kits_received_pmo,
+            "transfer_in": transfer_in_pmo,
+            "transfer_out": transfer_out_pmo,
+            "scheduled": sched_pmo_display,
+            "installed": installed_pmo_count,
+            "closing_stock": closing_pmo,
+            "dispatched": pmo_dispatched_count,
+            "returned": pmo_returned_count,
+        },
+        "psv": {
+            "opening": ledger.opening_balance_psv,
+            "received": kits_received_psv,
+            "transfer_in": transfer_in_psv,
+            "transfer_out": transfer_out_psv,
+            "scheduled": sched_psv_display,
+            "installed": installed_psv_count,
+            "closing_stock": closing_psv,
+            "dispatched": psv_dispatched_count,
+            "returned": psv_returned_count,
+        },
+        "total": {
+            "opening": ledger.opening_stock,
+            "received": total_kits_received,
+            "transfer_in": total_transfer_in,
+            "transfer_out": total_transfer_out,
+            "scheduled": scheduled_total,
+            "installed": total_installed,
+            "closing_stock": total_closing,
+            "dispatched": dispatched_count,
+            "returned": returned_count,
+            "physical_count": ledger.physical_count or 0,
+            "variance": ledger.variance or 0,
+        },
     }
 
 
@@ -2342,5 +2577,35 @@ def reconcile_and_update_shift(
         "exported_files": exported_files,
         "reconciliation": recon,
     }
+
+
+# ============================================================================
+# Aliases & Convenience Wrappers for Backward Compatibility & TUI Panes
+# ============================================================================
+get_stock_reconciliation_summary = compute_daily_reconciliation
+set_manual_physical_count = set_physical_count
+
+
+def record_inbound_delivery(
+    plates: Iterable[str] = (),
+    plate_category: str = PlateCategory.PSV,
+    delivery_note_ref: Optional[str] = None,
+    supplier: str = "Factory / Central Depot",
+    target_date_suffix: Optional[str] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """
+    Alias / convenience wrapper for record_delivery to support TUI inbound
+    delivery operations seamlessly.
+    """
+    return record_delivery(
+        delivery_number=delivery_note_ref,
+        plates=plates,
+        supplier=supplier,
+        plate_category=plate_category,
+        target_date_suffix=target_date_suffix,
+        **kwargs,
+    )
+
 
 

@@ -1,3 +1,10 @@
+
+.mobile-util-row, .mobile-primary-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
 /* ============================================================================
    TAB 3: INGESTION & BATCHES (Full-Scale Stream & Expandable Headers)
    Features: Full-width batches feed, accordion minimization, full-scale photos
@@ -98,6 +105,7 @@
     border-radius: var(--radius-lg);
     overflow: hidden;
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    flex-shrink: 0;
 }
 
 .batch-stream-card.is-expanded {
@@ -443,4 +451,90 @@
     display: none;
     align-items: center;
     gap: 6px;
+}
+
+/* Mobile Responsive Overrides for Batches */
+@media (max-width: 768px) {
+
+    /* Hide descriptive text on mobile */
+    .desktop-only-text {
+        display: none !important;
+    }
+    
+    .batches-header-bar {
+        padding: 8px 10px;
+    }
+
+    /* Shrink the title on mobile */
+    .batches-header-bar h3 span:first-child {
+        font-size: 0.9rem;
+    }
+
+    /* Group action buttons vs utility buttons */
+    .mobile-util-row {
+        display: none !important; /* Hide expand/collapse all on phone to save space */
+    }
+    
+    .mobile-primary-actions {
+        display: flex;
+        gap: 8px;
+        width: 100%;
+    }
+    .mobile-primary-actions .btn {
+        flex: 1;
+        padding: 6px;
+        font-size: 0.75rem;
+    }
+
+    /* Hide the scope filter bar behind a scroll on mobile, or make it extremely compact */
+    .scope-filter-bar {
+        padding: 4px 6px;
+        flex-direction: row;
+        align-items: center;
+    }
+    .scope-filter-label {
+        display: none !important;
+    }
+    .scope-summary-tag {
+        display: none !important;
+    }
+    .scope-pills-group {
+        width: 100%;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        padding-bottom: 2px;
+    }
+    .scope-pill-btn {
+        white-space: nowrap;
+        flex: 0 0 auto;
+        padding: 4px 8px;
+        font-size: 0.7rem;
+    }
+
+    .batches-header-bar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+    }
+    .batches-toolbar-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        width: 100%;
+    }
+    .batch-search-field {
+        width: 100% !important;
+        box-sizing: border-box;
+    }
+    
+    .batch-stream-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .batch-header-right {
+        width: 100%;
+        justify-content: space-between;
+        margin-top: 8px;
+    }
 }

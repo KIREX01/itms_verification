@@ -91,7 +91,7 @@ Examples:
 """)
 
 
-def launch_web(extra_args=None, port=8000):
+def launch_web(extra_args=None, port=443):
     """Launches the Django Web Operator Console with automatic browser pop-up."""
     if extra_args:
         for i, a in enumerate(extra_args):
@@ -102,7 +102,7 @@ def launch_web(extra_args=None, port=8000):
                     pass
 
     if is_port_in_use(port):
-        url = f"http://127.0.0.1:{port}/"
+        url = f"https://127.0.0.1:{port}/"
         print(f"[✓] ITMS Web Console is already running at {url}")
         print("[*] Opening browser...")
         import webbrowser
@@ -114,17 +114,50 @@ def launch_web(extra_args=None, port=8000):
         django.setup()
         from django.core.management import execute_from_command_line
 
-        cmd = ["manage.py", "run_web"]
+        cmd = ["manage.py", "runserver_plus", "0.0.0.0:443", "--cert-file", "cert.crt"]
         if extra_args:
-            cmd.extend(extra_args)
+            # Filter out custom args that runserver_plus doesn't understand natively,
+            # or map them appropriately if needed. For now just extend.
+            cmd.extend([a for a in extra_args if a not in ("--ssl", "-s") and not a.startswith("--port")])
         execute_from_command_line(cmd)
     except KeyboardInterrupt:
         print("\n[+] Web server stopped cleanly.")
         sys.exit(0)
 
 
+def is_service_installed(service_name="ITMSVerificationService"):
+    if sys.platform != "win32":
+        return False
+    import subprocess
+    try:
+        res = subprocess.run(["sc", "query", service_name], capture_output=True, text=True, creationflags=0x08000000)
+        return "SERVICE_NAME" in res.stdout
+    except Exception:
+        return False
+
+
 def start_daemon(extra_args=None, port=8000):
     """Starts the Web Console as an independent background daemon."""
+    if is_service_installed():
+        import subprocess
+        print("[*] Starting ITMSVerificationService Windows Service...")
+        res = subprocess.run(["net", "start", "ITMSVerificationService"], capture_output=True, text=True)
+        if res.returncode == 0 or "has already been started" in res.stdout or "has already been started" in res.stderr:
+            print("[+] ITMSVerificationService is running.")
+            return
+        elif "Access is denied" in res.stderr or "Access is denied" in res.stdout or "System error 5" in res.stderr or "System error 5" in res.stdout:
+            print("[!] Access denied. Elevating privileges to start service...")
+            try:
+                import ctypes
+                ctypes.windll.shell32.ShellExecuteW(None, "runas", "net", "start ITMSVerificationService", None, 1)
+                print("[+] UAC prompt launched to start the service.")
+                return
+            except Exception as e:
+                print(f"[!] Failed to elevate: {e}")
+        else:
+            print(f"[!] Failed to start service:\n{res.stdout}\n{res.stderr}")
+            return
+
     if extra_args:
         for i, a in enumerate(extra_args):
             if a in ("--port", "-p") and i + 1 < len(extra_args):
@@ -209,6 +242,23 @@ def start_daemon(extra_args=None, port=8000):
 
 def stop_server(extra_args=None):
     """Stops any running background Web Console server."""
+    if is_service_installed():
+        import subprocess
+        print("[*] Stopping ITMSVerificationService Windows Service...")
+        res = subprocess.run(["net", "stop", "ITMSVerificationService"], capture_output=True, text=True)
+        if res.returncode == 0 or "is not started" in res.stdout or "is not started" in res.stderr:
+            print("[+] ITMSVerificationService stopped.")
+        elif "Access is denied" in res.stderr or "Access is denied" in res.stdout or "System error 5" in res.stderr or "System error 5" in res.stdout:
+            print("[!] Access denied. Elevating privileges to stop service...")
+            try:
+                import ctypes
+                ctypes.windll.shell32.ShellExecuteW(None, "runas", "net", "stop ITMSVerificationService", None, 1)
+                print("[+] UAC prompt launched to stop the service.")
+            except Exception as e:
+                print(f"[!] Failed to elevate: {e}")
+        else:
+            print(f"[!] Failed to stop service:\n{res.stdout}\n{res.stderr}")
+
     pid_file = PROJECT_ROOT / ".itms_web.pid"
     stopped = False
 
@@ -441,7 +491,7 @@ def main():
             from core.version import __version__
             print(f"ITMS Verification Copilot v{__version__}")
         except (ImportError, AttributeError):
-            print("ITMS Verification Copilot v1.0.6")
+            print("ITMS Verification Copilot v1.0.7")
         return
 
     if first in ("start", "--daemon", "--bg", "-bg", "bg", "daemon"):

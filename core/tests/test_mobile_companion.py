@@ -51,11 +51,11 @@ class TestMobileCompanion:
         assert "type" in ips[0]
 
         # HTTPS mode (Default for secure mobile camera access)
-        info_https = network_service.get_mobile_connection_info(port=8080, ssl_port=8443, use_https=True)
+        info_https = network_service.get_mobile_connection_info(port=8080, ssl_port=443, use_https=True)
         assert info_https["success"] is True
-        assert info_https["ssl_port"] == 8443
+        assert info_https["ssl_port"] == 443
         assert "https://" in info_https["primary_url"]
-        assert ":8443/mobile/" in info_https["primary_url"]
+        assert ":443/mobile/" in info_https["primary_url"]
         assert len(info_https["candidate_urls"]) > 0
 
         # HTTP fallback mode
@@ -439,3 +439,102 @@ class TestMobileCompanion:
         ping_data = ping_resp.json()
         assert ping_data["batch_limit"] == 200
         assert "batch_photos" in ping_data
+
+    def test_uturn_walks_maintain_isolated_batches_and_prevent_cross_walk_repairing(self):
+        """
+        Verifies that successive U-Turn yard walks:
+        1. Create distinct IngestionBatch records per walk session (Batch #1, Batch #2).
+        2. Run association within each batch's isolated scope.
+        3. Never mix or re-pair photos from walk 1 with photos from walk 2.
+        """
+        upload_url = reverse("core:api_mobile_upload")
+        finish_url = reverse("core:api_mobile_uturn_finish")
+
+        # --- WALK 1 (Batch 1: 2 bikes: R1, R2, F2, F1) ---
+        session_1 = "UTURN-SESSION-A1"
+        for seq, ori, salt in [(1, "REAR", 15), (2, "REAR", 35), (2, "FRONT", 55), (1, "FRONT", 75)]:
+            img_bytes = _create_test_image_bytes(color=(salt, salt + 10, salt + 20))
+            f = io.BytesIO(img_bytes)
+            f.name = f"w1_{ori.lower()}_{seq}.jpg"
+            resp = self.client.post(upload_url, {
+                "photo": f,
+                "mode": "uturn",
+                "orientation": ori,
+                "sequence_number": str(seq),
+                "uturn_session_id": session_1,
+                "uturn_batch_index": "1",
+            })
+            assert resp.status_code == 200
+            assert resp.json()["success"] is True
+
+        # Finish Walk 1
+        finish_resp1 = self.client.post(
+            finish_url,
+            data=json.dumps({"uturn_session_id": session_1, "batch_index": 1}),
+            content_type="application/json",
+        )
+        assert finish_resp1.status_code == 200
+        batch1_id = finish_resp1.json()["batch_id"]
+        assert batch1_id is not None
+
+        # Verify batch 1 has 4 images
+        b1 = IngestionBatch.objects.get(batch_id=batch1_id)
+        assert b1.images.count() == 4
+        assert "U-Turn Walk Batch #1" in b1.source_label
+
+        # Verify walk 1 pairs are formed only within batch 1
+        w1_pairs = VehicleInstallationPair.objects.filter(
+            front_image__batch=b1,
+            rear_image__batch=b1,
+        )
+        assert w1_pairs.count() == 2
+
+        # --- WALK 2 (Batch 2: 2 bikes: R3, R4, F4, F3) ---
+        session_2 = "UTURN-SESSION-B2"
+        for seq, ori, salt in [(3, "REAR", 105), (4, "REAR", 125), (4, "FRONT", 145), (3, "FRONT", 165)]:
+            img_bytes = _create_test_image_bytes(color=(salt, salt + 10, salt + 20))
+            f = io.BytesIO(img_bytes)
+            f.name = f"w2_{ori.lower()}_{seq}.jpg"
+            resp = self.client.post(upload_url, {
+                "photo": f,
+                "mode": "uturn",
+                "orientation": ori,
+                "sequence_number": str(seq),
+                "uturn_session_id": session_2,
+                "uturn_batch_index": "2",
+            })
+            assert resp.status_code == 200
+            assert resp.json()["success"] is True
+
+        # Finish Walk 2
+        finish_resp2 = self.client.post(
+            finish_url,
+            data=json.dumps({"uturn_session_id": session_2, "batch_index": 2}),
+            content_type="application/json",
+        )
+        assert finish_resp2.status_code == 200
+        batch2_id = finish_resp2.json()["batch_id"]
+        assert batch2_id is not None
+        assert batch2_id != batch1_id
+
+        # Verify batch 2 has 4 images
+        b2 = IngestionBatch.objects.get(batch_id=batch2_id)
+        assert b2.images.count() == 4
+        assert "U-Turn Walk Batch #2" in b2.source_label
+
+        # Verify walk 2 pairs are strictly within batch 2
+        w2_pairs = VehicleInstallationPair.objects.filter(
+            front_image__batch=b2,
+            rear_image__batch=b2,
+        )
+        assert w2_pairs.count() == 2
+
+        # CRITICAL TEST: Zero cross-batch pairs exist!
+        cross_pairs = VehicleInstallationPair.objects.filter(
+            front_image__batch=b1,
+            rear_image__batch=b2,
+        ) | VehicleInstallationPair.objects.filter(
+            front_image__batch=b2,
+            rear_image__batch=b1,
+        )
+        assert cross_pairs.count() == 0, "Walk 1 and Walk 2 photos must NEVER be cross-paired!"

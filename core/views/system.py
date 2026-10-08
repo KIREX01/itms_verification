@@ -558,3 +558,70 @@ def serve_media(request: HttpRequest, path: str) -> HttpResponse:
     raise Http404("Media file not found")
 
 
+
+
+@csrf_exempt
+def api_browse_path(request: HttpRequest) -> JsonResponse:
+    if not request.user.is_authenticated:
+        return JsonResponse({"success": False, "error": "Authentication required"}, status=401)
+        
+    try:
+        import json
+        data = json.loads(request.body)
+        browse_type = data.get("type", "folder")
+        title = data.get("title", "Select Path")
+        initial_dir = data.get("initial_dir", "")
+    except Exception:
+        browse_type = request.GET.get("type", "folder")
+        title = request.GET.get("title", "Select Path")
+        initial_dir = request.GET.get("initial_dir", "")
+
+    if sys.platform == "win32":
+        import subprocess
+        env = os.environ.copy()
+        env["ITMS_INITIAL_DIR"] = str(initial_dir)
+        env["ITMS_TITLE"] = str(title)
+        
+        if browse_type == "file":
+            ps_script = '''
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = $env:ITMS_TITLE
+$dialog.Filter = "All Files (*.*)|*.*|PyTorch/ONNX Models (*.pt;*.onnx)|*.pt;*.onnx"
+if ($env:ITMS_INITIAL_DIR -and (Test-Path -LiteralPath $env:ITMS_INITIAL_DIR)) {
+    $dialog.InitialDirectory = $env:ITMS_INITIAL_DIR
+}
+$form = New-Object System.Windows.Forms.Form
+$form.TopMost = $true
+$res = $dialog.ShowDialog($form)
+if ($res -eq [System.Windows.Forms.DialogResult]::OK) {
+    Write-Output $dialog.FileName
+}
+'''
+        else:
+            ps_script = '''
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = $env:ITMS_TITLE
+$dialog.ShowNewFolderButton = $true
+if ($env:ITMS_INITIAL_DIR -and (Test-Path -LiteralPath $env:ITMS_INITIAL_DIR)) {
+    $dialog.SelectedPath = $env:ITMS_INITIAL_DIR
+}
+$form = New-Object System.Windows.Forms.Form
+$form.TopMost = $true
+$res = $dialog.ShowDialog($form)
+if ($res -eq [System.Windows.Forms.DialogResult]::OK) {
+    Write-Output $dialog.SelectedPath
+}
+'''
+        try:
+            result = subprocess.run(["powershell", "-STA", "-WindowStyle", "Hidden", "-NoProfile", "-Command", ps_script], capture_output=True, text=True, env=env)
+            out = result.stdout.strip()
+            if out:
+                return JsonResponse({"success": True, "selected_path": out})
+            return JsonResponse({"success": False, "canceled": True})
+        except Exception as e:
+            return JsonResponse({"success": False, "error": str(e)})
+            
+    return JsonResponse({"success": False, "error": "Native browsing not supported on this OS"})
+

@@ -243,22 +243,22 @@ function switchItmsSubview(subview) {
             thead.innerHTML = `<tr>
                 <th style="width:140px;">Kit Code</th>
                 <th style="width:110px;">Plate</th>
-                <th style="width:130px;">Front Plate</th>
-                <th style="width:130px;">Rear Plate</th>
-                <th style="width:140px;">GPS Tracker</th>
+                <th class="hide-mobile" style="width:130px;">Front Plate</th>
+                <th class="hide-mobile" style="width:130px;">Rear Plate</th>
+                <th class="hide-mobile" style="width:140px;">GPS Tracker</th>
                 <th style="width:100px;">Status</th>
-                <th style="width:130px;">Warehouse</th>
-                <th style="width:110px;">Created Date</th>
+                <th class="hide-mobile" style="width:130px;">Warehouse</th>
+                <th class="hide-mobile" style="width:110px;">Created Date</th>
             </tr>`;
         } else {
             thead.innerHTML = `<tr>
                 <th style="width:160px;">Order #</th>
                 <th style="width:120px;">Plate</th>
-                <th style="width:160px;">VIN / Chassis</th>
+                <th class="hide-mobile" style="width:160px;">VIN / Chassis</th>
                 <th style="width:110px;">Status</th>
-                <th style="width:140px;">Warehouse</th>
-                <th style="width:130px;">Officer</th>
-                <th style="width:130px;">Date</th>
+                <th class="hide-mobile" style="width:140px;">Warehouse</th>
+                <th class="hide-mobile" style="width:130px;">Officer</th>
+                <th class="hide-mobile" style="width:130px;">Date</th>
             </tr>`;
         }
     }
@@ -336,8 +336,8 @@ async function fetchItmsExplorerOrders() {
             document.getElementById("btn-explorer-prev").disabled = (itmsExplorerPage <= 1);
             document.getElementById("btn-explorer-next").disabled = !data.has_next_page;
 
-            // Auto-select first item if available
-            if (itmsExplorerOrders.length > 0) {
+            // Auto-select first item if available (desktop only, to keep table visible on mobile)
+            if (itmsExplorerOrders.length > 0 && window.innerWidth > 768) {
                 selectItmsOrder(itmsExplorerOrders[0]);
             }
         } else {
@@ -384,12 +384,12 @@ function renderItmsOrdersTable(items) {
             return `<tr id="itms-row-${idx}" onclick="selectItmsOrderAtIndex(${idx})">
                 <td><strong style="color:#38bdf8; font-family:var(--font-mono);">${kitCode}</strong></td>
                 <td><span style="color:var(--ug-yellow); font-family:var(--font-mono); font-weight:800;">${regPlate}</span></td>
-                <td><span style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${frontPlate}</span></td>
-                <td><span style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${rearPlate}</span></td>
-                <td><span style="font-family:var(--font-mono); font-size:0.75rem; color:#a78bfa;">${gps}</span></td>
+                <td class="hide-mobile"><span style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${frontPlate}</span></td>
+                <td class="hide-mobile"><span style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${rearPlate}</span></td>
+                <td class="hide-mobile"><span style="font-family:var(--font-mono); font-size:0.75rem; color:#a78bfa;">${gps}</span></td>
                 <td><span class="badge ${badgeClass}">${status}</span></td>
-                <td><span style="font-size:0.75rem; color:var(--ug-text-muted);">${wh}</span></td>
-                <td><span style="font-size:0.75rem; color:var(--ug-text-dim);">${created}</span></td>
+                <td class="hide-mobile"><span style="font-size:0.75rem; color:var(--ug-text-muted);">${wh}</span></td>
+                <td class="hide-mobile"><span style="font-size:0.75rem; color:var(--ug-text-dim);">${created}</span></td>
             </tr>`;
         }).join("");
         return;
@@ -407,18 +407,34 @@ function renderItmsOrdersTable(items) {
         return `<tr id="itms-row-${idx}" onclick="selectItmsOrderAtIndex(${idx})">
             <td><strong style="color:#fff; font-family:var(--font-mono);">${orderNum}</strong></td>
             <td><span style="color:var(--ug-yellow); font-family:var(--font-mono); font-weight:800;">${regPlate}</span></td>
-            <td><span style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${vin}</span></td>
+            <td class="hide-mobile"><span style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${vin}</span></td>
             <td><span class="badge ${status.toLowerCase().includes('installed') ? 'badge-green' : 'badge-yellow'}">${status}</span></td>
-            <td><span style="font-size:0.75rem; color:var(--ug-text-muted);">${wh}</span></td>
-            <td><span style="font-size:0.75rem; color:var(--ug-text-muted);">${officer}</span></td>
-            <td><span style="font-size:0.75rem; color:var(--ug-text-dim);">${date}</span></td>
+            <td class="hide-mobile"><span style="font-size:0.75rem; color:var(--ug-text-muted);">${wh}</span></td>
+            <td class="hide-mobile"><span style="font-size:0.75rem; color:var(--ug-text-muted);">${officer}</span></td>
+            <td class="hide-mobile"><span style="font-size:0.75rem; color:var(--ug-text-dim);">${date}</span></td>
         </tr>`;
     }).join("");
+}
+
+function openItmsMobileInspector() {
+    const panel = document.getElementById("itms-inspector-panel");
+    if (panel) {
+        panel.classList.add("mobile-show");
+        panel.scrollTop = 0;
+    }
+}
+
+function closeItmsMobileInspector() {
+    const panel = document.getElementById("itms-inspector-panel");
+    if (panel) {
+        panel.classList.remove("mobile-show");
+    }
 }
 
 function selectItmsOrderAtIndex(idx) {
     if (itmsExplorerOrders[idx]) {
         selectItmsOrder(itmsExplorerOrders[idx]);
+        openItmsMobileInspector();
     }
 }
 

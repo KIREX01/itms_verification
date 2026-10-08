@@ -120,7 +120,7 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
             "front_thumb_url": front_thumb_url,
             "rear_thumb_url": rear_thumb_url,
             "batch_id": batch_obj.batch_id if batch_obj else "Carryover",
-            "batch_label": batch_obj.batch_id if batch_obj else "Carryover Batch",
+            "batch_label": (batch_obj.source_label or batch_obj.batch_id) if batch_obj else "Carryover Batch",
             "batch_created_at": batch_obj.created_at.strftime("%Y-%m-%d %H:%M") if (batch_obj and batch_obj.created_at) else "",
             "is_today": is_today,
             "is_latest_batch": is_latest,

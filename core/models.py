@@ -768,6 +768,49 @@ class StockReturnScan(models.Model):
         return f"{self.registration_number} ({self.plate_category}) Returned: {self.reason}"
 
 
+class SafeAuditScan(models.Model):
+    """
+    Physical plate scanned or entered during safe room physical stock-taking / audit for a shift.
+    Represents actual physical presence in the safe room / storage box at this bond facility.
+    """
+    registration_number = models.CharField(max_length=32, db_index=True)
+    plate_category = models.CharField(
+        max_length=8,
+        choices=PlateCategory.choices,
+        default=PlateCategory.PSV,
+        db_index=True,
+    )
+    work_date = models.DateField(default=timezone.localdate, db_index=True)
+    work_date_suffix = models.CharField(
+        max_length=16,
+        db_index=True,
+        help_text="6-digit date suffix, e.g. 260926",
+    )
+    bond_code = models.CharField(max_length=32, blank=True, default="AGM", db_index=True)
+    scanned_at = models.DateTimeField(default=timezone.now, db_index=True)
+    scanned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="safe_audit_scans",
+    )
+    operator_name = models.CharField(max_length=150, blank=True, default="Operator")
+    notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-scanned_at"]
+        verbose_name_plural = "Safe audit scans"
+        indexes = [
+            models.Index(fields=["work_date_suffix", "registration_number"]),
+            models.Index(fields=["work_date", "plate_category"]),
+        ]
+
+    def __str__(self):
+        return f"{self.registration_number} ({self.plate_category}) Safe Audit {self.work_date_suffix}"
+
+
 class DailyStockLedger(models.Model):
     """
     Daily stock reconciliation snapshot and accounting ledger per work date.

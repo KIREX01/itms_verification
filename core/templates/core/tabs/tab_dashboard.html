@@ -129,7 +129,7 @@
 
         <!-- 📱 Wireless Mobile Camera Connect & Live QR Code Section -->
         <div class="dash-panel" id="dash-mobile-qr-section" style="margin-bottom: 20px; border: 1px solid var(--ug-border); background: var(--ug-black-card);">
-            <div class="dash-panel-title" style="display:flex; justify-content:space-between; align-items:center;">
+            <div class="dash-panel-title dash-qr-title-row">
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span style="font-size:1.15rem;">📱</span>
                     <span style="font-weight:800; color:#fff;">Wireless Mobile Camera Connect</span>
@@ -145,7 +145,7 @@
                 </div>
             </div>
 
-            <div style="display:grid; grid-template-columns: 190px 1fr; gap: 20px; align-items: center; margin-top: 10px;">
+            <div class="dash-qr-grid">
                 <!-- QR Code Canvas Box -->
                 <div style="display:flex; flex-direction:column; align-items:center; gap:8px; background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:10px; padding:12px;">
                     <div id="dash-qr-canvas" style="background:#ffffff; padding:8px; border-radius:6px; display:flex; align-items:center; justify-content:center; width:156px; height:156px; box-shadow:0 4px 12px rgba(0,0,0,0.5);">
@@ -157,18 +157,18 @@
                 <!-- Instructions, Direct URL & Workflow Info -->
                 <div style="display:flex; flex-direction:column; gap:10px;">
                     <!-- Direct Link URL Box -->
-                    <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:8px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center;">
+                    <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:8px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; flex-wrap: wrap; gap: 8px;">
                         <div>
                             <div style="font-size:0.7rem; color:var(--ug-text-dim); font-weight:800; text-transform:uppercase;">DIRECT MOBILE COMPANION URL</div>
-                            <div style="font-family:var(--font-mono); font-size:1.05rem; font-weight:900; color:var(--ug-yellow);" id="dash-mobile-direct-url">http://127.0.0.1:8000/mobile/</div>
+                            <div style="font-family:var(--font-mono); font-weight:900; color:var(--ug-yellow); word-break: break-all;" id="dash-mobile-direct-url">http://127.0.0.1:8000/mobile/</div>
                         </div>
-                        <button class="btn btn-secondary" onclick="copyDashMobileUrl()" style="padding:6px 14px; font-size:0.78rem;">
+                        <button class="btn btn-secondary" onclick="copyDashMobileUrl()" style="padding:6px 14px; font-size:0.78rem; flex-shrink: 0;">
                             📋 Copy URL
                         </button>
                     </div>
 
                     <!-- Workflow Mode Badges & Benefits -->
-                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div class="dash-qr-modes-grid">
                         <div style="background:rgba(16, 185, 129, 0.08); border:1px solid rgba(16, 185, 129, 0.25); border-radius:8px; padding:10px;">
                             <div style="font-size:0.78rem; font-weight:800; color:var(--ug-green); display:flex; align-items:center; gap:6px;">
                                 <span>🏭</span> On-Conveyor Mode (1-by-1)

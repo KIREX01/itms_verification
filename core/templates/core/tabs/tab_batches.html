@@ -8,27 +8,27 @@
                     <span>📦 Photo Ingestion Batches &amp; Evidence Stream</span>
                     <span class="badge badge-yellow" id="batches-count-badge">0 Batches</span>
                 </h3>
-                <p style="font-size:0.75rem; color:var(--ug-text-muted); margin-top:3px;">
+                <p class="desktop-only-text" style="font-size:0.75rem; color:var(--ug-text-muted); margin-top:3px;">
                     Expand any batch header to inspect evidence photos at full scale, or collapse/minimize to scroll through other sessions.
                 </p>
             </div>
             <div class="batches-toolbar-controls">
-                <input type="text" id="batch-search-input" class="batch-search-field" placeholder="🔍 Filter batches (ID, shift, plate)..." oninput="filterBatchesStream()">
-                <button class="btn btn-secondary" onclick="expandAllBatches()" title="Expand all batch photos">
-                    ▼ Expand All
-                </button>
-                <button class="btn btn-secondary" onclick="collapseAllBatches()" title="Collapse all batch photos">
-                    ▲ Collapse All
-                </button>
-                <button class="btn btn-secondary" onclick="fetchBatchesList()" title="Refresh batch list">
-                    🔄 Refresh
-                </button>
-                <button class="btn btn-secondary" onclick="openMobileConnectModal()" id="btn-open-mobile-modal" title="Connect phone camera to stream photos wirelessly via QR Code or Hotspot" style="border-color:var(--ug-cyan); color:var(--ug-cyan);">
-                    📱 Connect Phone Camera
-                </button>
-                <button class="btn btn-primary" onclick="openBatchUploadModal()" id="btn-open-upload-modal">
-                    📷 + New Upload Batch
-                </button>
+                <input type="text" id="batch-search-input" class="batch-search-field" placeholder="🔍 Filter batches..." oninput="filterBatchesStream()">
+                
+                <div class="mobile-util-row">
+                    <button class="btn btn-secondary" onclick="expandAllBatches()" title="Expand all">▼ Expand</button>
+                    <button class="btn btn-secondary" onclick="collapseAllBatches()" title="Collapse all">▲ Collapse</button>
+                    <button class="btn btn-secondary" onclick="fetchBatchesList()" title="Refresh">🔄 Refresh</button>
+                </div>
+
+                <div class="mobile-primary-actions">
+                    <button class="btn btn-secondary" onclick="openMobileConnectModal()" id="btn-open-mobile-modal" title="Connect phone camera" style="border-color:var(--ug-cyan); color:var(--ug-cyan);">
+                        📱 Phone Camera
+                    </button>
+                    <button class="btn btn-primary" onclick="openBatchUploadModal()" id="btn-open-upload-modal">
+                        📷 + Upload
+                    </button>
+                </div>
             </div>
         </div>
 

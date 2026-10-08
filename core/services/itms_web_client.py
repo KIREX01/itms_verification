@@ -1575,10 +1575,35 @@ class ITMSWebClient:
         if not code_map:
             return {"success": True, "created": 0, "updated": 0, "total": 0}
 
-        existing_kits = {
+        from core.vision import normalizer
+        from django.db.models import Q
+
+        existing_kits_by_code = {
             k.kit_code: k
             for k in InstallationKit.objects.filter(kit_code__in=list(code_map.keys()))
         }
+        reg_candidates = set()
+        for k in code_map.values():
+            r = (k.get("registration_number") or "").strip()
+            if r:
+                reg_candidates.add(r)
+                canon = normalizer.canonicalize(r)
+                if canon:
+                    reg_candidates.add(canon)
+                    reg_candidates.add(f"IK-{canon}")
+
+        existing_kits_by_reg = {}
+        if reg_candidates:
+            for k in InstallationKit.objects.filter(
+                Q(registration_number__in=list(reg_candidates)) | Q(kit_code__in=list(reg_candidates))
+            ):
+                if k.registration_number:
+                    existing_kits_by_reg[k.registration_number.strip().upper()] = k
+                    c_r = normalizer.canonicalize(k.registration_number)
+                    if c_r:
+                        existing_kits_by_reg[c_r] = k
+                if k.kit_code:
+                    existing_kits_by_reg[k.kit_code.strip().upper()] = k
 
         to_create: List[InstallationKit] = []
         to_update: List[InstallationKit] = []
@@ -1596,9 +1621,17 @@ class ITMSWebClient:
             k_uuid = k.get("kit_uuid", "")
             d_url = k.get("detail_url", "")
 
-            if code in existing_kits:
-                obj = existing_kits[code]
+            obj = (
+                existing_kits_by_code.get(code)
+                or (existing_kits_by_reg.get(reg_num.strip().upper()) if reg_num else None)
+                or (existing_kits_by_reg.get(normalizer.canonicalize(reg_num)) if reg_num else None)
+            )
+
+            if obj:
                 changed = False
+                if code and obj.kit_code != code:
+                    obj.kit_code = code
+                    changed = True
                 if reg_num and obj.registration_number != reg_num:
                     obj.registration_number = reg_num
                     changed = True
@@ -1662,7 +1695,7 @@ class ITMSWebClient:
                 InstallationKit.objects.bulk_update(
                     to_update,
                     [
-                        "registration_number", "front_plate", "rear_plate",
+                        "kit_code", "registration_number", "front_plate", "rear_plate",
                         "front_tracker", "rear_tracker", "gps_tracker",
                         "warehouse", "status", "created_date", "kit_uuid",
                         "detail_url", "last_synced_at",

@@ -43,8 +43,8 @@
             <span class="alert-icon">🔒</span>
             <div class="alert-content" style="flex:1;">
                 <strong id="https-alert-title" style="color:#fde047; font-size:0.82rem;">Switch to HTTPS for Live Camera Scanner</strong>
-                <span id="https-alert-desc" style="display:block; font-size:0.75rem; color:#94a3b8; margin:2px 0 6px 0;">Mobile browsers disable live camera streaming on plain HTTP. Tap to switch to secure port 8443:</span>
-                <a href="#" id="btn-switch-to-https" style="display:inline-block; padding:5px 12px; background:#eab308; color:#0f172a; font-weight:bold; font-size:0.75rem; border-radius:6px; text-decoration:none;">Switch to Secure HTTPS (Port 8443) ➔</a>
+                <span id="https-alert-desc" style="display:block; font-size:0.75rem; color:#94a3b8; margin:2px 0 6px 0;">Mobile browsers disable live camera streaming on plain HTTP. Tap to switch to secure port 443:</span>
+                <a href="#" id="btn-switch-to-https" style="display:inline-block; padding:5px 12px; background:#eab308; color:#0f172a; font-weight:bold; font-size:0.75rem; border-radius:6px; text-decoration:none;">Switch to Secure HTTPS (Port 443) ➔</a>
             </div>
         </div>
 
@@ -211,6 +211,18 @@
         <!-- MODE 2: OFF-CONVEYOR WORKFLOW (U-Turn Yard Walk) -->
         <!-- ================================================================= -->
         <main class="mode-container" id="container-uturn">
+            <!-- Active Walk Session Batch Indicator -->
+            <div class="uturn-batch-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding:8px 12px; background:rgba(15,23,42,0.85); border:1px solid rgba(56,189,248,0.3); border-radius:10px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:1.1rem;">🚶</span>
+                    <div>
+                        <div id="uturn-batch-indicator" style="font-weight:700; font-size:0.88rem; color:#38bdf8; letter-spacing:0.5px;">ACTIVE WALK: BATCH #1</div>
+                        <div style="font-size:0.7rem; color:var(--ug-text-dim,#94a3b8);">Off-conveyor row walk (isolated batch)</div>
+                    </div>
+                </div>
+                <span id="uturn-pair-status-pill" style="font-size:0.72rem; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); padding:3px 10px; border-radius:12px; font-weight:700;">ACTIVE</span>
+            </div>
+
             <!-- Visual U-Turn Progress Road -->
             <div class="uturn-flow-road">
                 <div class="road-step road-step-rear active" id="road-step-rear" onclick="if(MobileState.uturn.phase==='FRONT') toggleUturnTurnaround();">
@@ -520,6 +532,6 @@
     </div>
 
     <!-- Client-Side Engine -->
-    <script src="{% static 'core/js/mobile_companion.js' %}"></script>
+    <script src="{% static 'core/js/mobile_companion.js' %}?v=12"></script>
 </body>
 </html>

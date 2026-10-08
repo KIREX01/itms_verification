@@ -1935,7 +1935,7 @@ class OpeningTargetModal(ModalScreen[Optional[Dict[str, Any]]]):
     def on_mount(self) -> None:
         from core.services import stock_monitoring_service
         try:
-            summary = stock_monitoring_service.get_stock_reconciliation_summary(self.target_date_suffix)
+            summary = stock_monitoring_service.compute_daily_reconciliation(self.target_date_suffix)
             sched = summary.get("scheduled_target", 0)
             pmo_open = summary.get("pmo", {}).get("opening", 0)
             psv_open = summary.get("psv", {}).get("opening", 0)

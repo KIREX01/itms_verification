@@ -67,3 +67,69 @@
     flex: 1;
     overflow: auto;
 }
+
+.history-toolbar-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.history-toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+@media (max-width: 768px) {
+    .history-pane-container {
+        padding: 8px 10px;
+    }
+    
+    .history-toolbar-card {
+        flex-direction: column;
+        align-items: stretch;
+        padding: 10px;
+        gap: 10px;
+    }
+    
+    .history-toolbar-left {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+    
+    .history-filter-chips {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    
+    .history-chip {
+        flex: 1;
+        text-align: center;
+        padding: 5px;
+    }
+    
+    .history-toolbar-right {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+    
+    .scope-pills-group {
+        display: contents;
+    }
+    
+    .scope-pill-btn {
+        text-align: center;
+        justify-content: center;
+    }
+    
+    .history-toolbar-right .btn {
+        text-align: center;
+        justify-content: center;
+        margin: 0;
+    }
+    
+    .history-title {
+        text-align: center;
+    }
+}

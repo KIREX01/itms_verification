@@ -57,124 +57,130 @@
         </div>
 
         <!-- PHASE 1: PRE-SUBMISSION CONFIRMATION & SAFETY REVIEW (TUI Parity) -->
-        <div id="sub-phase-confirm" style="display:flex; flex-direction:column; gap:16px; padding:20px;">
-            <!-- Target Summary Card -->
-            <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:16px; display:flex; flex-direction:column; gap:10px;">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <span style="font-size:0.75rem; color:var(--ug-text-dim); text-transform:uppercase; font-weight:700;" id="sub-confirm-scope-title">SUBMISSION TARGET SCOPE</span>
-                    <span class="badge badge-green" id="sub-confirm-count-badge">0 Pairs Ready</span>
-                </div>
-                <div id="sub-confirm-target-details" style="display:flex; flex-direction:column; gap:6px;">
-                    <div style="font-family:var(--font-mono); font-size:1.25rem; font-weight:900; color:var(--ug-yellow);" id="sub-confirm-target-main">
-                        Loading target...
+        <div id="sub-phase-confirm" style="display:flex; flex-direction:column; width:100%; height:100%; overflow:hidden;">
+            <div class="modal-body" style="gap:16px;">
+                <!-- Target Summary Card -->
+                <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:16px; display:flex; flex-direction:column; gap:10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-size:0.75rem; color:var(--ug-text-dim); text-transform:uppercase; font-weight:700;" id="sub-confirm-scope-title">SUBMISSION TARGET SCOPE</span>
+                        <span class="badge badge-green" id="sub-confirm-count-badge">0 Pairs Ready</span>
                     </div>
-                    <div style="font-size:0.82rem; color:var(--ug-text-muted);" id="sub-confirm-target-sub">
-                        Order #—
+                    <div id="sub-confirm-target-details" style="display:flex; flex-direction:column; gap:6px;">
+                        <div style="font-family:var(--font-mono); font-size:1.25rem; font-weight:900; color:var(--ug-yellow);" id="sub-confirm-target-main">
+                            Loading target...
+                        </div>
+                        <div style="font-size:0.82rem; color:var(--ug-text-muted);" id="sub-confirm-target-sub">
+                            Order #—
+                        </div>
+                    </div>
+                    <div id="sub-confirm-batch-list-box" style="display:none; max-height:160px; overflow-y:auto; border:1px solid var(--ug-border); border-radius:var(--radius-sm); padding:6px 10px; font-family:var(--font-mono); font-size:0.78rem; background:rgba(0,0,0,0.3); display:none; flex-direction:column; gap:4px;">
+                        <!-- Dynamic preview list for batch items -->
                     </div>
                 </div>
-                <div id="sub-confirm-batch-list-box" style="display:none; max-height:160px; overflow-y:auto; border:1px solid var(--ug-border); border-radius:var(--radius-sm); padding:6px 10px; font-family:var(--font-mono); font-size:0.78rem; background:rgba(0,0,0,0.3); display:none; flex-direction:column; gap:4px;">
-                    <!-- Dynamic preview list for batch items -->
-                </div>
-            </div>
 
-            <!-- Safety Mode Switch Card -->
-            <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:14px 16px; display:flex; justify-content:space-between; align-items:center;">
-                <div style="display:flex; flex-direction:column; gap:3px;">
-                    <div style="font-size:0.88rem; font-weight:700; color:#fff;">
-                        Dry-Run Safety Mode
+                <!-- Safety Mode Switch Card -->
+                <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:14px 16px; display:flex; justify-content:space-between; align-items:center;">
+                    <div style="display:flex; flex-direction:column; gap:3px;">
+                        <div style="font-size:0.88rem; font-weight:700; color:#fff;">
+                            Dry-Run Safety Mode
+                        </div>
+                        <div style="font-size:0.75rem; color:var(--ug-text-muted);" id="sub-confirm-dryrun-desc">
+                            Simulates multi-step submission without remote server mutations (persisted to config.json).
+                        </div>
                     </div>
-                    <div style="font-size:0.75rem; color:var(--ug-text-muted);" id="sub-confirm-dryrun-desc">
-                        Simulates multi-step submission without remote server mutations (persisted to config.json).
-                    </div>
+                    <label class="switch" style="flex-shrink:0;">
+                        <input type="checkbox" id="sub-modal-dryrun-chk" onchange="onSubModalDryRunToggled()">
+                        <span class="slider"></span>
+                    </label>
                 </div>
-                <label class="switch" style="flex-shrink:0;">
-                    <input type="checkbox" id="sub-modal-dryrun-chk" onchange="onSubModalDryRunToggled()">
-                    <span class="slider"></span>
-                </label>
             </div>
 
             <!-- Pre-submission Actions Footer -->
-            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:4px;">
-                <button class="btn btn-secondary" onclick="closeSubmissionModal()" style="padding:8px 18px; font-size:0.82rem;">
+            <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+                <button class="btn btn-secondary" onclick="closeSubmissionModal()">
                     Cancel [Esc]
                 </button>
-                <button class="btn btn-primary" id="btn-sub-start-confirm" onclick="startSubmissionExecution()" style="background:var(--ug-green); border-color:var(--ug-green); padding:8px 22px; font-weight:800; font-size:0.85rem; box-shadow:0 4px 14px rgba(16,185,129,0.35);">
-                    🚀 Confirm &amp; Submit [Enter]
-                </button>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn btn-primary" id="btn-sub-start-confirm" onclick="startSubmissionExecution()" style="background:var(--ug-green); border-color:var(--ug-green); font-weight:800; box-shadow:0 4px 14px rgba(16,185,129,0.35);">
+                        🚀 Confirm &amp; Submit [Enter]
+                    </button>
+                </div>
             </div>
         </div>
 
         <!-- PHASE 2: ACTIVE TRANSMISSION PROGRESS & TELEMETRY STREAM -->
-        <div id="sub-phase-progress" style="display:none; flex-direction:column; gap:16px; padding:20px;">
-            <!-- Current Item Banner -->
-            <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:14px; display:flex; flex-direction:column; gap:6px;">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <span style="font-size:0.75rem; color:var(--ug-text-dim); text-transform:uppercase; font-weight:700;">CURRENT TRANSMISSION TARGET</span>
-                    <span class="badge badge-green" id="sub-item-index-badge">0 / 0</span>
-                </div>
-                <div style="display:flex; align-items:center; justify-content:space-between;">
-                    <div style="font-family:var(--font-mono); font-size:1.3rem; font-weight:900; color:var(--ug-yellow);" id="sub-active-plate">
-                        Preparing batch...
+        <div id="sub-phase-progress" style="display:none; flex-direction:column; width:100%;">
+            <div class="modal-body" style="gap:16px;">
+                <!-- Current Item Banner -->
+                <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:14px; display:flex; flex-direction:column; gap:6px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-size:0.75rem; color:var(--ug-text-dim); text-transform:uppercase; font-weight:700;">CURRENT TRANSMISSION TARGET</span>
+                        <span class="badge badge-green" id="sub-item-index-badge">0 / 0</span>
                     </div>
-                    <div style="font-family:var(--font-mono); font-size:0.9rem; color:#ffffff;" id="sub-active-order">
-                        Order #—
+                    <div style="display:flex; align-items:center; justify-content:space-between;">
+                        <div style="font-family:var(--font-mono); font-size:1.3rem; font-weight:900; color:var(--ug-yellow);" id="sub-active-plate">
+                            Preparing batch...
+                        </div>
+                        <div style="font-family:var(--font-mono); font-size:0.9rem; color:#ffffff;" id="sub-active-order">
+                            Order #—
+                        </div>
+                    </div>
+                    <div style="font-size:0.8rem; color:var(--ug-text-muted);" id="sub-status-desc">
+                        Initializing connection to stock.itms.ug...
                     </div>
                 </div>
-                <div style="font-size:0.8rem; color:var(--ug-text-muted);" id="sub-status-desc">
-                    Initializing connection to stock.itms.ug...
+
+                <!-- Progress Bar -->
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                    <div style="display:flex; justify-content:space-between; font-size:0.78rem; font-weight:700;">
+                        <span style="color:var(--ug-text-muted);">Overall Progress</span>
+                        <span style="color:var(--ug-yellow); font-family:var(--font-mono);" id="sub-progress-percent">0%</span>
+                    </div>
+                    <div style="height:12px; background:rgba(255,255,255,0.08); border-radius:6px; overflow:hidden; border:1px solid var(--ug-border);">
+                        <div id="sub-progress-bar-fill" style="height:100%; width:0%; background:linear-gradient(90deg, var(--ug-yellow), var(--ug-green)); transition:width 0.25s ease; border-radius:6px;"></div>
+                    </div>
+                </div>
+
+                <!-- Live Scoreboard Metrics -->
+                <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;">
+                    <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px; text-align:center;">
+                        <div style="font-size:0.7rem; color:var(--ug-text-dim); text-transform:uppercase;">TOTAL PAIRS</div>
+                        <div style="font-size:1.2rem; font-weight:800; color:#fff;" id="sub-kpi-total">0</div>
+                    </div>
+                    <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px; text-align:center;">
+                        <div style="font-size:0.7rem; color:var(--ug-text-dim); text-transform:uppercase;">SUCCEEDED</div>
+                        <div style="font-size:1.2rem; font-weight:800; color:var(--ug-green);" id="sub-kpi-success">0</div>
+                    </div>
+                    <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px; text-align:center;">
+                        <div style="font-size:0.7rem; color:var(--ug-text-dim); text-transform:uppercase;">FAILED</div>
+                        <div style="font-size:1.2rem; font-weight:800; color:var(--ug-red);" id="sub-kpi-failed">0</div>
+                    </div>
+                    <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px; text-align:center;">
+                        <div style="font-size:0.7rem; color:var(--ug-text-dim); text-transform:uppercase;">REMAINING</div>
+                        <div style="font-size:1.2rem; font-weight:800; color:var(--ug-yellow);" id="sub-kpi-remaining">0</div>
+                    </div>
+                </div>
+
+                <!-- Live Itemized Activity Stream -->
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                    <div style="font-size:0.75rem; font-weight:700; color:var(--ug-text-dim); text-transform:uppercase;">
+                        TRANSMISSION EVENT TRACE
+                    </div>
+                    <div id="sub-live-log-stream" style="max-height:160px; min-height:100px; overflow-y:auto; background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 12px; font-family:var(--font-mono); font-size:0.76rem; display:flex; flex-direction:column; gap:4px;">
+                        <div style="color:var(--ug-text-dim);">Waiting to begin transmission...</div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Progress Bar -->
-            <div style="display:flex; flex-direction:column; gap:6px;">
-                <div style="display:flex; justify-content:space-between; font-size:0.78rem; font-weight:700;">
-                    <span style="color:var(--ug-text-muted);">Overall Progress</span>
-                    <span style="color:var(--ug-yellow); font-family:var(--font-mono);" id="sub-progress-percent">0%</span>
-                </div>
-                <div style="height:12px; background:rgba(255,255,255,0.08); border-radius:6px; overflow:hidden; border:1px solid var(--ug-border);">
-                    <div id="sub-progress-bar-fill" style="height:100%; width:0%; background:linear-gradient(90deg, var(--ug-yellow), var(--ug-green)); transition:width 0.25s ease; border-radius:6px;"></div>
-                </div>
-            </div>
-
-            <!-- Live Scoreboard Metrics -->
-            <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;">
-                <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px; text-align:center;">
-                    <div style="font-size:0.7rem; color:var(--ug-text-dim); text-transform:uppercase;">TOTAL PAIRS</div>
-                    <div style="font-size:1.2rem; font-weight:800; color:#fff;" id="sub-kpi-total">0</div>
-                </div>
-                <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px; text-align:center;">
-                    <div style="font-size:0.7rem; color:var(--ug-text-dim); text-transform:uppercase;">SUCCEEDED</div>
-                    <div style="font-size:1.2rem; font-weight:800; color:var(--ug-green);" id="sub-kpi-success">0</div>
-                </div>
-                <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px; text-align:center;">
-                    <div style="font-size:0.7rem; color:var(--ug-text-dim); text-transform:uppercase;">FAILED</div>
-                    <div style="font-size:1.2rem; font-weight:800; color:var(--ug-red);" id="sub-kpi-failed">0</div>
-                </div>
-                <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px; text-align:center;">
-                    <div style="font-size:0.7rem; color:var(--ug-text-dim); text-transform:uppercase;">REMAINING</div>
-                    <div style="font-size:1.2rem; font-weight:800; color:var(--ug-yellow);" id="sub-kpi-remaining">0</div>
-                </div>
-            </div>
-
-            <!-- Live Itemized Activity Stream -->
-            <div style="display:flex; flex-direction:column; gap:6px;">
-                <div style="font-size:0.75rem; font-weight:700; color:var(--ug-text-dim); text-transform:uppercase;">
-                    TRANSMISSION EVENT TRACE
-                </div>
-                <div id="sub-live-log-stream" style="max-height:160px; min-height:100px; overflow-y:auto; background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 12px; font-family:var(--font-mono); font-size:0.76rem; display:flex; flex-direction:column; gap:4px;">
-                    <div style="color:var(--ug-text-dim);">Waiting to begin transmission...</div>
-                </div>
-            </div>
-
-            <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; padding-top:12px; border-top:1px solid var(--ug-border);">
-                <button class="btn btn-danger" id="btn-sub-abort" onclick="abortBatchSubmission()" style="padding:6px 14px; font-size:0.8rem;">
+            <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+                <button class="btn btn-danger" id="btn-sub-abort" onclick="abortBatchSubmission()">
                     ⏹ Stop / Abort
                 </button>
                 <div style="display:flex; gap:8px;">
-                    <button class="btn btn-secondary" id="btn-sub-minimize" onclick="minimizeSubmissionModal()" style="padding:6px 14px; font-size:0.8rem;">
+                    <button class="btn btn-secondary" id="btn-sub-minimize" onclick="minimizeSubmissionModal()">
                         🗕 Run in Background
                     </button>
-                    <button class="btn btn-primary" id="btn-sub-done" onclick="closeSubmissionModal()" style="padding:6px 14px; font-size:0.8rem; display:none;">
+                    <button class="btn btn-primary" id="btn-sub-done" onclick="closeSubmissionModal()" style="display:none;">
                         ✓ Done / Close
                     </button>
                 </div>
@@ -543,7 +549,7 @@
         </div>
         <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
             <span style="font-size:0.74rem; color:var(--ug-text-dim);">
-                Listening on HTTPS (:8443) and HTTP (:8000) for dual-mode access
+                Listening on HTTPS (:443) and HTTP (:8000) for dual-mode access
             </span>
             <div style="display:flex; gap:8px;">
                 <button class="btn btn-secondary" onclick="closeModal('modal-mobile-connect')">Close</button>

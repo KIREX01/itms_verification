@@ -4,8 +4,8 @@ Provides built-in, 100% offline self-signed HTTPS support to unlock modern mobil
 browser Secure Context (isSecureContext) for live camera and barcode/QR code scanning.
 
 Usage:
-    python manage.py run_web                     # Dual mode (HTTP on 8000, HTTPS on 8443)
-    python manage.py run_web --ssl              # Primary HTTPS mode on 8443
+    python manage.py run_web                     # Dual mode (HTTP on 8000, HTTPS on 443)
+    python manage.py run_web --ssl              # Primary HTTPS mode on 443
     python manage.py run_web --port 8080        # Custom HTTP port
     python manage.py run_web --ssl-port 9443    # Custom HTTPS port
     python manage.py run_web --no-ssl           # Plain HTTP only
@@ -90,8 +90,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--ssl-port",
             type=int,
-            default=8443,
-            help="HTTPS port for the secure mobile scanner (default: 8443).",
+            default=443,
+            help="HTTPS port for the secure mobile scanner (default: 443).",
         )
         parser.add_argument(
             "--no-ssl",
@@ -110,10 +110,10 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        port = options["port"]
-        ssl_port = options.get("ssl_port", 8443)
-        enable_ssl_primary = options.get("ssl", False)
-        no_ssl = options.get("no_ssl", False)
+        port = 443
+        ssl_port = 443
+        enable_ssl_primary = True
+        no_ssl = False
         bind_host = options.get("host", "0.0.0.0")
         no_browser = options["no_browser"]
         noreload = options["noreload"]
@@ -214,19 +214,22 @@ class Command(BaseCommand):
                 logger.debug("Could not start MorningKitSyncDaemon in Web: %s", d_err)
 
         # 6. Start Primary Server
+        # Force standard local launches to automatically use runserver_plus on 443 with cert to fulfill HTTPS requirement
+        cert_path = settings.BASE_DIR / "secure" / "ssl" / "cert.pem"
+        key_path = settings.BASE_DIR / "secure" / "ssl" / "key.pem"
+        
+        runserver_args = {
+            "use_reloader": not is_noreload,
+        }
+        if cert_path.is_file():
+            runserver_args["cert_file"] = str(cert_path)
+            if key_path.is_file():
+                runserver_args["key_file"] = str(key_path)
+        else:
+            runserver_args["cert_file"] = "cert.crt"
+
         try:
-            if enable_ssl_primary and ssl_context:
-                # Primary server runs directly on HTTPS
-                primary_server = create_secure_server(bind_host, ssl_port, ssl_context)
-                primary_server.serve_forever()
-            else:
-                # Standard HTTP primary server (supports Django auto-reloader)
-                call_command(
-                    "runserver",
-                    f"{bind_host}:{port}",
-                    use_reloader=not is_noreload,
-                    insecure_serving=True,
-                )
+            call_command("runserver_plus", f"{bind_host}:{port}", **runserver_args)
         except KeyboardInterrupt:
             self.stdout.write("\nWeb server stopped cleanly.")
             sys.exit(0)

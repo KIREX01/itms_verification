@@ -32,6 +32,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 
 .settings-card-title {
@@ -40,6 +42,7 @@
     color: #ffffff;
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
 }
 
@@ -107,4 +110,15 @@ input:checked + .slider {
 input:checked + .slider:before {
     transform: translateX(20px);
     background-color: #000000;
+}
+
+/* Fix for mobile squishing */
+.switch {
+    flex-shrink: 0 !important;
+}
+
+@media (max-width: 768px) {
+    .settings-card {
+        margin-bottom: 12px;
+    }
 }

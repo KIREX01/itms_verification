@@ -90,6 +90,11 @@ function escapeHtml(str) {
 let currentMobileQr = null;
 
 async function openMobileConnectModal() {
+    // If user is already on a mobile device, just redirect them to the mobile companion
+    if (/Mobi|Android/i.test(navigator.userAgent)) {
+        window.location.href = '/mobile/';
+        return;
+    }
     openModal("modal-mobile-connect");
     await loadMobileNetworkInfo();
 }

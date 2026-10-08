@@ -1056,11 +1056,14 @@ StockPane {
 }
 
 #stock-status-strip {
-    height: 1;
-    background: #090d16;
-    color: #94a3b8;
+    height: auto;
+    min-height: 1;
+    background: #0f172a;
+    border-bottom: solid #1e293b;
+    color: #e2e8f0;
     padding: 0 1;
     margin-bottom: 0;
+    align-vertical: middle;
 }
 
 #lbl-stock-instant-feedback {

@@ -1,0 +1,73 @@
+
+@media (max-width: 768px) { .history-toolbar-card { flex-direction: column; align-items: stretch; gap: 10px; } .history-toolbar-left, .history-toolbar-right { flex-direction: column; align-items: stretch; width: 100%; gap: 10px; } .history-filter-chips { display: flex; flex-wrap: wrap; gap: 5px; } .history-filter-chips button { flex: 1; } }
+
+.settings-scroll-container { display: flex; flex-direction: column; gap: 15px; } .settings-card { background: var(--ug-black-card); border: 1px solid var(--ug-border); border-radius: var(--radius-lg); padding: 15px; margin-bottom: 15px; } .switch { position: relative; display: inline-block; width: 40px; height: 20px; } .switch input { opacity: 0; width: 0; height: 0; } .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--ug-surface-hover); transition: .4s; border-radius: 20px; border: 1px solid var(--ug-border); } .slider:before { position: absolute; content: ''; height: 16px; width: 16px; left: 1px; bottom: 1px; background-color: white; transition: .4s; border-radius: 50%; } input:checked + .slider { background-color: var(--ug-green); border-color: var(--ug-green); } input:checked + .slider:before { transform: translateX(20px); }
+/* Fix Input Styling */
+.form-control, input[type=""text""], input[type=""number""], select, textarea {
+    background-color: #0f172a !important;
+    border: 1px solid #334155 !important;
+    color: #f8fafc !important;
+    border-radius: var(--radius-md) !important;
+}
+.form-control:focus, input[type=""text""]:focus, input[type=""number""]:focus, select:focus, textarea:focus {
+    outline: none !important;
+    border-color: var(--ug-cyan) !important;
+    box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2) !important;
+}
+
+/* Fix mobile modal buttons compaction */
+@media (max-width: 768px) {
+    .modal-footer {
+        flex-direction: column !important;
+        align-items: stretch !important;
+    }
+    .modal-footer button {
+        width: 100% !important;
+        margin-right: 0 !important;
+        margin-bottom: 5px !important;
+    }
+}
+
+/* ==========================================================================
+   MOBILE & UI LAYOUT FIXES (Queue/History/Settings)
+   ========================================================================== */
+
+/* Settings Tab Enhancements */
+.settings-scroll-container {
+    gap: 20px !important;
+}
+.settings-card {
+    margin-bottom: 20px;
+}
+.slider {
+    background-color: var(--ug-black-surface);
+    border: 1px solid var(--ug-text-dim); /* Make slider outline visible */
+}
+input:checked + .slider {
+    background-color: var(--ug-green) !important;
+}
+
+/* History/Queue Toolbar Reflow */
+.history-toolbar-right {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    justify-content: flex-start !important;
+    overflow: visible !important;
+}
+.scope-pills-group {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    width: 100%;
+}
+
+/* Form Control Global Fixes */
+.form-control, textarea.form-control, input.form-control {
+    background-color: var(--ug-black-surface) !important;
+    color: white !important;
+    border: 1px solid var(--ug-border) !important;
+}
+.form-control:focus, textarea.form-control:focus, input.form-control:focus {
+    border-color: var(--ug-yellow) !important;
+    outline: none !important;
+}

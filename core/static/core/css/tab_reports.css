@@ -1,0 +1,114 @@
+/* core/static/core/css/tab_reports.css */
+
+/* Report Tab Header & Action Ribbon */
+.reports-header-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 15px;
+    background: var(--ug-card-bg);
+    padding: 10px 16px;
+    border: 1px solid var(--ug-border);
+    border-radius: 6px;
+    gap: 15px;
+}
+
+.reports-header-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+/* Two-column grid that needs stacking */
+.reports-two-col-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    margin-bottom: 15px;
+}
+
+/* Unallocated toolbar actions */
+.unallocated-toolbar-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+/* Search input in unallocated plates table */
+.unallocated-search-input {
+    background: #0f172a;
+    border: 1px solid #334155;
+    color: #f8fafc;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.78rem;
+}
+
+/* Auto-fit grids */
+.reports-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+    margin-bottom: 15px;
+}
+
+.reports-totals-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    padding: 12px 0;
+}
+
+/* Responsive Overrides */
+@media (max-width: 768px) {
+    .reports-header-card {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 15px;
+    }
+
+    .reports-header-actions {
+        width: 100%;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+
+    .reports-header-actions > * {
+        width: 100%;
+        justify-content: center; /* Center text in buttons if flex */
+    }
+
+    .reports-header-actions > div:first-child {
+        justify-content: space-between;
+    }
+
+    .reports-header-actions .dropdown button {
+        width: 100%;
+    }
+
+    .reports-two-col-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .unallocated-toolbar-actions {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .unallocated-search-input {
+        flex: 1 1 100%; /* Force search to take full width on mobile */
+    }
+}
+
+@media (max-width: 480px) {
+    .reports-kpi-grid {
+        grid-template-columns: 1fr;
+    }
+    .reports-totals-grid {
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    }
+}

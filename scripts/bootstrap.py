@@ -178,6 +178,10 @@ def ensure_dependencies(install_missing: bool = True, upgrade: bool = False) -> 
                 marker_part = line.split(";", 1)[1].strip()
                 if '< "3.12"' in marker_part and sys.version_info >= (3, 12):
                     continue
+                if 'sys_platform != "win32"' in marker_part and sys.platform == "win32":
+                    continue
+                if 'sys_platform == "win32"' in marker_part and sys.platform != "win32":
+                    continue
                 line = line.split(";", 1)[0].strip()
             m = re.match(r"^([A-Za-z0-9_\-\.]+)", line)
             if m:

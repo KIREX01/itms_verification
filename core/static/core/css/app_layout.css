@@ -27,9 +27,10 @@ header.app-header {
     border-bottom: 1px solid var(--ug-border);
     padding: 8px 18px;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: space-between;
-    height: 56px;
+    gap: 8px;
+    height: auto;
     flex-shrink: 0;
     z-index: 20;
 }
@@ -90,6 +91,9 @@ header.app-header {
 nav.main-nav-tabs {
     display: flex;
     align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    overflow-x: auto;
     gap: 4px;
     background-color: var(--ug-black-surface);
     padding: 3px 4px;
@@ -283,4 +287,101 @@ footer.app-footer {
     font-size: 0.7rem;
     color: var(--ug-text-dim);
     font-family: var(--font-mono);
+}
+
+
+/* ============================================================================
+   RESPONSIVE DESIGN & MOBILE MENU OVERRIDES
+   ============================================================================ */
+.mobile-menu-btn {
+    display: none;
+    background: transparent;
+    border: none;
+    color: #fff;
+    cursor: pointer;
+    padding: 5px;
+    margin-right: 10px;
+}
+
+.header-main-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+
+@media (max-width: 992px) {
+    header.app-header {
+        flex-direction: column;
+        height: auto;
+        padding: 10px;
+        position: relative;
+        max-width: 100vw;
+    }
+    
+    .mobile-menu-btn {
+        display: block;
+    }
+    
+    .brand-section {
+        width: 100%;
+        justify-content: flex-start;
+    }
+    
+    .brand-sub {
+        display: none; /* Hide subtitle on mobile to save space */
+    }
+    
+    .desktop-badges {
+        display: none !important; /* Hide badges in header to save space on mobile */
+    }
+    
+    .desktop-user {
+        display: none !important; /* Hide user profile on mobile top bar */
+    }
+    
+    .hide-mobile {
+        display: none !important;
+    }
+    
+    /* Collapsible Navigation Menu */
+    nav.main-nav-tabs {
+        display: none; /* Hidden by default on mobile */
+        flex-direction: column;
+        width: 100%;
+        position: absolute;
+        top: 56px;
+        left: 0;
+        background-color: var(--ug-black-card);
+        border: 1px solid var(--ug-border);
+        border-radius: 0 0 8px 8px;
+        z-index: 1000;
+        padding: 10px;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+        max-height: calc(100vh - 70px);
+        overflow-y: auto;
+    }
+    
+    nav.main-nav-tabs.show-mobile {
+        display: flex;
+    }
+    
+    .nav-tab-item {
+        width: 100%;
+        justify-content: flex-start;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--ug-border);
+    }
+    
+    .nav-tab-item:last-child {
+        border-bottom: none;
+    }
+    
+    main.app-workspace {
+        height: calc(100vh - 50px - 26px); /* Adjust height for mobile header & footer */
+    }
+    
+    .footer-hotkeys {
+        display: none; /* Hide most hotkeys on mobile */
+    }
 }

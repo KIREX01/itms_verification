@@ -508,27 +508,38 @@ class InspectorPane(Static):
         from core.vision import normalizer
         from core.models import InstallationKit, StockDispatchScan, InstallationOrder
 
-        norm_plate = normalizer.normalize_plate(plate) if plate else None
-        if not norm_plate and dispatch_scan:
-            norm_plate = normalizer.normalize_plate(getattr(dispatch_scan, "registration_number", ""))
-        if not norm_plate and kit:
-            norm_plate = normalizer.normalize_plate(getattr(kit, "registration_number", ""))
+        def _get_plate_str(val: Any) -> str:
+            if not val:
+                return ""
+            if isinstance(val, dict):
+                return str(val.get("canonical") or val.get("raw") or "")
+            return str(val)
+
+        raw_p = _get_plate_str(plate)
+        if not raw_p and dispatch_scan:
+            raw_p = _get_plate_str(getattr(dispatch_scan, "registration_number", ""))
+        if not raw_p and kit:
+            raw_p = _get_plate_str(getattr(kit, "registration_number", ""))
+
+        norm_plate = normalizer.canonicalize(raw_p) if raw_p else None
+        disp_plate = raw_p or norm_plate or "UNKNOWN"
+        search_plates = [p for p in (raw_p, norm_plate) if p]
 
         # If kit not passed directly, look up locally
-        if not kit and norm_plate:
+        if not kit and search_plates:
             from django.db.models import Q
             kit = InstallationKit.objects.filter(
-                Q(registration_number=norm_plate) | Q(kit_code__icontains=norm_plate)
+                Q(registration_number__in=search_plates) | Q(kit_code__icontains=norm_plate)
             ).first()
 
         # If dispatch_scan not passed, find latest
-        if not dispatch_scan and norm_plate:
-            dispatch_scan = StockDispatchScan.objects.filter(registration_number=norm_plate).order_by("-dispatched_at").first()
+        if not dispatch_scan and search_plates:
+            dispatch_scan = StockDispatchScan.objects.filter(registration_number__in=search_plates).order_by("-dispatched_at").first()
 
         # Linked order lookup
         order = None
-        if norm_plate:
-            order = InstallationOrder.objects.filter(registration_number=norm_plate).first()
+        if search_plates:
+            order = InstallationOrder.objects.filter(registration_number__in=search_plates).first()
 
         # Category determination
         cat_badge = "[bold white on dark_blue] PSV White [/]"
@@ -585,7 +596,7 @@ class InspectorPane(Static):
 
         lines = [
             "[b cyan]═══ 📦 Stock & Kit Inspector ═══[/b cyan]",
-            f"[b]Plate:[/b]          [bold yellow]{escape(norm_plate or 'UNKNOWN')}[/bold yellow]  {cat_badge}",
+            f"[b]Plate:[/b]          [bold yellow]{escape(disp_plate)}[/bold yellow]  {cat_badge}",
             f"[b]Stock Status:[/b]   {status_badge}",
             f"               {status_desc}",
             "",

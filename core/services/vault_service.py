@@ -688,6 +688,52 @@ def get_or_create_mobile_batch(
     return new_batch
 
 
+def get_or_create_uturn_batch(
+    uturn_session_id: str = "",
+    batch_index: Optional[int] = None,
+    source_label: str = "",
+    force_new: bool = False,
+) -> IngestionBatch:
+    """
+    Finds or creates a distinct IngestionBatch for an Off-Conveyor (U-Turn walk) session.
+    Unlike the continuous On-Conveyor 200-image rolling limit, each U-Turn walk represents
+    a distinct row/bay walk session with its own batch number (e.g. 'U-Turn Walk Batch #1', '#2').
+    """
+    today = timezone.localdate()
+    clean_session_id = str(uturn_session_id).strip()
+
+    if clean_session_id and not force_new:
+        existing = IngestionBatch.objects.filter(
+            source_type=IngestionBatch.SourceType.MOBILE,
+            source_label__contains=clean_session_id,
+        ).first()
+        if existing:
+            return existing
+
+    if not clean_session_id and not force_new:
+        return get_or_create_mobile_batch(source_label=source_label)
+
+    # Count existing U-Turn mobile batches today to determine sequential walk batch index
+    qs = IngestionBatch.objects.filter(
+        created_at__date=today,
+        source_type=IngestionBatch.SourceType.MOBILE,
+        source_label__icontains="U-Turn",
+    )
+    b_idx = batch_index or (qs.count() + 1)
+    base_label = source_label.strip() if source_label else f"U-Turn Walk Batch #{b_idx}"
+    if clean_session_id and clean_session_id not in base_label:
+        label = f"{base_label} [{clean_session_id}]"
+    else:
+        label = base_label
+
+    new_batch = create_ingestion_batch(
+        source_type=IngestionBatch.SourceType.MOBILE,
+        source_label=label,
+    )
+    logger.info("Created distinct Off-Conveyor U-Turn batch: %s (%s)", new_batch.batch_id, label)
+    return new_batch
+
+
 def link_or_create_conveyor_pair(
     bike_client_id: str,
     image: EvidenceImage,

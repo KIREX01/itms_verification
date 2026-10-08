@@ -151,7 +151,7 @@ def get_local_ipv4_addresses() -> List[Dict[str, Any]]:
 
 def get_mobile_connection_info(
     port: int = 8000,
-    ssl_port: int = 8443,
+    ssl_port: int = 443,
     use_https: bool = True,
 ) -> Dict[str, Any]:
     """

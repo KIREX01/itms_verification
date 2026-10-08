@@ -33,3 +33,13 @@ pytest>=8.0
 pytest-django>=4.8
 tabulate>=0.9
 
+# --- Production Servers & Windows Services ---
+gunicorn>=21.2.0; sys_platform != "win32"  # Production WSGI server for Linux VPS
+waitress>=3.0.0                            # Production WSGI server for Windows
+pywin32>=306; sys_platform == "win32"      # Windows Service integration
+
+# --- HTTPS & Development Utilities ---
+django-extensions>=3.2.0
+werkzeug>=3.0.0
+pyOpenSSL>=23.2.0
+

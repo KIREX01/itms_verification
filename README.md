@@ -352,7 +352,7 @@ python manage.py sync_stock_kits --max-pages 10
 Audits daily physical consumption against ITMS installation orders and generates certified stock reconciliation ledgers:
 * **Discrepancy Detection**: Identifies surplus or missing kits, duplicate tracker assignments, and unlinked motorcycles.
 * **Automated CSV Docket Export**: Generates timestamped reports (`itms_bond_stock_<date>_<timestamp>.csv`) saved to the user's custom reports directory.
-* **Dynamic Release Attribution**: Every audit export header contains verified system metadata and semantic versioning (`ITMS Verification & Daily Stock Ledger Audit — v1.0.6`).
+* **Dynamic Release Attribution**: Every audit export header contains verified system metadata and semantic versioning (`ITMS Verification & Daily Stock Ledger Audit — v1.0.7`).
 
 ```bash
 # Reconcile today's morning and afternoon shifts:

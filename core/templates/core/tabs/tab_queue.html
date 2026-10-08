@@ -19,8 +19,7 @@
 
                 <!-- Row 2: Scope and Status Filters -->
                 <div style="display:flex; flex-direction:column; gap:6px;">
-                    <!-- Date / Session Scope Filter -->
-                    <div class="scope-pills-group" style="display:flex; padding:2px; justify-content:space-between; background:var(--ug-black-card); border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.06);">
+                    <div class="scope-pills-group" style="display:flex; flex-wrap:wrap; gap:4px; padding:4px; justify-content:space-between; background:var(--ug-black-card); border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.06);">
                         <button class="scope-pill-btn active" id="btn-qscope-today" onclick="setQueueDateScope('TODAY')" title="Focus on today's active shift (Hotkey: D)" style="flex:1; text-align:center; padding:3px 6px; font-size:0.72rem;">
                             🔥 Today
                         </button>
@@ -32,6 +31,12 @@
                         </button>
                         <button class="scope-pill-btn" id="btn-qscope-all" onclick="setQueueDateScope('ALL')" title="All records across database" style="flex:1; text-align:center; padding:3px 6px; font-size:0.72rem;">
                             🌐 All
+                        </button>
+                        <button class="scope-pill-btn" onclick="fetchPairs()" title="Refresh Queue" style="flex:1; text-align:center; padding:3px 6px; font-size:0.72rem; color: var(--ug-cyan);">
+                            ⟳ Refresh
+                        </button>
+                        <button class="scope-pill-btn" onclick="exportQueueCSV()" title="Export Queue to CSV" style="flex:1; text-align:center; padding:3px 6px; font-size:0.72rem; color: var(--ug-green);">
+                            📥 CSV
                         </button>
                     </div>
 
@@ -70,7 +75,7 @@
         <!-- Right Column: Inspection & Action Studio -->
         <div class="inspection-studio-pane" id="queue-inspection-pane">
             <div class="studio-empty-state" id="queue-studio-empty">
-                <span style="font-size:3rem;">🔍</span>
+                <span class="hide-mobile" style="font-size:3rem;">🔍</span>
                 <h3 style="color:#fff; font-size:1.1rem; font-weight:800;">No vehicle pair selected</h3>
                 <p style="font-size:0.85rem; max-width:380px;">Select a pair from the queue on the left to inspect evidence photos, match plates, and submit.</p>
             </div>
@@ -79,11 +84,14 @@
             <div id="queue-studio-content" style="display:none; flex-direction:column; gap:14px;">
                 <!-- Header Banner -->
                 <div class="detail-banner-card">
-                    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                        <span class="detail-plate-hero-text" id="qdetail-plate">---</span>
-                        <span class="badge badge-yellow" id="qdetail-status">PENDING</span>
-                        <span class="badge badge-muted" id="qdetail-batch-badge" style="font-size:0.72rem;">Batch: —</span>
-                        <span id="qdetail-delta" style="font-size:0.8rem; color:var(--ug-text-muted);">Δt: --</span>
+                    <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
+                        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                            <span class="detail-plate-hero-text" id="qdetail-plate">---</span>
+                            <span class="badge badge-yellow" id="qdetail-status">PENDING</span>
+                            <span class="badge badge-muted" id="qdetail-batch-badge" style="font-size:0.72rem;">Batch: —</span>
+                            <span id="qdetail-delta" style="font-size:0.8rem; color:var(--ug-text-muted);">Δt: --</span>
+                        </div>
+                        <button class="btn btn-secondary mobile-only-btn" onclick="closeQueueMobileInspector()" style="display:none; padding:4px 12px; font-size:0.8rem; border-color:var(--ug-yellow); color:var(--ug-yellow);">◀ Back</button>
                     </div>
                     <div style="text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
                         <div style="font-size:0.7rem; color:var(--ug-text-dim); text-transform:uppercase;">Matched Installation Order</div>
@@ -108,9 +116,9 @@
                             <span id="qfront-timestamp" style="color:var(--ug-text-dim); font-size:0.75rem;">--:--:--</span>
                         </div>
                         <div class="evidence-viewport">
-                            <img id="qimg-front" src="" alt="Front vehicle" onerror="handlePhotoError('front')" onclick="openLightbox(this.src)">
+                            <img id="qimg-front" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="Front vehicle" onerror="window.handlePhotoError('front')" onclick="openLightbox(this.src)">
                             <div class="viewport-placeholder" id="qfront-placeholder">📷 No front angle photo</div>
-                            <span class="evidence-zoom-hint">🔍 Click to zoom</span>
+                            
                         </div>
                         <div class="evidence-crop-bar">
                             <div>Detected: <span class="crop-ocr-text" id="qfront-ocr-text">---</span></div>
@@ -125,9 +133,9 @@
                             <span id="qrear-timestamp" style="color:var(--ug-text-dim); font-size:0.75rem;">--:--:--</span>
                         </div>
                         <div class="evidence-viewport">
-                            <img id="qimg-rear" src="" alt="Rear vehicle" onerror="handlePhotoError('rear')" onclick="openLightbox(this.src)">
+                            <img id="qimg-rear" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="Rear vehicle" onerror="window.handlePhotoError('rear')" onclick="openLightbox(this.src)">
                             <div class="viewport-placeholder" id="qrear-placeholder">📷 No rear angle photo</div>
-                            <span class="evidence-zoom-hint">🔍 Click to zoom</span>
+                            
                         </div>
                         <div class="evidence-crop-bar">
                             <div>Detected: <span class="crop-ocr-text" id="qrear-ocr-text">---</span></div>
@@ -173,23 +181,19 @@
                 </div>
 
                 <!-- Operator Decision Bar (TUI Bindings) -->
-                <div class="operator-decision-bar">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <button class="btn-decision btn-success" id="btn-action-approve" onclick="executePairAction('approve')" title="Approve pair and advance to next item (Hotkey: A)">
-                            ✓ Approve &amp; Next <span class="hotkey">A</span>
-                        </button>
-                        <button class="btn-decision btn-gold" onclick="executePairAction('swap')" title="Swap front and rear photos (Hotkey: S)">
-                            ⇄ Swap Front / Rear <span class="hotkey">S</span>
-                        </button>
-                        <button class="btn-decision btn-secondary" onclick="openEditPlateModal()" title="Edit plate, change verification status, or link ITMS order (Hotkeys: E or L)">
-                            ✏️ Edit Plate &amp; Link Order <span class="hotkey">E / L</span>
-                        </button>
-                    </div>
-                    <div>
-                        <button class="btn-decision btn-primary" id="btn-submit-action" onclick="executePairAction('submit')" title="Submit verified motorcycle pair to ITMS (Hotkey: Enter)">
-                            🚀 Submit to ITMS <span class="hotkey">Enter</span>
-                        </button>
-                    </div>
+                <div class="operator-decision-bar" id="mobile-decision-grid">
+                    <button class="btn-decision btn-success" id="btn-action-approve" onclick="executePairAction('approve')" title="Approve pair and advance to next item (Hotkey: A)">
+                        ✓ Approve <span class="hotkey hide-mobile">A</span>
+                    </button>
+                    <button class="btn-decision btn-gold" onclick="executePairAction('swap')" title="Swap front and rear photos (Hotkey: S)">
+                        ⇄ Swap <span class="hotkey hide-mobile">S</span>
+                    </button>
+                    <button class="btn-decision btn-secondary" onclick="openEditPlateModal()" title="Edit plate, change verification status, or link ITMS order (Hotkeys: E or L)">
+                        ✏️ Edit Plate <span class="hotkey hide-mobile">E / L</span>
+                    </button>
+                    <button class="btn-decision btn-primary" id="btn-submit-action" onclick="executePairAction('submit')" title="Submit verified motorcycle pair to ITMS (Hotkey: Enter)">
+                        🚀 Submit <span class="hotkey hide-mobile">Enter</span>
+                    </button>
                 </div>
             </div>
         </div>

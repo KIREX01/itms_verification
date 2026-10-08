@@ -1,0 +1,362 @@
+<div class="tab-pane" id="pane-stock">
+    <div class="itms-split-view active">
+        <!-- LEFT PANE: Main Operations (65%) -->
+        <div class="itms-table-panel" style="padding: 14px;">
+            <div class="pane-header">
+                <h2>🏭 Bond Stock & Logistics</h2>
+                <div class="header-actions" style="display: flex; gap: 6px; align-items: center;">
+                    <button class="btn btn-secondary" onclick="stockPrevDay()" title="Previous Shift">◀</button>
+                    <button class="btn btn-primary" onclick="stockToday()" title="Today's Shift">Today</button>
+                    <button class="btn btn-secondary" onclick="stockNextDay()" title="Next Shift">▶</button>
+                    <span id="stock-date-display" class="badge badge-dark" style="margin-left: 6px; font-weight: 700;">Shift: Loading...</span>
+                </div>
+            </div>
+
+            <!-- Stock 4-Mode Nav -->
+            <div class="stock-mode-nav">
+                <button class="btn btn-primary stock-mode-btn active" id="btn-mode-dispatch" onclick="setStockMode('dispatch')">
+                    1. Dispatch <span class="hotkey">1</span>
+                </button>
+                <button class="btn btn-secondary stock-mode-btn" id="btn-mode-movements" onclick="setStockMode('movements')">
+                    2. Movements <span class="hotkey">2</span>
+                </button>
+                <button class="btn btn-secondary stock-mode-btn" id="btn-mode-audit" onclick="setStockMode('audit')">
+                    3. Safe Audit <span class="hotkey">3</span>
+                </button>
+                <button class="btn btn-secondary stock-mode-btn" id="btn-mode-ledger" onclick="setStockMode('ledger')">
+                    4. Ledger <span class="hotkey">4</span>
+                </button>
+            </div>
+
+            <!-- Universal Command Bar -->
+            <div class="stock-command-bar">
+                <select id="stock-category-select" class="form-control" style="width: 130px; font-weight: 600;">
+                    <option value="PSV">PSV White</option>
+                    <option value="PMO">PMO Yellow</option>
+                </select>
+                <input type="text" id="stock-universal-scan" class="form-control" style="flex: 1;" placeholder="Scan barcode or type plate... (Press / to focus)" autocomplete="off">
+                <div class="stock-command-bar-actions">
+                    <button class="btn btn-secondary" onclick="openStockPasteModal()" title="Paste registration numbers from Excel (V)">📋 Paste <span class="hotkey">V</span></button>
+                    <button class="btn btn-primary" onclick="syncStock()" title="Unified sync with ITMS (S)">⟳ Sync <span class="hotkey">S</span></button>
+                    <button class="btn btn-secondary" onclick="exportStockCSV()" title="Export reconciliation CSV (E)">📥 Export <span class="hotkey">E</span></button>
+                </div>
+            </div>
+
+            <!-- Instant Metrics Strip -->
+            <div id="stock-status-strip" class="stock-status-pills">
+                <span class="badge badge-muted">Opening: 0</span>
+                <span class="badge badge-muted">Received: 0</span>
+                <span class="badge badge-muted">Dispatched: 0</span>
+                <span class="badge badge-muted">Installed: 0</span>
+                <span class="badge badge-cyan">Closing: 0</span>
+                <span class="badge badge-yellow">Physical: 0</span>
+                <span class="badge badge-green">Unallocated: 0</span>
+            </div>
+
+            <!-- Instant Verification & Status Feedback Strip -->
+            <div id="stock-feedback-alert" class="alert alert-success" style="margin-bottom: 12px; font-size: 0.95rem; font-weight: 700; padding: 10px 14px;">
+                ⚡ READY FOR SCANNING: Scan plate or click Paste to load from Excel.
+            </div>
+
+            <!-- MODE 1: Dispatch -->
+            <div id="mode-dispatch" class="stock-mode-container active" style="display: flex; flex-direction: column; flex: 1; overflow: hidden; min-height: 0;">
+                <div class="itms-table-scroll">
+                    <table class="itms-grid-table" id="table-stock-dispatch">
+                        <thead>
+                            <tr>
+                                <th style="width: 50px;">#</th>
+                                <th style="width: 100px;">Time</th>
+                                <th style="width: 130px;">Plate Number</th>
+                                <th style="width: 110px;">Category</th>
+                                <th style="width: 140px;">Kit Code</th>
+                                <th style="width: 140px;">GPS Tracker</th>
+                                <th style="width: 120px;">Status</th>
+                                <th style="width: 130px;">Operator</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="8" class="text-center" style="padding: 30px; color: var(--ug-text-muted);">Loading dispatch logs...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-pagination-bar" style="margin-top: auto; display: flex; justify-content: space-between; align-items: center; padding: 10px 0 0 0;">
+                    <span id="dispatch-summary" style="font-weight: 700; color: var(--ug-green); font-size: 0.9rem;">Dispatched Today: 0 kits</span>
+                    <button class="btn btn-danger" id="btn-clear-dispatches" onclick="clearDispatchesToday()" style="padding: 5px 12px; font-size: 0.8rem;">Clear Dispatches Today</button>
+                </div>
+            </div>
+
+            <!-- MODE 2: Movements -->
+            <div id="mode-movements" class="stock-mode-container" style="display: none; flex-direction: column; flex: 1; overflow: hidden; min-height: 0;">
+                <div class="itms-table-scroll">
+                    <table class="itms-grid-table" id="table-stock-movements">
+                        <thead>
+                            <tr>
+                                <th style="width: 50px;">#</th>
+                                <th style="width: 90px;">Time</th>
+                                <th style="width: 150px;">Movement Type</th>
+                                <th style="width: 100px;">Category</th>
+                                <th style="width: 180px;">Source / Dest / Reason</th>
+                                <th style="width: 140px;">Reference</th>
+                                <th style="width: 80px;">Count</th>
+                                <th>Sample Plates</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="8" class="text-center" style="padding: 30px; color: var(--ug-text-muted);">Loading movements...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-pagination-bar" style="margin-top: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 0 0 0;">
+                    <select id="movement-type" class="form-control" style="width: 160px; font-size: 0.85rem;">
+                        <option value="DELIVERY">Inbound Delivery</option>
+                        <option value="TRANSFER_IN">Bond Transfer In</option>
+                        <option value="TRANSFER_OUT">Bond Transfer Out</option>
+                        <option value="RETURN">Line Return</option>
+                    </select>
+                    <input type="text" id="movement-partner" class="form-control" placeholder="Partner / Bond / Reason..." style="flex: 1; min-width: 150px; font-size: 0.85rem;">
+                    <input type="text" id="movement-ref" class="form-control" placeholder="Batch / Waybill..." style="width: 130px; font-size: 0.85rem;">
+                    <span id="lbl-movement-staged" class="badge badge-muted" style="font-size: 0.85rem; padding: 6px 10px;">Staged: 0 plates</span>
+                    <button class="btn btn-success" onclick="commitMovement()" style="padding: 6px 14px; font-size: 0.85rem; font-weight: 700;">✓ Commit Movement</button>
+                    <button class="btn btn-secondary" onclick="clearMovementStaged()" style="padding: 6px 12px; font-size: 0.85rem;">Clear Staged</button>
+                </div>
+            </div>
+
+            <!-- MODE 3: Safe Audit -->
+            <div id="mode-audit" class="stock-mode-container" style="display: none; flex-direction: column; flex: 1; overflow: hidden; min-height: 0;">
+                <div class="itms-table-scroll">
+                    <table class="itms-grid-table" id="table-stock-audit">
+                        <thead>
+                            <tr>
+                                <th style="width: 50px;">#</th>
+                                <th style="width: 130px;">Plate Number</th>
+                                <th style="width: 130px;">Verification</th>
+                                <th style="width: 150px;">Kit Code</th>
+                                <th style="width: 150px;">GPS Tracker</th>
+                                <th style="width: 130px;">Front BLE</th>
+                                <th style="width: 130px;">Rear BLE</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="7" class="text-center" style="padding: 30px; color: var(--ug-text-muted);">Loading audit data...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-pagination-bar" style="margin-top: auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 0 0 0;">
+                    <span id="audit-summary" style="font-weight: 700; flex: 1; font-size: 0.85rem; color: #fff;">Safe Audit Summary: Physical Audited: 0 │ Verified: 0 │ Unregistered: 0 │ Variance: 0</span>
+                    <input type="number" id="audit-manual-count" class="form-control" placeholder="Manual Count" style="width: 130px; font-size: 0.85rem;">
+                    <button class="btn btn-primary" onclick="setManualAuditCount()" style="padding: 6px 12px; font-size: 0.85rem;">Set Count</button>
+                    <button class="btn btn-danger" onclick="exportUnregistered()" style="padding: 6px 12px; font-size: 0.85rem;">Export Unregistered</button>
+                </div>
+            </div>
+
+            <!-- MODE 4: Ledger -->
+            <div id="mode-ledger" class="stock-mode-container" style="display: none; flex-direction: column; flex: 1; overflow: hidden; min-height: 0;">
+                <div class="itms-table-scroll">
+                    <table class="itms-grid-table" id="table-stock-ledger">
+                        <thead>
+                            <tr>
+                                <th style="width: 240px;">Stock Movement Category</th>
+                                <th style="width: 130px;">PMO Yellow</th>
+                                <th style="width: 130px;">PSV White</th>
+                                <th style="width: 140px;">Total Combined</th>
+                                <th>Notes & Explanations</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="5" class="text-center" style="padding: 30px; color: var(--ug-text-muted);">Loading ledger...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-pagination-bar" style="margin-top: auto; display: flex; gap: 10px; padding: 10px 0 0 0;">
+                    <button class="btn btn-primary" onclick="openLedgerTargetModal()" style="font-size: 0.85rem;">✎ Edit Opening & Target <span class="hotkey">O</span></button>
+                    <button class="btn btn-secondary" onclick="refreshStockLedger()" style="font-size: 0.85rem;">⟳ Refresh Ledger <span class="hotkey">R</span></button>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- RIGHT PANE: Kit Inspector (35%) -->
+        <div class="itms-inspector-panel" id="stock-inspector-card">
+            <div class="inspector-header">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                        <div class="inspector-plate-hero" id="ins-plate">SCAN PLATE</div>
+                        <span id="ins-cat-badge" class="badge badge-muted" style="display: none;">PSV</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span id="ins-status" class="badge badge-green" style="display: none;">✓ ON STOCK</span>
+                        <button class="btn btn-secondary mobile-only-btn" onclick="closeStockMobileInspector()" style="display:none; padding:4px 12px; font-size:0.8rem; border-color:var(--ug-yellow); color:var(--ug-yellow);">◀ Back</button>
+                    </div>
+                </div>
+                <div class="inspector-order-num" id="ins-desc" style="margin-top: 5px;">Scan barcode or click a plate to inspect hardware profile & stock status.</div>
+            </div>
+
+            <!-- Blocked Plate Warning Alert -->
+            <div id="ins-error-box" class="alert alert-danger" style="display: none; font-size: 0.82rem; padding: 10px 12px; margin-bottom: 12px; line-height: 1.4;">
+                ⛔ NOT ON STOCK (BLOCKED): Set physical box aside and swap with kits on stock!
+            </div>
+
+            <div id="inspector-content" style="display: none; flex-direction: column; gap: 14px;">
+                <!-- 🛰️ Hardware Profile -->
+                <div>
+                    <div class="inspector-section-title">🛰️ Hardware Profile</div>
+                    <div class="hardware-box">
+                        <div class="hw-row">
+                            <span class="hw-label">Kit Code:</span>
+                            <span class="hw-val" id="ins-kit-code">---</span>
+                        </div>
+                        <div class="hw-row">
+                            <span class="hw-label">Warehouse:</span>
+                            <span class="hw-val" id="ins-warehouse">---</span>
+                        </div>
+                        <div class="hw-row">
+                            <span class="hw-label">GPS Tracker:</span>
+                            <span class="hw-val" id="ins-gps">---</span>
+                        </div>
+                        <div class="hw-row">
+                            <span class="hw-label">Front BLE:</span>
+                            <span class="hw-val" id="ins-front">---</span>
+                        </div>
+                        <div class="hw-row">
+                            <span class="hw-label">Rear BLE:</span>
+                            <span class="hw-val" id="ins-rear">---</span>
+                        </div>
+                        <div class="hw-row">
+                            <span class="hw-label">Front Plate Serial:</span>
+                            <span class="hw-val" id="ins-fplate">---</span>
+                        </div>
+                        <div class="hw-row">
+                            <span class="hw-label">Rear Plate Serial:</span>
+                            <span class="hw-val" id="ins-rplate">---</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 📥 ITMS Order Linkage -->
+                <div>
+                    <div class="inspector-section-title">📥 ITMS Order Linkage</div>
+                    <div class="hardware-box" id="ins-order-box">
+                        <div class="hw-row">
+                            <span class="hw-label">Order #:</span>
+                            <span class="hw-val" id="ins-order-num">---</span>
+                        </div>
+                        <div class="hw-row">
+                            <span class="hw-label">Order Status:</span>
+                            <span class="hw-val" id="ins-order-status">---</span>
+                        </div>
+                        <div class="hw-row">
+                            <span class="hw-label">Owner / Fleet:</span>
+                            <span class="hw-val" id="ins-order-owner">---</span>
+                        </div>
+                        <div class="hw-row">
+                            <span class="hw-label">Motorcycle:</span>
+                            <span class="hw-val" id="ins-order-bike">---</span>
+                        </div>
+                        <div class="hw-row">
+                            <span class="hw-label">Chassis / VIN:</span>
+                            <span class="hw-val" id="ins-order-chassis">---</span>
+                        </div>
+                    </div>
+                    <div id="ins-unallocated-box" style="display: none; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-md); padding: 8px 12px; font-size: 0.8rem; color: #34d399; font-weight: 700;">
+                        ● Unallocated Kit (Available for line allocation)
+                    </div>
+                </div>
+
+                <!-- 📤 Line Dispatch Record -->
+                <div id="ins-dispatch-section" style="display: none;">
+                    <div class="inspector-section-title">📤 Line Dispatch Record</div>
+                    <div class="hardware-box">
+                        <div class="hw-row">
+                            <span class="hw-label">Dispatched At:</span>
+                            <span class="hw-val" id="ins-disp-time">---</span>
+                        </div>
+                        <div class="hw-row">
+                            <span class="hw-label">Category:</span>
+                            <span class="hw-val" id="ins-disp-cat">---</span>
+                        </div>
+                        <div class="hw-row">
+                            <span class="hw-label">Shift Suffix:</span>
+                            <span class="hw-val" id="ins-disp-suffix">---</span>
+                        </div>
+                        <div class="hw-row">
+                            <span class="hw-label">Dispatch Status:</span>
+                            <span class="hw-val" id="ins-disp-status">---</span>
+                        </div>
+                        <div class="hw-row">
+                            <span class="hw-label">Operator:</span>
+                            <span class="hw-val" id="ins-disp-operator">---</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Paste Excel Modal -->
+<div class="modal-overlay" id="stock-paste-modal">
+    <div class="modal-box" style="width: 580px;">
+        <div class="modal-header">
+            <h3 class="modal-title"><span>📋</span> Paste from Excel</h3>
+            <button class="modal-close" onclick="closeStockPasteModal()">×</button>
+        </div>
+        <div class="modal-body">
+            <p style="font-size: 0.85rem; color: var(--ug-text-muted); margin: 0;">Paste a column of registration numbers from Excel below. The system will automatically parse them for the current mode (<span id="paste-mode-label" style="font-weight: bold; color: var(--ug-yellow);">DISPATCH</span>).</p>
+            <textarea id="stock-paste-area" class="form-control" style="height: 180px; width: 100%; font-family: monospace; font-size: 0.9rem;" placeholder="UMA 123A&#10;UMB 456B&#10;UMC 789C..."></textarea>
+            
+            <div id="paste-movement-warning" class="alert alert-warning" style="display: none; font-size: 0.85rem; padding: 10px; margin: 0;">
+                Note: In Movements mode, these plates will be ingested into your staged buffer. You can review them before clicking Commit.
+            </div>
+        </div>
+        <div class="modal-footer" style="display: flex; gap: 8px; justify-content: space-between; align-items: center;">
+            <button class="btn btn-secondary" onclick="openMobileConnectModal()">📱 Scan with Mobile</button>
+            <div style="display: flex; gap: 8px;">
+                <button class="btn btn-secondary" onclick="closeStockPasteModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="processStockPaste()">Process Plates</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Opening / Targets Modal -->
+<div class="modal-overlay" id="stock-target-modal">
+    <div class="modal-box" style="width: 480px;">
+        <div class="modal-header">
+            <h3 class="modal-title"><span>✎</span> Edit Opening & Target</h3>
+            <button class="modal-close" onclick="closeLedgerTargetModal()">×</button>
+        </div>
+        <div class="modal-body">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 0.8rem; color: var(--ug-text-muted);">Auto-Balance Helper:</span>
+                <button type="button" class="btn btn-secondary" onclick="autoCarryPreviousClosing()" style="padding: 4px 10px; font-size: 0.78rem;">
+                    ⚡ Auto-Carry Previous Closing
+                </button>
+            </div>
+            <div class="form-group" style="margin-top: 4px;">
+                <label style="font-size: 0.85rem; font-weight: 600;">Opening Balance (PSV White)</label>
+                <input type="number" id="ledger-opening-psv" class="form-control" style="width: 100%;" oninput="updateTotalOpening()">
+            </div>
+            <div class="form-group">
+                <label style="font-size: 0.85rem; font-weight: 600;">Opening Balance (PMO Yellow)</label>
+                <input type="number" id="ledger-opening-pmo" class="form-control" style="width: 100%;" oninput="updateTotalOpening()">
+            </div>
+            <div style="padding: 8px 12px; background: rgba(255,255,255,0.03); border: 1px solid var(--ug-border); border-radius: var(--radius-md); font-size: 0.82rem; display: flex; justify-content: space-between;">
+                <span style="color: var(--ug-text-muted);">Total Combined Opening:</span>
+                <span id="ledger-opening-total" style="font-weight: 700; color: #fff;">0</span>
+            </div>
+            <hr style="border: 0; border-top: 1px solid var(--ug-border); margin: 4px 0;">
+            <div class="form-group">
+                <label style="font-size: 0.85rem; font-weight: 600;">Scheduled Target (Total)</label>
+                <input type="number" id="ledger-target-total" class="form-control" style="width: 100%;">
+            </div>
+            <div class="form-group">
+                <label style="font-size: 0.85rem; font-weight: 600;">Shift Handover Remarks</label>
+                <input type="text" id="ledger-remarks" class="form-control" style="width: 100%;" placeholder="e.g. Opening verified with Safe Room officer">
+            </div>
+        </div>
+        <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 8px;">
+            <button class="btn btn-secondary" onclick="closeLedgerTargetModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="saveLedgerTargets()">Save Balances</button>
+        </div>
+    </div>
+</div>

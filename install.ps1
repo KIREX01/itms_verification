@@ -337,6 +337,20 @@ try {
     Write-Warning "Could not register global command: $_"
 }
 
+# ------------------------------------------------------------------
+# 6c. Register 24/7 Background Windows Service (survives sleep & logout)
+# ------------------------------------------------------------------
+$serviceBat = Join-Path $InstallDir "install_service.bat"
+if (Test-Path $serviceBat) {
+    Write-Host "[>] Installing 24/7 background Windows Service (survives sleep & logout)..." -ForegroundColor Cyan
+    try {
+        Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$serviceBat`" /nopause" -Verb RunAs -Wait
+        Write-Host "    [+] Windows Service registered successfully." -ForegroundColor Green
+    } catch {
+        Write-Warning "Could not register service with Administrator rights: $_"
+    }
+}
+
 Write-Host ""
 Write-Host "====================================================================" -ForegroundColor Green
 Write-Host "   [+] ITMS VERIFICATION COPILOT READY FOR USE!" -ForegroundColor Green

@@ -79,6 +79,23 @@ if (-not $Force) {
     Write-Host ""
 }
 
+# 2b. Stop and Remove ITMS Windows Service (if installed)
+Write-Host "[>] Checking for ITMSVerificationService Windows Service..." -ForegroundColor Cyan
+try {
+    $scCheck = sc.exe query ITMSVerificationService 2>$null
+    if ($scCheck -match "SERVICE_NAME") {
+        Write-Host "    [*] Stopping and removing ITMSVerificationService..." -ForegroundColor Yellow
+        net.exe stop ITMSVerificationService 2>$null
+        $uninstallBat = Join-Path $InstallDir "uninstall_service.bat"
+        if (Test-Path $uninstallBat) {
+            Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$uninstallBat`" /nopause" -Wait -WindowStyle Hidden
+        } else {
+            sc.exe delete ITMSVerificationService 2>$null
+        }
+        Write-Host "    [+] Windows Service removed." -ForegroundColor Green
+    }
+} catch {}
+
 # 3. Terminate Any Running ITMS Python / Server Processes
 Write-Host "[>] Terminating running ITMS processes..." -ForegroundColor Cyan
 try {

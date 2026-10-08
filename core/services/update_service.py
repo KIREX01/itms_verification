@@ -460,6 +460,24 @@ class UpdateService:
             bootstrap.ensure_model_weights(download_missing=True)
             bootstrap.detect_and_configure_ocr(download_missing=True)
 
+            # 4. If Windows, update / install & restart Windows Service
+            if sys.platform == "win32":
+                try:
+                    service_script = PROJECT_ROOT / "windows_service.py"
+                    install_bat = PROJECT_ROOT / "install_service.bat"
+                    res = subprocess.run(["sc", "query", "ITMSVerificationService"], capture_output=True, text=True)
+                    if "SERVICE_NAME" in res.stdout and service_script.is_file():
+                        print("  [>] Updating ITMSVerificationService Windows Service...")
+                        subprocess.run([sys.executable, str(service_script), "update", "--startup=auto"], check=False)
+                        subprocess.run(["net", "stop", "ITMSVerificationService"], check=False, capture_output=True)
+                        subprocess.run(["net", "start", "ITMSVerificationService"], check=False, capture_output=True)
+                        print("  [+] ITMSVerificationService updated and restarted.")
+                    elif install_bat.is_file():
+                        import ctypes
+                        ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f'/c "{install_bat}" /nopause', None, 1)
+                except Exception as svc_err:
+                    logger.debug("Windows service update notice: %s", svc_err)
+
             return True, "Dependencies, migrations, and model weights verified."
         except Exception as exc:
             logger.error("Post-update task error: %s", exc)

@@ -17,6 +17,7 @@ Usage:
 import os
 import shutil
 import signal
+import subprocess
 import sys
 from pathlib import Path
 
@@ -442,16 +443,51 @@ def run_update(extra_args=None):
         if req_file.is_file():
             import subprocess
             subprocess.run([py_exe, "-m", "pip", "install", "-r", str(req_file)], cwd=PROJECT_ROOT, check=False)
-        import subprocess
         subprocess.run([py_exe, str(PROJECT_ROOT / "scripts" / "bootstrap.py")], cwd=PROJECT_ROOT, check=False)
+
+        # Ensure Windows Service is kept in sync (installed or updated & restarted)
+        if sys.platform == "win32":
+            try:
+                service_py = PROJECT_ROOT / "windows_service.py"
+                install_bat = PROJECT_ROOT / "install_service.bat"
+                res = subprocess.run(["sc", "query", "ITMSVerificationService"], capture_output=True, text=True)
+                if "SERVICE_NAME" in res.stdout:
+                    print("[*] Updating and restarting ITMSVerificationService Windows Service...")
+                    subprocess.run([py_exe, str(service_py), "update", "--startup=auto"], check=False)
+                    subprocess.run(["net", "stop", "ITMSVerificationService"], check=False, capture_output=True)
+                    subprocess.run(["net", "start", "ITMSVerificationService"], check=False, capture_output=True)
+                    print("[+] ITMSVerificationService updated and active in background.")
+                elif install_bat.is_file():
+                    print("[*] Installing ITMSVerificationService for 24/7 background operation...")
+                    import ctypes
+                    ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f'/c "{install_bat}" /nopause', None, 1)
+            except Exception as svc_err:
+                print(f"[!] Windows service update notice: {svc_err}")
     except Exception as post_exc:
         print(f"[!] Post-update task notice: {post_exc}")
 
 
 def run_uninstall(extra_args=None):
     """Triggers complete application uninstallation."""
-    import subprocess
     if sys.platform == "win32":
+        # First stop and remove Windows Service if installed
+        try:
+            res = subprocess.run(["sc", "query", "ITMSVerificationService"], capture_output=True, text=True)
+            if "SERVICE_NAME" in res.stdout:
+                print("[*] Stopping and removing ITMSVerificationService Windows Service...")
+                uninstall_bat = PROJECT_ROOT / "uninstall_service.bat"
+                service_py = PROJECT_ROOT / "windows_service.py"
+                if uninstall_bat.is_file():
+                    import ctypes
+                    ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f'/c "{uninstall_bat}" /nopause', None, 1)
+                elif service_py.is_file():
+                    subprocess.run([get_python_exe(), str(service_py), "stop"], check=False, capture_output=True)
+                    subprocess.run([get_python_exe(), str(service_py), "remove"], check=False, capture_output=True)
+                subprocess.run(["sc", "delete", "ITMSVerificationService"], check=False, capture_output=True)
+                print("[+] ITMSVerificationService stopped and removed.")
+        except Exception as svc_err:
+            pass
+
         uninstall_ps1 = PROJECT_ROOT / "uninstall.ps1"
         if not uninstall_ps1.is_file():
             print("[!] uninstall.ps1 not found.")
@@ -469,6 +505,53 @@ def run_uninstall(extra_args=None):
         if extra_args:
             cmd.extend(extra_args)
         subprocess.run(cmd, check=False)
+
+
+def run_service(args):
+    """Manages the Windows Service directly from itms CLI."""
+    if sys.platform != "win32":
+        print("[!] Windows Service is only supported on Windows.")
+        return
+    action = args[0].lower() if args else "status"
+    service_script = PROJECT_ROOT / "windows_service.py"
+    py_exe = get_python_exe()
+
+    if action in ("install", "setup"):
+        bat = PROJECT_ROOT / "install_service.bat"
+        if bat.is_file():
+            import ctypes
+            ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f'/c "{bat}"', None, 1)
+            print("[+] Windows Service installer launched with Administrator privileges.")
+        else:
+            subprocess.run([py_exe, str(service_script), "install"])
+            subprocess.run([py_exe, str(service_script), "update", "--startup=auto"])
+            subprocess.run([py_exe, str(service_script), "start"])
+    elif action in ("remove", "uninstall", "delete"):
+        bat = PROJECT_ROOT / "uninstall_service.bat"
+        if bat.is_file():
+            import ctypes
+            ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f'/c "{bat}"', None, 1)
+            print("[+] Windows Service uninstaller launched with Administrator privileges.")
+        else:
+            subprocess.run([py_exe, str(service_script), "stop"])
+            subprocess.run([py_exe, str(service_script), "remove"])
+    elif action in ("status", "info"):
+        res = subprocess.run(["sc", "query", "ITMSVerificationService"], capture_output=True, text=True)
+        if "SERVICE_NAME" in res.stdout:
+            state = "UNKNOWN"
+            for line in res.stdout.splitlines():
+                if "STATE" in line:
+                    state = line.split(":")[-1].strip()
+            print(f"[+] ITMSVerificationService is INSTALLED. Status: {state}")
+            print("    Runs 24/7 in background on https://localhost/ (port 443)")
+            print("    Away Mode: Active (CPU and network active when screen dims/lid closes)")
+        else:
+            print("[-] ITMSVerificationService is NOT installed.")
+            print("    To install, run: itms service install (or double-click install_service.bat)")
+    elif action in ("start", "stop", "restart"):
+        subprocess.run([py_exe, str(service_script), action])
+    else:
+        print("Usage: itms service [status|install|start|stop|restart|remove]")
 
 
 def run_manage(args):
@@ -555,6 +638,10 @@ def main():
 
     if first in ("manage", "django"):
         run_manage(args[1:])
+        return
+
+    if first in ("service", "svc"):
+        run_service(args[1:])
         return
 
     # If argument starts with --port or -p, pass directly to web launcher

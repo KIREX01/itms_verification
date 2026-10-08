@@ -87,6 +87,7 @@ class ITMSDjangoService(win32serviceutil.ServiceFramework):
 
     def main(self):
         base_dir = Path(__file__).resolve().parent
+        os.chdir(str(base_dir))
         venv_python = base_dir / ".venv" / "Scripts" / "python.exe"
         if not venv_python.is_file():
             venv_python = Path(sys.executable)

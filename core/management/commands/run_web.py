@@ -218,8 +218,8 @@ class Command(BaseCommand):
         cert_file, key_file = ssl_service.ensure_ssl_certificates(san_ips=san_ips)
         runserver_args = {
             "use_reloader": not is_noreload,
-            "cert_file": str(cert_file),
-            "key_file": str(key_file),
+            "cert_path": str(cert_file),
+            "key_file_path": str(key_file),
         }
 
         try:

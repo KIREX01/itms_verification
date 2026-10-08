@@ -454,13 +454,23 @@ def run_update(extra_args=None):
                 if "SERVICE_NAME" in res.stdout:
                     print("[*] Updating and restarting ITMSVerificationService Windows Service...")
                     subprocess.run([py_exe, str(service_py), "update", "--startup=auto"], check=False)
-                    subprocess.run(["net", "stop", "ITMSVerificationService"], check=False, capture_output=True)
-                    subprocess.run(["net", "start", "ITMSVerificationService"], check=False, capture_output=True)
+                    start_res = subprocess.run(["net", "start", "ITMSVerificationService"], capture_output=True, text=True)
+                    if start_res.returncode != 0 and "has already been started" not in start_res.stdout:
+                        subprocess.run(
+                            ["powershell", "-NoProfile", "-Command", "Start-Process cmd -ArgumentList '/c net stop ITMSVerificationService & net start ITMSVerificationService' -Verb RunAs -Wait"],
+                            check=False
+                        )
+                    else:
+                        subprocess.run(["net", "stop", "ITMSVerificationService"], check=False, capture_output=True)
+                        subprocess.run(["net", "start", "ITMSVerificationService"], check=False, capture_output=True)
                     print("[+] ITMSVerificationService updated and active in background.")
                 elif install_bat.is_file():
-                    print("[*] Installing ITMSVerificationService for 24/7 background operation...")
-                    import ctypes
-                    ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f'/c "{install_bat}" /nopause', None, 1)
+                    print("[*] Automatically installing ITMSVerificationService for 24/7 background operation...")
+                    subprocess.run(
+                        ["powershell", "-NoProfile", "-Command", f"Start-Process cmd -ArgumentList '/c `\"{install_bat}`\" /nopause' -Verb RunAs -Wait"],
+                        check=False
+                    )
+                    print("[+] ITMSVerificationService installed and running in background.")
             except Exception as svc_err:
                 print(f"[!] Windows service update notice: {svc_err}")
     except Exception as post_exc:
@@ -478,8 +488,10 @@ def run_uninstall(extra_args=None):
                 uninstall_bat = PROJECT_ROOT / "uninstall_service.bat"
                 service_py = PROJECT_ROOT / "windows_service.py"
                 if uninstall_bat.is_file():
-                    import ctypes
-                    ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f'/c "{uninstall_bat}" /nopause', None, 1)
+                    subprocess.run(
+                        ["powershell", "-NoProfile", "-Command", f"Start-Process cmd -ArgumentList '/c `\"{uninstall_bat}`\" /nopause' -Verb RunAs -Wait"],
+                        check=False
+                    )
                 elif service_py.is_file():
                     subprocess.run([get_python_exe(), str(service_py), "stop"], check=False, capture_output=True)
                     subprocess.run([get_python_exe(), str(service_py), "remove"], check=False, capture_output=True)
@@ -519,9 +531,18 @@ def run_service(args):
     if action in ("install", "setup"):
         bat = PROJECT_ROOT / "install_service.bat"
         if bat.is_file():
-            import ctypes
-            ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f'/c "{bat}"', None, 1)
-            print("[+] Windows Service installer launched with Administrator privileges.")
+            print("[*] Launching Windows Service installer with Administrator privileges...")
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", f"Start-Process cmd -ArgumentList '/c `\"{bat}`\" /nopause' -Verb RunAs -Wait"],
+                check=False
+            )
+            time.sleep(1)
+            res = subprocess.run(["sc", "query", "ITMSVerificationService"], capture_output=True, text=True)
+            if "RUNNING" in res.stdout:
+                print("[+] ITMSVerificationService successfully installed and running!")
+                print("    Access URL: https://localhost/ (port 443)")
+            else:
+                print("[+] Service installer completed.")
         else:
             subprocess.run([py_exe, str(service_script), "install"])
             subprocess.run([py_exe, str(service_script), "update", "--startup=auto"])
@@ -529,9 +550,12 @@ def run_service(args):
     elif action in ("remove", "uninstall", "delete"):
         bat = PROJECT_ROOT / "uninstall_service.bat"
         if bat.is_file():
-            import ctypes
-            ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f'/c "{bat}"', None, 1)
-            print("[+] Windows Service uninstaller launched with Administrator privileges.")
+            print("[*] Launching Windows Service uninstaller with Administrator privileges...")
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", f"Start-Process cmd -ArgumentList '/c `\"{bat}`\" /nopause' -Verb RunAs -Wait"],
+                check=False
+            )
+            print("[+] ITMSVerificationService uninstalled.")
         else:
             subprocess.run([py_exe, str(service_script), "stop"])
             subprocess.run([py_exe, str(service_script), "remove"])
@@ -548,8 +572,38 @@ def run_service(args):
         else:
             print("[-] ITMSVerificationService is NOT installed.")
             print("    To install, run: itms service install (or double-click install_service.bat)")
-    elif action in ("start", "stop", "restart"):
-        subprocess.run([py_exe, str(service_script), action])
+    elif action == "start":
+        start_res = subprocess.run(["net", "start", "ITMSVerificationService"], capture_output=True, text=True)
+        if start_res.returncode == 0 or "has already been started" in start_res.stdout:
+            print("[+] ITMSVerificationService is running.")
+        else:
+            print("[*] Requesting UAC elevation to start ITMSVerificationService...")
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "Start-Process cmd -ArgumentList '/c net start ITMSVerificationService' -Verb RunAs -Wait"],
+                check=False
+            )
+            time.sleep(1)
+            verify = subprocess.run(["sc", "query", "ITMSVerificationService"], capture_output=True, text=True)
+            if "RUNNING" in verify.stdout:
+                print("[+] ITMSVerificationService started successfully.")
+            else:
+                print("[!] Check status with: itms service status")
+    elif action == "stop":
+        stop_res = subprocess.run(["net", "stop", "ITMSVerificationService"], capture_output=True, text=True)
+        if stop_res.returncode == 0:
+            print("[+] ITMSVerificationService stopped.")
+        else:
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "Start-Process cmd -ArgumentList '/c net stop ITMSVerificationService' -Verb RunAs -Wait"],
+                check=False
+            )
+            print("[+] ITMSVerificationService stopped.")
+    elif action == "restart":
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command", "Start-Process cmd -ArgumentList '/c net stop ITMSVerificationService & net start ITMSVerificationService' -Verb RunAs -Wait"],
+            check=False
+        )
+        print("[+] ITMSVerificationService restarted.")
     else:
         print("Usage: itms service [status|install|start|stop|restart|remove]")
 

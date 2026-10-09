@@ -40,6 +40,22 @@ fi
 cd "$INSTALL_DIR"
 chmod +x itms scripts/bootstrap.py 2>/dev/null || true
 
+# 1.5 System Dependencies (Tesseract OCR & OpenCV libs)
+if command -v apt-get >/dev/null 2>&1; then
+    MISSING_PKGS=()
+    command -v tesseract >/dev/null 2>&1 || MISSING_PKGS+=(tesseract-ocr)
+    (dpkg -s libgl1 >/dev/null 2>&1 || dpkg -s libgl1-mesa-glx >/dev/null 2>&1) || MISSING_PKGS+=(libgl1)
+    (dpkg -s libglib2.0-0 >/dev/null 2>&1 || dpkg -s libglib2.0-0t64 >/dev/null 2>&1) || MISSING_PKGS+=(libglib2.0-0)
+    if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
+        echo "[>] Installing required system dependencies (${MISSING_PKGS[*]})..."
+        if [ "$(id -u)" -eq 0 ]; then
+            apt-get update -qq && apt-get install -y -qq "${MISSING_PKGS[@]}" || true
+        elif command -v sudo >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq "${MISSING_PKGS[@]}" || true
+        fi
+    fi
+fi
+
 # 2. Python Environment & Virtualenv
 echo "[>] Verifying Python 3 environment..."
 PYTHON_BIN=""

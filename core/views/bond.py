@@ -577,6 +577,96 @@ def api_stock_mvr_docket(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
+@require_GET
+def api_stock_blocked_plates(request: HttpRequest) -> JsonResponse:
+    """Returns the list of plates not on stock and the ITMS Transfer Manager request docket."""
+    from core.services import stock_monitoring_service
+    date_suffix = (
+        request.GET.get("date")
+        or request.GET.get("date_suffix")
+        or request.GET.get("suffix")
+        or None
+    )
+    try:
+        docket = stock_monitoring_service.get_stock_transfer_request_docket(date_suffix)
+        return JsonResponse({"success": True, "docket": docket})
+    except Exception as exc:
+        logger.error("api_stock_blocked_plates error: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
+@csrf_exempt
+@require_POST
+def api_stock_verify_batch(request: HttpRequest) -> JsonResponse:
+    """
+    Verifies a pasted batch of license plates against stock without creating dispatches.
+    Returns which plates are valid on stock vs which are NOT on stock, along with
+    a pre-formatted ITMS Transfer Manager request docket.
+    """
+    from core.services import stock_monitoring_service, kit_provisioning_service, bond_service
+    plates_raw = None
+    date_suffix = None
+    check_itms_live = True
+
+    if request.content_type == "application/json" and request.body:
+        try:
+            body = json.loads(request.body.decode("utf-8"))
+            plates_raw = body.get("plates")
+            date_suffix = body.get("date") or body.get("date_suffix") or body.get("suffix")
+            if "check_itms_live" in body:
+                check_itms_live = bool(body.get("check_itms_live"))
+        except Exception:
+            pass
+    if not plates_raw:
+        plates_raw = request.POST.get("plates")
+        date_suffix = (
+            request.POST.get("date")
+            or request.POST.get("date_suffix")
+            or request.POST.get("suffix")
+            or date_suffix
+        )
+        if "check_itms_live" in request.POST:
+            check_itms_live = request.POST.get("check_itms_live") in ("true", "True", "1")
+
+    if not plates_raw:
+        return JsonResponse({"success": False, "error": "No plate numbers provided in 'plates'."}, status=400)
+
+    clean_plates = stock_monitoring_service.parse_plate_input(plates_raw)
+    if not clean_plates:
+        return JsonResponse({"success": False, "error": "No valid license plates found."}, status=400)
+
+    try:
+        active_bond = bond_service.get_active_bond()
+        verify_res = kit_provisioning_service.verify_scanned_kits_stock(
+            clean_plates,
+            check_itms_live=check_itms_live,
+            facility_name=active_bond.get("name"),
+        )
+
+        verified_plates = verify_res.get("verified_plates", [])
+        rejected_not_on_stock = verify_res.get("rejected_not_on_stock", [])
+        already_installed = verify_res.get("already_installed", [])
+        blocked = rejected_not_on_stock + already_installed
+
+        if blocked:
+            stock_monitoring_service.record_blocked_plates(blocked, date_suffix)
+
+        docket = stock_monitoring_service.get_stock_transfer_request_docket(date_suffix, blocked_plates=blocked)
+
+        return JsonResponse({
+            "success": True,
+            "total_submitted": len(clean_plates),
+            "verified_plates": verified_plates,
+            "rejected_not_on_stock": rejected_not_on_stock,
+            "already_installed": already_installed,
+            "blocked_plates": blocked,
+            "docket": docket,
+        })
+    except Exception as exc:
+        logger.error("api_stock_verify_batch error: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
 @csrf_exempt
 @require_POST
 def api_stock_shift_reconcile(request: HttpRequest) -> JsonResponse:

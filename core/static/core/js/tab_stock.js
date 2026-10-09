@@ -398,6 +398,7 @@ async function submitDispatch(platesList) {
                 }
                 notify(`⚠️ Dispatched ${newCount} kits. ${blocked.length} kit(s) blocked.`, 'warning');
                 inspectPlate(blocked[0]);
+                openNotOnStockModal(data.docket || data);
             } else {
                 const bgSyncNote = data.enriching_in_background ? ' Background ITMS sync initiated ⚡' : '';
                 if (feedback) {
@@ -421,6 +422,7 @@ async function submitDispatch(platesList) {
                     feedback.innerHTML = `⛔ ${blocked.length} KIT(S) BLOCKED: 0 dispatched. Set physical boxes aside!`;
                 }
                 inspectPlate(blocked[0]);
+                openNotOnStockModal(data.docket || data);
             } else {
                 if (feedback) {
                     feedback.className = 'alert alert-danger';
@@ -723,6 +725,303 @@ async function processStockPaste() {
 }
 
 // -----------------------------------------------------------------------------
+// Not On Stock (Blocked Plates) & ITMS Transfer Docket
+// -----------------------------------------------------------------------------
+
+let lastNotOnStockData = null;
+
+async function checkStockPasteAvailability() {
+    const area = document.getElementById('stock-paste-area');
+    if (!area) return;
+    const raw = area.value;
+    const plates = raw
+        .split(/[\n\r,]+/)
+        .map(p => p.trim().toUpperCase())
+        .filter(p => p.length > 3);
+
+    if (plates.length === 0) {
+        notify('No valid license plates found in pasted text.', 'warning');
+        return;
+    }
+
+    notify(`🔍 Verifying ${plates.length} plates against stock...`, 'info');
+
+    try {
+        const res = await fetch('/api/stock/verify-batch/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                plates: plates.join('\n'),
+                date_suffix: currentStockDateSuffix,
+                check_itms_live: true,
+            }),
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            const blocked = data.blocked_plates || (data.rejected_not_on_stock || []).concat(data.already_installed || []);
+            const validCount = (data.verified_plates || []).length;
+
+            if (blocked.length === 0) {
+                notify(`✓ All ${validCount} plate(s) are valid on stock! Clean to dispatch.`, 'success');
+                const feedback = document.getElementById('stock-feedback-alert');
+                if (feedback) {
+                    feedback.className = 'alert alert-success';
+                    feedback.innerHTML = `✓ STOCK CHECK PASS: All ${validCount} plate(s) are available in warehouse stock.`;
+                }
+            } else {
+                closeStockPasteModal();
+                notify(`⚠️ Stock Check: ${validCount} in stock, ${blocked.length} NOT on stock!`, 'warning');
+                openNotOnStockModal(data.docket || data);
+            }
+        } else {
+            notify(`Stock verification failed: ${data.error}`, 'error');
+        }
+    } catch (e) {
+        notify(`Network error: ${e.message}`, 'error');
+    }
+}
+
+async function checkShiftBlockedPlates() {
+    try {
+        const res = await fetch(`/api/stock/blocked-plates/?date_suffix=${currentStockDateSuffix}`);
+        const data = await res.json();
+        const btn = document.getElementById('btn-view-blocked-stock');
+        const lbl = document.getElementById('lbl-blocked-stock-count');
+
+        if (data.success && data.docket && data.docket.count > 0) {
+            lastNotOnStockData = data.docket;
+            if (lbl) lbl.innerText = data.docket.count;
+            if (btn) btn.style.display = 'inline-flex';
+        } else {
+            if (btn) btn.style.display = 'none';
+        }
+    } catch (e) {
+        console.debug('checkShiftBlockedPlates notice:', e);
+    }
+}
+
+async function openNotOnStockModal(data) {
+    if (!data) {
+        if (lastNotOnStockData) {
+            data = lastNotOnStockData;
+        } else {
+            try {
+                const res = await fetch(`/api/stock/blocked-plates/?date_suffix=${currentStockDateSuffix}`);
+                const resData = await res.json();
+                if (resData.success && resData.docket) {
+                    data = resData.docket;
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+    }
+
+    if (!data) {
+        notify('No blocked or unlisted plates recorded for this shift.', 'info');
+        return;
+    }
+
+    lastNotOnStockData = data;
+
+    const count = data.count !== undefined ? data.count : (data.blocked_plates ? data.blocked_plates.length : 0);
+    const total = data.total_submitted !== undefined ? data.total_submitted : count;
+    const valid = data.verified_plates ? data.verified_plates.length : Math.max(0, total - count);
+
+    // Update Header Badges
+    const countBadge = document.getElementById('not-on-stock-count-badge');
+    if (countBadge) countBadge.innerText = count;
+
+    const statTotal = document.getElementById('not-on-stock-stat-total');
+    if (statTotal) statTotal.innerText = total;
+
+    const statValid = document.getElementById('not-on-stock-stat-valid');
+    if (statValid) statValid.innerText = valid;
+
+    const statBlocked = document.getElementById('not-on-stock-stat-blocked');
+    if (statBlocked) statBlocked.innerText = count;
+
+    // Update Command Bar Button
+    const btn = document.getElementById('btn-view-blocked-stock');
+    const lbl = document.getElementById('lbl-blocked-stock-count');
+    if (lbl) lbl.innerText = count;
+    if (btn && count > 0) btn.style.display = 'inline-flex';
+
+    // Populate Table
+    const tbody = document.getElementById('not-on-stock-table-body');
+    if (tbody) {
+        tbody.innerHTML = '';
+        const items = data.items || [];
+        if (items.length > 0) {
+            items.forEach((item, idx) => {
+                const tr = document.createElement('tr');
+                const isInstalled = item.status === 'ALREADY_INSTALLED';
+                const statusBadge = isInstalled
+                    ? '<span class="badge badge-yellow" style="font-size: 0.75rem;">ALREADY INSTALLED</span>'
+                    : '<span class="badge badge-danger" style="font-size: 0.75rem;">NOT ON STOCK</span>';
+
+                tr.innerHTML = `
+                    <td style="color: var(--ug-text-muted); font-size: 0.85rem;">${item.index || idx + 1}</td>
+                    <td style="font-weight: 700; font-family: monospace; font-size: 0.95rem; color: #fff;">${item.plate}</td>
+                    <td><span class="badge badge-muted" style="font-size: 0.75rem;">${item.category || 'PSV'}</span></td>
+                    <td style="font-size: 0.85rem;">
+                        ${statusBadge}
+                        <div style="font-size: 0.78rem; color: var(--ug-text-muted); margin-top: 2px;">${item.reason || 'Missing from ITMS Safe Room stock'}</div>
+                    </td>
+                    <td style="text-align: center;">
+                        <span class="badge badge-danger" style="font-size: 0.75rem; background: rgba(220,53,69,0.2); border: 1px solid #dc3545; color: #ff6b6b;">
+                            Set Box Aside
+                        </span>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } else {
+            const rawList = data.blocked_plates || data.plates || data.rejected_not_on_stock || [];
+            if (rawList.length > 0) {
+                rawList.forEach((p, idx) => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td style="color: var(--ug-text-muted); font-size: 0.85rem;">${idx + 1}</td>
+                        <td style="font-weight: 700; font-family: monospace; font-size: 0.95rem; color: #fff;">${p}</td>
+                        <td><span class="badge badge-muted" style="font-size: 0.75rem;">PSV</span></td>
+                        <td style="font-size: 0.85rem;">
+                            <span class="badge badge-danger" style="font-size: 0.75rem;">NOT ON STOCK</span>
+                            <div style="font-size: 0.78rem; color: var(--ug-text-muted); margin-top: 2px;">Not found in local stock or live ITMS /installation-kits</div>
+                        </td>
+                        <td style="text-align: center;">
+                            <span class="badge badge-danger" style="font-size: 0.75rem; background: rgba(220,53,69,0.2); border: 1px solid #dc3545; color: #ff6b6b;">
+                                Set Box Aside
+                            </span>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else {
+                tbody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding: 20px; color: var(--ug-text-muted);">No blocked plates recorded for this shift.</td></tr>`;
+            }
+        }
+    }
+
+    // Populate Formatted Message Text
+    const txtArea = document.getElementById('not-on-stock-text-area');
+    if (txtArea) {
+        txtArea.value = data.formatted_message || data.docket?.formatted_message || (data.plates ? data.plates.join('\n') : '');
+    }
+
+    switchNotOnStockView('table');
+
+    if (typeof openModal === 'function') {
+        openModal('stock-not-on-stock-modal');
+    } else {
+        const m = document.getElementById('stock-not-on-stock-modal');
+        if (m) m.classList.add('active');
+    }
+}
+
+function closeNotOnStockModal() {
+    if (typeof closeModal === 'function') {
+        closeModal('stock-not-on-stock-modal');
+    } else {
+        const m = document.getElementById('stock-not-on-stock-modal');
+        if (m) m.classList.remove('active');
+    }
+}
+
+function switchNotOnStockView(viewMode) {
+    const tblView = document.getElementById('not-on-stock-view-table');
+    const txtView = document.getElementById('not-on-stock-view-text');
+    const btnTbl = document.getElementById('btn-tab-not-on-stock-table');
+    const btnTxt = document.getElementById('btn-tab-not-on-stock-text');
+
+    if (viewMode === 'text') {
+        if (tblView) tblView.style.display = 'none';
+        if (txtView) txtView.style.display = 'flex';
+        if (btnTbl) { btnTbl.className = 'btn btn-secondary'; }
+        if (btnTxt) { btnTxt.className = 'btn btn-primary'; }
+    } else {
+        if (tblView) tblView.style.display = 'block';
+        if (txtView) txtView.style.display = 'none';
+        if (btnTbl) { btnTbl.className = 'btn btn-primary'; }
+        if (btnTxt) { btnTxt.className = 'btn btn-secondary'; }
+    }
+}
+
+function _fallbackCopyText(text, successMsg) {
+    const el = document.createElement('textarea');
+    el.value = text;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+    notify(successMsg, 'success');
+}
+
+function copyNotOnStockRawPlates() {
+    if (!lastNotOnStockData) return;
+    const raw = lastNotOnStockData.raw_plates
+        || (lastNotOnStockData.plates ? lastNotOnStockData.plates.join('\n') : '')
+        || (lastNotOnStockData.blocked_plates ? lastNotOnStockData.blocked_plates.join('\n') : '');
+
+    if (!raw) {
+        notify('No plate numbers to copy.', 'warning');
+        return;
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(raw).then(() => {
+            notify('📋 Copied raw plates to clipboard! (Ready to paste into ITMS)', 'success');
+        }).catch(() => {
+            _fallbackCopyText(raw, '📋 Copied raw plates to clipboard!');
+        });
+    } else {
+        _fallbackCopyText(raw, '📋 Copied raw plates to clipboard!');
+    }
+}
+
+function copyNotOnStockMessage() {
+    if (!lastNotOnStockData) return;
+    const msg = lastNotOnStockData.formatted_message
+        || (document.getElementById('not-on-stock-text-area') ? document.getElementById('not-on-stock-text-area').value : '');
+
+    if (!msg) {
+        notify('No message text to copy.', 'warning');
+        return;
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(msg).then(() => {
+            notify('💬 Copied Transfer Manager message to clipboard! (Ready for WhatsApp/Email)', 'success');
+        }).catch(() => {
+            _fallbackCopyText(msg, '💬 Copied Transfer Manager message to clipboard!');
+        });
+    } else {
+        _fallbackCopyText(msg, '💬 Copied Transfer Manager message to clipboard!');
+    }
+}
+
+function downloadNotOnStockDocket() {
+    if (!lastNotOnStockData) return;
+    const text = lastNotOnStockData.formatted_message
+        || (document.getElementById('not-on-stock-text-area') ? document.getElementById('not-on-stock-text-area').value : '');
+
+    if (!text) {
+        notify('No docket content to download.', 'warning');
+        return;
+    }
+
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `ITMS_Stock_Transfer_Request_${currentStockDateSuffix || 'shift'}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    notify('📥 Downloaded ITMS Stock Transfer Request docket (.txt)', 'success');
+}
+
+// -----------------------------------------------------------------------------
 // Opening & Target Balance Sheet Modal
 // -----------------------------------------------------------------------------
 
@@ -882,6 +1181,7 @@ async function refreshStockLedger() {
 
         // Fetch shift details (dispatches, movements, audits)
         await fetchStockDetails();
+        await checkShiftBlockedPlates();
     } catch (e) {
         console.error('refreshStockLedger error:', e);
     }

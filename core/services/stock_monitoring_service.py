@@ -495,11 +495,16 @@ def record_dispatch_scans(
             if already_installed:
                 reasons.append(f"Already installed ({len(already_installed)}): {', '.join(already_installed)}")
             err_msg = f"Kits not on stock cannot be taken out! {'; '.join(reasons)}"
+            blocked_all = rejected_not_on_stock + already_installed
+            if blocked_all:
+                record_blocked_plates(blocked_all, suffix)
+            docket = get_stock_transfer_request_docket(suffix, blocked_plates=blocked_all)
             return {
                 "success": False,
                 "error": err_msg,
                 "rejected_not_on_stock": rejected_not_on_stock,
                 "already_installed": already_installed,
+                "blocked_plates": blocked_all,
                 "verified_plates": [],
                 "synced_from_itms": [],
                 "total_submitted": len(clean_plates) + dup_count,
@@ -508,6 +513,7 @@ def record_dispatch_scans(
                 "duplicate_scans_skipped": dup_count,
                 "duplicate_plates": dup_plates,
                 "stock_readiness": readiness,
+                "docket": docket,
             }
 
     # Mark verified stock kits as Dispatched in local database
@@ -585,7 +591,11 @@ def record_dispatch_scans(
         "enriching_in_background": True,
     }
 
-    if rejected_not_on_stock or already_installed:
+    blocked_all = rejected_not_on_stock + already_installed
+    if blocked_all:
+        record_blocked_plates(blocked_all, suffix)
+        res_payload["blocked_plates"] = blocked_all
+        res_payload["docket"] = get_stock_transfer_request_docket(suffix, blocked_plates=blocked_all)
         warn_parts = []
         if rejected_not_on_stock:
             warn_parts.append(f"{len(rejected_not_on_stock)} kit(s) blocked (not on ITMS stock: {', '.join(rejected_not_on_stock)})")
@@ -1825,6 +1835,125 @@ def export_blocked_kits_csv(
             ])
 
     return file_path, filename, len(clean_plates)
+
+
+def get_stock_transfer_request_docket(
+    target_date_suffix: Optional[str] = None,
+    blocked_plates: Optional[Iterable[str]] = None,
+    reason: str = "Not on ITMS stock / missing from Safe Room",
+) -> Dict[str, Any]:
+    """
+    Generates a structured ITMS Stock Transfer & Provisioning Docket for plates that
+    are NOT on stock or were rejected during dispatch verification.
+    Provides:
+    - raw_plates: newline-separated plate numbers ready for bulk ITMS import / search.
+    - formatted_message: formal text docket ready to copy/share directly with ITMS Transfer Manager.
+    - items: array of detailed plate records with status and action instructions.
+    - count: total rejected plate count.
+    """
+    work_d, suffix = resolve_date_and_suffix(target_date_suffix)
+    if blocked_plates is None:
+        blocked_plates = get_blocked_plates_for_date(suffix)
+    clean_plates = parse_plate_input(blocked_plates)
+
+    active_bond = bond_service.get_active_bond()
+    warehouse = active_bond.get("name", "AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)")
+    active_code = active_bond.get("code", "AGM")
+    now_str = timezone.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    target_codes = [f"IK-{p}" for p in clean_plates]
+    known_kits = {
+        k.registration_number: k
+        for k in InstallationKit.objects.filter(
+            Q(registration_number__in=clean_plates) | Q(kit_code__in=target_codes)
+        )
+    }
+
+    installed_orders = set(
+        InstallationOrder.objects.filter(
+            registration_number__in=clean_plates,
+        ).filter(Q(is_archived=True) | Q(order_status__iexact="Installed")).values_list("registration_number", flat=True)
+    )
+
+    items = []
+    for idx, p in enumerate(clean_plates, start=1):
+        kit = known_kits.get(p) or known_kits.get(f"IK-{p}")
+        category = "PMO" if "PMO" in p.upper() else "PSV"
+
+        if p in installed_orders or (kit and (kit.status or "").lower() in ("installed", "archived")):
+            status = "ALREADY_INSTALLED"
+            item_reason = "Already installed / archived on an order"
+        elif kit and (kit.status or "").lower() == "new":
+            status = "AWAITING_ALLOCATION"
+            item_reason = f"Kit exists in {kit.warehouse or 'Safe Room'} - awaiting MVR allocation"
+        else:
+            status = "NOT_ON_STOCK"
+            item_reason = reason
+
+        items.append({
+            "index": idx,
+            "plate": p,
+            "category": category,
+            "status": status,
+            "reason": item_reason,
+            "action": "Set Box Aside",
+        })
+
+    raw_plates = "\n".join(clean_plates)
+    count = len(clean_plates)
+
+    docket_lines = [
+        "==================================================",
+        "ITMS STOCK TRANSFER & REGISTRATION REQUEST",
+        f"Facility: {warehouse} (Code: {active_code})",
+        f"Shift Date: {work_d.strftime('%Y-%m-%d')} (Suffix: {suffix})",
+        f"Generated At: {now_str}",
+        f"Total Rejected / Not On Stock: {count} Plate(s)",
+        "==================================================",
+        "",
+        "ATTENTION ITMS TRANSFER MANAGER:",
+        "The following physical kit(s) were submitted for assembly line",
+        "dispatch but were NOT found in active warehouse stock or ITMS records.",
+        "Their physical boxes have been SET ASIDE (quarantined from fitters).",
+        "",
+        "Please add, transfer, or provision these plates to active bond stock:",
+        "",
+        "REJECTED PLATES LIST (SET ASIDE):",
+    ]
+
+    if items:
+        for it in items:
+            docket_lines.append(f"  {it['index']:2d}. {it['plate']:<10} [{it['category']}] - {it['reason']}")
+    else:
+        docket_lines.append("  [None - All submitted plates are currently in stock]")
+
+    docket_lines.extend([
+        "",
+        "--------------------------------------------------",
+        "RAW PLATES FOR BULK ITMS TRANSFER / SEARCH:",
+        raw_plates if raw_plates else "[None]",
+        "--------------------------------------------------",
+        "",
+        "* Action Taken on Floor: Physical boxes set aside. None issued to fitters.",
+        "* Verified by: ITMS Verification Copilot (Dispatch Stock Guard)",
+        "==================================================",
+    ])
+
+    formatted_message = "\n".join(docket_lines)
+
+    return {
+        "success": True,
+        "work_date_suffix": suffix,
+        "formatted_date": work_d.strftime("%Y-%m-%d"),
+        "warehouse": warehouse,
+        "active_code": active_code,
+        "count": count,
+        "plates": clean_plates,
+        "raw_plates": raw_plates,
+        "items": items,
+        "formatted_message": formatted_message,
+        "generated_at": now_str,
+    }
 
 
 def export_unregistered_stocktake_csv(

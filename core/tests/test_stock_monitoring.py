@@ -1681,6 +1681,89 @@ class StockMonitoringTests(TestCase):
         self.assertEqual(stub.front_tracker, "BLE-FRONT-9988")
         self.assertEqual(InstallationKit.objects.filter(registration_number="UMA 555STUB").count(), 1)
 
+    def test_get_stock_transfer_request_docket(self):
+        """Verifies generation of ITMS stock transfer docket for non-stock plates."""
+        docket = stock_monitoring_service.get_stock_transfer_request_docket(
+            target_date_suffix=self.test_suffix,
+            blocked_plates=["UZZ999ZZ", "UXX888XX"],
+        )
+        self.assertTrue(docket["success"])
+        self.assertEqual(docket["count"], 2)
+        self.assertIn("UZZ999ZZ", docket["raw_plates"])
+        self.assertIn("UXX888XX", docket["raw_plates"])
+        self.assertIn("ITMS STOCK TRANSFER & REGISTRATION REQUEST", docket["formatted_message"])
+        self.assertIn("SET ASIDE", docket["formatted_message"])
+        self.assertEqual(len(docket["items"]), 2)
+        self.assertEqual(docket["items"][0]["action"], "Set Box Aside")
+
+    @patch("core.services.kit_provisioning_service.get_web_client")
+    def test_dispatch_attaches_transfer_docket_when_plates_blocked(self, mock_get_client):
+        """When dispatches contain blocked plates, transfer docket is automatically attached."""
+        InstallationKit.objects.create(
+            kit_code="IK-UMA222BB",
+            registration_number="UMA222BB",
+            status="New",
+            warehouse="AGM SPIRO",
+        )
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.fetch_installation_kits.return_value = {"success": True, "count": 0, "kits": []}
+
+        res = stock_monitoring_service.record_dispatch_scans(
+            plates=["UMA222BB", "UZZ888XX"],
+            target_date_suffix=self.test_suffix,
+            require_stock_verification=True,
+            check_itms_live=True,
+        )
+        self.assertTrue(res["success"])
+        self.assertEqual(res["newly_dispatched"], 1)
+        self.assertIn("UZZ888XX", res["rejected_not_on_stock"])
+        self.assertIn("docket", res)
+        self.assertEqual(res["docket"]["count"], 1)
+        self.assertIn("UZZ888XX", res["docket"]["raw_plates"])
+
+    @patch("core.services.kit_provisioning_service.get_web_client")
+    def test_api_stock_verify_batch_and_blocked_plates(self, mock_get_client):
+        """Tests /api/stock/verify-batch/ and /api/stock/blocked-plates/ endpoints."""
+        from django.test import Client
+        import json
+
+        InstallationKit.objects.create(
+            kit_code="IK-UMA333CC",
+            registration_number="UMA333CC",
+            status="New",
+            warehouse="AGM SPIRO",
+        )
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.fetch_installation_kits.return_value = {"success": True, "count": 0, "kits": []}
+
+        c = Client()
+        # 1. Test verify-batch endpoint
+        resp = c.post(
+            "/api/stock/verify-batch/",
+            data=json.dumps({
+                "plates": "UMA333CC\nUBB999ZZ",
+                "date_suffix": self.test_suffix,
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["verified_plates"], ["UMA333CC"])
+        self.assertEqual(data["rejected_not_on_stock"], ["UBB999ZZ"])
+        self.assertIn("docket", data)
+        self.assertEqual(data["docket"]["count"], 1)
+
+        # 2. Test blocked-plates endpoint
+        resp_blocked = c.get(f"/api/stock/blocked-plates/?date_suffix={self.test_suffix}")
+        self.assertEqual(resp_blocked.status_code, 200)
+        blocked_data = resp_blocked.json()
+        self.assertTrue(blocked_data["success"])
+        self.assertIn("docket", blocked_data)
+        self.assertIn("UBB999ZZ", blocked_data["docket"]["raw_plates"])
+
 
 
 

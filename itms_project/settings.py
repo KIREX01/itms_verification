@@ -15,8 +15,46 @@ env = environ.Env(
 # Load .env if present (silently ignored if missing, e.g. in CI)
 environ.Env.read_env(BASE_DIR / ".env")
 
+
+def safe_env_float(var_name: str, default: float) -> float:
+    try:
+        val = env(var_name, default=None)
+        if val is None or val == "":
+            return default
+        return float(val)
+    except Exception:
+        return default
+
+
+def safe_env_int(var_name: str, default: int) -> int:
+    try:
+        val = env(var_name, default=None)
+        if val is None or val == "":
+            return default
+        return int(val)
+    except Exception:
+        return default
+
+
+def safe_env_bool(var_name: str, default: bool) -> bool:
+    try:
+        val = env(var_name, default=None)
+        if val is None or val == "":
+            return default
+        if isinstance(val, bool):
+            return val
+        s = str(val).strip().lower()
+        if s in ("true", "1", "yes", "on", "t"):
+            return True
+        if s in ("false", "0", "no", "off", "f"):
+            return False
+        return default
+    except Exception:
+        return default
+
+
 SECRET_KEY = env("DJANGO_SECRET_KEY", default="insecure-dev-key-change-me")
-DEBUG = env.bool("DJANGO_DEBUG", default=True)
+DEBUG = safe_env_bool("DJANGO_DEBUG", default=True)
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["127.0.0.1", "localhost", "*", "close.kirex.online"])
 if "*" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("*")
@@ -110,27 +148,27 @@ SECURE_AUTH_ROOT = SECURE_ROOT / "auth"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # --- Operator vs Developer Permissions ---
-DEVELOPER_MODE = env.bool("DEVELOPER_MODE", default=get_setting("system.developer_mode", False))
+DEVELOPER_MODE = safe_env_bool("DEVELOPER_MODE", default=get_setting("system.developer_mode", False))
 
 # --- Vision pipeline config (read by core/vision modules) ---
 PLATE_YOLO_WEIGHTS = env("PLATE_YOLO_WEIGHTS", default="models/license-plate-finetune-v1n.pt")
-PLATE_DETECTOR_CONF_THRESHOLD = env.float("PLATE_DETECTOR_CONF_THRESHOLD", default=get_setting("vision.detector_conf_threshold", 0.35))
-OCR_MIN_CONFIDENCE = env.float("OCR_MIN_CONFIDENCE", default=get_setting("vision.min_ocr_confidence", 0.55))
-USE_PADDLEOCR = env.bool("USE_PADDLEOCR", default=get_setting("vision.use_paddleocr", True))
+PLATE_DETECTOR_CONF_THRESHOLD = safe_env_float("PLATE_DETECTOR_CONF_THRESHOLD", default=get_setting("vision.detector_conf_threshold", 0.35))
+OCR_MIN_CONFIDENCE = safe_env_float("OCR_MIN_CONFIDENCE", default=get_setting("vision.min_ocr_confidence", 0.55))
+USE_PADDLEOCR = safe_env_bool("USE_PADDLEOCR", default=get_setting("vision.use_paddleocr", True))
 
 # --- Fuzzy matcher thresholds ---
-FUZZY_EXACT_THRESHOLD = env.int("FUZZY_EXACT_THRESHOLD", default=100)
-FUZZY_ACCEPT_THRESHOLD = env.int("FUZZY_ACCEPT_THRESHOLD", default=85)
-FUZZY_REJECT_THRESHOLD = env.int("FUZZY_REJECT_THRESHOLD", default=75)
+FUZZY_EXACT_THRESHOLD = safe_env_int("FUZZY_EXACT_THRESHOLD", default=100)
+FUZZY_ACCEPT_THRESHOLD = safe_env_int("FUZZY_ACCEPT_THRESHOLD", default=85)
+FUZZY_REJECT_THRESHOLD = safe_env_int("FUZZY_REJECT_THRESHOLD", default=75)
 
 # --- Simulated ITMS ---
-ITMS_SIMULATED_LATENCY_MS = env.int("ITMS_SIMULATED_LATENCY_MS", default=150)
-ITMS_FAILURE_INJECTION_RATE = env.float("ITMS_FAILURE_INJECTION_RATE", default=0.0)
+ITMS_SIMULATED_LATENCY_MS = safe_env_int("ITMS_SIMULATED_LATENCY_MS", default=150)
+ITMS_FAILURE_INJECTION_RATE = safe_env_float("ITMS_FAILURE_INJECTION_RATE", default=0.0)
 
 # --- ITMS Web App Live Integration (stock.itms.ug) ---
 ITMS_SUBMISSION_BACKEND = env("ITMS_SUBMISSION_BACKEND", default="web")  # "web" or "mock"
-ITMS_WEB_DRY_RUN = env.bool("ITMS_WEB_DRY_RUN", default=get_setting("submission.dry_run_mode", True))
-ITMS_SUBMIT_STEP3 = env.bool("ITMS_SUBMIT_STEP3", default=get_setting("submission.submit_step3", True))
+ITMS_WEB_DRY_RUN = safe_env_bool("ITMS_WEB_DRY_RUN", default=get_setting("submission.dry_run_mode", True))
+ITMS_SUBMIT_STEP3 = safe_env_bool("ITMS_SUBMIT_STEP3", default=get_setting("submission.submit_step3", True))
 ITMS_API_BASE_URL = env("ITMS_API_BASE_URL", default=get_setting("network.itms_base_url", "https://stock.itms.ug")).rstrip("/")
 ITMS_LOGIN_ENDPOINT = env("ITMS_LOGIN_ENDPOINT", default=get_setting("network.login_endpoint", "/site/login"))
 ITMS_REFRESH_ENDPOINT = env("ITMS_REFRESH_ENDPOINT", default="/api/auth/refresh")
@@ -141,21 +179,21 @@ ITMS_UPLOAD_REAR_ENDPOINT = env("ITMS_UPLOAD_REAR_ENDPOINT", default="/api/order
 ITMS_FINALIZE_ENDPOINT = env("ITMS_FINALIZE_ENDPOINT", default="/api/orders/finalize")
 ITMS_USERNAME = env("ITMS_USERNAME", default="")
 ITMS_PASSWORD = env("ITMS_PASSWORD", default="")
-ITMS_REQUEST_TIMEOUT_SECONDS = env.int("ITMS_REQUEST_TIMEOUT_SECONDS", default=get_setting("submission.request_timeout_seconds", 30))
+ITMS_REQUEST_TIMEOUT_SECONDS = safe_env_int("ITMS_REQUEST_TIMEOUT_SECONDS", default=get_setting("submission.request_timeout_seconds", 30))
 ITMS_TOKEN_STORAGE_FILE = env("ITMS_TOKEN_STORAGE_FILE", default=str(SECURE_AUTH_ROOT / "itms_tokens.json"))
-CIRCUIT_BREAKER_THRESHOLD = env.int("CIRCUIT_BREAKER_THRESHOLD", default=get_setting("submission.circuit_breaker_threshold", 3))
+CIRCUIT_BREAKER_THRESHOLD = safe_env_int("CIRCUIT_BREAKER_THRESHOLD", default=get_setting("submission.circuit_breaker_threshold", 3))
 
 # Evidence vault retention lifecycle (prunes submitted photos older than N days)
-VAULT_RETENTION_DAYS = env.int("VAULT_RETENTION_DAYS", default=get_setting("storage.vault_retention_days", 7))
-EXPORT_RETENTION_DAYS = env.int("EXPORT_RETENTION_DAYS", default=get_setting("storage.export_retention_days", 30))
-CROPS_RETENTION_DAYS = env.int("CROPS_RETENTION_DAYS", default=get_setting("storage.crops_retention_days", 7))
+VAULT_RETENTION_DAYS = safe_env_int("VAULT_RETENTION_DAYS", default=get_setting("storage.vault_retention_days", 7))
+EXPORT_RETENTION_DAYS = safe_env_int("EXPORT_RETENTION_DAYS", default=get_setting("storage.export_retention_days", 30))
+CROPS_RETENTION_DAYS = safe_env_int("CROPS_RETENTION_DAYS", default=get_setting("storage.crops_retention_days", 7))
 
 # Mobile Companion Device Connection Limits (Protects Server and Laptop from Overload)
-MAX_MOBILE_COMPANION_DEVICES = env.int("MAX_MOBILE_COMPANION_DEVICES", default=get_setting("mobile.max_devices", 2))
-MOBILE_DEVICE_SESSION_TTL_SECONDS = env.float("MOBILE_DEVICE_SESSION_TTL_SECONDS", default=20.0)
+MAX_MOBILE_COMPANION_DEVICES = safe_env_int("MAX_MOBILE_COMPANION_DEVICES", default=get_setting("mobile.max_devices", 2))
+MOBILE_DEVICE_SESSION_TTL_SECONDS = safe_env_float("MOBILE_DEVICE_SESSION_TTL_SECONDS", default=20.0)
 
 # Mobile Companion Batch Limits (200 photos per batch = 100 motorcycles: 100 Front + 100 Rear)
-MAX_MOBILE_BATCH_PHOTOS = env.int("MAX_MOBILE_BATCH_PHOTOS", default=get_setting("mobile.max_batch_photos", 200))
+MAX_MOBILE_BATCH_PHOTOS = safe_env_int("MAX_MOBILE_BATCH_PHOTOS", default=get_setting("mobile.max_batch_photos", 200))
 MAX_MOBILE_BATCH_PAIRS = MAX_MOBILE_BATCH_PHOTOS // 2
 
 # Active Bond Facility Configuration (Guarantees Strict Scoping to AGM Bonded Warehouse)

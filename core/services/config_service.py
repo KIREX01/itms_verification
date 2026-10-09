@@ -6,12 +6,14 @@ Ensures zero-configuration portability on other machines (defaults to SQLite),
 enforces operator vs developer command permissions, and provides dynamic configuration
 for safety, vision pipeline, network timeouts, and storage lifecycle.
 """
+from __future__ import annotations
+
 import copy
 import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

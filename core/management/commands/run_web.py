@@ -110,13 +110,13 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        port = 443
-        ssl_port = 443
-        enable_ssl_primary = True
-        no_ssl = False
+        port = options.get("port") or 443
+        ssl_port = options.get("ssl_port") or port
+        enable_ssl_primary = not options.get("no_ssl", False)
+        no_ssl = options.get("no_ssl", False)
         bind_host = options.get("host", "0.0.0.0")
-        no_browser = options["no_browser"]
-        noreload = options["noreload"]
+        no_browser = options.get("no_browser", False)
+        noreload = options.get("noreload", False)
 
         self.stdout.write(self.style.SUCCESS("=" * 68))
         self.stdout.write(self.style.SUCCESS("  ITMS VERIFICATION COPILOT - WEB & MOBILE OPERATOR CONSOLE"))
@@ -213,17 +213,29 @@ class Command(BaseCommand):
             except Exception as d_err:
                 logger.debug("Could not start MorningKitSyncDaemon in Web: %s", d_err)
 
-        # 6. Start Primary Server
-        # Force standard local launches to automatically use runserver_plus on 443 with cert to fulfill HTTPS requirement
-        cert_file, key_file = ssl_service.ensure_ssl_certificates(san_ips=san_ips)
-        runserver_args = {
-            "use_reloader": not is_noreload,
-            "cert_path": str(cert_file),
-            "key_file_path": str(key_file),
-        }
+        # 6. Start Primary WSGI Server (Desktop & Mobile HTTPS)
+        def _serve():
+            if ssl_context:
+                srv = create_secure_server(bind_host, port, ssl_context)
+            else:
+                srv = ThreadedWSGIServer((bind_host, port), WSGIRequestHandler)
+                srv.set_app(StaticFilesHandler(WSGIHandler()))
+            srv.serve_forever()
 
         try:
-            call_command("runserver_plus", f"{bind_host}:{port}", **runserver_args)
+            if is_noreload:
+                _serve()
+            else:
+                from django.utils.autoreload import run_with_reloader
+                run_with_reloader(_serve)
+        except OSError as os_err:
+            if getattr(os_err, "winerror", None) == 10048 or "Address already in use" in str(os_err):
+                self.stdout.write(self.style.WARNING(
+                    f"\n[!] Port {port} is already in use by another process or Windows Service.\n"
+                    f"    Open {desktop_url} directly in your browser."
+                ))
+            else:
+                raise
         except KeyboardInterrupt:
             self.stdout.write("\nWeb server stopped cleanly.")
             sys.exit(0)

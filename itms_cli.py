@@ -114,18 +114,14 @@ def launch_web(extra_args=None, port=443):
         import django
         django.setup()
         from django.core.management import execute_from_command_line
-        from core.services.ssl_service import ensure_ssl_certificates
 
-        cert_file, key_file = ensure_ssl_certificates()
         cmd = [
-            "manage.py", "runserver_plus", f"0.0.0.0:{port}",
-            "--cert-file", str(cert_file),
-            "--key-file", str(key_file)
+            "manage.py", "run_web", "--noreload",
+            "--port", str(port),
+            "--ssl-port", str(port),
         ]
         if extra_args:
-            # Filter out custom args that runserver_plus doesn't understand natively,
-            # or map them appropriately if needed. For now just extend.
-            cmd.extend([a for a in extra_args if a not in ("--ssl", "-s") and not a.startswith("--port")])
+            cmd.extend([a for a in extra_args if a not in ("--web", "-w") and not a.startswith("--port")])
         execute_from_command_line(cmd)
     except KeyboardInterrupt:
         print("\n[+] Web server stopped cleanly.")

@@ -26,6 +26,8 @@ Architecture & Safety Principles:
 4. Credential & Privacy Protection:
    - Sensitive credentials are never logged to console or persisted in plaintext.
 """
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -35,7 +37,7 @@ import time
 import urllib.parse
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import requests
 from requests.adapters import HTTPAdapter

@@ -16,11 +16,13 @@ Provides:
     or targeted kit lookups, preventing runaway pagination across tens of thousands of records.
 - Unified Shift Synchronization: Synchronizes active fitment, shift archive, and recent stock kits in one safe pass.
 """
+from __future__ import annotations
+
 import logging
 import re
 import time
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, Iterable, List, Optional, Set, Union
 from django.utils import timezone
 from django.conf import settings
 from django.db import transaction

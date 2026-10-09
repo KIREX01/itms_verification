@@ -70,10 +70,6 @@ def signup_view(request: HttpRequest) -> HttpResponse:
         password = request.POST.get("password", "").strip()
         password_confirm = request.POST.get("password_confirm", "").strip()
 
-        connect_itms = bool(request.POST.get("connect_itms"))
-        itms_email = request.POST.get("itms_email", "").strip()
-        itms_password = request.POST.get("itms_password", "").strip()
-
         if not username or not password:
             return render(request, "core/signup.html", {
                 "error": "Username and password are required.",
@@ -115,9 +111,6 @@ def signup_view(request: HttpRequest) -> HttpResponse:
                 "full_name": full_name,
                 "email": email,
                 "password": password,
-                "connect_itms": connect_itms,
-                "itms_email": itms_email,
-                "itms_password": itms_password,
                 "code": code,
                 "expires_at": time.time() + 600,  # 10 minutes
                 "last_sent_at": time.time(),
@@ -220,14 +213,6 @@ def signup_verify_view(request: HttpRequest) -> HttpResponse:
                 "email": email,
                 "error": err,
             })
-
-        # Connect optional ITMS credentials if provided
-        if pending.get("connect_itms") and pending.get("itms_email") and pending.get("itms_password"):
-            ok, itms_msg = auth_service.connect_itms_account(pending["itms_email"], pending["itms_password"])
-            if ok:
-                messages.success(request, f"Connected to ITMS WebApp as '{pending['itms_email']}'.")
-            else:
-                messages.warning(request, f"Account created, but ITMS connection note: {itms_msg}")
 
         # Clear session pending state & log user in
         del request.session["pending_signup"]

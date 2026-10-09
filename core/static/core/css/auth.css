@@ -1,6 +1,11 @@
 /* ============================================================================
-   AUTHENTICATION & ONBOARDING (LOGIN & SIGNUP)
+   AUTHENTICATION & ONBOARDING (LOGIN, SIGNUP, & 2FA)
+   Mobile-First Responsive Layout & High-Contrast Touch Design
    ============================================================================ */
+
+*, *::before, *::after {
+    box-sizing: border-box;
+}
 
 .auth-page-wrapper {
     min-height: 100vh;
@@ -8,22 +13,27 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    background-color: var(--ug-black-surface);
-    padding: 24px;
+    background-color: var(--ug-black-surface, #0f1117);
+    padding: 24px 16px;
+    width: 100%;
 }
 
 .auth-card-box {
-    background-color: var(--ug-black-card);
-    border: 1px solid var(--ug-border);
-    border-radius: var(--radius-xl);
+    background-color: var(--ug-black-card, #161922);
+    border: 1px solid var(--ug-border, #282d3d);
+    border-radius: var(--radius-xl, 14px);
     width: 440px;
     max-width: 100%;
     overflow: hidden;
-    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55);
+}
+
+.auth-card-box.auth-card-wide {
+    width: 490px;
 }
 
 .auth-card-head {
-    padding: 24px 24px 16px;
+    padding: 24px 24px 14px;
     text-align: center;
 }
 
@@ -31,126 +41,150 @@
     padding: 0 24px 24px;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 14px;
 }
 
 .auth-card-footer {
     padding: 14px 24px;
-    background-color: var(--ug-black-surface);
-    border-top: 1px solid var(--ug-border);
+    background-color: var(--ug-black-surface, #0f1117);
+    border-top: 1px solid var(--ug-border, #282d3d);
     text-align: center;
     font-size: 0.82rem;
-    color: var(--ug-text-muted);
+    color: var(--ug-text-muted, #8b949e);
 }
+
 .auth-card-footer a {
-    color: var(--ug-yellow);
+    color: var(--ug-yellow, #ffd100);
     font-weight: 700;
     text-decoration: none;
 }
+
 .auth-card-footer a:hover {
     text-decoration: underline;
+    color: #ffffff;
 }
 
 .alert-banner {
     padding: 10px 14px;
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-md, 8px);
     font-size: 0.82rem;
     font-weight: 600;
-}
-.alert-banner.error {
-    background-color: rgba(217, 0, 0, 0.15);
-    border: 1px solid rgba(217, 0, 0, 0.4);
-    color: #f87171;
-}
-.alert-banner.warning {
-    background-color: rgba(252, 220, 4, 0.15);
-    border: 1px solid rgba(252, 220, 4, 0.4);
-    color: var(--ug-yellow);
+    line-height: 1.4;
 }
 
-.auth-card-box.auth-card-wide {
-    width: 540px;
+.alert-banner.error {
+    background-color: rgba(217, 0, 0, 0.15);
+    border: 1px solid rgba(217, 0, 0, 0.45);
+    color: #f87171;
+}
+
+.alert-banner.warning {
+    background-color: rgba(252, 220, 4, 0.15);
+    border: 1px solid rgba(252, 220, 4, 0.45);
+    color: var(--ug-yellow, #ffd100);
+}
+
+.alert-banner.success {
+    background-color: rgba(35, 134, 54, 0.15);
+    border: 1px solid rgba(35, 134, 54, 0.45);
+    color: #3fb950;
 }
 
 .form-field {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    width: 100%;
 }
+
 .form-field label {
-    font-size: 0.8rem;
+    font-size: 0.82rem;
     font-weight: 700;
-    color: var(--ug-text-muted);
+    color: var(--ug-text-muted, #8b949e);
 }
+
 .form-field input[type="text"],
 .form-field input[type="email"],
 .form-field input[type="password"] {
-    background-color: var(--ug-black-surface);
-    border: 1px solid var(--ug-border);
+    background-color: var(--ug-black-surface, #0f1117);
+    border: 1px solid var(--ug-border, #282d3d);
     color: #ffffff;
-    padding: 9px 12px;
-    border-radius: var(--radius-md);
-    font-size: 0.88rem;
+    padding: 11px 14px;
+    border-radius: var(--radius-md, 8px);
+    font-size: 1rem; /* 16px standard to eliminate iOS auto-zoom */
     outline: none;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    width: 100%;
+    min-height: 44px; /* Accessible minimum touch target */
 }
+
 .form-field input:focus {
-    border-color: var(--ug-yellow);
-    box-shadow: 0 0 0 2px var(--ug-yellow-glow);
+    border-color: var(--ug-yellow, #ffd100);
+    box-shadow: 0 0 0 2px rgba(255, 209, 0, 0.25);
 }
 
 .form-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;
+    width: 100%;
 }
 
-.itms-connect-card {
-    background-color: rgba(13, 15, 20, 0.7);
-    border: 1px solid var(--ug-border);
-    border-radius: var(--radius-lg);
-    padding: 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    margin-top: 4px;
-}
+/* ============================================================================
+   RESPONSIVE MEDIA QUERIES (Mobile & Tablet)
+   ============================================================================ */
 
-.toggle-label {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-weight: 700;
-    font-size: 0.85rem;
-    color: var(--ug-yellow);
-    cursor: pointer;
-}
+@media (max-width: 600px) {
+    .auth-page-wrapper {
+        padding: 16px 12px;
+        justify-content: flex-start;
+        padding-top: 20px;
+    }
 
-.toggle-label input[type="checkbox"] {
-    accent-color: var(--ug-yellow);
-    cursor: pointer;
-}
+    .auth-card-box,
+    .auth-card-box.auth-card-wide {
+        width: 100%;
+        max-width: 100%;
+        border-radius: 12px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    }
 
-.itms-fields {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    padding-top: 12px;
-    border-top: 1px solid var(--ug-border);
-}
+    .auth-card-head {
+        padding: 20px 16px 12px;
+    }
 
-.itms-signup-hint {
-    font-size: 0.76rem;
-    color: var(--ug-text-dim);
-    line-height: 1.4;
-}
+    .auth-card-head h1 {
+        font-size: 1.22rem !important;
+    }
 
-.itms-signup-hint a {
-    color: var(--ug-yellow);
-    text-decoration: none;
-    font-weight: 700;
-}
-.itms-signup-hint a:hover {
-    text-decoration: underline;
-}
+    .auth-card-body {
+        padding: 0 16px 20px;
+        gap: 14px;
+    }
 
+    .form-row {
+        grid-template-columns: 1fr;
+        gap: 14px;
+    }
+
+    .form-field input[type="text"],
+    .form-field input[type="email"],
+    .form-field input[type="password"] {
+        padding: 12px 14px;
+        font-size: 1rem;
+        min-height: 48px;
+    }
+
+    .btn.btn-primary,
+    .auth-btn-primary {
+        padding: 14px 16px !important;
+        font-size: 0.95rem !important;
+        min-height: 48px;
+        width: 100%;
+    }
+
+    .auth-card-footer {
+        padding: 14px 16px;
+        font-size: 0.8rem;
+    }
+}

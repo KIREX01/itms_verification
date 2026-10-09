@@ -10,7 +10,10 @@ Design notes
 - SubmissionAuditLog is intentionally append-only: rows are never edited,
   only inserted, so it can serve as a forensic trail.
 """
+from __future__ import annotations
+
 import uuid
+from typing import Any, Dict, List, Optional
 
 from django.conf import settings
 from django.db import models

@@ -35,4 +35,6 @@ scratch/
 .vscode/
 itms_bond_stock_*.csv
 Screenshot*.png
+sample_data/AGM*
+sample_data/*STOCK*
 

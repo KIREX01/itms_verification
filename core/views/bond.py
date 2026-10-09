@@ -68,6 +68,7 @@ def api_stock_dispatch(request: HttpRequest) -> JsonResponse:
     from core.services import stock_monitoring_service
     plates_raw = None
     target_date = None
+    plate_category = "PSV"
     operator_name = "Operator"
     notes = ""
 
@@ -79,6 +80,7 @@ def api_stock_dispatch(request: HttpRequest) -> JsonResponse:
             body = json.loads(request.body.decode("utf-8"))
             plates_raw = body.get("plates")
             target_date = body.get("date") or body.get("date_suffix") or body.get("suffix")
+            plate_category = body.get("plate_category", "PSV")
             operator_name = body.get("operator_name") or "Operator"
             notes = body.get("notes") or ""
             auto_create_kits = bool(body.get("auto_create_kits", False))
@@ -95,6 +97,7 @@ def api_stock_dispatch(request: HttpRequest) -> JsonResponse:
             or request.POST.get("suffix")
             or target_date
         )
+        plate_category = request.POST.get("plate_category", plate_category)
         operator_name = request.POST.get("operator_name", operator_name)
         notes = request.POST.get("notes", notes)
         if "auto_create_kits" in request.POST:
@@ -109,6 +112,7 @@ def api_stock_dispatch(request: HttpRequest) -> JsonResponse:
         user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
         res = stock_monitoring_service.record_dispatch_scans(
             plates=plates_raw,
+            plate_category=plate_category,
             target_date_suffix=target_date,
             operator_name=operator_name,
             dispatched_by=user,

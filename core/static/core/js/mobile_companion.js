@@ -84,6 +84,11 @@ const MobileState = {
         subMode: "DISPATCH", // 'DISPATCH' | 'DELIVERY' | 'RETURN'
         category: "PSV",     // 'PSV' | 'PMO'
         queue: [],
+        blockedPlates: [],
+        syncedSessionPlates: new Set(),
+        recentScansCooldown: new Map(), // plate -> timestamp
+        isSyncing: false,
+        autoSync: localStorage.getItem("itms_mobile_auto_sync") !== "false",
         cameraStream: null,
         cameraFacing: "environment",
         isScanning: false,
@@ -513,16 +518,40 @@ function switchMobileMode(mode) {
 // ============================================================================
 function setStockSubMode(subMode) {
     MobileState.stock.subMode = subMode;
-    document.getElementById("pill-stock-dispatch").classList.toggle("active", subMode === "DISPATCH");
-    document.getElementById("pill-stock-delivery").classList.toggle("active", subMode === "DELIVERY");
-    document.getElementById("pill-stock-return").classList.toggle("active", subMode === "RETURN");
+    const pillDispatch = document.getElementById("pill-stock-dispatch");
+    const pillDelivery = document.getElementById("pill-stock-delivery");
+    const pillReturn = document.getElementById("pill-stock-return");
+
+    const isDispatch = subMode === "DISPATCH";
+    const isDelivery = subMode === "DELIVERY";
+    const isReturn = subMode === "RETURN";
+
+    if (pillDispatch) {
+        pillDispatch.classList.toggle("active", isDispatch);
+        pillDispatch.style.background = isDispatch ? "#0284c7" : "#1e293b";
+        pillDispatch.style.borderColor = isDispatch ? "#38bdf8" : "#475569";
+        pillDispatch.style.color = "#ffffff";
+    }
+    if (pillDelivery) {
+        pillDelivery.classList.toggle("active", isDelivery);
+        pillDelivery.style.background = isDelivery ? "#16a34a" : "#1e293b";
+        pillDelivery.style.borderColor = isDelivery ? "#4ade80" : "#475569";
+        pillDelivery.style.color = "#ffffff";
+    }
+    if (pillReturn) {
+        pillReturn.classList.toggle("active", isReturn);
+        pillReturn.style.background = isReturn ? "#dc2626" : "#1e293b";
+        pillReturn.style.borderColor = isReturn ? "#f87171" : "#475569";
+        pillReturn.style.color = "#ffffff";
+    }
 
     const titleMap = {
         "DISPATCH": "Dispatch to Line (Line Out)",
         "DELIVERY": "Inbound Shipment Delivery",
         "RETURN": "Uninstalled Plates Return",
     };
-    document.getElementById("stock-target-title").textContent = titleMap[subMode] || "Plate Intake";
+    const titleElem = document.getElementById("stock-target-title");
+    if (titleElem) titleElem.textContent = titleMap[subMode] || "Plate Intake";
 }
 
 function setStockCategory(cat) {
@@ -530,15 +559,27 @@ function setStockCategory(cat) {
     const btnPsv = document.getElementById("btn-cat-psv");
     const btnPmo = document.getElementById("btn-cat-pmo");
     if (cat === "PSV") {
-        btnPsv.style.background = "#0284c7";
-        btnPsv.style.color = "#ffffff";
-        btnPmo.style.background = "#374151";
-        btnPmo.style.color = "#cbd5e1";
+        if (btnPsv) {
+            btnPsv.style.background = "#0284c7";
+            btnPsv.style.color = "#ffffff";
+            btnPsv.style.borderColor = "#38bdf8";
+        }
+        if (btnPmo) {
+            btnPmo.style.background = "#334155";
+            btnPmo.style.color = "#ffffff";
+            btnPmo.style.borderColor = "#475569";
+        }
     } else {
-        btnPmo.style.background = "#eab308";
-        btnPmo.style.color = "#000000";
-        btnPsv.style.background = "#374151";
-        btnPsv.style.color = "#cbd5e1";
+        if (btnPmo) {
+            btnPmo.style.background = "#b45309";
+            btnPmo.style.color = "#ffffff";
+            btnPmo.style.borderColor = "#fbbf24";
+        }
+        if (btnPsv) {
+            btnPsv.style.background = "#334155";
+            btnPsv.style.color = "#ffffff";
+            btnPsv.style.borderColor = "#475569";
+        }
     }
 }
 
@@ -820,47 +861,84 @@ function startStockScanLoop() {
     MobileState.stock.scanLoopId = requestAnimationFrame(tick);
 }
 
-function handleStockBarcodeDetected(rawCode) {
-    const now = Date.now();
-    if (rawCode === MobileState.stock.lastScannedCode && (now - MobileState.stock.lastScannedTime) < 2500) {
-        return;
-    }
-
-    const cleanPlate = extractPlateFromScannedCode(rawCode);
-    if (!cleanPlate || cleanPlate.length < 3) return;
-
-    MobileState.stock.lastScannedCode = rawCode;
-    MobileState.stock.lastScannedTime = now;
-
-    // Visual feedback
+function showScanDetectionBanner(text, isError = false) {
     const viewport = document.getElementById("stock-camera-viewport");
     const liveBadge = document.getElementById("stock-scan-live-badge");
     const detectedSpan = document.getElementById("stock-last-detected");
     if (viewport) {
-        viewport.classList.add("detected");
-        setTimeout(() => viewport.classList.remove("detected"), 450);
+        viewport.classList.remove("detected-error", "detected");
+        viewport.classList.add(isError ? "detected-error" : "detected");
+        setTimeout(() => {
+            if (viewport) viewport.classList.remove("detected-error", "detected");
+        }, 450);
     }
     if (liveBadge && detectedSpan) {
-        detectedSpan.textContent = cleanPlate;
+        detectedSpan.textContent = text;
+        liveBadge.style.background = isError ? "rgba(220, 38, 38, 0.95)" : "rgba(16, 185, 129, 0.95)";
+        liveBadge.style.borderColor = isError ? "#ef4444" : "#10b981";
+        liveBadge.style.color = "#ffffff";
         liveBadge.style.display = "block";
-        setTimeout(() => {
+        if (window._liveBadgeTimer) clearTimeout(window._liveBadgeTimer);
+        window._liveBadgeTimer = setTimeout(() => {
             if (liveBadge) liveBadge.style.display = "none";
-        }, 2200);
+        }, 2400);
+    }
+}
+
+function handleStockBarcodeDetected(rawCode) {
+    if (!rawCode) return;
+    const cleanPlate = extractPlateFromScannedCode(rawCode);
+    if (!cleanPlate || cleanPlate.length < 3) return;
+
+    const now = Date.now();
+
+    // 1. Per-Plate Debounce Cooldown:
+    // Ignore the identical plate if seen within the last 10 seconds.
+    // This stops rapid 60 FPS repeat-scanning when holding a box in front of camera.
+    const lastSeen = MobileState.stock.recentScansCooldown.get(cleanPlate) || 0;
+    if (now - lastSeen < 10000) {
+        return;
     }
 
-    // Audio & haptic feedback
+    // 2. Duplicate Detection:
+    // Check if this plate is already in the current staged queue OR already synced during this session.
+    const isAlreadyInQueue = MobileState.stock.queue.includes(cleanPlate);
+    const isAlreadySynced = MobileState.stock.syncedSessionPlates.has(cleanPlate);
+    const isBlocked = MobileState.stock.blockedPlates.includes(cleanPlate);
+
+    if (isAlreadyInQueue || isAlreadySynced || isBlocked) {
+        MobileState.stock.recentScansCooldown.set(cleanPlate, now);
+
+        // Visual alert on camera viewport
+        showScanDetectionBanner(`⚠️ DUPLICATE: ${cleanPlate}`, true);
+
+        // Low error pitch buzzer & double haptic vibration
+        playScanBeep(false);
+        if (navigator.vibrate) navigator.vibrate([140, 70, 140]);
+
+        const dupType = isBlocked ? "BLOCKED (not in stock)" : (isAlreadySynced ? "already synced to server" : "already in queue");
+        showMobileToast(`⚠️ Duplicate: Plate ${cleanPlate} ${dupType}!`, true);
+        return;
+    }
+
+    // 3. New Valid Plate!
+    MobileState.stock.recentScansCooldown.set(cleanPlate, now);
+
+    // Visual feedback on camera viewport
+    showScanDetectionBanner(`✅ SCANNED: ${cleanPlate}`, false);
+
+    // High success chime & crisp single vibration
     playScanBeep(true);
-    if (navigator.vibrate) navigator.vibrate(100);
+    if (navigator.vibrate) navigator.vibrate(60);
 
     // Add to staged queue
     addPlateToStockQueue(cleanPlate);
 
-    // Auto-sync if checkbox is checked
-    const chkAutoSync = document.getElementById("chk-auto-sync");
-    if (chkAutoSync && chkAutoSync.checked) {
+    // Auto-sync immediately if enabled
+    if (MobileState.stock.autoSync) {
         setTimeout(() => {
             syncStockScansToServer();
-        }, 250);
+        }, 150);
     }
 }
 
@@ -870,9 +948,18 @@ function submitSingleStockPlate() {
     const raw = input.value.trim().toUpperCase();
     if (!raw) return;
 
-    addPlateToStockQueue(raw);
+    handleStockBarcodeDetected(raw);
     input.value = "";
     input.focus();
+}
+
+function toggleAutoSyncPreference(checkbox) {
+    MobileState.stock.autoSync = !!(checkbox && checkbox.checked);
+    localStorage.setItem("itms_mobile_auto_sync", MobileState.stock.autoSync ? "true" : "false");
+    showMobileToast(MobileState.stock.autoSync ? "⚡ Auto-Sync ON: Scans send to server instantly" : "⏸ Auto-Sync OFF: Scans stage in queue");
+    if (MobileState.stock.autoSync && MobileState.stock.queue.length > 0) {
+        syncStockScansToServer();
+    }
 }
 
 function showMobileToast(message, isWarning = false) {
@@ -904,36 +991,6 @@ function showMobileToast(message, isWarning = false) {
     }, 2800);
 }
 
-function addBulkStockPlates() {
-    const textarea = document.getElementById("text-stock-bulk");
-    if (!textarea) return;
-    const lines = textarea.value.split("\n");
-    let added = 0;
-    let dups = 0;
-    lines.forEach(l => {
-        const raw = l.trim().toUpperCase();
-        const cleaned = raw.replace(/^IK-/, "").replace(/[^A-Z0-9]/g, "");
-        if (cleaned) {
-            if (!MobileState.stock.queue.includes(cleaned)) {
-                MobileState.stock.queue.push(cleaned);
-                added++;
-            } else {
-                dups++;
-            }
-        }
-    });
-    textarea.value = "";
-    saveStockQueueToStorage();
-    renderStockQueueList();
-    if (added > 0 || dups > 0) {
-        let msg = `Added ${added} new plates.`;
-        if (dups > 0) {
-            msg += ` (${dups} duplicates skipped)`;
-        }
-        showMobileToast(msg, dups > 0 && added === 0);
-    }
-}
-
 function saveStockQueueToStorage() {
     try {
         localStorage.setItem("itms_mobile_stock_queue", JSON.stringify(MobileState.stock.queue));
@@ -955,6 +1012,11 @@ function loadStockQueueFromStorage() {
     } catch (e) {
         console.warn("Could not load stock queue from localStorage:", e);
     }
+    // Initialize auto-sync checkbox state from preference
+    const chk = document.getElementById("chk-auto-sync");
+    if (chk) {
+        chk.checked = MobileState.stock.autoSync;
+    }
 }
 
 function addPlateToStockQueue(plateStr) {
@@ -964,16 +1026,8 @@ function addPlateToStockQueue(plateStr) {
     if (!MobileState.stock.queue.includes(clean)) {
         MobileState.stock.queue.push(clean);
         saveStockQueueToStorage();
-        if (navigator.vibrate) {
-            navigator.vibrate(50);
-        }
         renderStockQueueList();
-        showMobileToast(`✓ Added ${clean} (${MobileState.stock.queue.length} staged)`);
-    } else {
-        if (navigator.vibrate) {
-            navigator.vibrate([100, 60, 100]);
-        }
-        showMobileToast(`⚠️ Duplicate: Plate ${clean} already scanned!`, true);
+        showMobileToast(`✅ Added ${clean} (${MobileState.stock.queue.length} in queue)`);
     }
 }
 
@@ -1008,14 +1062,18 @@ function renderStockQueueList() {
 }
 
 async function syncStockScansToServer() {
-    const q = MobileState.stock.queue;
+    if (MobileState.stock.isSyncing) return;
+    const q = [...MobileState.stock.queue];
     if (q.length === 0) {
-        showMobileToast("No plates in queue to sync.", true);
         return;
     }
 
+    MobileState.stock.isSyncing = true;
     const btn = document.getElementById("btn-sync-stock");
-    if (btn) btn.disabled = true;
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = "⏳ Syncing...";
+    }
 
     const subMode = MobileState.stock.subMode;
     const category = MobileState.stock.category;
@@ -1046,39 +1104,111 @@ async function syncStockScansToServer() {
             body: JSON.stringify(payload),
         });
         const data = await resp.json();
+
         if (data.success) {
-            let newlyCount = data.newly_dispatched !== undefined ? data.newly_dispatched : (data.plates_count || q.length);
-            let msg = `✓ Recorded ${newlyCount} plates for ${subMode} (${category})!`;
-            if (data.enriching_in_background || (data.synced_from_itms && data.synced_from_itms.length > 0)) {
-                msg += " (ITMS sync running in background ⚡)";
-            }
-            if (data.rejected_not_on_stock && data.rejected_not_on_stock.length > 0) {
-                msg += ` (⚠️ ${data.rejected_not_on_stock.length} blocked: ${data.rejected_not_on_stock.join(", ")})`;
-                MobileState.stock.queue = data.rejected_not_on_stock;
+            // Successfully processed plates: add to session history
+            const processedPlates = data.verified_plates || q;
+            processedPlates.forEach(p => MobileState.stock.syncedSessionPlates.add(p));
+
+            // Remove processed plates from queue
+            MobileState.stock.queue = MobileState.stock.queue.filter(p => !processedPlates.includes(p));
+
+            // Check if any plates were blocked
+            const blocked = data.rejected_not_on_stock || data.blocked_plates || [];
+            if (blocked.length > 0) {
+                // Remove blocked from active queue so queue doesn't stay blocked!
+                MobileState.stock.queue = MobileState.stock.queue.filter(p => !blocked.includes(p));
+                blocked.forEach(p => {
+                    if (!MobileState.stock.blockedPlates.includes(p)) {
+                        MobileState.stock.blockedPlates.push(p);
+                    }
+                });
+                renderBlockedPlatesTray();
+                playScanBeep(false);
+                if (navigator.vibrate) navigator.vibrate([160, 80, 160]);
+                showMobileToast(`⚠️ ${blocked.length} kit(s) NOT ON STOCK! Set box aside!`, true);
             } else {
-                MobileState.stock.queue = [];
+                playScanBeep(true);
+                let newlyCount = data.newly_dispatched !== undefined ? data.newly_dispatched : processedPlates.length;
+                showMobileToast(`✅ Synced ${newlyCount} plates (${subMode} - ${category})!`, false);
             }
+
             saveStockQueueToStorage();
-            playScanBeep(true);
-            showMobileToast(msg, false);
             renderStockQueueList();
         } else {
-            let errMsg = data.error || "Server rejection";
-            if (data.rejected_not_on_stock && data.rejected_not_on_stock.length > 0) {
-                errMsg = `⚠️ ${data.rejected_not_on_stock.length} kit(s) blocked (not on stock): ` + data.rejected_not_on_stock.join(", ");
-                MobileState.stock.queue = data.rejected_not_on_stock;
+            // Server error / rejection (e.g. 400 Bad Request because kits not in stock)
+            const blocked = data.rejected_not_on_stock || data.blocked_plates || [];
+            if (blocked.length > 0) {
+                // Remove blocked plates from active queue so future scans don't fail!
+                MobileState.stock.queue = MobileState.stock.queue.filter(p => !blocked.includes(p));
+                blocked.forEach(p => {
+                    if (!MobileState.stock.blockedPlates.includes(p)) {
+                        MobileState.stock.blockedPlates.push(p);
+                    }
+                });
+                renderBlockedPlatesTray();
                 saveStockQueueToStorage();
                 renderStockQueueList();
+                playScanBeep(false);
+                if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+                showMobileToast(`⚠️ BLOCKED: ${blocked.join(", ")} NOT ON STOCK (Set box aside!)`, true);
+            } else {
+                playScanBeep(false);
+                showMobileToast(data.error || "Server sync failed", true);
             }
-            playScanBeep(false);
-            showMobileToast(errMsg, true);
         }
     } catch (err) {
-        playScanBeep(false);
-        showMobileToast(`Network connection error: ${err.message} (Scans safely kept on phone)`, true);
+        showMobileToast(`Connection offline: Saved in queue (${err.message})`, true);
     } finally {
-        if (btn) btn.disabled = false;
+        MobileState.stock.isSyncing = false;
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = "⚡ Sync to Server";
+        }
     }
+}
+
+function renderBlockedPlatesTray() {
+    const tray = document.getElementById("stock-blocked-tray");
+    const countLbl = document.getElementById("lbl-mobile-blocked-count");
+    const listElem = document.getElementById("mobile-blocked-list");
+    if (!tray || !countLbl || !listElem) return;
+
+    const blocked = MobileState.stock.blockedPlates;
+    if (blocked.length === 0) {
+        tray.style.display = "none";
+        return;
+    }
+
+    tray.style.display = "block";
+    countLbl.textContent = blocked.length;
+    listElem.innerHTML = blocked.map((p, i) => `<div>${i + 1}. <strong>${p}</strong> - Physical box set aside</div>`).join("");
+}
+
+function shareBlockedPlatesWhatsApp() {
+    const blocked = MobileState.stock.blockedPlates;
+    if (blocked.length === 0) {
+        showMobileToast("No blocked plates recorded.", true);
+        return;
+    }
+    const lines = [
+        "⚠️ *ITMS WAREHOUSE STOCK TRANSFER REQUEST*",
+        `Facility: AGM SPIRO`,
+        `Shift: ${new Date().toLocaleDateString()}`,
+        `Total Kits Blocked: ${blocked.length}`,
+        "",
+        "*Plates Not on Stock (Physical Boxes Set Aside):*",
+        ...blocked.map((p, i) => `${i + 1}. ${p}`),
+        "",
+        "*Bulk Plates:*",
+        blocked.join(" "),
+        "",
+        "_Please transfer these kits into warehouse stock in ITMS._"
+    ];
+    const text = lines.join("
+");
+    const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank");
 }
 
 // ============================================================================

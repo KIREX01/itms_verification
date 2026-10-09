@@ -348,19 +348,38 @@ body {
     border-radius: 8px;
     background: var(--ug-black-surface-elevated);
     border: 1px solid var(--ug-border);
+    color: #ffffff !important;
+    font-weight: 700;
     transition: all 0.2s ease;
+}
+
+.step-pill .step-text,
+.step-pill .step-name {
+    color: #ffffff !important;
+    font-weight: 700;
 }
 
 .step-pill.active {
     border-color: var(--ug-yellow);
     background: rgba(245, 158, 11, 0.12);
     box-shadow: 0 0 8px var(--ug-yellow-glow);
+    color: #ffffff !important;
 }
 
 .step-pill.completed {
     border-color: var(--ug-green);
     background: rgba(16, 185, 129, 0.12);
-    color: #6ee7b7;
+    color: #ffffff !important;
+}
+
+#stock-camera-viewport.detected-error {
+    box-shadow: inset 0 0 0 4px #ef4444;
+    animation: flash-red 0.4s ease;
+}
+
+@keyframes flash-red {
+    0% { background: rgba(239, 68, 68, 0.4); }
+    100% { background: #000000; }
 }
 
 .step-num {

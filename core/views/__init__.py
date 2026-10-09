@@ -15,6 +15,7 @@ All symbols are re-exported here for 100% backward compatibility.
 from .auth import (
     login_view,
     signup_view,
+    signup_verify_view,
     logout_view,
 )
 
@@ -165,5 +166,6 @@ __all__ = [
     "logout_view",
     "serve_media",
     "signup_view",
+    "signup_verify_view",
     "upload_photos_view",
 ]

@@ -1,0 +1,156 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify Email & Complete Registration - ITMS Verification</title>
+    <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/auth.css' %}">
+    <style>
+        .otp-input-container {
+            display: flex;
+            justify-content: center;
+            margin: 18px 0;
+        }
+        .otp-input {
+            width: 100%;
+            max-width: 280px;
+            text-align: center;
+            font-size: 2rem;
+            font-weight: 800;
+            letter-spacing: 12px;
+            padding: 12px 16px;
+            background: #090b10 !important;
+            border: 2px solid var(--ug-yellow) !important;
+            border-radius: 8px;
+            color: #ffffff !important;
+            font-family: 'Courier New', Courier, monospace;
+            box-shadow: 0 0 16px rgba(255, 209, 0, 0.2);
+            transition: all 0.2s ease;
+        }
+        .otp-input:focus {
+            outline: none;
+            border-color: #ffffff !important;
+            box-shadow: 0 0 22px rgba(255, 209, 0, 0.4);
+        }
+        .email-badge {
+            display: inline-block;
+            background: rgba(255, 209, 0, 0.12);
+            border: 1px solid rgba(255, 209, 0, 0.35);
+            color: var(--ug-yellow);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin: 6px 0 14px;
+        }
+        .resend-box {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 18px;
+            padding-top: 16px;
+            border-top: 1px solid var(--ug-border, #282d3d);
+            font-size: 0.8rem;
+        }
+        .btn-link {
+            background: none;
+            border: none;
+            color: var(--ug-yellow);
+            cursor: pointer;
+            text-decoration: underline;
+            font-size: 0.85rem;
+            padding: 0;
+            font-weight: 600;
+        }
+        .btn-link:hover {
+            color: #ffffff;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Uganda National Flag Ribbon -->
+    <div class="uganda-flag-ribbon"></div>
+
+    <div class="auth-page-wrapper">
+        <div class="auth-card-box">
+            <div class="auth-card-head">
+                <div style="font-size:2.4rem; margin-bottom:6px;">📬</div>
+                <h1 style="font-size:1.35rem; font-weight:800; color:#ffffff; letter-spacing:0.5px;">
+                    TWO-FACTOR <span style="color:var(--ug-yellow);">VERIFICATION</span>
+                </h1>
+                <p style="font-size:0.75rem; color:var(--ug-text-muted); margin-top:2px;">
+                    We sent a 6-digit confirmation code to your email
+                </p>
+                <div class="email-badge">
+                    ✉️ {{ email|default:"your email" }}
+                </div>
+            </div>
+
+            <div class="auth-card-body">
+                {% if error %}
+                    <div class="alert-banner error">
+                        <span>⚠️ {{ error }}</span>
+                    </div>
+                {% endif %}
+
+                {% if message %}
+                    <div class="alert-banner success" style="background: rgba(35, 134, 54, 0.2); border: 1px solid #238636; color: #3fb950; padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; font-size: 0.85rem;">
+                        <span>✅ {{ message }}</span>
+                    </div>
+                {% endif %}
+
+                <form method="POST" action="{% url 'core:signup_verify' %}" style="display:flex; flex-direction:column; gap:16px;">
+                    {% csrf_token %}
+
+                    <div style="text-align: center;">
+                        <label for="code" style="display:block; font-size:0.8rem; color:var(--ug-text-muted); margin-bottom:6px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">
+                            Enter 6-Digit Code
+                        </label>
+                        <div class="otp-input-container">
+                            <input type="text" id="code" name="code" class="otp-input" maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" required autofocus placeholder="------">
+                        </div>
+                        <p style="font-size:0.75rem; color:var(--ug-text-muted); margin-top:4px;">
+                            Code expires in <strong>10 minutes</strong>
+                        </p>
+                    </div>
+
+                    <button type="submit" class="auth-btn-primary" style="margin-top:6px; font-size:0.95rem; font-weight:800; letter-spacing:0.5px; padding:12px;">
+                        VERIFY & COMPLETE REGISTRATION 🚀
+                    </button>
+                </form>
+
+                <div class="resend-box">
+                    <form method="POST" action="{% url 'core:signup_verify' %}" style="display:inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="resend">
+                        <span style="color:var(--ug-text-muted);">Didn't receive it?</span>
+                        <button type="submit" class="btn-link" style="margin-left:6px;">Resend Code</button>
+                    </form>
+
+                    <a href="{% url 'core:signup' %}" style="color:var(--ug-text-muted); text-decoration:none; font-size:0.8rem;">
+                        &larr; Change Details
+                    </a>
+                </div>
+            </div>
+
+            <div class="auth-card-footer">
+                <a href="{% url 'core:login' %}">&larr; Return to Sign In</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Auto-format OTP input to only allow digits
+        const codeInput = document.getElementById('code');
+        if (codeInput) {
+            codeInput.addEventListener('input', function(e) {
+                this.value = this.value.replace(/[^0-9]/g, '');
+            });
+        }
+    </script>
+</body>
+</html>

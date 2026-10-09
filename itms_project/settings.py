@@ -149,6 +149,11 @@ SECURE_AUTH_ROOT = SECURE_ROOT / "auth"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# --- Resend 2FA Email Service ---
+RESEND_API_KEY = env("RESEND_API_KEY", default="").strip()
+RESEND_FROM_EMAIL = env("RESEND_FROM_EMAIL", default="ITMS Verification <auth@info.kirex.online>").strip()
+SIGNUP_2FA_ENABLED = safe_env_bool("SIGNUP_2FA_ENABLED", default=True)
+
 # --- Operator vs Developer Permissions ---
 DEVELOPER_MODE = safe_env_bool("DEVELOPER_MODE", default=get_setting("system.developer_mode", False))
 

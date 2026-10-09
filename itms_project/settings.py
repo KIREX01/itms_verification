@@ -53,7 +53,9 @@ def safe_env_bool(var_name: str, default: bool) -> bool:
         return default
 
 
-SECRET_KEY = env("DJANGO_SECRET_KEY", default="insecure-dev-key-change-me")
+SECRET_KEY = env("DJANGO_SECRET_KEY", default="").strip()
+if not SECRET_KEY:
+    SECRET_KEY = "django-insecure-itms-verification-cloud-key-928472918471"
 DEBUG = safe_env_bool("DJANGO_DEBUG", default=True)
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["127.0.0.1", "localhost", "*", "close.kirex.online"])
 if "*" not in ALLOWED_HOSTS:

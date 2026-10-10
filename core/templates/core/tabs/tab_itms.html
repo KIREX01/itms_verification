@@ -73,7 +73,7 @@
                         <select id="itms-select-bond" class="form-control" style="flex:1; background:var(--ug-card-bg); color:#fff; border:1px solid var(--ug-border); border-radius:var(--radius-sm); padding:8px 10px; font-size:0.85rem;" onchange="onBondSelectionChanged()">
                             <option value="AGM">AGM Bonded Warehouse (AGM)</option>
                         </select>
-                        <button class="btn btn-secondary" onclick="loadOperatingBonds()" style="padding:0 10px; font-size:0.8rem;" title="Refresh discovered warehouse list">🔄</button>
+                        <button class="btn btn-secondary" onclick="typeof syncBondsFromITMS === 'function' ? syncBondsFromITMS() : loadOperatingBonds()" style="padding:0 10px; font-size:0.8rem;" title="Fetch latest bonded facilities from ITMS">🔄</button>
                     </div>
                     <span style="font-size:0.72rem; color:var(--ug-text-dim);">Orders from other facilities are strictly isolated to protect local floor counts.</span>
                 </div>

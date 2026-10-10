@@ -12,9 +12,14 @@
                 <div class="settings-card-title">
                     <span>🏢 Operating Facility &amp; Bonded Warehouse</span>
                 </div>
-                <span class="badge badge-yellow" id="settings-bond-badge">
-                    ● Active: {{ active_bond.code|default:"AGM" }}
-                </span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <button class="btn btn-secondary" onclick="syncBondsFromITMS()" id="btn-sync-bonds" style="padding:4px 10px; font-size:0.75rem;" title="Fetch latest bonded facilities registered in ITMS WebApp">
+                        🔄 Sync from ITMS
+                    </button>
+                    <span class="badge badge-yellow" id="settings-bond-badge">
+                        ● Active: {{ active_bond.code|default:"AGM" }}
+                    </span>
+                </div>
             </div>
 
             <div class="settings-row">
@@ -157,62 +162,31 @@
 
             <div class="settings-row">
                 <div class="settings-label-group">
-                    <span class="settings-label-title">Active Database Backend</span>
-                    <span class="settings-label-desc">Configured SQL database for installation orders, evidence vault, and audit trails.</span>
+                    <span class="settings-label-title">Database Service Status</span>
+                    <span class="settings-label-desc">Primary transactional datastore for installation orders, evidence vault, and audit trails.</span>
                 </div>
-                <span class="badge badge-green">{{ database_display }}</span>
+                <span class="badge badge-green">● Connected &amp; Synchronized</span>
             </div>
         </div>
 
-        <!-- Evidence Vault & Media Storage Settings -->
+        <!-- Evidence Vault & Server Storage Policy -->
         <div class="settings-card">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <span>💾 Storage &amp; Evidence Vault Folder</span>
+                    <span>💾 Storage &amp; Evidence Vault Lifecycle</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <span class="badge badge-cyan" id="vault-status-badge">Checking...</span>
-                    <span class="badge badge-green" id="vault-disk-badge">-- GB Free</span>
+                    <span class="badge badge-green">● Server Managed</span>
+                    <span class="badge badge-yellow">Auto-Prune Active</span>
                 </div>
             </div>
 
-            <div class="settings-row" style="flex-direction:column; align-items:flex-start; gap:12px;">
-                <div class="settings-label-group" style="width:100%;">
-                    <span class="settings-label-title">Vault Root Directory</span>
-                    <span class="settings-label-desc">Location on this computer where photographic evidence is stored and organized by date.</span>
+            <div class="settings-row">
+                <div class="settings-label-group">
+                    <span class="settings-label-title">Evidence Storage &amp; Retention</span>
+                    <span class="settings-label-desc">Incoming evidence is stored in the secured server vault. Original heavy photos are pruned upon confirmed ITMS submission, permanently preserving WebP previews and audit records.</span>
                 </div>
-
-                <!-- Path Display & Action Controls -->
-                <div style="width:100%; display:flex; gap:8px; align-items:center;">
-                    <div style="position:relative; flex:1;">
-                        <input type="text" id="settings-vault-path-input"
-                               style="width:100%; font-family:var(--font-mono); font-size:0.82rem; padding:8px 12px; background-color:var(--ug-black-surface); border:1px solid var(--ug-border); color:#fff; border-radius:var(--radius-md);"
-                               placeholder="e.g. C:\ITMS_Vault or media/vault">
-                    </div>
-                    <button type="button" class="btn btn-secondary" onclick="browseVaultFolder()" id="btn-browse-vault" style="white-space:nowrap; padding:8px 14px; font-size:0.82rem;">
-                        📁 Browse...
-                    </button>
-                    <button type="button" class="btn btn-primary" onclick="saveVaultFolder()" id="btn-save-vault" style="white-space:nowrap; padding:8px 14px; font-size:0.82rem;">
-                        💾 Save Location
-                    </button>
-                </div>
-
-                <!-- Presets & Migration Option -->
-                <div style="width:100%; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
-                    <div style="display:flex; align-items:center; gap:6px; font-size:0.75rem; color:var(--ug-text-dim);">
-                        <span>Presets:</span>
-                        <button type="button" class="btn btn-secondary" onclick="setVaultPreset('default')" style="padding:2px 8px; font-size:0.75rem;">Default (media/vault)</button>
-                        <button type="button" class="btn btn-secondary" onclick="setVaultPreset('documents')" style="padding:2px 8px; font-size:0.75rem;">Documents</button>
-                        <button type="button" class="btn btn-secondary" onclick="setVaultPreset('pictures')" style="padding:2px 8px; font-size:0.75rem;">Pictures</button>
-                    </div>
-
-                    <label style="display:flex; align-items:center; gap:6px; font-size:0.75rem; color:var(--ug-text-muted); cursor:pointer;">
-                        <input type="checkbox" id="settings-vault-migrate-chk" checked>
-                        <span>Copy existing photos to new folder</span>
-                    </label>
-                </div>
-
-                <div id="vault-message-box" style="display:none; font-size:0.78rem; padding:8px 12px; border-radius:var(--radius-sm); width:100%;"></div>
+                <span class="badge badge-secondary" style="font-size:0.75rem;">Managed via TUI Console</span>
             </div>
         </div>
 
@@ -239,318 +213,25 @@
         </div>
 
         <!-- ======================================================== -->
-        <!-- SECTION 2: DEVELOPER / DIAGNOSTIC SETTINGS (Revealed)    -->
+        <!-- SECTION 2: ADMINISTRATIVE & ADVANCED CONFIGURATION       -->
         <!-- ======================================================== -->
 
-        <!-- Developer Mode Toggle Header Card -->
-        <div class="settings-card" style="border-left: 3px solid var(--ug-cyan);">
+        <!-- Server Administration Exclusive Card -->
+        <div class="settings-card" style="border-left: 3px solid var(--ug-yellow);">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <span>🛠️ Developer &amp; Diagnostic Settings</span>
+                    <span>🛡️ Server Administration &amp; Engineering Controls</span>
                 </div>
-                <span class="badge {% if developer_mode %}badge-cyan{% else %}badge-muted{% endif %}" id="settings-devmode-badge">
-                    {% if developer_mode %}● DEVELOPER MODE ON{% else %}● Hidden (Safe){% endif %}
-                </span>
+                <span class="badge badge-secondary">TUI Console Exclusive</span>
             </div>
 
             <div class="settings-row">
                 <div class="settings-label-group">
-                    <span class="settings-label-title">Enable Developer Diagnostics</span>
-                    <span class="settings-label-desc">Toggle ON to reveal advanced engineering parameters: Crawl limits, SQLite lock timeouts, HTTP pooling, and vision thresholds.</span>
+                    <span class="settings-label-title">Advanced Diagnostics &amp; Infrastructure Parameters</span>
+                    <span class="settings-label-desc">Database engine configuration, crawler bounds, HTTP pool tuning, and storage paths are restricted to the server console. Access them securely via <code>itms --tui</code> with the Master PIN.</span>
                 </div>
-                <label class="switch">
-                    <input type="checkbox" id="settings-devmode-toggle" {% if developer_mode %}checked{% endif %}
-                           onchange="toggleDeveloperSettingsMode(this)">
-                    <span class="slider"></span>
-                </label>
+                <span class="badge badge-yellow">Terminal Protected</span>
             </div>
-        </div>
-
-        <!-- Developer Settings Container -->
-        <div id="developer-settings-section" style="display: {% if developer_mode %}block{% else %}none{% endif %};">
-
-            <!-- Card 2A: Crawl & Pagination Bounds -->
-            <div class="settings-card">
-                <div class="settings-card-header">
-                    <div class="settings-card-title">
-                        <span>🕷️ Crawl &amp; Pagination Bounds (Engineering)</span>
-                    </div>
-                    <span class="badge badge-cyan">Pagination</span>
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">Max Active Orders Pages</span>
-                        <span class="settings-label-desc">Maximum pagination limit when scanning ITMS active installation orders (default: 25 pages = 500 records).</span>
-                    </div>
-                    <input type="number" id="input-dev-crawl-active" min="1" max="100"
-                           value="{{ developer_settings.crawl_max_active_pages.value|default:25 }}"
-                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateSetting('crawl.max_active_pages', parseInt(this.value, 10))">
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">Max Archive Orders Pages</span>
-                        <span class="settings-label-desc">Maximum pagination limit when synchronizing shift archive orders (default: 50 pages = 1000 records).</span>
-                    </div>
-                    <input type="number" id="input-dev-crawl-archive" min="1" max="200"
-                           value="{{ developer_settings.crawl_max_archive_pages.value|default:50 }}"
-                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateSetting('crawl.max_archive_pages', parseInt(this.value, 10))">
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">Max Kit Catalog Pages</span>
-                        <span class="settings-label-desc">Maximum pagination limit when indexing stock installation kits (default: 25 pages = 500 records).</span>
-                    </div>
-                    <input type="number" id="input-dev-crawl-kits" min="1" max="100"
-                           value="{{ developer_settings.crawl_max_kit_pages.value|default:25 }}"
-                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateSetting('crawl.max_kit_pages', parseInt(this.value, 10))">
-                </div>
-            </div>
-
-            <!-- Card 2B: Database Performance & Concurrency -->
-            <div class="settings-card">
-                <div class="settings-card-header">
-                    <div class="settings-card-title">
-                        <span>⚡ Database Performance &amp; Concurrency</span>
-                    </div>
-                    <span class="badge badge-green">SQLite / Locking</span>
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">SQLite Busy Timeout (ms)</span>
-                        <span class="settings-label-desc">Milliseconds to wait for SQLite database locks to release before raising OperationalError (default: 30000ms).</span>
-                    </div>
-                    <input type="number" id="input-dev-sqlite-timeout" min="1000" max="120000" step="1000"
-                           value="{{ developer_settings.database_sqlite_busy_timeout_ms.value|default:30000 }}"
-                           style="width: 110px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateSetting('database.sqlite_busy_timeout_ms', parseInt(this.value, 10))">
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">Database Batch Write Size</span>
-                        <span class="settings-label-desc">Record chunk size for bulk database updates and insertions wrapped in atomic transactions (default: 200).</span>
-                    </div>
-                    <input type="number" id="input-dev-batch-size" min="10" max="1000" step="50"
-                           value="{{ developer_settings.database_batch_write_size.value|default:200 }}"
-                           style="width: 110px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateSetting('database.batch_write_size', parseInt(this.value, 10))">
-                </div>
-            </div>
-
-            <!-- Card 2C: Network Connection Pooling & Sockets -->
-            <div class="settings-card">
-                <div class="settings-card-header">
-                    <div class="settings-card-title">
-                        <span>🌐 Network Connection Pooling &amp; Sockets</span>
-                    </div>
-                    <span class="badge badge-yellow">HTTP Adapter</span>
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">HTTP Request Timeout (seconds)</span>
-                        <span class="settings-label-desc">Socket timeout before aborting and retrying ITMS requests (default: 15s).</span>
-                    </div>
-                    <input type="number" id="input-dev-net-timeout" min="5" max="120"
-                           value="{{ developer_settings.network_http_timeout_seconds.value|default:15 }}"
-                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateSetting('network.http_timeout_seconds', parseInt(this.value, 10))">
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">HTTP Pool Connections</span>
-                        <span class="settings-label-desc">Number of persistent connection pools to maintain in memory (default: 10).</span>
-                    </div>
-                    <input type="number" id="input-dev-pool-conn" min="2" max="50"
-                           value="{{ developer_settings.network_pool_connections.value|default:10 }}"
-                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateSetting('network.pool_connections', parseInt(this.value, 10))">
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">HTTP Pool Max Sockets</span>
-                        <span class="settings-label-desc">Maximum connection pool socket capacity before recycling (default: 20).</span>
-                    </div>
-                    <input type="number" id="input-dev-pool-max" min="5" max="100"
-                           value="{{ developer_settings.network_pool_maxsize.value|default:20 }}"
-                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateSetting('network.pool_maxsize', parseInt(this.value, 10))">
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">Circuit Breaker Error Threshold</span>
-                        <span class="settings-label-desc">Consecutive network/server failures before pausing automated requests (default: 3).</span>
-                    </div>
-                    <input type="number" id="input-dev-circuit-breaker" min="1" max="10"
-                           value="{{ developer_settings.submission_circuit_breaker_threshold.value|default:3 }}"
-                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateSetting('submission.circuit_breaker_threshold', parseInt(this.value, 10))">
-                </div>
-            </div>
-
-            <!-- Card 2D: Vision & OCR Intelligence Calibration -->
-            <div class="settings-card">
-                <div class="settings-card-header">
-                    <div class="settings-card-title">
-                        <span>🧠 Vision Pipeline &amp; OCR Intelligence</span>
-                    </div>
-                    <span class="badge badge-purple">AI / OCR</span>
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">Minimum OCR Confidence Score</span>
-                        <span class="settings-label-desc">Threshold below which OCR detections are flagged for operator review (0.0 to 1.0, default: 0.55).</span>
-                    </div>
-                    <input type="number" id="input-dev-ocr-conf" min="0.1" max="1.0" step="0.05"
-                           value="{{ developer_settings.vision_min_ocr_confidence.value|default:0.55 }}"
-                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateSetting('vision.min_ocr_confidence', parseFloat(this.value))">
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">YOLO Plate Detector Confidence</span>
-                        <span class="settings-label-desc">Bounding box threshold for YOLO vehicle plate detection (0.0 to 1.0, default: 0.35).</span>
-                    </div>
-                    <input type="number" id="input-dev-detector-conf" min="0.1" max="1.0" step="0.05"
-                           value="{{ developer_settings.vision_detector_conf_threshold.value|default:0.35 }}"
-                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateSetting('vision.detector_conf_threshold', parseFloat(this.value))">
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">YOLOv8 / YOLOv11 Model Weights</span>
-                        <span class="settings-label-desc">Neural detector checkpoint (.pt / .onnx) for vehicle license plate localization.</span>
-                    </div>
-                    <div style="display:flex; gap:6px;">
-                        <input type="text" id="input-dev-yolo-weights"
-                               value="{{ developer_settings.vision_yolo_weights.value|default:'models/license-plate-finetune-v1n.pt' }}"
-                               style="width: 260px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem; font-family:var(--font-mono);"
-                               onchange="updateSetting('vision.yolo_weights', this.value.trim())">
-                        <button class="btn btn-secondary" style="padding: 6px 10px;" onclick="browseGenericPath('input-dev-yolo-weights', 'file', 'Select YOLO Weights Model', 'vision.yolo_weights')" title="Browse for model file...">📁</button>
-                    </div>
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">U-Turn Turnaround Threshold (seconds)</span>
-                        <span class="settings-label-desc">Maximum turnaround time delta for Tier 2 reverse U-turn walk alignment (default: 1800s).</span>
-                    </div>
-                    <input type="number" id="input-dev-uturn-threshold" min="60" max="7200" step="60"
-                           value="{{ developer_settings.matcher_uturn_threshold_seconds.value|default:1800 }}"
-                           style="width: 100px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateSetting('matcher.uturn_threshold_seconds', parseInt(this.value, 10))">
-                </div>
-            </div>
-
-            <!-- Card 2E: Multipart Photo Compression & Lifecycle -->
-            <div class="settings-card">
-                <div class="settings-card-header">
-                    <div class="settings-card-title">
-                        <span>📸 Compression &amp; Retention Policies</span>
-                    </div>
-                    <span class="badge badge-yellow">Storage &amp; Compression</span>
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">Smart Photo Compression</span>
-                        <span class="settings-label-desc">Downscale photos in-memory during HTTP upload (master photos in vault remain untouched).</span>
-                    </div>
-                    <label class="switch">
-                        <input type="checkbox" id="settings-compression-toggle" 
-                               {% if developer_settings.compression_enabled.value %}checked{% endif %}
-                               onchange="updateSetting('compression.enabled', this.checked)">
-                        <span class="slider"></span>
-                    </label>
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">Max Dimension (px) &amp; JPEG Quality</span>
-                        <span class="settings-label-desc">LANCZOS downsampling resolution limit and JPEG quality factor (default: 1920px, 88 quality).</span>
-                    </div>
-                    <div style="display:flex; gap:10px; align-items:center;">
-                        <input type="number" id="input-dev-comp-dim" min="640" max="3840" step="160"
-                               value="{{ developer_settings.compression_max_dimension.value|default:1920 }}"
-                               style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                               onchange="updateSetting('compression.max_dimension', parseInt(this.value, 10))">
-                        <input type="number" id="input-dev-comp-quality" min="50" max="100" step="2"
-                               value="{{ developer_settings.compression_jpeg_quality.value|default:88 }}"
-                               style="width: 80px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                               onchange="updateSetting('compression.jpeg_quality', parseInt(this.value, 10))">
-                    </div>
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">Vault Retention (Days)</span>
-                        <span class="settings-label-desc">Days to preserve evidence photos in local vault before pruning.</span>
-                    </div>
-                    <input type="number" id="input-dev-vault-days" min="1" max="90"
-                           value="{{ developer_settings.storage_vault_retention_days.value|default:7 }}"
-                           style="width: 80px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateSetting('storage.vault_retention_days', parseInt(this.value, 10))">
-                </div>
-            </div>
-
-            <!-- Card 2F: Testing & Simulation (Submission Backend) -->
-            <div class="settings-card">
-                <div class="settings-card-header">
-                    <div class="settings-card-title">
-                        <span>🧪 Testing &amp; Simulation Backend</span>
-                    </div>
-                    <span class="badge badge-yellow">Simulation</span>
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">ITMS Submission Backend</span>
-                        <span class="settings-label-desc">Switch between real API submissions or simulated stubs (live, stub).</span>
-                    </div>
-                    <select id="input-dev-submission-backend"
-                            style="padding: 6px 12px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                            onchange="updateSetting('submission.backend', this.value)">
-                        <option value="live" {% if developer_settings.submission_backend.value == 'live' %}selected{% endif %}>Live API</option>
-                        <option value="stub" {% if developer_settings.submission_backend.value == 'stub' %}selected{% endif %}>Stub (Simulated)</option>
-                    </select>
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">Simulated Latency (ms)</span>
-                        <span class="settings-label-desc">Artificial delay for stub backend to simulate network lag.</span>
-                    </div>
-                    <input type="number" id="input-dev-sim-latency" min="0" max="10000" step="100"
-                           value="{{ developer_settings.simulation_latency_ms.value|default:0 }}"
-                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateSetting('simulation.latency_ms', parseInt(this.value, 10))">
-                </div>
-
-                <div class="settings-row">
-                    <div class="settings-label-group">
-                        <span class="settings-label-title">Failure Injection Rate (%)</span>
-                        <span class="settings-label-desc">Percentage of stub requests that intentionally fail (0-100).</span>
-                    </div>
-                    <input type="number" id="input-dev-fail-rate" min="0" max="100"
-                           value="{{ developer_settings.simulation_failure_rate.value|default:0 }}"
-                           style="width: 90px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateSetting('simulation.failure_rate', parseInt(this.value, 10))">
-                </div>
-            </div>
-
         </div>
 
         <!-- ======================================================== -->

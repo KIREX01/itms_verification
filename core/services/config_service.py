@@ -9,9 +9,12 @@ for safety, vision pipeline, network timeouts, and storage lifecycle.
 from __future__ import annotations
 
 import copy
+import hashlib
+import hmac
 import json
 import logging
 import os
+import secrets
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -72,6 +75,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "vault_retention_days": 7,
         "export_retention_days": 30,
         "crops_retention_days": 7,
+    },
+    "security": {
+        "tui_master_pin_enabled": True,        # Prompt for master security PIN on TUI launch
+        "tui_master_pin_hash": "",             # PBKDF2 hash of master PIN (empty defaults to 739104)
+        "tui_lockout_seconds": 60,             # Lockout duration after 3 failed attempts
+        "tui_max_failed_attempts": 3,          # Max invalid attempts before temporary lockout
+        "tui_auto_lock_minutes": 15,           # Inactivity timeout before re-prompting for Master PIN
     },
     "matcher": {
         "uturn_threshold_seconds": 1800,       # Turnaround time delta threshold (seconds) for U-Turn walk
@@ -999,8 +1009,84 @@ def get_active_database_info() -> Dict[str, Any]:
     }
 
 
+DEFAULT_TUI_MASTER_PIN = "739104"
+
+
+def _hash_tui_pin(pin: str, salt: Optional[str] = None) -> str:
+    """Hashes a numeric master PIN using PBKDF2 HMAC-SHA256 with 100,000 iterations."""
+    if not salt:
+        salt = secrets.token_hex(16)
+    clean_pin = str(pin).strip()
+    dk = hashlib.pbkdf2_hmac("sha256", clean_pin.encode("utf-8"), salt.encode("utf-8"), 100_000)
+    return f"{salt}${dk.hex()}"
+
+
+def _verify_tui_pin_hash(pin: str, stored_hash: str) -> bool:
+    """Verifies entered PIN against stored salt$hash using constant-time comparison."""
+    if not stored_hash or "$" not in stored_hash:
+        return False
+    try:
+        salt, hash_val = stored_hash.split("$", 1)
+        clean_pin = str(pin).strip()
+        test_dk = hashlib.pbkdf2_hmac("sha256", clean_pin.encode("utf-8"), salt.encode("utf-8"), 100_000).hex()
+        return hmac.compare_digest(hash_val, test_dk)
+    except Exception:
+        return False
+
+
+def get_tui_master_pin_hash(base_dir: Optional[Path] = None) -> str:
+    """Returns stored PIN hash from config.json or empty string if not explicitly set."""
+    return str(get_setting("security.tui_master_pin_hash", "", base_dir)).strip()
+
+
+def verify_tui_master_pin(entered_pin: str, base_dir: Optional[Path] = None) -> bool:
+    """
+    Verifies entered 6-digit PIN against:
+    1. TUI_MASTER_PIN environment variable (if explicitly set)
+    2. Stored hash in secure/config.json
+    3. Default system master PIN (739104) if no custom PIN was ever set.
+    """
+    if not entered_pin:
+        return False
+    clean_pin = str(entered_pin).strip()
+
+    # 1. Environment variable override
+    env_pin = os.getenv("TUI_MASTER_PIN", "").strip()
+    if env_pin:
+        return hmac.compare_digest(clean_pin, env_pin)
+
+    # 2. Configured persistent hash
+    stored_hash = get_tui_master_pin_hash(base_dir)
+    if stored_hash:
+        return _verify_tui_pin_hash(clean_pin, stored_hash)
+
+    # 3. Default fallback PIN
+    return hmac.compare_digest(clean_pin, DEFAULT_TUI_MASTER_PIN)
+
+
+def set_tui_master_pin(new_pin: str, base_dir: Optional[Path] = None) -> bool:
+    """Hashes and persists a new TUI master PIN in secure/config.json."""
+    clean_pin = str(new_pin).strip()
+    if len(clean_pin) < 4:
+        raise ValueError("TUI Master PIN must be at least 4 digits")
+    hashed = _hash_tui_pin(clean_pin)
+    return set_setting("security.tui_master_pin_hash", hashed, base_dir)
+
+
 class ConfigService:
     """Convenience wrapper for OOP access to central configuration."""
+
+    @staticmethod
+    def verify_tui_master_pin(entered_pin: str, base_dir: Optional[Path] = None) -> bool:
+        return verify_tui_master_pin(entered_pin, base_dir)
+
+    @staticmethod
+    def set_tui_master_pin(new_pin: str, base_dir: Optional[Path] = None) -> bool:
+        return set_tui_master_pin(new_pin, base_dir)
+
+    @staticmethod
+    def get_tui_master_pin_hash(base_dir: Optional[Path] = None) -> str:
+        return get_tui_master_pin_hash(base_dir)
 
     @staticmethod
     def get_setting(key_path: str, default: Any = None, base_dir: Optional[Path] = None) -> Any:

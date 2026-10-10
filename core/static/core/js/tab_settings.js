@@ -376,6 +376,57 @@ async function changeActiveBond(selectEl) {
     }
 }
 
+async function syncBondsFromITMS() {
+    const btn = document.getElementById("btn-sync-bonds");
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = "🔄 Syncing...";
+    }
+    showToast("Connecting to ITMS to discover bonded warehouses...", "info");
+    try {
+        const res = await fetch("/api/itms/sync_bonds/", { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Discovered ${data.count || 0} bonded warehouses from ITMS!`, "success");
+            const sel = document.getElementById("settings-bond-select");
+            const selItms = document.getElementById("itms-select-bond");
+            if (data.warehouses && data.warehouses.length > 0) {
+                const renderOptions = (targetSel) => {
+                    if (!targetSel) return;
+                    const currVal = targetSel.value;
+                    targetSel.innerHTML = "";
+                    data.warehouses.forEach(w => {
+                        const opt = document.createElement("option");
+                        opt.value = w.code;
+                        opt.textContent = `${w.code} - ${w.name}`;
+                        if (w.code === currVal || (data.active_bond && w.code === data.active_bond.code)) {
+                            opt.selected = true;
+                        }
+                        targetSel.appendChild(opt);
+                    });
+                };
+                renderOptions(sel);
+                renderOptions(selItms);
+            }
+            if (data.active_bond) {
+                const badge = document.getElementById("settings-bond-badge");
+                if (badge) badge.innerText = `● Active: ${data.active_bond.code}`;
+                const itmsBadge = document.getElementById("itms-active-bond-badge");
+                if (itmsBadge) itmsBadge.innerText = `${data.active_bond.name} (${data.active_bond.code})`;
+            }
+        } else {
+            showToast(data.error || "Could not sync bonds from ITMS.", "warning");
+        }
+    } catch (err) {
+        showToast(`Failed syncing bonds: ${err}`, "error");
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = "🔄 Sync from ITMS";
+        }
+    }
+}
+
 function toggleDeveloperSettingsMode(chk) {
     const devContainer = document.getElementById("developer-settings-section");
     if (devContainer) {

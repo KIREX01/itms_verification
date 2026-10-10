@@ -51,6 +51,7 @@ from textual.widgets import (
     TabPane,
 )
 
+import time
 from core.tui.dashboard_pane import DashboardPane
 from core.tui.inspectors import InspectorPane
 from core.tui.itms_pane import ITMSConnectionPane
@@ -61,6 +62,7 @@ from core.tui.tables import TableLoaderMixin, HISTORY_FILTERS
 from core.tui.handlers import NavigationHandlersMixin
 from core.tui.actions import OperatorActionsMixin
 from core.tui.auth_screens import LandingAuthScreen
+from core.tui.lock_screen import TUIMasterLockScreen
 from core.tui.commands import ITMSCommandProvider, ITMSCommandPalette
 from core.services import auth_service
 
@@ -120,6 +122,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         ("r", "refresh", "Refresh Data"),
         ("x", "unlink_order", "Unlink Order (X)"),
         ("ctrl+u", "unlink_order", "Unlink Order (^U)"),
+        ("ctrl+l", "lock_console", "Lock TUI (^L)"),
         ("ctrl+x", "logout", "Sign Out (^X)"),
         ("q", "quit", "Quit"),
     ]
@@ -127,6 +130,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.current_user = None
+        self._last_user_activity = time.time()
         self.history_filter_index = 0
         self.current_history_filter = HISTORY_FILTERS[0]
         self.current_queue_scope = "TODAY"
@@ -251,7 +255,35 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         if fb_warn:
             self.log_message(f"[bold yellow]⚠️ Fallback Active:[/bold yellow] {fb_warn}", level="WARNING")
 
-        # Session authentication check
+        # Master Terminal Security Lock verification
+        tui_pin_enabled = config_service.get_setting("security.tui_master_pin_enabled", True)
+        if tui_pin_enabled:
+            self.push_screen(TUIMasterLockScreen(), self._on_master_unlocked_startup)
+        else:
+            self._proceed_after_master_unlock()
+
+        self.log_message("[dim]Press [1-7] workflow tabs │ [I] Photos │ [P] Vision │ [M] Match │ [B] Batch Submit │ [O] Drain Outbox │ [^L] Lock Console │ [X] Sign Out[/dim]")
+
+        # Start background warehouse installation kits sync daemon (3-hour periodic sync)
+        if config_service.get_setting("sync.auto_sync_enabled", True):
+            try:
+                from core.services import kit_provisioning_service
+                kit_daemon = kit_provisioning_service.MorningKitSyncDaemon.get_instance()
+                kit_daemon.start()
+            except Exception as d_err:
+                logger.debug("Could not start MorningKitSyncDaemon in TUI: %s", d_err)
+
+        # Periodically refresh dashboard and outbox monitor every 15s
+        self.set_interval(15.0, self._auto_refresh_dashboard_and_outbox)
+
+    def _on_master_unlocked_startup(self, unlocked: bool) -> None:
+        if unlocked:
+            self.log_message("[bold green]🔒 Master TUI Console unlocked.[/bold green]", level="SUCCESS")
+            self._proceed_after_master_unlock()
+        else:
+            self.exit()
+
+    def _proceed_after_master_unlock(self) -> None:
         saved_user = auth_service.get_remembered_session()
         if saved_user:
             self.current_user = saved_user
@@ -267,19 +299,15 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         else:
             self.push_screen(LandingAuthScreen(), self._on_auth_completed)
 
-        self.log_message("[dim]Press [1-7] workflow tabs │ [I] Photos │ [P] Vision │ [M] Match │ [B] Batch Submit │ [O] Drain Outbox │ [X] Sign Out[/dim]")
+    def action_lock_console(self) -> None:
+        """Manually locks TUI console immediately requiring Master PIN to unlock."""
+        self.push_screen(TUIMasterLockScreen(), self._on_console_relocked_result)
 
-        # Start background warehouse installation kits sync daemon (3-hour periodic sync)
-        if config_service.get_setting("sync.auto_sync_enabled", True):
-            try:
-                from core.services import kit_provisioning_service
-                kit_daemon = kit_provisioning_service.MorningKitSyncDaemon.get_instance()
-                kit_daemon.start()
-            except Exception as d_err:
-                logger.debug("Could not start MorningKitSyncDaemon in TUI: %s", d_err)
-
-        # Periodically refresh dashboard and outbox monitor every 15s
-        self.set_interval(15.0, self._auto_refresh_dashboard_and_outbox)
+    def _on_console_relocked_result(self, unlocked: bool) -> None:
+        if unlocked:
+            self.log_message("[bold green]🔒 Master Console unlocked.[/bold green]", level="SUCCESS")
+        else:
+            self.exit()
 
     def _on_vault_configured(self, chosen_path=None) -> None:
         from core.services import vault_service
@@ -297,6 +325,20 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
 
     def _auto_refresh_dashboard_and_outbox(self) -> None:
         """Periodically updates dashboard telemetry and checks offline outbox queue."""
+        # Idle timeout auto-lock check
+        try:
+            from core.services import config_service
+            lock_min = int(config_service.get_setting("security.tui_auto_lock_minutes", 15))
+            if lock_min > 0 and (time.time() - self._last_user_activity > lock_min * 60):
+                if not isinstance(self.screen, TUIMasterLockScreen):
+                    self.log_message(
+                        "[bold yellow]🔒 Terminal idle timeout reached. Locking console.[/bold yellow]",
+                        level="WARNING",
+                    )
+                    self.action_lock_console()
+        except Exception:
+            pass
+
         try:
             self.query_one("#dashboard-pane", DashboardPane).refresh_dashboard()
         except Exception:
@@ -372,6 +414,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
 
     def on_key(self, event: events.Key) -> None:
         """Global key event interceptor for hardware barcode scanners and tab shortcuts."""
+        self._last_user_activity = time.time()
         # Unfocus input on Escape so digits 1-6 navigate tabs immediately without edit mode
         if event.key == "escape" and isinstance(self.focused, Input):
             self.set_focus(None)

@@ -175,6 +175,8 @@ def api_settings(request: HttpRequest) -> JsonResponse:
     GET: Returns current system configuration, user settings, developer settings, and active engine.
     POST: Updates configuration parameters dynamically.
     """
+    is_admin = bool(request.user and request.user.is_authenticated and request.user.is_superuser)
+
     if request.method == "POST":
         if not request.user.is_authenticated:
             return JsonResponse({"success": False, "error": "Authentication required to update system settings."}, status=401)
@@ -188,9 +190,26 @@ def api_settings(request: HttpRequest) -> JsonResponse:
         else:
             payload = dict(request.POST.items())
 
+        items_to_set = []
         if "key" in payload and "value" in payload:
-            k = str(payload["key"]).strip()
-            v = payload["value"]
+            items_to_set.append((str(payload["key"]).strip(), payload["value"]))
+        elif "settings" in payload and isinstance(payload["settings"], dict):
+            for k, v in payload["settings"].items():
+                items_to_set.append((str(k).strip(), v))
+        else:
+            for k, v in payload.items():
+                if k not in ("csrfmiddlewaretoken",):
+                    items_to_set.append((str(k).strip(), v))
+
+        # Restrict developer and infrastructure settings to superusers
+        DEV_PREFIXES = ("crawl.", "database.", "network.", "vision.", "matcher.", "storage.", "simulation.", "system.developer_mode")
+        for k, v in items_to_set:
+            if any(k.startswith(p) for p in DEV_PREFIXES) and not is_admin:
+                return JsonResponse({
+                    "success": False,
+                    "error": f"Setting '{k}' requires administrative access. Configure via the TUI console.",
+                }, status=403)
+
             config_service.set_setting(k, v)
             if "yolo_weights" in k:
                 try:
@@ -199,27 +218,6 @@ def api_settings(request: HttpRequest) -> JsonResponse:
                 except Exception:
                     pass
             updated_keys.append(k)
-        elif "settings" in payload and isinstance(payload["settings"], dict):
-            for k, v in payload["settings"].items():
-                config_service.set_setting(str(k).strip(), v)
-                if "yolo_weights" in str(k):
-                    try:
-                        from core.vision import detector
-                        detector.set_yolo_weights(v)
-                    except Exception:
-                        pass
-                updated_keys.append(str(k).strip())
-        else:
-            for k, v in payload.items():
-                if k not in ("csrfmiddlewaretoken",):
-                    config_service.set_setting(str(k).strip(), v)
-                    if "yolo_weights" in str(k):
-                        try:
-                            from core.vision import detector
-                            detector.set_yolo_weights(v)
-                        except Exception:
-                            pass
-                    updated_keys.append(str(k).strip())
 
         cfg = config_service.load_config()
         db_info = config_service.get_active_database_info()
@@ -229,11 +227,11 @@ def api_settings(request: HttpRequest) -> JsonResponse:
             "updated_keys": updated_keys,
             "dry_run": cfg.get("submission", {}).get("dry_run_mode", True),
             "submit_step3": cfg.get("submission", {}).get("submit_step3", True),
-            "developer_mode": config_service.is_developer_mode(),
+            "developer_mode": config_service.is_developer_mode() if is_admin else False,
             "user_settings": config_service.get_user_settings(),
-            "developer_settings": config_service.get_developer_settings(),
-            "database": db_info.get("display", "SQLite"),
-            "active_engine": db_info.get("vendor", "sqlite"),
+            "developer_settings": config_service.get_developer_settings() if is_admin else {},
+            "database": db_info.get("display", "SQLite") if is_admin else "Connected & Synchronized",
+            "active_engine": db_info.get("vendor", "sqlite") if is_admin else "connected",
         })
 
     cfg = config_service.load_config()
@@ -242,12 +240,12 @@ def api_settings(request: HttpRequest) -> JsonResponse:
         "success": True,
         "dry_run": cfg.get("submission", {}).get("dry_run_mode", True),
         "submit_step3": cfg.get("submission", {}).get("submit_step3", True),
-        "developer_mode": config_service.is_developer_mode(),
+        "developer_mode": config_service.is_developer_mode() if is_admin else False,
         "user_settings": config_service.get_user_settings(),
-        "developer_settings": config_service.get_developer_settings(),
+        "developer_settings": config_service.get_developer_settings() if is_admin else {},
         "active_bond": config_service.get_active_bond(),
-        "database": db_info.get("display", "SQLite"),
-        "active_engine": db_info.get("vendor", "sqlite"),
+        "database": db_info.get("display", "SQLite") if is_admin else "Connected & Synchronized",
+        "active_engine": db_info.get("vendor", "sqlite") if is_admin else "connected",
         "version": __version__,
         "version_tag": f"v{__version__}",
     })
@@ -325,13 +323,14 @@ def api_vault_folder(request: HttpRequest) -> JsonResponse:
     GET: Returns current active Evidence Vault folder, disk space, and presets.
     POST: Updates and persists the Evidence Vault storage location in config.json.
     """
+    is_admin = bool(request.user and request.user.is_authenticated and request.user.is_superuser)
     default_vault = (settings.BASE_DIR / "media" / "vault").resolve()
     docs_vault = (Path.home() / "Documents" / "ITMS_Vault").resolve()
     pics_vault = (Path.home() / "Pictures" / "ITMS_Vault").resolve()
 
     if request.method == "POST":
-        if not request.user.is_authenticated:
-            return JsonResponse({"success": False, "error": "Authentication required."}, status=401)
+        if not is_admin:
+            return JsonResponse({"success": False, "error": "Evidence vault folder configuration is restricted to the TUI console."}, status=403)
         new_path_raw = ""
         migrate_files = False
         if request.content_type == "application/json" and request.body:
@@ -409,6 +408,17 @@ def api_vault_folder(request: HttpRequest) -> JsonResponse:
     except Exception:
         photo_count = EvidenceImage.objects.count()
 
+    if not is_admin:
+        return JsonResponse({
+            "success": True,
+            "vault_path": "Server Managed",
+            "is_default": is_default,
+            "photo_count": photo_count,
+            "stats": {"free_gb": stats.get("free_gb", 0), "total_gb": stats.get("total_gb", 0)},
+            "presets": {},
+            "is_restricted": True,
+        })
+
     return JsonResponse({
         "success": True,
         "vault_path": str(current_vault),
@@ -429,8 +439,8 @@ def api_browse_vault_folder(request: HttpRequest) -> JsonResponse:
     Launches the host operating system's native folder browser dialog
     and returns the selected folder path with input sanitization and command injection defense.
     """
-    if not request.user.is_authenticated:
-        return JsonResponse({"success": False, "error": "Authentication required to open native folder browser."}, status=401)
+    if not (request.user and request.user.is_authenticated and request.user.is_superuser):
+        return JsonResponse({"success": False, "error": "Folder browser is restricted to server administrators."}, status=403)
 
     current_vault = vault_service.get_vault_root().resolve()
     selected_path = None

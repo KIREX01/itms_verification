@@ -164,6 +164,18 @@ def api_itms_warehouses(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+def api_sync_bonds(request: HttpRequest) -> JsonResponse:
+    """Dynamically queries ITMS WebApp and extracts available warehouse/bond facilities."""
+    try:
+        from core.services.itms_web_client import default_web_client
+        res = default_web_client.fetch_warehouses_from_itms()
+        return JsonResponse(res)
+    except Exception as exc:
+        logger.error("api_sync_bonds error: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
+@csrf_exempt
 @require_POST
 def api_itms_connect(request: HttpRequest) -> JsonResponse:
     """Connects and authenticates against live ITMS WebApp (stock.itms.ug)."""

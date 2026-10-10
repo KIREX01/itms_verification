@@ -35,13 +35,31 @@ class Command(BaseCommand):
         port = options.get("port", 8000)
 
         # Launch background web server so mobile camera pairing works seamlessly while inside TUI
+        started_web = False
         if not no_web:
-            from core.services.background_web_service import start_background_web_server, stop_background_web_server
-            start_background_web_server(host="0.0.0.0", port=port)
+            import socket
+            port_active = False
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(0.5)
+                    port_active = (s.connect_ex(("127.0.0.1", port)) == 0)
+            except Exception:
+                port_active = False
+
+            if port_active:
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"[*] Port {port} is already active (running web service). Skipping background web server."
+                    )
+                )
+            else:
+                from core.services.background_web_service import start_background_web_server
+                start_background_web_server(host="0.0.0.0", port=port)
+                started_web = True
 
         try:
             ITMSOperatorApp().run()
         finally:
-            if not no_web:
+            if started_web:
                 from core.services.background_web_service import stop_background_web_server
                 stop_background_web_server()

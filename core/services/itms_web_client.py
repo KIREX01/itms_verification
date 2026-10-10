@@ -1183,6 +1183,127 @@ class ITMSWebClient:
             "total": len(orders),
         }
 
+    def fetch_warehouses_from_itms(self) -> Dict[str, Any]:
+        """
+        Dynamically extracts bonded warehouse / installation facilities from ITMS WebApp.
+        Queries the installation orders filter dropdown (/installation-orders/index),
+        extracts warehouse options, and enriches with order and kit warehouse data.
+        Updates config.json with discovered facilities.
+        """
+        import html as _html
+        session_data = self.session_store.session
+        url = f"{self.base_url}/installation-orders/index"
+
+        discovered: Dict[str, Dict[str, Any]] = {}
+
+        def _add_facility(name: str, wh_id: str = ""):
+            name_clean = _html.unescape(str(name or "")).strip()
+            if not name_clean or name_clean.lower() in ("all", "select warehouse", "any", "prompt", "--"):
+                return
+            upper_name = name_clean.upper()
+
+            # Derive concise facility code
+            if "AGM" in upper_name:
+                code = "AGM"
+            elif "SPIRO" in upper_name:
+                code = "SPIRO"
+            elif "BOND" in upper_name:
+                bm = re.search(r"BOND\s*([0-9A-Z]+)", upper_name)
+                code = f"BOND{bm.group(1)}" if bm else "BOND"
+            else:
+                words = [w for w in re.split(r"[^A-Za-z0-9]+", upper_name) if w]
+                code = "".join(w[0] for w in words)[:8] if words else upper_name[:6]
+
+            # Avoid collision by appending suffix if code exists with different name
+            original_code = code
+            suffix = 2
+            while code in discovered and discovered[code]["name"].upper() != upper_name:
+                code = f"{original_code}_{suffix}"
+                suffix += 1
+
+            discovered[code] = {
+                "code": code,
+                "name": name_clean,
+                "warehouse_id": str(wh_id).strip() or code.lower(),
+                "source": "ITMS_LIVE",
+            }
+
+        # 1. Live scrape of ITMS filter dropdown
+        if session_data.is_cookie_valid():
+            try:
+                resp = self._request_with_retry("GET", url, timeout=self.timeout)
+                if resp.status_code == 200:
+                    html_content = resp.text
+                    # Search for warehouse_id select element
+                    sel_match = re.search(
+                        r'<select[^>]*(?:name=["\'][^"\']*warehouse_id[^"\']*["\']|id=["\'][^"\']*warehouse_id[^"\']*["\'])[^>]*>(.*?)</select>',
+                        html_content,
+                        re.DOTALL | re.IGNORECASE,
+                    )
+                    if not sel_match:
+                        sel_match = re.search(
+                            r'<select[^>]*name=["\']InstallationOrderSearch\[(?:warehouse|warehouse_id)\]["\'][^>]*>(.*?)</select>',
+                            html_content,
+                            re.DOTALL | re.IGNORECASE,
+                        )
+
+                    if sel_match:
+                        inner_opts = sel_match.group(1)
+                        for opt_m in re.finditer(
+                            r'<option[^>]*value=["\']([^"\']*)["\'][^>]*>(.*?)</option>',
+                            inner_opts,
+                            re.DOTALL | re.IGNORECASE,
+                        ):
+                            val = opt_m.group(1).strip()
+                            lbl = re.sub(r"<[^>]+>", "", opt_m.group(2)).strip()
+                            if val:
+                                _add_facility(name=lbl, wh_id=val)
+
+                    # Also scan rows for warehouse column
+                    row_wh_matches = re.findall(r'<td[^>]*>([^<]*BOND[^<]*)</td>', html_content, re.IGNORECASE)
+                    for r_wh in row_wh_matches:
+                        _add_facility(name=r_wh)
+            except Exception as exc:
+                logger.warning("Error querying live ITMS warehouse options: %s", exc)
+
+        # 2. Enrich from local database orders and kits
+        try:
+            from core.models import InstallationOrder, InstallationKit
+            for w in InstallationOrder.objects.exclude(warehouse_name="").values_list("warehouse_name", "warehouse_id"):
+                _add_facility(name=w[0], wh_id=w[1] or "")
+            for wk in InstallationKit.objects.exclude(warehouse="").values_list("warehouse", flat=True).distinct():
+                _add_facility(name=wk)
+        except Exception as db_exc:
+            logger.debug("Database warehouse query note: %s", db_exc)
+
+        # 3. Fallback to default bonds if empty
+        if not discovered:
+            default_bonds = config_service.DEFAULT_CONFIG["bond"]["available_bonds"]
+            for b in default_bonds:
+                discovered[b["code"]] = dict(b)
+
+        # Sort so AGM is always first
+        facility_list = list(discovered.values())
+        facility_list.sort(key=lambda x: (0 if x.get("code") == "AGM" else 1, x.get("name", "")))
+
+        # 4. Persist to config.json
+        config_service.set_setting("bond.available_bonds", facility_list)
+
+        # Check active bond validity
+        active_bond = config_service.get_active_bond()
+        if not any(f["code"] == active_bond.get("code") for f in facility_list):
+            if facility_list:
+                config_service.set_active_bond(facility_list[0]["code"], facility_list[0]["name"])
+                active_bond = config_service.get_active_bond()
+
+        return {
+            "success": True,
+            "count": len(facility_list),
+            "warehouses": facility_list,
+            "active_bond": active_bond,
+            "message": f"Successfully synchronized {len(facility_list)} warehouse facility(ies) from ITMS.",
+        }
+
     # ──────────────────────────────────────────────────────────────────────────
     # Installation Kits Hub (https://stock.itms.ug/installation-kits)
     # ──────────────────────────────────────────────────────────────────────────
@@ -4423,6 +4544,10 @@ def get_web_client() -> ITMSWebClient:
     if _default_web_client is None:
         _default_web_client = ITMSWebClient()
     return _default_web_client
+
+
+# Module-level default web client alias
+default_web_client = get_web_client()
 
 
 def get_current_itms_account() -> str:

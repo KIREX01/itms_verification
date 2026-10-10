@@ -1,14 +1,29 @@
 #!/usr/bin/env bash
 # ITMS Verification Copilot - CLI Launcher for Linux and macOS
+# Resolves canonical directory path across symlinks (/usr/local/bin/itms -> /opt/itms/itms)
 
 set -e
 
-# Determine Project Directory
-if [ -f "$(pwd)/itms_cli.py" ]; then
-    APP_DIR="$(pwd)"
-else
-    APP_DIR="${ITMS_HOME:-$(cd "$(dirname "$0")" && pwd)}"
+# Resolve canonical path across symlinks
+TARGET_SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$TARGET_SOURCE" ]; do
+    TARGET_DIR="$( cd -P "$( dirname "$TARGET_SOURCE" )" >/dev/null 2>&1 && pwd )"
+    TARGET_SOURCE="$(readlink "$TARGET_SOURCE")"
+    [[ $TARGET_SOURCE != /* ]] && TARGET_SOURCE="$TARGET_DIR/$TARGET_SOURCE"
+done
+APP_DIR="$( cd -P "$( dirname "$TARGET_SOURCE" )" >/dev/null 2>&1 && pwd )"
+
+# Fallback to ITMS_HOME or current working directory if itms_cli.py exists here
+if [ ! -f "$APP_DIR/itms_cli.py" ]; then
+    if [ -n "$ITMS_HOME" ] && [ -f "$ITMS_HOME/itms_cli.py" ]; then
+        APP_DIR="$ITMS_HOME"
+    elif [ -f "$(pwd)/itms_cli.py" ]; then
+        APP_DIR="$(pwd)"
+    fi
 fi
+
+# Ensure terminal type is set for Textual TUI
+export TERM="${TERM:-xterm-256color}"
 
 # Prioritize Virtual Environment Python
 VENV_PY="$APP_DIR/.venv/bin/python"

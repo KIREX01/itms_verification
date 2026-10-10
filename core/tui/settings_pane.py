@@ -95,6 +95,11 @@ class SettingsPane(Vertical):
         bond_code = active_bond.get("code", "AGM")
         strict_bond = cfg.get("bond", {}).get("strict_bond_scoping", True)
 
+        # Operator settings: Security & Master PIN
+        sec_cfg = cfg.get("security", {})
+        tui_pin_enabled = sec_cfg.get("tui_master_pin_enabled", True)
+        tui_auto_lock_min = str(sec_cfg.get("tui_auto_lock_minutes", 15))
+
         # Operator settings: Shift & Synchronization
         auto_sync = cfg.get("sync", {}).get("auto_sync_enabled", True)
         sync_interval = str(cfg.get("sync", {}).get("auto_sync_interval_seconds", 60))
@@ -179,6 +184,10 @@ class SettingsPane(Vertical):
                         yield Static("[b]Strict Bond Scoping[/b]\n[dim]Restrict orders, kits, and reconciliation strictly to the active bond warehouse[/dim]", classes="settings-label")
                         yield Switch(value=strict_bond, id="switch-strict-bond")
 
+                    with Horizontal(classes="settings-row"):
+                        yield Static("[b]Sync Live Bonds from ITMS[/b]\n[dim]Fetch bonded warehouse facilities registered in ITMS portal[/dim]", classes="settings-label")
+                        yield Button("🔄 Sync from ITMS", id="btn-sync-bonds-tui", variant="warning", classes="settings-btn")
+
                 # Card 1B: Shift Synchronization & Reconciliation
                 with Vertical(classes="settings-card"):
                     yield Static("[bold cyan]📅 Shift Synchronization & Reconciliation Ledger[/bold cyan]", classes="settings-card-title")
@@ -240,6 +249,23 @@ class SettingsPane(Vertical):
                     with Horizontal(classes="settings-row"):
                         yield Static("[b]Prompt for Vault Location on Startup[/b]\n[dim]Allow operator to choose or confirm vault directory whenever the app launches[/dim]", classes="settings-label")
                         yield Switch(value=vault_prompt_startup, id="switch-vault-prompt-startup")
+
+                # Card 1D: Master Terminal Security Lock & Master PIN
+                with Vertical(classes="settings-card"):
+                    yield Static("[bold yellow]🔒 Master Terminal Security Lock & Access Control[/bold yellow]", classes="settings-card-title")
+
+                    with Horizontal(classes="settings-row"):
+                        yield Static("[b]Require Master PIN on TUI Startup[/b]\n[dim]Prompt for 6-digit PIN before granting console access[/dim]", classes="settings-label")
+                        yield Switch(value=tui_pin_enabled, id="switch-master-pin-enabled")
+
+                    with Horizontal(classes="settings-row"):
+                        yield Static("[b]Idle Auto-Lock Timeout (Minutes)[/b]\n[dim]Automatically lock console after inactivity (0 to disable)[/dim]", classes="settings-label")
+                        yield Input(value=tui_auto_lock_min, id="input-auto-lock-minutes", classes="settings-input")
+
+                    with Horizontal(classes="settings-row"):
+                        yield Static("[b]Change Master PIN[/b]\n[dim]Enter new 6-digit numeric PIN to update master lock[/dim]", classes="settings-label")
+                        yield Input(placeholder="New 6-digit PIN", password=True, id="input-new-master-pin", classes="settings-input")
+                        yield Button("💾 Set PIN", id="btn-save-master-pin", variant="warning", classes="settings-btn")
 
                 # Card 1C: Permissions & Developer Mode Switch
                 with Vertical(classes="settings-card"):
@@ -529,10 +555,52 @@ class SettingsPane(Vertical):
             self.action_switch_active_database()
         elif btn_id == "btn-change-vault":
             self.action_change_vault()
+        elif btn_id == "btn-save-master-pin":
+            self.action_save_master_pin()
         elif btn_id == "btn-change-reports-dir":
             self.action_change_reports_dir()
         elif btn_id == "btn-change-yolo-weights":
             self.action_change_yolo_weights()
+        elif btn_id == "btn-sync-bonds-tui":
+            self.run_worker(self._async_sync_bonds_itms, thread=True)
+
+    def action_save_master_pin(self) -> None:
+        """Saves updated 6-digit Master Security PIN to secure/config.json."""
+        try:
+            pin_input = self.query_one("#input-new-master-pin", Input)
+            new_pin = pin_input.value.strip()
+            if not new_pin:
+                self.app.notify("Please enter a numeric Master PIN", severity="warning")
+                return
+            if len(new_pin) < 4:
+                self.app.notify("PIN must be at least 4 digits", severity="error")
+                return
+            config_service.set_tui_master_pin(new_pin)
+            pin_input.value = ""
+            self.app.notify("✅ Master PIN updated successfully!", severity="information")
+            if hasattr(self.app, "log_message"):
+                self.app.log_message("[bold green]TUI Master Security PIN updated and hashed.[/bold green]", level="SUCCESS")
+        except Exception as exc:
+            self.app.notify(f"Failed to update Master PIN: {exc}", severity="error")
+
+    def _async_sync_bonds_itms(self) -> None:
+        try:
+            self.app.log_message("Querying ITMS WebApp for registered bonded warehouses...", level="INFO")
+            from core.services.itms_web_client import default_web_client
+            res = default_web_client.fetch_warehouses_from_itms()
+            if res.get("success"):
+                cnt = res.get("count", 0)
+                self.app.log_message(f"[bold green]Discovered {cnt} bonded warehouses from ITMS![/bold green]", level="SUCCESS")
+                act = res.get("active_bond", {})
+                if act:
+                    try:
+                        self.query_one("#input-bond-code", Input).value = act.get("code", "AGM")
+                    except Exception:
+                        pass
+            else:
+                self.app.log_message(f"[bold yellow]Sync bonds note:[/bold yellow] {res.get('error')}", level="WARNING")
+        except Exception as exc:
+            self.app.log_message(f"[bold red]Sync bonds error:[/bold red] {exc}", level="ERROR")
 
     def action_change_vault(self) -> None:
         """Launches Vault Location dialog and refreshes display."""
@@ -769,6 +837,16 @@ class SettingsPane(Vertical):
 
             cfg.setdefault("storage", {})
             cfg["storage"]["prompt_vault_on_startup"] = vault_prompt
+
+            # Operator: Security & Master PIN
+            try:
+                pin_enabled = self.query_one("#switch-master-pin-enabled", Switch).value
+                auto_lock_m = int(self.query_one("#input-auto-lock-minutes", Input).value.strip() or 15)
+                cfg.setdefault("security", {})
+                cfg["security"]["tui_master_pin_enabled"] = pin_enabled
+                cfg["security"]["tui_auto_lock_minutes"] = max(0, auto_lock_m)
+            except Exception:
+                pass
 
             # Operator: Bond Facility
             try:

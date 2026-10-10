@@ -524,7 +524,7 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
             pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
             pair.save(update_fields=["verification_status"])
 
-        outcome = submission_worker.submit_pair(pair, dry_run=is_dry_run, operator=operator_user)
+        outcome = submission_worker.submit_pair(pair, backend="web", dry_run=is_dry_run, operator=operator_user)
         return JsonResponse({
             "success": outcome.success,
             "status": pair.verification_status,
@@ -612,7 +612,7 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
         ).first()
         if not refreshed:
             continue
-        outcome = submission_worker.submit_pair(refreshed, dry_run=is_dry_run, operator=operator_user)
+        outcome = submission_worker.submit_pair(refreshed, backend="web", dry_run=is_dry_run, operator=operator_user)
         if outcome.success:
             succeeded += 1
         else:

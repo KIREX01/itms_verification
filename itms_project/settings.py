@@ -252,7 +252,8 @@ ITMS_SIMULATED_LATENCY_MS = safe_env_int("ITMS_SIMULATED_LATENCY_MS", default=15
 ITMS_FAILURE_INJECTION_RATE = safe_env_float("ITMS_FAILURE_INJECTION_RATE", default=0.0)
 
 # --- ITMS Web App Live Integration (stock.itms.ug) ---
-ITMS_SUBMISSION_BACKEND = env("ITMS_SUBMISSION_BACKEND", default="web")  # "web" or "mock"
+_raw_backend = env("ITMS_SUBMISSION_BACKEND", default="web")
+ITMS_SUBMISSION_BACKEND = _raw_backend.strip().lower() if (_raw_backend and _raw_backend.strip()) else "web"
 ITMS_WEB_DRY_RUN = safe_env_bool("ITMS_WEB_DRY_RUN", default=get_setting("submission.dry_run_mode", True))
 ITMS_SUBMIT_STEP3 = safe_env_bool("ITMS_SUBMIT_STEP3", default=get_setting("submission.submit_step3", True))
 ITMS_API_BASE_URL = env("ITMS_API_BASE_URL", default=get_setting("network.itms_base_url", "https://stock.itms.ug")).rstrip("/")

@@ -61,7 +61,14 @@ def submit_pair(
 ) -> SubmissionOutcome:
     """Drive a single pair through the ITMS workflow (mock, live API, or live_web) with full audit logging."""
     from core.services import config_service, vault_service
-    backend_mode = (backend or getattr(settings, "ITMS_SUBMISSION_BACKEND", "web")).lower()
+    backend_mode = (
+        (backend or "").strip()
+        or (config_service.get_setting("submission.backend") or "").strip()
+        or (getattr(settings, "ITMS_SUBMISSION_BACKEND", "web") or "").strip()
+        or "web"
+    ).lower()
+    if backend_mode not in ("live_web", "web", "live", "mock", "api"):
+        backend_mode = "web"
     
     if dry_run is not None:
         is_dry_run = bool(dry_run)
@@ -197,7 +204,27 @@ def submit_pair(
 
         return SubmissionOutcome(pair_id=pair.id, success=True, token=token, backend="live_web", dry_run=is_dry_run)
 
-    itms_service = itms_client.default_client if backend_mode == "live" else itms_mock
+    if backend_mode == "api":
+        itms_service = itms_client.default_client
+    elif backend_mode == "mock":
+        itms_service = itms_mock
+    else:
+        # Failsafe: if somehow not handled by live_web, route through live_web
+        from core.services.itms_web_client import get_web_client
+        web_client = get_web_client()
+        res = web_client.execute_installation_order_workflow(
+            order_identifier=order.order_number,
+            front_photo_path=pair.front_image.vault_file,
+            rear_photo_path=pair.rear_image.vault_file,
+            pair_id=pair.id,
+            dry_run=is_dry_run,
+            submit_step3=is_submit_step3,
+            log_callback=log_callback,
+        )
+        if not res.get("success"):
+            err_msg = res.get("error", "Web workflow failed")
+            return SubmissionOutcome(pair_id=pair.id, success=False, error=err_msg, backend="live_web", dry_run=is_dry_run)
+        return SubmissionOutcome(pair_id=pair.id, success=True, token=res.get("order_uuid", ""), backend="live_web", dry_run=is_dry_run)
 
     try:
         step = itms_service.lookup_order(order.order_number)

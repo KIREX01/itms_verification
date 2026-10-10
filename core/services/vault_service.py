@@ -14,7 +14,7 @@ import shutil
 import uuid
 from datetime import date, datetime
 from pathlib import Path
-from typing import BinaryIO, Optional, Tuple, Union
+from typing import Any, BinaryIO, Optional, Tuple, Union
 
 from django.conf import settings
 from django.db import IntegrityError

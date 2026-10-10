@@ -374,7 +374,7 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
             # Live lookup against ITMS server if order not in local DB (TUI Parity)
             if not target_order:
                 try:
-                    client = get_web_client()
+                    client = get_web_client(user=request.user)
                     if client.session_store.session.is_cookie_valid():
                         fetch_res = client.fetch_order_info(clean_val, download_photos=False)
                         if not fetch_res.get("success") and clean_val != raw_val:

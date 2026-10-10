@@ -875,3 +875,37 @@ class DailyStockLedger(models.Model):
             f"PSV [Open {self.opening_balance_psv} -> Close {self.closing_balance_psv}], "
             f"PMO [Open {self.opening_balance_pmo} -> Close {self.closing_balance_pmo}]"
         )
+
+
+class OperatorITMSSession(models.Model):
+    """
+    Persisted ITMS WebApp session credentials for an individual operator.
+    Stores cookies, CSRF tokens, and facility scoping per user account,
+    enabling multi-user concurrent operation on VPS servers without filesystem JSON contention.
+    """
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="itms_session",
+    )
+    base_url = models.CharField(max_length=255, default="https://stock.itms.ug")
+    itms_email = models.CharField(max_length=255, blank=True, default="")
+    itms_user_uuid = models.CharField(max_length=128, blank=True, default="")
+    itms_display_name = models.CharField(max_length=255, blank=True, default="")
+    cookies = models.JSONField(default=dict, blank=True)
+    csrf_token = models.TextField(blank=True, default="")
+    is_authenticated = models.BooleanField(default=False)
+    saved_at = models.DateTimeField(auto_now=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    last_verified_at = models.DateTimeField(null=True, blank=True)
+    last_status_message = models.CharField(max_length=500, blank=True, default="")
+    active_bond_code = models.CharField(max_length=64, default="AGM")
+    active_bond_name = models.CharField(max_length=255, default="AGM Bonded Warehouse")
+
+    class Meta:
+        verbose_name = "Operator ITMS Session"
+        verbose_name_plural = "Operator ITMS Sessions"
+
+    def __str__(self):
+        status_str = f"Authenticated as {self.itms_email}" if self.is_authenticated else "Disconnected"
+        return f"ITMS Session for {self.user.username} ({status_str})"

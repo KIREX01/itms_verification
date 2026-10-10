@@ -58,7 +58,7 @@ def api_orders_list(request: HttpRequest) -> JsonResponse:
     # If no local orders found and search query is provided, query ITMS live (TUI Parity)
     if not orders and search and len(search) >= 3:
         try:
-            client = get_web_client()
+            client = get_web_client(user=request.user)
             if client.session_store.session.is_cookie_valid():
                 live_info = client.fetch_order_info(search, download_photos=False)
                 if live_info.get("success"):
@@ -118,7 +118,7 @@ def api_seed_orders(request: HttpRequest) -> JsonResponse:
 @require_GET
 def api_itms_status(request: HttpRequest) -> JsonResponse:
     """Returns current ITMS WebApp connection status, active user identity, and operating bond."""
-    status = auth_service.get_itms_status()
+    status = auth_service.get_itms_status(user=request.user)
     return JsonResponse({
         "success": True,
         "status": status,
@@ -167,8 +167,9 @@ def api_itms_warehouses(request: HttpRequest) -> JsonResponse:
 def api_sync_bonds(request: HttpRequest) -> JsonResponse:
     """Dynamically queries ITMS WebApp and extracts available warehouse/bond facilities."""
     try:
-        from core.services.itms_web_client import default_web_client
-        res = default_web_client.fetch_warehouses_from_itms()
+        from core.services.itms_web_client import get_web_client
+        client = get_web_client(user=request.user)
+        res = client.fetch_warehouses_from_itms()
         return JsonResponse(res)
     except Exception as exc:
         logger.error("api_sync_bonds error: %s", exc)
@@ -204,8 +205,8 @@ def api_itms_connect(request: HttpRequest) -> JsonResponse:
 
     from core.services.itms_web_client import normalize_itms_url
     norm_url = normalize_itms_url(base_url)
-    ok, msg = auth_service.connect_itms_account(email, password, norm_url)
-    status = auth_service.get_itms_status()
+    ok, msg = auth_service.connect_itms_account(email, password, norm_url, user=request.user)
+    status = auth_service.get_itms_status(user=request.user)
     return JsonResponse({
         "success": ok,
         "message": msg,
@@ -220,7 +221,7 @@ def api_itms_disconnect(request: HttpRequest) -> JsonResponse:
     """Disconnects from ITMS WebApp by clearing local session cookies."""
     try:
         from core.services.itms_web_client import get_web_client
-        client = get_web_client()
+        client = get_web_client(user=request.user)
         client.logout()
     except Exception as exc:
         logger.warning("ITMS disconnect error: %s", exc)
@@ -228,7 +229,7 @@ def api_itms_disconnect(request: HttpRequest) -> JsonResponse:
     return JsonResponse({
         "success": True,
         "message": "Disconnected from ITMS WebApp.",
-        "status": auth_service.get_itms_status(),
+        "status": auth_service.get_itms_status(user=request.user),
         "active_bond": bond_service.get_active_bond(),
     })
 
@@ -253,7 +254,7 @@ def api_itms_orders_explorer(request: HttpRequest) -> JsonResponse:
     except (ValueError, TypeError):
         limit = 20
 
-    client = get_web_client()
+    client = get_web_client(user=request.user)
     session_valid = client.session_store.session.is_cookie_valid()
 
     should_try_live = (source == "live") or (source == "auto" and session_valid)
@@ -583,7 +584,7 @@ def api_itms_order_detail(request: HttpRequest, order_ident: str) -> JsonRespons
         Q(vin__iexact=order_ident)
     ).first()
 
-    client = get_web_client()
+    client = get_web_client(user=request.user)
     session_valid = client.session_store.session.is_cookie_valid()
 
     # If missing hardware/photos, or force_live requested, and session is valid:
@@ -752,7 +753,7 @@ def api_itms_sync_now(request: HttpRequest) -> JsonResponse:
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             logger.debug("JSON decode error in api_itms_sync_now: %s", exc)
 
-    client = get_web_client()
+    client = get_web_client(user=request.user)
     if not client.session_store.session.is_cookie_valid():
         return JsonResponse({
             "success": False,
@@ -843,7 +844,7 @@ def api_itms_kits(request: HttpRequest) -> JsonResponse:
     """
     Lists or synchronizes ITMS Installation Kits stock inventory.
     """
-    client = get_web_client()
+    client = get_web_client(user=request.user)
     if request.method == "POST" or request.GET.get("sync") == "true":
         if not client.session_store.session.is_cookie_valid():
             return JsonResponse({"success": False, "error": "ITMS session not authenticated."}, status=401)

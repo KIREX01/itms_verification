@@ -462,7 +462,6 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         if isinstance(self.focused, Input):
             return
 
-        import time
         now = time.time()
         interval = now - self._scanner_last_time
         self._scanner_last_time = now

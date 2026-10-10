@@ -302,29 +302,113 @@ class ITMSWebSessionData:
 
 
 class ITMSWebSessionStore:
-    """Manages disk persistence and loading of ITMS WebApp cookies."""
+    """Manages database (OperatorITMSSession) and disk persistence/loading of ITMS WebApp cookies."""
 
-    def __init__(self, storage_path: Optional[Path] = None):
+    def __init__(self, storage_path: Optional[Path] = None, user: Optional[Any] = None):
         self.storage_path = Path(storage_path) if storage_path else get_default_session_file()
+        self.user = user
         self._session: ITMSWebSessionData = ITMSWebSessionData()
         self.load()
 
     def load(self) -> ITMSWebSessionData:
-        if not self.storage_path.is_file():
-            self._session = ITMSWebSessionData()
-            return self._session
-
+        db_loaded = False
         try:
-            with open(self.storage_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            self._session = ITMSWebSessionData.from_dict(data)
+            from core.models import OperatorITMSSession
+            session_obj = None
+            if self.user and getattr(self.user, "is_authenticated", False):
+                session_obj = OperatorITMSSession.objects.filter(user=self.user).first()
+            elif self.user is None:
+                session_obj = (
+                    OperatorITMSSession.objects.filter(is_authenticated=True).order_by("-saved_at").first()
+                    or OperatorITMSSession.objects.order_by("-saved_at").first()
+                )
+
+            if session_obj:
+                saved_ts = session_obj.saved_at.timestamp() if session_obj.saved_at else 0.0
+                exp_ts = session_obj.expires_at.timestamp() if session_obj.expires_at else 0.0
+                ver_ts = session_obj.last_verified_at.timestamp() if session_obj.last_verified_at else 0.0
+                self._session = ITMSWebSessionData(
+                    base_url=session_obj.base_url or "https://stock.itms.ug",
+                    user_email=session_obj.itms_email or "",
+                    user_uuid=session_obj.itms_user_uuid or "",
+                    user_display_name=session_obj.itms_display_name or "",
+                    cookies=dict(session_obj.cookies or {}),
+                    csrf_token=session_obj.csrf_token or "",
+                    is_authenticated=bool(session_obj.is_authenticated),
+                    saved_at=saved_ts,
+                    expires_at=exp_ts,
+                    last_verified_at=ver_ts,
+                    last_status_message=session_obj.last_status_message or "",
+                )
+                db_loaded = True
         except Exception as exc:
-            logger.warning("Failed to load ITMS web session from %s: %s", self.storage_path, exc)
+            logger.debug("Database load note for ITMS session: %s", exc)
+
+        if not db_loaded and self.storage_path.is_file():
+            try:
+                with open(self.storage_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self._session = ITMSWebSessionData.from_dict(data)
+                # Auto-migrate disk session to DB if user is available and DB is ready
+                if self.user and getattr(self.user, "is_authenticated", False) and (self._session.cookies or self._session.is_authenticated):
+                    try:
+                        self.save(self._session)
+                    except Exception:
+                        pass
+            except Exception as exc:
+                logger.warning("Failed to load ITMS web session from %s: %s", self.storage_path, exc)
+                self._session = ITMSWebSessionData()
+        elif not db_loaded:
             self._session = ITMSWebSessionData()
+
         return self._session
 
     def save(self, session_data: ITMSWebSessionData) -> ITMSWebSessionData:
         self._session = session_data
+
+        # 1. Persist to database if Django models are available
+        try:
+            from datetime import datetime, timezone as dt_tz
+            from core.models import OperatorITMSSession
+
+            exp_dt = datetime.fromtimestamp(session_data.expires_at, tz=dt_tz.utc) if session_data.expires_at > 0 else None
+            ver_dt = datetime.fromtimestamp(session_data.last_verified_at, tz=dt_tz.utc) if session_data.last_verified_at > 0 else None
+
+            target_user = self.user if (self.user and getattr(self.user, "is_authenticated", False)) else None
+            if target_user:
+                OperatorITMSSession.objects.update_or_create(
+                    user=target_user,
+                    defaults={
+                        "base_url": session_data.base_url,
+                        "itms_email": session_data.user_email,
+                        "itms_user_uuid": session_data.user_uuid,
+                        "itms_display_name": session_data.user_display_name,
+                        "cookies": session_data.cookies or {},
+                        "csrf_token": session_data.csrf_token,
+                        "is_authenticated": session_data.is_authenticated,
+                        "expires_at": exp_dt,
+                        "last_verified_at": ver_dt,
+                        "last_status_message": session_data.last_status_message,
+                    },
+                )
+            else:
+                existing = OperatorITMSSession.objects.order_by("-saved_at").first()
+                if existing:
+                    existing.base_url = session_data.base_url
+                    existing.itms_email = session_data.user_email
+                    existing.itms_user_uuid = session_data.user_uuid
+                    existing.itms_display_name = session_data.user_display_name
+                    existing.cookies = session_data.cookies or {}
+                    existing.csrf_token = session_data.csrf_token
+                    existing.is_authenticated = session_data.is_authenticated
+                    existing.expires_at = exp_dt
+                    existing.last_verified_at = ver_dt
+                    existing.last_status_message = session_data.last_status_message
+                    existing.save()
+        except Exception as exc:
+            logger.debug("Database save note for ITMS session: %s", exc)
+
+        # 2. Also persist to local disk as fallback / CLI backup
         try:
             self.storage_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.storage_path, "w", encoding="utf-8") as f:
@@ -335,10 +419,30 @@ class ITMSWebSessionStore:
                 pass
         except Exception as exc:
             logger.warning("Failed to write ITMS web session to %s: %s", self.storage_path, exc)
+
         return self._session
 
     def clear(self) -> None:
         self._session = ITMSWebSessionData()
+        try:
+            from core.models import OperatorITMSSession
+            if self.user and getattr(self.user, "is_authenticated", False):
+                OperatorITMSSession.objects.filter(user=self.user).update(
+                    is_authenticated=False,
+                    cookies={},
+                    csrf_token="",
+                    last_status_message="Logged out",
+                )
+            else:
+                OperatorITMSSession.objects.all().update(
+                    is_authenticated=False,
+                    cookies={},
+                    csrf_token="",
+                    last_status_message="Logged out",
+                )
+        except Exception as exc:
+            logger.debug("Database clear note for ITMS session: %s", exc)
+
         if self.storage_path.is_file():
             try:
                 self.storage_path.unlink()
@@ -364,9 +468,11 @@ class ITMSWebClient:
         base_url: Optional[str] = None,
         session_store: Optional[ITMSWebSessionStore] = None,
         timeout: int = 15,
+        user: Optional[Any] = None,
     ):
-        self.base_url = normalize_itms_url(base_url or get_itms_base_url())
-        self.session_store = session_store or ITMSWebSessionStore()
+        self.user = user
+        self.session_store = session_store or ITMSWebSessionStore(user=user)
+        self.base_url = normalize_itms_url(base_url or getattr(self.session_store.session, "base_url", None) or get_itms_base_url())
         self.timeout = timeout
         self._session: Optional[requests.Session] = None
         self._session_lock = threading.Lock()
@@ -4524,6 +4630,7 @@ class ITMSWebClient:
 
     def get_status(self) -> Dict[str, Any]:
         """Returns the current session and reachability status summary."""
+        self.session_store.load()
         session_data = self.session_store.session
         is_valid = session_data.is_cookie_valid()
         expires_in = int(session_data.expires_at - time.time()) if session_data.expires_at > 0 else 0
@@ -4570,14 +4677,25 @@ class ITMSWebClient:
         return m.group(1) if m else ""
 
 
-# Default singleton instance
+# Cached client instances per user ID, plus default fallback
+_client_cache: Dict[Any, ITMSWebClient] = {}
 _default_web_client: Optional[ITMSWebClient] = None
 
 
-def get_web_client() -> ITMSWebClient:
-    global _default_web_client
+def get_web_client(user: Optional[Any] = None) -> ITMSWebClient:
+    global _default_web_client, _client_cache
+    if user and getattr(user, "is_authenticated", False):
+        user_key = getattr(user, "pk", getattr(user, "id", str(user)))
+        if user_key not in _client_cache:
+            _client_cache[user_key] = ITMSWebClient(user=user)
+        client = _client_cache[user_key]
+        client.session_store.load()
+        return client
+
     if _default_web_client is None:
         _default_web_client = ITMSWebClient()
+    else:
+        _default_web_client.session_store.load()
     return _default_web_client
 
 

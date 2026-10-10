@@ -231,10 +231,10 @@ def save_operator_preferences(updates: Dict[str, Any]) -> None:
         logger.warning("Could not save operator preferences: %s", exc)
 
 
-def get_itms_status() -> Dict[str, Any]:
+def get_itms_status(user: Optional[Any] = None) -> Dict[str, Any]:
     """Queries current ITMS WebApp connection status."""
     from core.services.itms_web_client import get_web_client
-    client = get_web_client()
+    client = get_web_client(user=user)
     status = client.get_status()
     ping_status = client.test_connection()
     return {
@@ -253,11 +253,14 @@ def connect_itms_account(
     email: str,
     password: str,
     base_url: Optional[str] = None,
+    user: Optional[Any] = None,
 ) -> Tuple[bool, str]:
     """Authenticates against the live ITMS WebApp and stores session cookies."""
-    from core.services.itms_web_client import ITMSWebClient, get_web_client, normalize_itms_url
+    from core.services.itms_web_client import get_web_client, normalize_itms_url
     norm_url = normalize_itms_url(base_url) if base_url else None
-    client = ITMSWebClient(base_url=norm_url) if norm_url else get_web_client()
+    client = get_web_client(user=user)
+    if norm_url:
+        client.base_url = norm_url
     try:
         ok, msg, sess = client.login(email=email, password=password)
         if ok:

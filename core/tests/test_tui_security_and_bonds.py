@@ -134,3 +134,106 @@ class DynamicBondDiscoveryTests(TestCase):
         assert "AGM" in codes
         assert "SPIRO" in codes
         assert "BOND52" in codes
+
+
+class OperatorITMSSessionTests(TestCase):
+    """Verifies database-backed ITMS session persistence, multi-user isolation, and API synchronization."""
+
+    def setUp(self):
+        self.client = Client()
+        self.user1 = User.objects.create_user(
+            username="operator_a", password="TestPassword123!", email="op_a@itms.ug"
+        )
+        self.user2 = User.objects.create_user(
+            username="operator_b", password="TestPassword123!", email="op_b@itms.ug"
+        )
+
+    def test_session_store_database_persistence_and_isolation(self):
+        """ITMSWebSessionStore writes to OperatorITMSSession in DB and isolates user sessions."""
+        from core.models import OperatorITMSSession
+        from core.services.itms_web_client import ITMSWebSessionData, ITMSWebSessionStore
+
+        # User 1 session
+        store1 = ITMSWebSessionStore(user=self.user1)
+        sess1 = ITMSWebSessionData(
+            base_url="https://stock.itms.ug",
+            user_email="operator_a@itms.ug",
+            user_uuid="11111111-1111-1111-1111-111111111111",
+            cookies={"_identity-frontend": "token_a", "advanced-frontend": "sess_a"},
+            csrf_token="csrf_a",
+            is_authenticated=True,
+            expires_at=time.time() + 86400 * 30,
+            last_verified_at=time.time(),
+        )
+        store1.save(sess1)
+
+        # User 2 session
+        store2 = ITMSWebSessionStore(user=self.user2)
+        sess2 = ITMSWebSessionData(
+            base_url="https://stock.itms.ug",
+            user_email="operator_b@itms.ug",
+            user_uuid="22222222-2222-2222-2222-222222222222",
+            cookies={"_identity-frontend": "token_b", "advanced-frontend": "sess_b"},
+            csrf_token="csrf_b",
+            is_authenticated=True,
+            expires_at=time.time() + 86400 * 30,
+            last_verified_at=time.time(),
+        )
+        store2.save(sess2)
+
+        # Check DB rows
+        db_sess1 = OperatorITMSSession.objects.get(user=self.user1)
+        db_sess2 = OperatorITMSSession.objects.get(user=self.user2)
+
+        self.assertEqual(db_sess1.itms_email, "operator_a@itms.ug")
+        self.assertEqual(db_sess1.cookies["_identity-frontend"], "token_a")
+        self.assertEqual(db_sess2.itms_email, "operator_b@itms.ug")
+        self.assertEqual(db_sess2.cookies["_identity-frontend"], "token_b")
+
+        # Simulate another worker loading User 1's session fresh from DB
+        fresh_store = ITMSWebSessionStore(user=self.user1)
+        loaded = fresh_store.load()
+        self.assertTrue(loaded.is_authenticated)
+        self.assertEqual(loaded.user_email, "operator_a@itms.ug")
+        self.assertEqual(loaded.cookies["_identity-frontend"], "token_a")
+
+    def test_api_connect_and_status_synchronization(self):
+        """Connecting via /api/itms/connect/ updates DB and /api/itms/status/ returns authenticated."""
+        from unittest.mock import patch
+        from core.models import OperatorITMSSession
+
+        self.client.force_login(self.user1)
+
+        with patch("core.services.itms_web_client.ITMSWebClient.login") as mock_login:
+            mock_login.return_value = (
+                True,
+                "Connected to ITMS WebApp successfully.",
+                {
+                    "user_email": "live_user@itms.ug",
+                    "user_uuid": "33333333-3333-3333-3333-333333333333",
+                    "cookies": {"_identity-frontend": "valid_token"},
+                },
+            )
+
+            # 1. Connect
+            connect_res = self.client.post(
+                "/api/itms/connect/",
+                data=json.dumps({
+                    "email": "live_user@itms.ug",
+                    "password": "secretpassword",
+                    "base_url": "https://stock.itms.ug",
+                }),
+                content_type="application/json",
+            )
+            self.assertEqual(connect_res.status_code, 200)
+            data = connect_res.json()
+            self.assertTrue(data.get("success"))
+
+            # 2. Check /api/itms/status/
+            status_res = self.client.get("/api/itms/status/")
+            self.assertEqual(status_res.status_code, 200)
+            status_data = status_res.json()
+            self.assertTrue(status_data.get("success"))
+            self.assertIn("status", status_data)
+            self.assertIn("authenticated", status_data["status"])
+

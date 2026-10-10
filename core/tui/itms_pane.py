@@ -50,7 +50,7 @@ class ITMSConnectionPane(Vertical):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.client: ITMSWebClient = get_web_client()
+        self._client: Optional[ITMSWebClient] = None
         self.current_subview: str = "CONNECT"
         self._last_fetched_orders: List[Dict[str, Any]] = []
         self._last_active_orders: List[Dict[str, Any]] = []
@@ -63,6 +63,18 @@ class ITMSConnectionPane(Vertical):
         self._highlighted_kit: Optional[Dict[str, Any]] = None
         self._is_archive_mode: bool = False
         self._is_fetching_kits: bool = False
+
+    @property
+    def client(self) -> ITMSWebClient:
+        if self._client is not None:
+            return self._client
+        user = getattr(self.app, "current_user", None)
+        self._client = get_web_client(user=user)
+        return self._client
+
+    @client.setter
+    def client(self, val: ITMSWebClient) -> None:
+        self._client = val
 
     def compose(self) -> ComposeResult:
         # Top Banner (Dynamic mode badge based on loaded config)
@@ -738,7 +750,8 @@ class ITMSConnectionPane(Vertical):
             f"[dim]Executing Yii2 session authentication for {email}...[/dim]",
         )
 
-        client = ITMSWebClient(base_url=url, session_store=self.client.session_store)
+        user = getattr(self.app, "current_user", None)
+        client = ITMSWebClient(base_url=url, session_store=self.client.session_store, user=user)
         res = client.login(email, password, remember_me=remember)
 
         # client.login returns a 3-tuple: (success: bool, message: str, session_data: dict)

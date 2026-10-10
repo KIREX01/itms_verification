@@ -44,6 +44,7 @@ def upload_photos_view(request: HttpRequest) -> HttpResponse:
         batch = vault_service.create_ingestion_batch(
             source_type=IngestionBatch.SourceType.WEB,
             source_label=batch_label,
+            user=request.user,
         )
 
         results = []
@@ -173,6 +174,7 @@ def api_upload_photos(request: HttpRequest) -> JsonResponse:
     batch = vault_service.create_ingestion_batch(
         source_type=IngestionBatch.SourceType.API,
         source_label=batch_label,
+        user=request.user,
     )
 
     items = []

@@ -32,17 +32,46 @@ HASH_CHUNK_SIZE = 1024 * 1024
 def create_ingestion_batch(
     source_type: str = IngestionBatch.SourceType.CLI,
     source_label: str = "",
+    account_email: str = "",
+    user: Optional[Any] = None,
 ) -> IngestionBatch:
-    """Creates a new IngestionBatch with a human-readable identifier."""
+    """Creates a new IngestionBatch with a human-readable identifier and operator attribution."""
     now = timezone.now()
     batch_prefix = now.strftime("BATCH-%Y%m%d-%H%M%S")
     short_uuid = uuid.uuid4().hex[:6]
     batch_id = f"{batch_prefix}-{short_uuid}"
 
+    email = account_email or ""
+    if not email and user and getattr(user, "is_authenticated", False):
+        try:
+            itms_sess = getattr(user, "itms_session", None)
+            if itms_sess and itms_sess.itms_email:
+                email = itms_sess.itms_email
+        except Exception:
+            pass
+
+    if not email:
+        try:
+            from core.services.itms_web_client import get_current_itms_account
+            email = get_current_itms_account()
+        except Exception:
+            pass
+
+    label = (source_label or "").strip()
+    if user and getattr(user, "is_authenticated", False):
+        uname = getattr(user, "username", "Operator")
+        if not label:
+            label = f"Uploaded by {uname}"
+        elif f"({uname})" not in label and uname not in label:
+            label = f"{label} ({uname})"
+    elif not label:
+        label = batch_id
+
     batch = IngestionBatch.objects.create(
         batch_id=batch_id,
         source_type=source_type,
-        source_label=source_label or batch_id,
+        source_label=label,
+        account_email=email,
         created_at=now,
     )
     return batch

@@ -170,7 +170,8 @@ class ITMSClient:
         token_store: Optional[TokenStore] = None,
         timeout: Optional[int] = None,
     ):
-        self.base_url = (base_url or getattr(settings, "ITMS_API_BASE_URL", "https://stock.itms.ug")).rstrip("/")
+        from core.services.itms_web_client import normalize_itms_url
+        self.base_url = normalize_itms_url(base_url or getattr(settings, "ITMS_API_BASE_URL", "https://stock.itms.ug"))
         self.timeout = timeout or getattr(settings, "ITMS_REQUEST_TIMEOUT_SECONDS", 30)
         self.token_store = token_store or TokenStore()
         self.session = requests.Session()

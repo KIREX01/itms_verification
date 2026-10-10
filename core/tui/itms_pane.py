@@ -670,7 +670,9 @@ class ITMSConnectionPane(Vertical):
     @work(thread=True)
     def action_ping(self) -> None:
         """Pings ITMS WebApp to test reachability and latency."""
-        url = self.query_one("#input-itms-url", Input).value.strip() or self.client.base_url
+        from core.services.itms_web_client import normalize_itms_url
+        raw_url = self.query_one("#input-itms-url", Input).value.strip() or self.client.base_url
+        url = normalize_itms_url(raw_url)
         self.app.call_from_thread(self._set_feedback, "Pinging server...", "yellow")
         self.app.call_from_thread(
             self._log_preview,
@@ -708,7 +710,9 @@ class ITMSConnectionPane(Vertical):
     @work(thread=True)
     def action_login(self) -> None:
         """Performs Yii2 form login and stores 30-day session cookies."""
-        url = self.query_one("#input-itms-url", Input).value.strip() or self.client.base_url
+        from core.services.itms_web_client import normalize_itms_url
+        raw_url = self.query_one("#input-itms-url", Input).value.strip() or self.client.base_url
+        url = normalize_itms_url(raw_url)
         email = self.query_one("#input-itms-email", Input).value.strip()
         password = self.query_one("#input-itms-password", Input).value
         remember = self.query_one("#chk-itms-remember", Checkbox).value

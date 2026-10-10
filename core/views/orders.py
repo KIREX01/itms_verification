@@ -202,7 +202,9 @@ def api_itms_connect(request: HttpRequest) -> JsonResponse:
     if bond_code:
         bond_service.set_active_bond(str(bond_code).strip(), str(bond_name).strip() if bond_name else None)
 
-    ok, msg = auth_service.connect_itms_account(email, password, base_url)
+    from core.services.itms_web_client import normalize_itms_url
+    norm_url = normalize_itms_url(base_url)
+    ok, msg = auth_service.connect_itms_account(email, password, norm_url)
     status = auth_service.get_itms_status()
     return JsonResponse({
         "success": ok,

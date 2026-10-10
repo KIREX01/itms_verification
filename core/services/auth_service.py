@@ -255,8 +255,9 @@ def connect_itms_account(
     base_url: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """Authenticates against the live ITMS WebApp and stores session cookies."""
-    from core.services.itms_web_client import ITMSWebClient, get_web_client
-    client = ITMSWebClient(base_url=base_url) if base_url else get_web_client()
+    from core.services.itms_web_client import ITMSWebClient, get_web_client, normalize_itms_url
+    norm_url = normalize_itms_url(base_url) if base_url else None
+    client = ITMSWebClient(base_url=norm_url) if norm_url else get_web_client()
     try:
         ok, msg, sess = client.login(email=email, password=password)
         if ok:

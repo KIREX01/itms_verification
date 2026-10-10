@@ -65,7 +65,6 @@ class TUIMasterLockScreen(ModalScreen[bool]):
 
     #input-master-pin {
         width: 32;
-        margin: 0 auto;
         text-align: center;
         border: tall $primary;
     }

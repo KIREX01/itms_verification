@@ -46,10 +46,45 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
+
+def normalize_itms_url(raw_url: Optional[str]) -> str:
+    """
+    Normalizes any provided ITMS URL to ensure:
+    1. It always has an http:// or https:// scheme (defaults to https://).
+    2. Any trailing paths like /site/login or /site/logout are stripped to form the proper base URL.
+    3. Handles inputs like 'site/login', '/site/login', 'stock.itms.ug', 'https://stock.itms.ug/site/login'.
+    4. Empty or invalid values safely default to 'https://stock.itms.ug'.
+    """
+    if not raw_url or not str(raw_url).strip():
+        return "https://stock.itms.ug"
+
+    clean = str(raw_url).strip().rstrip("/")
+
+    # If the user literally typed 'site/login' or '/site/login' or 'site/logout':
+    if clean.lstrip("/") in ("site/login", "site/logout", "site", "login", "logout"):
+        return "https://stock.itms.ug"
+
+    # Add scheme if missing (e.g. 'stock.itms.ug' or 'stock.itms.ug/site/login')
+    if not clean.startswith("http://") and not clean.startswith("https://"):
+        clean = f"https://{clean.lstrip('/')}"
+
+    # Strip subpaths like /site/login or /site/logout from base_url
+    for suffix in ("/site/login", "/site/logout", "/site", "/login"):
+        if clean.endswith(suffix):
+            clean = clean[:-len(suffix)].rstrip("/")
+
+    parsed = urllib.parse.urlparse(clean)
+    if not parsed.netloc:
+        return "https://stock.itms.ug"
+
+    return clean
+
+
 def get_itms_base_url() -> str:
     try:
         if settings.configured:
-            return getattr(settings, "ITMS_API_BASE_URL", "https://stock.itms.ug")
+            configured = getattr(settings, "ITMS_API_BASE_URL", "https://stock.itms.ug")
+            return normalize_itms_url(configured)
     except Exception:
         pass
     return "https://stock.itms.ug"
@@ -330,7 +365,7 @@ class ITMSWebClient:
         session_store: Optional[ITMSWebSessionStore] = None,
         timeout: int = 15,
     ):
-        self.base_url = (base_url or get_itms_base_url()).rstrip("/")
+        self.base_url = normalize_itms_url(base_url or get_itms_base_url())
         self.session_store = session_store or ITMSWebSessionStore()
         self.timeout = timeout
         self._session: Optional[requests.Session] = None

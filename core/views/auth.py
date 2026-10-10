@@ -12,9 +12,25 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
 
-from core.services import auth_service, email_service
+from core.services import auth_service, device_service, email_service
 
 logger = logging.getLogger(__name__)
+
+
+def _redirect_after_auth(request: HttpRequest, next_url: str = "") -> HttpResponse:
+    """
+    Directs authenticated operators to their appropriate workspace:
+    - If explicit target next_url is set, follows that destination.
+    - If opening from a mobile phone, opens the touch-optimized Mobile Capture Station.
+    - If opening from a laptop/desktop, opens the Supervisor Console.
+    """
+    if next_url and next_url != "/":
+        return redirect(next_url)
+
+    # Device-aware routing
+    if device_service.is_mobile_device(request):
+        return redirect("core:mobile_companion")
+    return redirect("core:dashboard")
 
 
 def login_view(request: HttpRequest) -> HttpResponse:
@@ -26,7 +42,7 @@ def login_view(request: HttpRequest) -> HttpResponse:
         next_url = "/"
 
     if request.user.is_authenticated:
-        return redirect(next_url if next_url != "/" else "core:dashboard")
+        return _redirect_after_auth(request, next_url)
 
     if request.method == "POST":
         username = request.POST.get("username", "").strip()
@@ -43,7 +59,7 @@ def login_view(request: HttpRequest) -> HttpResponse:
 
         auth_login(request, user)
         auth_service.save_remembered_session(user, remember=remember)
-        return redirect(next_url if next_url != "/" else "core:dashboard")
+        return _redirect_after_auth(request, next_url)
 
     # If no users exist in the active database yet, prompt first-time onboarding
     if User.objects.count() == 0:
@@ -61,7 +77,7 @@ def login_view(request: HttpRequest) -> HttpResponse:
 def signup_view(request: HttpRequest) -> HttpResponse:
     """Operator Registration / Onboarding view with 2FA email verification."""
     if request.user.is_authenticated:
-        return redirect("core:dashboard")
+        return _redirect_after_auth(request)
 
     if request.method == "POST":
         username = request.POST.get("username", "").strip()
@@ -70,42 +86,37 @@ def signup_view(request: HttpRequest) -> HttpResponse:
         password = request.POST.get("password", "").strip()
         password_confirm = request.POST.get("password_confirm", "").strip()
 
-        if not username or not password:
+        # Validation
+        if not username:
             return render(request, "core/signup.html", {
-                "error": "Username and password are required.",
+                "error": "Username is required.",
                 "form_data": request.POST,
             })
-
-        if not email or "@" not in email:
+        if not email:
             return render(request, "core/signup.html", {
-                "error": "A valid work email is required for 2-Factor Authentication security verification.",
+                "error": "A valid work email is required for two-factor authentication.",
                 "form_data": request.POST,
             })
-
+        if not password:
+            return render(request, "core/signup.html", {
+                "error": "Password is required.",
+                "form_data": request.POST,
+            })
         if password != password_confirm:
             return render(request, "core/signup.html", {
                 "error": "Passwords do not match.",
                 "form_data": request.POST,
             })
-
-        if len(password) < 6:
+        if len(password) < 8:
             return render(request, "core/signup.html", {
-                "error": "Password must be at least 6 characters.",
+                "error": "Password must be at least 8 characters.",
                 "form_data": request.POST,
             })
 
-        if User.objects.filter(username=username).exists():
-            return render(request, "core/signup.html", {
-                "error": f"Username '{username}' already exists. Please choose a different username.",
-                "form_data": request.POST,
-            })
-
-        # Check if 2FA email verification is enabled
-        use_2fa = getattr(settings, "SIGNUP_2FA_ENABLED", True)
-        if use_2fa:
+        # Initiate 2FA Email Verification
+        enable_2fa = getattr(settings, "SIGNUP_2FA_ENABLED", True)
+        if enable_2fa:
             code = email_service.generate_2fa_code()
-            ok, msg = email_service.send_2fa_verification_code(email, code, username=username)
-
             request.session["pending_signup"] = {
                 "username": username,
                 "full_name": full_name,
@@ -117,7 +128,9 @@ def signup_view(request: HttpRequest) -> HttpResponse:
             }
             request.session.modified = True
 
+            ok, msg = email_service.send_2fa_verification_code(email, code, username=username)
             if not ok:
+                logger.warning("Failed to send 2FA email on signup: %s", msg)
                 messages.warning(request, f"Email delivery notice: {msg}")
 
             return redirect("core:signup_verify")
@@ -137,7 +150,7 @@ def signup_view(request: HttpRequest) -> HttpResponse:
 
         auth_login(request, user)
         auth_service.save_remembered_session(user, remember=True)
-        return redirect("core:dashboard")
+        return _redirect_after_auth(request)
 
     return render(request, "core/signup.html", {"form_data": {}})
 
@@ -145,7 +158,7 @@ def signup_view(request: HttpRequest) -> HttpResponse:
 def signup_verify_view(request: HttpRequest) -> HttpResponse:
     """Verifies the 6-digit email 2FA code before activating operator account."""
     if request.user.is_authenticated:
-        return redirect("core:dashboard")
+        return _redirect_after_auth(request)
 
     pending = request.session.get("pending_signup")
     if not pending:
@@ -220,7 +233,7 @@ def signup_verify_view(request: HttpRequest) -> HttpResponse:
         auth_service.save_remembered_session(user, remember=True)
 
         messages.success(request, "Email verified successfully! Welcome to ITMS Verification Copilot.")
-        return redirect("core:dashboard")
+        return _redirect_after_auth(request)
 
     return render(request, "core/signup_verify.html", {
         "email": email,
@@ -232,5 +245,3 @@ def logout_view(request: HttpRequest) -> HttpResponse:
     auth_service.clear_remembered_session()
     auth_logout(request)
     return redirect("core:login")
-
-

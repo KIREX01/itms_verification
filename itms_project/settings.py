@@ -53,17 +53,96 @@ def safe_env_bool(var_name: str, default: bool) -> bool:
         return default
 
 
-SECRET_KEY = env("DJANGO_SECRET_KEY", default="").strip()
-if not SECRET_KEY:
-    SECRET_KEY = "django-insecure-itms-verification-cloud-key-928472918471"
-DEBUG = safe_env_bool("DJANGO_DEBUG", default=True)
-ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["127.0.0.1", "localhost", "*", "close.kirex.online"])
-if "*" not in ALLOWED_HOSTS:
+def get_or_create_secret_key(base_dir: Path) -> str:
+    """
+    Returns a cryptographically secure secret key.
+    If DJANGO_SECRET_KEY is unset, empty, or a known placeholder,
+    automatically generates a high-entropy 50+ character random key,
+    persists it into secure/secret_key.txt and .env, and returns it.
+    """
+    key = env("DJANGO_SECRET_KEY", default="").strip()
+    placeholder_keys = (
+        "change-me-to-a-random-50-char-string",
+        "insecure-dev-key-change-me",
+        "django-insecure-itms-verification-cloud-key-928472918471",
+    )
+    if key and key not in placeholder_keys and not key.startswith("django-insecure"):
+        return key
+
+    secret_file = base_dir / "secure" / "secret_key.txt"
+    secret_file.parent.mkdir(parents=True, exist_ok=True)
+    if secret_file.exists():
+        try:
+            stored = secret_file.read_text(encoding="utf-8").strip()
+            if stored and len(stored) >= 40 and stored not in placeholder_keys:
+                return stored
+        except Exception:
+            pass
+
+    import secrets
+    new_key = secrets.token_urlsafe(50)
+    try:
+        secret_file.write_text(new_key, encoding="utf-8")
+    except Exception:
+        pass
+
+    env_path = base_dir / ".env"
+    if env_path.exists():
+        try:
+            import re
+            content = env_path.read_text(encoding="utf-8")
+            if re.search(r"^DJANGO_SECRET_KEY=.*", content, flags=re.MULTILINE):
+                content = re.sub(r"^DJANGO_SECRET_KEY=.*", f"DJANGO_SECRET_KEY={new_key}", content, flags=re.MULTILINE)
+            else:
+                content += f"\nDJANGO_SECRET_KEY={new_key}\n"
+            env_path.write_text(content, encoding="utf-8")
+        except Exception:
+            pass
+
+    return new_key
+
+
+SECRET_KEY = get_or_create_secret_key(BASE_DIR)
+DEBUG = safe_env_bool("DJANGO_DEBUG", default=False)
+
+# Allowed Hosts: strictly bounded when DEBUG=False, allows local and configured domain
+configured_hosts = env.list("DJANGO_ALLOWED_HOSTS", default=[])
+default_hosts = ["close.kirex.online", "16.170.39.187", "127.0.0.1", "localhost"]
+ALLOWED_HOSTS = list(set(default_hosts + configured_hosts))
+if DEBUG and "*" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("*")
 
-# Trust Caddy/Nginx Reverse Proxy for HTTPS
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=["https://close.kirex.online"])
+# --- Security & SSL Hardening ---
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+CSRF_TRUSTED_ORIGINS = env.list(
+    "CSRF_TRUSTED_ORIGINS",
+    default=["https://close.kirex.online", "http://127.0.0.1:8000"],
+)
+
+# Cookies over HTTPS
+SESSION_COOKIE_SECURE = safe_env_bool("SESSION_COOKIE_SECURE", default=not DEBUG)
+CSRF_COOKIE_SECURE = safe_env_bool("CSRF_COOKIE_SECURE", default=not DEBUG)
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+
+# SSL Redirect & HSTS
+SECURE_SSL_REDIRECT = safe_env_bool("SECURE_SSL_REDIRECT", default=not DEBUG)
+if not DEBUG:
+    SECURE_HSTS_SECONDS = safe_env_int("SECURE_HSTS_SECONDS", default=31536000)  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = safe_env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=True)
+    SECURE_HSTS_PRELOAD = safe_env_bool("SECURE_HSTS_PRELOAD", default=True)
+else:
+    SECURE_HSTS_SECONDS = 0
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_HSTS_PRELOAD = False
+
+# Browser Security Headers
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_BROWSER_XSS_FILTER = True
+X_FRAME_OPTIONS = "DENY"
+SECURE_REFERRER_POLICY = "same-origin"
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -95,7 +174,7 @@ LOGOUT_REDIRECT_URL = "/login/"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [

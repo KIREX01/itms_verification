@@ -22,12 +22,18 @@
                 <span class="brand-symbol">🏍️</span>
                 <div>
                     <h1 class="brand-title">ITMS MOBILE CAPTURE</h1>
-                    <div class="brand-subtitle">VERIFICATION COPILOT • UGANDA</div>
+                    <div class="brand-subtitle">
+                        VERIFICATION COPILOT • UGANDA
+                        {% if is_cloud_sync %}<span style="color:#10b981; font-weight:800; font-size:0.68rem; margin-left:4px;">• ☁️ CLOUD SYNCED</span>{% endif %}
+                    </div>
                 </div>
             </div>
 
-            <!-- Header Controls: Device Lease Info, Signal Pill & Disconnect Button -->
+            <!-- Header Controls: Device Lease Info, Console Switch, Signal Pill & Disconnect Button -->
             <div class="header-actions">
+                <a href="/?view=desktop" class="btn-switch-supervisor" id="btn-switch-supervisor" title="Open Desktop Supervisor Console">
+                    💻 Console
+                </a>
                 <div class="signal-pill" id="signal-pill" onclick="toggleOutboxDrawer()">
                     <span class="signal-dot" id="signal-dot">●</span>
                     <span class="signal-text" id="signal-text">Connecting...</span>

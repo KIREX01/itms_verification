@@ -521,16 +521,16 @@
                         </select>
                     </div>
 
-                    <!-- Two Connection Methods Card -->
+                    <!-- Connection Instructions Card (Cloud VPS or Local Hotspot) -->
                     <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:12px; display:flex; flex-direction:column; gap:8px; font-size:0.78rem;">
                         <div style="display:flex; align-items:center; gap:6px; color:#fff; font-weight:800;">
-                            <span>🔒 Built-in Self-Signed HTTPS (100% Offline)</span>
+                            <span id="mobile-modal-conn-heading">🔒 HTTPS Secure Cloud &amp; Offline Pairing</span>
                         </div>
-                        <div style="color:var(--ug-text-muted); line-height:1.4;">
-                            <strong style="color:var(--ug-green);">Live Camera &amp; QR Scanning Unlocked:</strong><br>
-                            Modern mobile browsers require HTTPS for camera streaming. When your phone browser shows <em>"Connection not private"</em>, simply tap <strong>Advanced ➔ Proceed</strong>.<br><br>
-                            <strong style="color:var(--ug-yellow);">Wi-Fi / Hotspot Tip:</strong><br>
-                            Ensure your phone is connected to the laptop's Windows Mobile Hotspot (<code style="color:#38bdf8;">192.168.137.1</code>) or shared local Wi-Fi.
+                        <div id="mobile-modal-network-tip" style="color:var(--ug-text-muted); line-height:1.4;">
+                            <strong style="color:var(--ug-green);">Live Camera &amp; Barcode Scanning Ready:</strong><br>
+                            Point your phone camera at the QR code to open the Mobile Capture Station.<br><br>
+                            <strong style="color:var(--ug-yellow);">Network / Cloud Sync:</strong><br>
+                            When hosted on the cloud server, both devices connect over cellular or Wi-Fi without needing a shared network.
                         </div>
                     </div>
 

@@ -111,6 +111,26 @@ body {
     gap: 6px;
 }
 
+.btn-switch-supervisor {
+    background: rgba(234, 179, 8, 0.15);
+    border: 1px solid rgba(234, 179, 8, 0.45);
+    color: #fde047;
+    border-radius: 16px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 4px 8px;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+}
+
+.btn-switch-supervisor:active {
+    background: rgba(234, 179, 8, 0.35);
+}
+
 .btn-disconnect-session {
     background: rgba(239, 68, 68, 0.15);
     border: 1px solid rgba(239, 68, 68, 0.35);

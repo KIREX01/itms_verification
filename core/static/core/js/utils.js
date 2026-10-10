@@ -112,13 +112,28 @@ async function loadMobileNetworkInfo() {
         if (input) input.value = data.primary_url;
 
         if (badge) {
-            if (data.hotspot_detected) {
+            if (data.connection_mode === "CLOUD_VPS") {
+                badge.className = "badge badge-green";
+                badge.textContent = "☁️ Cloud Server Active";
+            } else if (data.hotspot_detected) {
                 badge.className = "badge badge-green";
                 badge.textContent = "Hotspot Active (192.168.137.1)";
             } else {
                 badge.className = "badge badge-yellow";
                 badge.textContent = "Wi-Fi / LAN Mode";
             }
+        }
+
+        const tipElem = document.getElementById("mobile-modal-network-tip");
+        const headingElem = document.getElementById("mobile-modal-conn-heading");
+        if (tipElem && data.connection_mode === "CLOUD_VPS") {
+            if (headingElem) headingElem.textContent = "☁️ HTTPS Cloud VPS Sync Active";
+            tipElem.innerHTML = `
+                <strong style="color:var(--ug-green);">Live Cloud Sync Unlocked:</strong><br>
+                Both your phone and laptop communicate directly through <strong>${escapeHtml(data.primary_ip || window.location.host)}</strong> with SSL.<br><br>
+                <strong style="color:var(--ug-yellow);">No Local Wi-Fi Needed:</strong><br>
+                Your phone can connect via cellular data (4G/5G) or any separate Wi-Fi network. Scan the QR code with your phone camera to start capturing immediately.
+            `;
         }
 
         if (select && data.candidate_urls) {
@@ -187,6 +202,7 @@ function copyMobileUrl() {
 }
 
 let mobileStatusPollInterval = null;
+let lastKnownPhotosCount = null;
 
 async function pollMobileCompanionStatus() {
     try {
@@ -245,6 +261,18 @@ async function pollMobileCompanionStatus() {
             const pairsCount = Math.floor(batchPhotos / 2);
             dashCounter.textContent = `📦 ${batchLabel}: ${batchPhotos}/${batchLimit} photos (${pairsCount} pairs)`;
         }
+
+        // 4. Live update metrics and notify supervisor on laptop when new phone photos arrive
+        if (lastKnownPhotosCount !== null && batchPhotos > lastKnownPhotosCount) {
+            const delta = batchPhotos - lastKnownPhotosCount;
+            if (typeof fetchStats === "function") {
+                fetchStats();
+            }
+            if (typeof showToast === "function") {
+                showToast(`📷 ${delta} new photo${delta > 1 ? "s" : ""} synced from smartphone!`, "success");
+            }
+        }
+        lastKnownPhotosCount = batchPhotos;
 
         // 3. Live Connect Modal Elements (if open)
         const modalDevBadge = document.getElementById("modal-connected-devices-badge");

@@ -2,15 +2,56 @@
 Network discovery and mobile pairing service for ITMS Verification Copilot.
 
 Discovers local network interfaces (Wi-Fi, Ethernet, Windows Mobile Hotspot, Phone Hotspot)
-and generates connection endpoints and mobile access URLs with real-time classification.
+and generates connection endpoints and mobile access URLs with real-time classification,
+including Cloud VPS production domain routing.
 """
 import logging
 import socket
-from typing import Dict, List, Any
+from typing import Any, Dict, List, Optional
+
+from django.http import HttpRequest
 
 logger = logging.getLogger(__name__)
 
 WINDOWS_HOTSPOT_DEFAULT_IP = "192.168.137.1"
+
+
+def is_private_or_loopback_ip(ip: str) -> bool:
+    """Returns True if the IP address is a private LAN, link-local, or loopback address."""
+    if not ip:
+        return True
+    ip = ip.strip()
+    if ip.startswith("127.") or ip.startswith("localhost"):
+        return True
+    if ip.startswith("192.168.") or ip.startswith("10."):
+        return True
+    if ip.startswith("169.254."):
+        return True
+    # 172.16.0.0 – 172.31.255.255
+    if ip.startswith("172."):
+        parts = ip.split(".")
+        if len(parts) >= 2 and parts[1].isdigit():
+            second_octet = int(parts[1])
+            if 16 <= second_octet <= 31:
+                return True
+    return False
+
+
+def is_cloud_or_domain_host(host: str) -> bool:
+    """
+    Returns True if the host is a public domain name (e.g. close.kirex.online)
+    or a non-private public IP address.
+    """
+    if not host:
+        return False
+    host_clean = host.split(":")[0].strip().lower()
+    if host_clean in ("localhost", "127.0.0.1", "0.0.0.0"):
+        return False
+    # If contains non-digit/dot characters, it's a domain name
+    if any(c.isalpha() for c in host_clean):
+        return True
+    # Otherwise check if it's a public IP
+    return not is_private_or_loopback_ip(host_clean)
 
 
 def classify_interface(ip: str) -> Dict[str, Any]:
@@ -153,13 +194,14 @@ def get_mobile_connection_info(
     port: int = 8000,
     ssl_port: int = 443,
     use_https: bool = True,
+    request: Optional[HttpRequest] = None,
 ) -> Dict[str, Any]:
     """
     Returns structured connection metadata for mobile pairing:
     - primary_url: Best URL to open on the mobile browser (HTTPS default for camera & QR)
     - https_primary_url: Direct HTTPS URL (enables mobile camera & QR scanner)
     - http_primary_url: Standard HTTP URL
-    - connection_mode: LAPTOP_HOTSPOT, PHONE_HOTSPOT, or WIFI_LAN
+    - connection_mode: CLOUD_VPS, LAPTOP_HOTSPOT, PHONE_HOTSPOT, or WIFI_LAN
     - connection_badge: Human-readable badge text
     - candidate_urls: List of all valid URLs (for QR display & manual switching)
     - hotspot_detected: True if Windows Mobile Hotspot IP (192.168.137.1) is present
@@ -195,6 +237,51 @@ def get_mobile_connection_info(
         for iface in interfaces
     ]
 
+    is_cloud = False
+    connection_badge = primary.get("badge", "")
+    connection_desc = primary.get("description", "")
+
+    # Check incoming request host for Cloud VPS production deployment (e.g. close.kirex.online)
+    if request is not None:
+        try:
+            req_host = request.get_host().strip()
+            is_secure_conn = request.is_secure() or (request.META.get("HTTP_X_FORWARDED_PROTO") == "https")
+            cloud_scheme = "https" if (is_secure_conn or use_https) else "http"
+
+            if is_cloud_or_domain_host(req_host):
+                is_cloud = True
+                primary_mode = "CLOUD_VPS"
+                primary_ip = req_host.split(":")[0]
+                primary_url = f"{cloud_scheme}://{req_host}/mobile/"
+                https_primary_url = f"https://{req_host}/mobile/"
+                http_primary_url = f"http://{req_host}/mobile/"
+                active_scheme = cloud_scheme
+                connection_badge = f"Cloud Server ({req_host})"
+                connection_desc = "Connected via Cloud VPS. Accessible anywhere over cellular (4G/5G) or Wi-Fi — no shared local network needed!"
+
+                # Unmark previous primary candidates
+                for c in candidate_urls:
+                    c["is_primary"] = False
+
+                # Insert cloud URL as candidate #1
+                candidate_urls.insert(0, {
+                    "ip": req_host,
+                    "type": "☁️ Cloud Server (Accessible Anywhere)",
+                    "mode": "CLOUD_VPS",
+                    "badge": connection_badge,
+                    "description": connection_desc,
+                    "url": primary_url,
+                    "https_url": https_primary_url,
+                    "http_url": http_primary_url,
+                    "is_primary": True,
+                    "is_hotspot": False,
+                    "is_laptop_hotspot": False,
+                    "is_phone_hotspot": False,
+                    "is_cloud": True,
+                })
+        except Exception as exc:
+            logger.debug("Could not inspect request host for cloud pairing: %s", exc)
+
     return {
         "success": True,
         "primary_ip": primary_ip,
@@ -204,10 +291,11 @@ def get_mobile_connection_info(
         "use_https": use_https,
         "scheme": active_scheme,
         "connection_mode": primary_mode,
-        "connection_badge": primary.get("badge", ""),
-        "connection_desc": primary.get("description", ""),
-        "is_laptop_hotspot": primary.get("is_laptop_hotspot", False),
-        "is_phone_hotspot": primary.get("is_phone_hotspot", False),
+        "connection_badge": connection_badge,
+        "connection_desc": connection_desc,
+        "is_cloud": is_cloud,
+        "is_laptop_hotspot": primary.get("is_laptop_hotspot", False) if not is_cloud else False,
+        "is_phone_hotspot": primary.get("is_phone_hotspot", False) if not is_cloud else False,
         "port": port,
         "ssl_port": ssl_port,
         "active_port": active_port,

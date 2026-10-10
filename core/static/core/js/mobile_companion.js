@@ -196,7 +196,7 @@ function renderOutboxDrawerItems(items) {
     if (!listElem) return;
 
     if (items.length === 0) {
-        listElem.innerHTML = '<div class="empty-outbox-message">No pending photos. All evidence synced to laptop!</div>';
+        listElem.innerHTML = '<div class="empty-outbox-message">No pending photos. All evidence synced to Cloud Server & Supervisor Console ✓</div>';
         return;
     }
 

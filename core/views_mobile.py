@@ -13,13 +13,13 @@ from datetime import datetime
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from core.models import EvidenceImage, IngestionBatch, VehicleInstallationPair
-from core.services import network_service, vault_service
+from core.services import device_service, network_service, vault_service
 from core.services.device_session_service import session_manager
 from core.services.photo_quality_service import assess_photo_quality
 from core.version import __version__
@@ -38,15 +38,33 @@ def _get_client_ip(request: HttpRequest) -> str:
 def mobile_companion_view(request: HttpRequest) -> HttpResponse:
     """
     Renders the Mobile Web Companion touch UI for smartphones.
-    Zero-install PWA/web interface accessed via local Wi-Fi or Hotspot.
+    Zero-install PWA/web interface accessed via Cloud VPS, local Wi-Fi, or Hotspot.
+    Supports station switching back to supervisor console.
     """
+    view_override = request.GET.get("view", "").lower().strip()
+    if view_override == "desktop":
+        request.session["preferred_view"] = "desktop"
+        return redirect("core:dashboard")
+    elif view_override == "mobile":
+        request.session["preferred_view"] = "mobile"
+
     batch = vault_service.get_or_create_mobile_batch()
+    is_mobile = device_service.is_mobile_device(request)
+    device_type = device_service.get_client_device_type(request)
+
+    conn_info = network_service.get_mobile_connection_info(request=request)
+    is_cloud = conn_info.get("is_cloud", False)
+
     return render(request, "core/mobile_companion.html", {
         "version": __version__,
         "active_batch_id": batch.batch_id,
         "active_batch_label": batch.source_label,
         "server_time": timezone.now().isoformat(),
         "max_devices": session_manager.get_max_allowed(),
+        "is_mobile_device": is_mobile,
+        "device_type": device_type,
+        "is_cloud_sync": is_cloud,
+        "server_host": request.get_host(),
     })
 
 
@@ -134,7 +152,7 @@ def api_network_info(request: HttpRequest) -> JsonResponse:
     else:
         use_https = True
 
-    info = network_service.get_mobile_connection_info(port=port, use_https=use_https)
+    info = network_service.get_mobile_connection_info(port=port, use_https=use_https, request=request)
     return JsonResponse(info)
 
 

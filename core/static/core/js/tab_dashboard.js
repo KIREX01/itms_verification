@@ -174,7 +174,10 @@ async function initDashboardMobileQr() {
         if (urlElem) urlElem.textContent = data.primary_url;
 
         if (pillElem) {
-            if (data.connection_mode === "LAPTOP_HOTSPOT") {
+            if (data.connection_mode === "CLOUD_VPS") {
+                pillElem.className = "badge badge-green";
+                pillElem.textContent = "☁️ Cloud VPS Active";
+            } else if (data.connection_mode === "LAPTOP_HOTSPOT") {
                 pillElem.className = "badge badge-green";
                 pillElem.textContent = "💻 Laptop Hotspot Active";
             } else if (data.connection_mode === "PHONE_HOTSPOT") {

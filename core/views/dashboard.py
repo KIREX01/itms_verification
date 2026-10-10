@@ -6,7 +6,7 @@ import logging
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET
 
@@ -17,7 +17,7 @@ from core.models import (
     SubmissionAuditLog,
     VehicleInstallationPair,
 )
-from core.services import auth_service, config_service
+from core.services import auth_service, config_service, device_service
 from core.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,15 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
     """
     Renders the primary Operator Console (Single-Page Web Application).
     Provides all tools needed to review evidence, match plates, and submit to ITMS.
+    Automatically routes mobile devices to the Mobile Capture Station unless desktop view requested.
     """
+    mode = device_service.get_effective_view_mode(request)
+    if mode == "mobile":
+        return redirect("core:mobile_companion")
+
+    is_mobile = device_service.is_mobile_device(request)
+    device_type = device_service.get_client_device_type(request)
+
     db_info = config_service.get_active_database_info()
     dry_run = config_service.get_setting("submission.dry_run_mode", True)
     itms_status = auth_service.get_itms_status()
@@ -48,6 +56,8 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         "developer_mode": config_service.is_developer_mode(),
         "active_bond": config_service.get_active_bond(),
         "available_bonds": config_service.get_available_bonds(),
+        "is_mobile_device": is_mobile,
+        "device_type": device_type,
     }
     return render(request, "core/dashboard.html", context)
 

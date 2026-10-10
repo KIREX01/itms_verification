@@ -1,0 +1,105 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>403 - Access Denied | ITMS Verification Copilot</title>
+    <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #0b0d10;
+            color: #f1f5f9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        .error-wrapper {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        .error-card {
+            background: #13171f;
+            border: 1px solid #2d3748;
+            border-radius: 12px;
+            max-width: 480px;
+            width: 100%;
+            padding: 36px 28px;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+        }
+        .error-code {
+            font-size: 4rem;
+            font-weight: 900;
+            color: #f97316;
+            line-height: 1;
+            margin: 0 0 12px 0;
+            letter-spacing: -1px;
+        }
+        .error-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 12px;
+        }
+        .error-desc {
+            font-size: 0.9rem;
+            color: #94a3b8;
+            line-height: 1.5;
+            margin-bottom: 24px;
+        }
+        .error-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .btn-action {
+            display: inline-block;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 0.88rem;
+            font-weight: 700;
+            text-decoration: none;
+            transition: all 0.2s ease;
+        }
+        .btn-primary {
+            background: #eab308;
+            color: #0b0d10;
+        }
+        .btn-primary:hover {
+            background: #facc15;
+        }
+        .btn-secondary {
+            background: #1e293b;
+            color: #e2e8f0;
+            border: 1px solid #334155;
+        }
+        .btn-secondary:hover {
+            background: #334155;
+        }
+    </style>
+</head>
+<body>
+    <div class="uganda-flag-ribbon"></div>
+    <div class="error-wrapper">
+        <div class="error-card">
+            <div class="error-code">403</div>
+            <div class="error-title">Access Restricted</div>
+            <div class="error-desc">
+                Your operator account or session does not possess authorized clearance for this resource.
+            </div>
+            <div class="error-actions">
+                <a href="/login/" class="btn-action btn-primary">Sign In with Credentials</a>
+                <a href="/" class="btn-action btn-secondary">Return to Console</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

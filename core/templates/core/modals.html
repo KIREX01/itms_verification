@@ -386,8 +386,8 @@
                     <div class="ingest-step-card" id="ingest-step-2">
                         <div class="ingest-step-icon" id="ingest-step-2-icon">⏳</div>
                         <div class="ingest-step-info">
-                            <div class="ingest-step-title">2. Vault Storage &amp; Cryptographic Deduplication</div>
-                            <div class="ingest-step-desc" id="ingest-step-2-desc">SHA-256 fingerprinting, vault indexing &amp; duplicate detection...</div>
+                            <div class="ingest-step-title">2. Vault Storage &amp; Physical 1:1 Pairing</div>
+                            <div class="ingest-step-desc" id="ingest-step-2-desc">SHA-256 fingerprinting, vault indexing &amp; establishing Front/Rear pairs...</div>
                         </div>
                         <span class="badge badge-secondary" id="ingest-step-2-badge">WAITING</span>
                     </div>
@@ -396,8 +396,8 @@
                     <div class="ingest-step-card" id="ingest-step-3">
                         <div class="ingest-step-icon" id="ingest-step-3-icon">⏳</div>
                         <div class="ingest-step-info">
-                            <div class="ingest-step-title">3. YOLO Vision Plate Detection &amp; OCR</div>
-                            <div class="ingest-step-desc" id="ingest-step-3-desc">Detecting license plates and reading Ugandan vehicle registrations...</div>
+                            <div class="ingest-step-title">3. Dual-Stream Joint Vision OCR</div>
+                            <div class="ingest-step-desc" id="ingest-step-3-desc">Joint plate detection, syntax arbitration &amp; character consensus across paired angles...</div>
                         </div>
                         <span class="badge badge-secondary" id="ingest-step-3-badge">WAITING</span>
                     </div>
@@ -406,8 +406,8 @@
                     <div class="ingest-step-card" id="ingest-step-4">
                         <div class="ingest-step-icon" id="ingest-step-4-icon">⏳</div>
                         <div class="ingest-step-info">
-                            <div class="ingest-step-title">4. Pair Association &amp; Order Linking</div>
-                            <div class="ingest-step-desc" id="ingest-step-4-desc">Correlating front and rear angles and linking ITMS installation orders...</div>
+                            <div class="ingest-step-title">4. ITMS Order Verification &amp; Linking</div>
+                            <div class="ingest-step-desc" id="ingest-step-4-desc">Corroborating verified plate numbers against active orders &amp; registry...</div>
                         </div>
                         <span class="badge badge-secondary" id="ingest-step-4-badge">WAITING</span>
                     </div>
@@ -793,3 +793,21 @@
 
 <!-- Toast Notifications Container -->
 <div class="toast-container" id="toast-container"></div>
+
+<!-- Floating Background Batch Ingestion Progress Widget -->
+<div id="global-bg-upload-pill" style="display:none; position:fixed; bottom:20px; right:20px; z-index:99999; background:rgba(18,20,29,0.95); border:1px solid rgba(255,255,255,0.15); border-left:4px solid #fcdc04; box-shadow:0 8px 30px rgba(0,0,0,0.6); padding:10px 14px; border-radius:8px; backdrop-filter:blur(10px); min-width:280px; max-width:380px; cursor:pointer;" onclick="openModal('modal-batch-upload')" title="Click to view batch upload stepper">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:5px;">
+        <span id="global-bg-upload-title" style="font-size:0.75rem; font-weight:800; color:#fff; display:flex; align-items:center; gap:6px;">
+            <span class="live-pulse-dot" id="global-bg-upload-dot" style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#fcdc04; animation:pulse 1.5s infinite;"></span>
+            <span id="global-bg-upload-label">Uploading Batch...</span>
+        </span>
+        <span id="global-bg-upload-pct" style="font-size:0.75rem; font-weight:800; color:#fcdc04; font-family:monospace;">0%</span>
+    </div>
+    <div style="height:5px; background:rgba(255,255,255,0.08); border-radius:3px; overflow:hidden; margin-bottom:6px;">
+        <div id="global-bg-upload-fill" style="height:100%; width:0%; background:linear-gradient(90deg, #fcdc04, #10b981); transition:width 0.25s ease; border-radius:3px;"></div>
+    </div>
+    <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.7rem; color:#888;">
+        <span id="global-bg-upload-desc">Transferring photos in background...</span>
+        <span style="color:#06b6d4; font-weight:700;">Open &rarr;</span>
+    </div>
+</div>

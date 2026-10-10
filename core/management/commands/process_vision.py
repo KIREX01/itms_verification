@@ -269,11 +269,19 @@ class Command(BaseCommand):
         else:
             qs = EvidenceImage.objects.filter(base_filter, retry_count__lt=max_retries).order_by("ingested_at")
 
+        # Exclude images that are already part of complete pairs processed jointly in Phase 2
+        qs = qs.exclude(
+            Q(as_front_of__rear_image__isnull=False) |
+            Q(as_rear_of__front_image__isnull=False)
+        )
+
         if options.get("limit"):
             qs = qs[: options["limit"]]
 
         total = qs.count() if hasattr(qs, "count") else len(qs)
-        if total > 0:
+        if total == 0:
+            self.stdout.write("Phase 3: All evidence images are paired and verified via Dual-Stream Joint Vision. Skipping single-image pass.\n")
+        elif total > 0:
             self.stdout.write(f"Processing {total} pending image(s) (max_retries={max_retries})...\n")
             processed = 0
             plate_found = 0

@@ -414,6 +414,12 @@ def ingest_from_disk(
     vault_abs_path = target_dir / vault_filename
     shutil.copy2(path, vault_abs_path)
 
+    try:
+        os.chmod(target_dir, 0o755)
+        os.chmod(vault_abs_path, 0o644)
+    except Exception:
+        pass
+
     # Enhance the vault copy in-place: autocontrast, dynamic contrast,
     # saturation boost, sharpness, brightness normalization.
     enhance_whole_image(str(vault_abs_path))
@@ -557,6 +563,12 @@ def ingest_uploaded_file(
     with vault_abs_path.open("wb") as dest:
         for chunk in uploaded_file.chunks():
             dest.write(chunk)
+
+    try:
+        os.chmod(target_dir, 0o755)
+        os.chmod(vault_abs_path, 0o644)
+    except Exception:
+        pass
 
     # Enhance the vault copy in-place: autocontrast, dynamic contrast,
     # saturation boost, sharpness, brightness normalization.

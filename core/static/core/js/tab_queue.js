@@ -149,6 +149,21 @@ function renderQueueCards() {
                 return;
             }
         }
+        if (typeof isBatchIngesting !== "undefined" && isBatchIngesting) {
+            container.innerHTML = `
+                <div style="text-align:center; padding:36px 14px; display:flex; flex-direction:column; align-items:center; gap:12px;">
+                    <span class="live-pulse-dot" style="display:inline-block; width:16px; height:16px; border-radius:50%; background:var(--ug-yellow); animation:pulse 1.5s infinite;"></span>
+                    <h4 style="color:#fff; font-size:1.05rem; font-weight:800; margin:0;">Batch Ingesting in Background...</h4>
+                    <p style="font-size:0.78rem; color:var(--ug-text-muted); max-width:300px; margin:0;">
+                        Transferring photos to secure vault. Front & rear pairs will appear here automatically as soon as upload completes.
+                    </p>
+                    <button class="btn btn-secondary" onclick="openModal('modal-batch-upload')" style="font-size:0.75rem; padding:5px 12px; border-color:var(--ug-yellow); color:var(--ug-yellow);">
+                        👁️ View Upload Stepper
+                    </button>
+                </div>
+            `;
+            return;
+        }
         if (currentQueueDateScope === "TODAY") {
             container.innerHTML = `
                 <div style="text-align:center; padding:36px 14px; display:flex; flex-direction:column; align-items:center; gap:10px;">

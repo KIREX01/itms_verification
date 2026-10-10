@@ -23,6 +23,16 @@ from core.vision import normalizer
 
 logger = logging.getLogger(__name__)
 
+def _clean_media_url(file_path):
+    """Safely normalizes file paths to clean /media/ URLs, preventing duplicate prefixes or backslashes."""
+    if not file_path:
+        return None
+    p = str(file_path).replace(chr(92), "/").strip().lstrip("/")
+    if p.startswith("media/"):
+        return f"/{p}"
+    return f"/media/{p}"
+
+
 
 @require_GET
 def api_pairs_list(request: HttpRequest) -> JsonResponse:
@@ -92,10 +102,10 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
 
     pairs_data = []
     for p in qs[:limit]:
-        front_url = f"/media/{str(p.front_image.vault_file).replace(chr(92), '/')}" if p.front_image and p.front_image.vault_file else None
-        rear_url = f"/media/{str(p.rear_image.vault_file).replace(chr(92), '/')}" if p.rear_image and p.rear_image.vault_file else None
-        front_thumb_url = f"/media/{str(p.front_image.thumbnail_file or p.front_image.vault_file).replace(chr(92), '/')}" if p.front_image and p.front_image.vault_file else None
-        rear_thumb_url = f"/media/{str(p.rear_image.thumbnail_file or p.rear_image.vault_file).replace(chr(92), '/')}" if p.rear_image and p.rear_image.vault_file else None
+        front_url = _clean_media_url(p.front_image.vault_file) if p.front_image and p.front_image.vault_file else None
+        rear_url = _clean_media_url(p.rear_image.vault_file) if p.rear_image and p.rear_image.vault_file else None
+        front_thumb_url = _clean_media_url(p.front_image.thumbnail_file or p.front_image.vault_file) if p.front_image and p.front_image.vault_file else None
+        rear_thumb_url = _clean_media_url(p.rear_image.thumbnail_file or p.rear_image.vault_file) if p.rear_image and p.rear_image.vault_file else None
 
         batch_obj = (p.front_image.batch if p.front_image and p.front_image.batch else None) or (
             p.rear_image.batch if p.rear_image and p.rear_image.batch else None
@@ -185,9 +195,9 @@ def api_pair_detail(request: HttpRequest, pair_id: int) -> JsonResponse:
         preview_path = str(pair.front_image.preview_file or pair.front_image.vault_file).replace("\\", "/")
         front = {
             "id": str(pair.front_image.id),
-            "url": f"/media/{vault_path}",
-            "preview_url": f"/media/{preview_path}",
-            "thumb_url": f"/media/{thumb_path}",
+            "url": _clean_media_url(pair.front_image.vault_file),
+            "preview_url": _clean_media_url(pair.front_image.preview_file or pair.front_image.vault_file),
+            "thumb_url": _clean_media_url(pair.front_image.thumbnail_file or pair.front_image.vault_file),
             "detected_plate": pair.front_image.detected_plate,
             "ocr_confidence": round(pair.front_image.ocr_confidence * 100, 1) if pair.front_image.ocr_confidence is not None else None,
             "detector_confidence": round(pair.front_image.detector_confidence * 100, 1) if pair.front_image.detector_confidence is not None else None,
@@ -201,9 +211,9 @@ def api_pair_detail(request: HttpRequest, pair_id: int) -> JsonResponse:
         preview_path = str(pair.rear_image.preview_file or pair.rear_image.vault_file).replace("\\", "/")
         rear = {
             "id": str(pair.rear_image.id),
-            "url": f"/media/{vault_path}",
-            "preview_url": f"/media/{preview_path}",
-            "thumb_url": f"/media/{thumb_path}",
+            "url": _clean_media_url(pair.rear_image.vault_file),
+            "preview_url": _clean_media_url(pair.rear_image.preview_file or pair.rear_image.vault_file),
+            "thumb_url": _clean_media_url(pair.rear_image.thumbnail_file or pair.rear_image.vault_file),
             "detected_plate": pair.rear_image.detected_plate,
             "ocr_confidence": round(pair.rear_image.ocr_confidence * 100, 1) if pair.rear_image.ocr_confidence is not None else None,
             "detector_confidence": round(pair.rear_image.detector_confidence * 100, 1) if pair.rear_image.detector_confidence is not None else None,

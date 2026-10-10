@@ -119,9 +119,12 @@ def upload_photos_view(request: HttpRequest) -> HttpResponse:
         except Exception as assoc_err:
             logger.warning("Auto-association warning on upload %s: %s", batch.batch_id, assoc_err)
 
+        pairs_count = VehicleInstallationPair.objects.filter(Q(front_image__batch=batch) | Q(rear_image__batch=batch)).count()
+
         # AJAX / JSON response
         if request.headers.get("X-Requested-With") == "XMLHttpRequest" or "application/json" in request.headers.get("Accept", ""):
             return JsonResponse({
+                "pairs_count": pairs_count,
                 "success": True,
                 "batch_id": batch.batch_id,
                 "batch_label": batch.source_label,
@@ -231,9 +234,12 @@ def api_upload_photos(request: HttpRequest) -> JsonResponse:
     except Exception as assoc_err:
         logger.warning("Auto-association warning on API upload %s: %s", batch.batch_id, assoc_err)
 
+    pairs_count = VehicleInstallationPair.objects.filter(Q(front_image__batch=batch) | Q(rear_image__batch=batch)).count()
+
     return JsonResponse({
         "success": True,
         "batch_id": batch.batch_id,
+        "pairs_count": pairs_count,
         "source_type": batch.source_type,
         "source_label": batch.source_label,
         "total_files": batch.total_files,
@@ -300,9 +306,12 @@ def api_batch_detail(request: HttpRequest, batch_id: str) -> JsonResponse:
             "pair": p_info,
         })
 
+    pairs_count = VehicleInstallationPair.objects.filter(Q(front_image__batch=batch) | Q(rear_image__batch=batch)).count()
+
     return JsonResponse({
         "success": True,
         "batch_id": batch.batch_id,
+        "pairs_count": pairs_count,
         "source_type": batch.source_type,
         "source_label": batch.source_label,
         "created_at": batch.created_at.strftime("%Y-%m-%d %H:%M:%S") if batch.created_at else "",

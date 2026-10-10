@@ -28,6 +28,10 @@ function switchNavTab(tabIndex) {
         fetchItmsExplorerOrders();
     } else if (tabIndex === 3) {
         fetchBatchesList();
+    } else if (tabIndex === 4) {
+        if (typeof fetchPairs === "function") {
+            fetchPairs();
+        }
     } else if (tabIndex === 5) {
         fetchHistoryEvents();
     } else if (tabIndex === 6) {

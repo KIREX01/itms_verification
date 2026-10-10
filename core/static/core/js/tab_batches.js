@@ -1,3 +1,28 @@
+
+function updateGlobalBgUploadPill(label, pct, desc) {
+    const pill = document.getElementById("global-bg-upload-pill");
+    if (!pill) return;
+    if (label) {
+        const lbl = document.getElementById("global-bg-upload-label");
+        if (lbl) lbl.innerText = label;
+    }
+    if (pct !== undefined && pct !== null) {
+        const pEl = document.getElementById("global-bg-upload-pct");
+        const fill = document.getElementById("global-bg-upload-fill");
+        if (pEl) pEl.innerText = `${pct}%`;
+        if (fill) fill.style.width = `${pct}%`;
+    }
+    if (desc) {
+        const dEl = document.getElementById("global-bg-upload-desc");
+        if (dEl) dEl.innerText = desc;
+    }
+    pill.style.display = "block";
+}
+
+function hideGlobalBgUploadPill() {
+    const pill = document.getElementById("global-bg-upload-pill");
+    if (pill) pill.style.display = "none";
+}
 /**
  * ITMS CLOSING SYSTEM - TAB 3: BATCHES & EVIDENCE PHOTO STREAM
  * Manages full-scale evidence photo viewing, collapsible batch accordion cards,
@@ -398,6 +423,9 @@ function closeBatchUploadModal() {
 
 function minimizeBatchUploadModal() {
     closeModal("modal-batch-upload");
+    if (isBatchIngesting) {
+        updateGlobalBgUploadPill("Batch Ingesting in Background", 35, "Transferring & pairing photos...");
+    }
     showToast("Batch ingestion running in background. Monitoring progress...", "info");
     startPipelinePolling();
 }
@@ -550,6 +578,7 @@ async function submitTabBatchUpload() {
             const totalMB = (e.total / (1024 * 1024)).toFixed(1);
             setIngestProgress(scaledPct, `Uploading photos: ${loadedMB}MB / ${totalMB}MB (${rawPct}%)`);
             setText("ingest-step-1-desc", `Transferred ${loadedMB}MB of ${totalMB}MB (${rawPct}%)...`);
+            updateGlobalBgUploadPill(`Uploading Photos (${rawPct}%)`, scaledPct, `${loadedMB}MB of ${totalMB}MB transferred`);
         }
     };
 
@@ -568,7 +597,14 @@ async function submitTabBatchUpload() {
 
                     // Step 2: Vault Cryptographic Storage & Deduplication
                     setStepStatus(2, "completed", "INGESTED", "✓");
-                    setText("ingest-step-2-desc", `SHA-256 hashed: ${data.ingested_count} vaulted, ${data.duplicate_count || 0} duplicates skipped.`);
+                    setText("ingest-step-2-desc", `Vaulted ${data.ingested_count} photos. Physical 1:1 pairs established immediately (${Math.min(data.front_count || 0, data.rear_count || 0)} pairs).`);
+                    setStepStatus(2, "completed", "PAIRED", "✅");
+
+                    // Immediately refresh Review Queue so operator sees pairs & photos instantly!
+                    if (typeof fetchPairs === "function") fetchPairs();
+                    if (typeof fetchBatchesList === "function") fetchBatchesList();
+                    if (typeof fetchStats === "function") fetchStats();
+                    updateGlobalBgUploadPill("Photos Vaulted & Paired", 45, "Running Dual-Stream Joint Vision OCR...");
                     setIngestProgress(40, "Vault ingestion verified. Starting YOLO Vision OCR...");
 
                     // Clear file selections in memory
@@ -620,8 +656,8 @@ function handleIngestError(errorMsg) {
 async function startIngestionPipelineTracking(batchId, batchData) {
     // Step 3: YOLO Vision Active
     setStepStatus(3, "active", "RUNNING", "🔄");
-    setText("ingest-step-3-desc", "Executing YOLO plate detector and Ugandan syntax OCR...");
-    setIngestProgress(45, "Running YOLO Vision detection & OCR...");
+    setText("ingest-step-3-desc", "Running Dual-Stream Joint Vision OCR on motorcycle pairs...");
+    setIngestProgress(45, "Running Dual-Stream Joint Vision OCR...");
 
     try {
         await fetch("/api/pipeline/run/", {
@@ -711,6 +747,8 @@ async function startIngestionPipelineTracking(batchId, batchData) {
 
                 showToast(`Batch ${batchId} successfully ingested and processed!`, "success");
                 appendConsoleLog(`Batch ${batchId}: Ingestion and vision pipeline complete.`, "success");
+                updateGlobalBgUploadPill("Pipeline Complete!", 100, "All pairs verified.");
+                setTimeout(hideGlobalBgUploadPill, 4000);
             }
         } catch (pollErr) {
             console.warn("Ingestion status poll error:", pollErr);

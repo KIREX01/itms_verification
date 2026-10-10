@@ -1205,8 +1205,7 @@ function shareBlockedPlatesWhatsApp() {
         "",
         "_Please transfer these kits into warehouse stock in ITMS._"
     ];
-    const text = lines.join("
-");
+    const text = lines.join("\n");
     const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
     window.open(url, "_blank");
 }

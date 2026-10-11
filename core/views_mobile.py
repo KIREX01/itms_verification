@@ -15,7 +15,6 @@ from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from core.models import EvidenceImage, IngestionBatch, VehicleInstallationPair
@@ -35,6 +34,7 @@ def _get_client_ip(request: HttpRequest) -> str:
     return request.META.get("REMOTE_ADDR", "127.0.0.1")
 
 
+@require_GET
 def mobile_companion_view(request: HttpRequest) -> HttpResponse:
     """
     Renders the Mobile Web Companion touch UI for smartphones.
@@ -121,7 +121,7 @@ def api_mobile_ping(request: HttpRequest) -> JsonResponse:
     })
 
 
-@csrf_exempt
+@require_POST
 def api_mobile_disconnect(request: HttpRequest) -> JsonResponse:
     """Explicitly releases an active smartphone companion session."""
     device_id = request.POST.get("device_id") or request.GET.get("device_id", "")
@@ -191,7 +191,6 @@ def api_mobile_status(request: HttpRequest) -> JsonResponse:
     })
 
 
-@csrf_exempt
 @require_POST
 def api_mobile_upload(request: HttpRequest) -> JsonResponse:
     """
@@ -347,7 +346,6 @@ def api_mobile_upload(request: HttpRequest) -> JsonResponse:
     })
 
 
-@csrf_exempt
 @require_POST
 def api_mobile_new_batch(request: HttpRequest) -> JsonResponse:
     """
@@ -369,7 +367,6 @@ def api_mobile_new_batch(request: HttpRequest) -> JsonResponse:
     })
 
 
-@csrf_exempt
 @require_POST
 def api_mobile_uturn_finish(request: HttpRequest) -> JsonResponse:
     """

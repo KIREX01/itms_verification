@@ -3,10 +3,41 @@
  * Handles IndexedDB offline caching, camera capture, signal sensing, and background sync.
  */
 
+// Global CSRF token interceptor for mobile companion AJAX calls
+(function () {
+    const originalFetch = window.fetch;
+    window.fetch = function (resource, init) {
+        init = init || {};
+        const method = (init.method || "GET").toUpperCase();
+        if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+            const tokenMeta = document.querySelector('meta[name="csrf-token"]');
+            const token = tokenMeta ? tokenMeta.getAttribute("content") : "";
+            if (token) {
+                init.headers = init.headers || {};
+                if (init.headers instanceof Headers) {
+                    if (!init.headers.has("X-CSRFToken")) {
+                        init.headers.append("X-CSRFToken", token);
+                    }
+                } else if (Array.isArray(init.headers)) {
+                    if (!init.headers.some(h => h[0] === "X-CSRFToken")) {
+                        init.headers.push(["X-CSRFToken", token]);
+                    }
+                } else if (!init.headers["X-CSRFToken"]) {
+                    init.headers["X-CSRFToken"] = token;
+                }
+            }
+        }
+        return originalFetch.call(this, resource, init);
+    };
+})();
+
 function getOrCreateDeviceId() {
     let id = localStorage.getItem("itms_mobile_device_id");
     if (!id) {
-        id = "DEV-" + Date.now().toString(36).toUpperCase() + "-" + Math.random().toString(36).substring(2, 6).toUpperCase();
+        const randBytes = new Uint8Array(4);
+        window.crypto.getRandomValues(randBytes);
+        const hex = Array.from(randBytes, b => b.toString(16).padStart(2, "0")).join("").toUpperCase();
+        id = "DEV-" + Date.now().toString(36).toUpperCase() + "-" + hex;
         localStorage.setItem("itms_mobile_device_id", id);
     }
     return id;
@@ -29,8 +60,8 @@ function getDeviceName() {
 
 function getInitialUturnBatchIndex() {
     const saved = localStorage.getItem("itms_uturn_batch_index");
-    if (saved && !isNaN(parseInt(saved, 10))) {
-        return Math.max(1, parseInt(saved, 10));
+    if (saved && !Number.isNaN(Number.parseInt(saved, 10))) {
+        return Math.max(1, Number.parseInt(saved, 10));
     }
     return 1;
 }
@@ -222,8 +253,11 @@ async function pingServer() {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 2500);
 
-        const url = `/api/mobile/ping/?device_id=${encodeURIComponent(MobileState.deviceId)}&device_name=${encodeURIComponent(MobileState.deviceName)}&mode=${encodeURIComponent(MobileState.mode)}`;
-        const resp = await fetch(url, {
+        const pingUrl = new URL("/api/mobile/ping/", window.location.origin);
+        pingUrl.searchParams.set("device_id", MobileState.deviceId);
+        pingUrl.searchParams.set("device_name", MobileState.deviceName);
+        pingUrl.searchParams.set("mode", MobileState.mode);
+        const resp = await fetch(pingUrl.toString(), {
             method: "GET",
             cache: "no-store",
             signal: controller.signal
@@ -316,7 +350,7 @@ function hideDeviceLimitModal() {
 }
 
 function retryDeviceConnection() {
-    pingServer();
+    void pingServer();
 }
 
 async function disconnectDeviceSession() {
@@ -363,14 +397,16 @@ function setOnlineStatus(online, latency) {
 
     // Trigger auto-drain if transitioning back into Wi-Fi range
     if (wasOffline || (online && !MobileState.syncInProgress)) {
-        drainOutboxQueue();
+        void drainOutboxQueue();
     }
 }
 
 function startHeartbeat() {
-    pingServer();
+    void pingServer();
     if (MobileState.heartbeatTimer) clearInterval(MobileState.heartbeatTimer);
-    MobileState.heartbeatTimer = setInterval(pingServer, 3500);
+    MobileState.heartbeatTimer = setInterval(() => {
+        void pingServer();
+    }, 3500);
 }
 
 // ============================================================================
@@ -454,7 +490,9 @@ async function drainOutboxQueue() {
 
 function manualSyncOutbox(e) {
     if (e) e.stopPropagation();
-    pingServer().then(() => drainOutboxQueue());
+    pingServer().then(() => {
+        void drainOutboxQueue();
+    }).catch(() => {});
 }
 
 function updateUturnBatchIndicator() {
@@ -937,7 +975,7 @@ function handleStockBarcodeDetected(rawCode) {
     // Auto-sync immediately if enabled
     if (MobileState.stock.autoSync) {
         setTimeout(() => {
-            syncStockScansToServer();
+            void syncStockScansToServer();
         }, 150);
     }
 }
@@ -958,7 +996,7 @@ function toggleAutoSyncPreference(checkbox) {
     localStorage.setItem("itms_mobile_auto_sync", MobileState.stock.autoSync ? "true" : "false");
     showMobileToast(MobileState.stock.autoSync ? "⚡ Auto-Sync ON: Scans send to server instantly" : "⏸ Auto-Sync OFF: Scans stage in queue");
     if (MobileState.stock.autoSync && MobileState.stock.queue.length > 0) {
-        syncStockScansToServer();
+        void syncStockScansToServer();
     }
 }
 
@@ -1967,7 +2005,7 @@ function toggleOutboxDrawer() {
     } else {
         drawer.style.display = "block";
         tray.classList.add("open");
-        refreshOutboxCount();
+        void refreshOutboxCount();
     }
 }
 
@@ -2013,7 +2051,7 @@ function initMobileCompanion() {
         console.error("Error in updateUturnBatchIndicator:", e);
     }
     try {
-        refreshOutboxCount();
+        void refreshOutboxCount();
     } catch (e) {
         console.error("Error in refreshOutboxCount:", e);
     }

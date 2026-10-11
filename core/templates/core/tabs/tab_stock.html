@@ -30,11 +30,11 @@
 
             <!-- Universal Command Bar -->
             <div class="stock-command-bar">
-                <select id="stock-category-select" class="form-control" style="width: 130px; font-weight: 600;">
+                <select id="stock-category-select" class="form-control" style="width: 130px; font-weight: 600;" aria-label="Stock Category">
                     <option value="PSV">PSV White</option>
                     <option value="PMO">PMO Yellow</option>
                 </select>
-                <input type="text" id="stock-universal-scan" class="form-control" style="flex: 1;" placeholder="Scan barcode or type plate... (Press / to focus)" autocomplete="off">
+                <input type="text" id="stock-universal-scan" class="form-control" style="flex: 1;" placeholder="Scan barcode or type plate... (Press / to focus)" autocomplete="off" aria-label="Universal barcode scan or registration plate input">
                 <div class="stock-command-bar-actions">
                     <button class="btn btn-warning" id="btn-view-blocked-stock" onclick="openNotOnStockModal()" style="display: none; font-size: 0.85rem; font-weight: 700; align-items: center; gap: 4px;" title="View plates not on stock needing ITMS transfer">
                         ⚠️ Not On Stock (<span id="lbl-blocked-stock-count">0</span>)
@@ -110,14 +110,14 @@
                     </table>
                 </div>
                 <div class="table-pagination-bar" style="margin-top: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 0 0 0;">
-                    <select id="movement-type" class="form-control" style="width: 160px; font-size: 0.85rem;">
+                    <select id="movement-type" class="form-control" style="width: 160px; font-size: 0.85rem;" aria-label="Stock Movement Type">
                         <option value="DELIVERY">Inbound Delivery</option>
                         <option value="TRANSFER_IN">Bond Transfer In</option>
                         <option value="TRANSFER_OUT">Bond Transfer Out</option>
                         <option value="RETURN">Line Return</option>
                     </select>
-                    <input type="text" id="movement-partner" class="form-control" placeholder="Partner / Bond / Reason..." style="flex: 1; min-width: 150px; font-size: 0.85rem;">
-                    <input type="text" id="movement-ref" class="form-control" placeholder="Batch / Waybill..." style="width: 130px; font-size: 0.85rem;">
+                    <input type="text" id="movement-partner" class="form-control" placeholder="Partner / Bond / Reason..." style="flex: 1; min-width: 150px; font-size: 0.85rem;" aria-label="Movement Partner, Destination Bond, or Reason">
+                    <input type="text" id="movement-ref" class="form-control" placeholder="Batch / Waybill..." style="width: 130px; font-size: 0.85rem;" aria-label="Movement Batch or Waybill Reference">
                     <span id="lbl-movement-staged" class="badge badge-muted" style="font-size: 0.85rem; padding: 6px 10px;">Staged: 0 plates</span>
                     <button class="btn btn-success" onclick="commitMovement()" style="padding: 6px 14px; font-size: 0.85rem; font-weight: 700;">✓ Commit Movement</button>
                     <button class="btn btn-secondary" onclick="clearMovementStaged()" style="padding: 6px 12px; font-size: 0.85rem;">Clear Staged</button>
@@ -146,7 +146,7 @@
                 </div>
                 <div class="table-pagination-bar" style="margin-top: auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 0 0 0;">
                     <span id="audit-summary" style="font-weight: 700; flex: 1; font-size: 0.85rem; color: #fff;">Safe Audit Summary: Physical Audited: 0 │ Verified: 0 │ Unregistered: 0 │ Variance: 0</span>
-                    <input type="number" id="audit-manual-count" class="form-control" placeholder="Manual Count" style="width: 130px; font-size: 0.85rem;">
+                    <input type="number" id="audit-manual-count" class="form-control" placeholder="Manual Count" style="width: 130px; font-size: 0.85rem;" aria-label="Manual Physical Audit Count">
                     <button class="btn btn-primary" onclick="setManualAuditCount()" style="padding: 6px 12px; font-size: 0.85rem;">Set Count</button>
                     <button class="btn btn-danger" onclick="exportUnregistered()" style="padding: 6px 12px; font-size: 0.85rem;">Export Unregistered</button>
                 </div>
@@ -305,7 +305,7 @@
         </div>
         <div class="modal-body">
             <p style="font-size: 0.85rem; color: var(--ug-text-muted); margin: 0;">Paste a column of registration numbers from Excel below. The system will automatically parse them for the current mode (<span id="paste-mode-label" style="font-weight: bold; color: var(--ug-yellow);">DISPATCH</span>).</p>
-            <textarea id="stock-paste-area" class="form-control" style="height: 180px; width: 100%; font-family: monospace; font-size: 0.9rem;" placeholder="UMA 123A&#10;UMB 456B&#10;UMC 789C..."></textarea>
+            <textarea id="stock-paste-area" class="form-control" style="height: 180px; width: 100%; font-family: monospace; font-size: 0.9rem;" placeholder="UMA 123A&#10;UMB 456B&#10;UMC 789C..." aria-label="Registration numbers pasted from Excel"></textarea>
             
             <div id="paste-movement-warning" class="alert alert-warning" style="display: none; font-size: 0.85rem; padding: 10px; margin: 0;">
                 Note: In Movements mode, these plates will be ingested into your staged buffer. You can review them before clicking Commit.
@@ -403,12 +403,12 @@
                 </button>
             </div>
             <div class="form-group" style="margin-top: 4px;">
-                <label style="font-size: 0.85rem; font-weight: 600;">Opening Balance (PSV White)</label>
-                <input type="number" id="ledger-opening-psv" class="form-control" style="width: 100%;" oninput="updateTotalOpening()">
+                <label for="ledger-opening-psv" style="font-size: 0.85rem; font-weight: 600;">Opening Balance (PSV White)</label>
+                <input type="number" id="ledger-opening-psv" class="form-control" style="width: 100%;" oninput="updateTotalOpening()" aria-label="Opening Balance for PSV White">
             </div>
             <div class="form-group">
-                <label style="font-size: 0.85rem; font-weight: 600;">Opening Balance (PMO Yellow)</label>
-                <input type="number" id="ledger-opening-pmo" class="form-control" style="width: 100%;" oninput="updateTotalOpening()">
+                <label for="ledger-opening-pmo" style="font-size: 0.85rem; font-weight: 600;">Opening Balance (PMO Yellow)</label>
+                <input type="number" id="ledger-opening-pmo" class="form-control" style="width: 100%;" oninput="updateTotalOpening()" aria-label="Opening Balance for PMO Yellow">
             </div>
             <div style="padding: 8px 12px; background: rgba(255,255,255,0.03); border: 1px solid var(--ug-border); border-radius: var(--radius-md); font-size: 0.82rem; display: flex; justify-content: space-between;">
                 <span style="color: var(--ug-text-muted);">Total Combined Opening:</span>
@@ -416,12 +416,12 @@
             </div>
             <hr style="border: 0; border-top: 1px solid var(--ug-border); margin: 4px 0;">
             <div class="form-group">
-                <label style="font-size: 0.85rem; font-weight: 600;">Scheduled Target (Total)</label>
-                <input type="number" id="ledger-target-total" class="form-control" style="width: 100%;">
+                <label for="ledger-target-total" style="font-size: 0.85rem; font-weight: 600;">Scheduled Target (Total)</label>
+                <input type="number" id="ledger-target-total" class="form-control" style="width: 100%;" aria-label="Scheduled Target Total">
             </div>
             <div class="form-group">
-                <label style="font-size: 0.85rem; font-weight: 600;">Shift Handover Remarks</label>
-                <input type="text" id="ledger-remarks" class="form-control" style="width: 100%;" placeholder="e.g. Opening verified with Safe Room officer">
+                <label for="ledger-remarks" style="font-size: 0.85rem; font-weight: 600;">Shift Handover Remarks</label>
+                <input type="text" id="ledger-remarks" class="form-control" style="width: 100%;" placeholder="e.g. Opening verified with Safe Room officer" aria-label="Shift Handover Remarks">
             </div>
         </div>
         <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 8px;">

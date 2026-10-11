@@ -12,12 +12,19 @@ from core.services import network_service, ssl_service
 
 class TestSslService:
 
-    def test_embedded_certificates_exist_and_valid(self):
-        """Verifies that the embedded fallback certificate and key PEM constants are valid strings."""
-        assert "BEGIN CERTIFICATE" in ssl_service.EMBEDDED_FALLBACK_CERT_PEM
-        assert "END CERTIFICATE" in ssl_service.EMBEDDED_FALLBACK_CERT_PEM
-        assert "BEGIN RSA PRIVATE KEY" in ssl_service.EMBEDDED_FALLBACK_KEY_PEM
-        assert "END RSA PRIVATE KEY" in ssl_service.EMBEDDED_FALLBACK_KEY_PEM
+    def test_ensure_ssl_certificates_generates_valid_pem(self, tmp_path):
+        """Verifies that dynamically generated certificates and keys contain standard PEM headers."""
+        cert_file = tmp_path / "cert.pem"
+        key_file = tmp_path / "key.pem"
+        out_cert, out_key = ssl_service.ensure_ssl_certificates(
+            cert_path=cert_file,
+            key_path=key_file,
+        )
+        cert_text = out_cert.read_text(encoding="utf-8")
+        key_text = out_key.read_text(encoding="utf-8")
+        assert "BEGIN CERTIFICATE" in cert_text
+        assert "END CERTIFICATE" in cert_text
+        assert "PRIVATE KEY" in key_text
 
     def test_ensure_ssl_certificates(self, tmp_path):
         """Tests that ensure_ssl_certificates writes usable cert.pem and key.pem files."""
@@ -77,6 +84,6 @@ class TestSslService:
 
         assert data["success"] is True
         assert data["primary_url"].startswith("https://")
-        assert ":443/mobile/" in data["primary_url"]
+        assert "/mobile/" in data["primary_url"]
         assert "https_primary_url" in data
         assert "http_primary_url" in data

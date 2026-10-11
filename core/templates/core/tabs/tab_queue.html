@@ -116,7 +116,9 @@
                             <span id="qfront-timestamp" style="color:var(--ug-text-dim); font-size:0.75rem;">--:--:--</span>
                         </div>
                         <div class="evidence-viewport">
-                            <img id="qimg-front" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="Front vehicle" onerror="window.handlePhotoError('front')" onclick="openLightbox(this.src)">
+                            <button type="button" class="evidence-viewport-btn" onclick="openLightbox(document.getElementById('qimg-front').src)" aria-label="Enlarge front vehicle photo" style="background:none; border:none; padding:0; cursor:pointer; width:100%; height:100%; display:flex; align-items:center; justify-content:center;">
+                                <img id="qimg-front" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="Front vehicle" onerror="window.handlePhotoError('front')">
+                            </button>
                             <div class="viewport-placeholder" id="qfront-placeholder">📷 No front angle photo</div>
                             
                         </div>
@@ -133,7 +135,9 @@
                             <span id="qrear-timestamp" style="color:var(--ug-text-dim); font-size:0.75rem;">--:--:--</span>
                         </div>
                         <div class="evidence-viewport">
-                            <img id="qimg-rear" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="Rear vehicle" onerror="window.handlePhotoError('rear')" onclick="openLightbox(this.src)">
+                            <button type="button" class="evidence-viewport-btn" onclick="openLightbox(document.getElementById('qimg-rear').src)" aria-label="Enlarge rear vehicle photo" style="background:none; border:none; padding:0; cursor:pointer; width:100%; height:100%; display:flex; align-items:center; justify-content:center;">
+                                <img id="qimg-rear" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="Rear vehicle" onerror="window.handlePhotoError('rear')">
+                            </button>
                             <div class="viewport-placeholder" id="qrear-placeholder">📷 No rear angle photo</div>
                             
                         </div>

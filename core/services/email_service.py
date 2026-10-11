@@ -27,7 +27,7 @@ def generate_2fa_code() -> str:
 
 def _sanitize_log_str(val: str, max_len: int = 100) -> str:
     """Sanitizes strings before logging to prevent CRLF log injection (CWE-117)."""
-    return re.sub(r"[\r\n\x00-\x1f]", "", str(val or "")).strip()[:max_len]
+    return re.sub(r"[\x00-\x1f]", "", str(val or "")).strip()[:max_len]
 
 
 def get_resend_api_key() -> str:

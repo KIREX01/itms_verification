@@ -600,7 +600,8 @@ class OrderSyncService:
 
         search_val = plate_or_code or ""
         page = 1
-        limit_pages = 1 if plate_or_code else max_pages
+        safe_max_pages = max(1, min(int(max_pages or 50), 100))
+        limit_pages = 1 if plate_or_code else safe_max_pages
 
         while page <= limit_pages:
             fetch_res = self.client.fetch_installation_kits(

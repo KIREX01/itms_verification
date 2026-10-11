@@ -87,25 +87,25 @@
                 </div>
 
                 <div class="header-badges desktop-badges">
-                    <span class="badge badge-green" id="header-submission-indicator" onclick="reopenSubmissionModal()" style="display:none; cursor:pointer; font-weight:800;">
+                    <button type="button" class="badge badge-green" id="header-submission-indicator" onclick="reopenSubmissionModal()" style="display:none; cursor:pointer; font-weight:800; font-family:inherit;">
                         🚀 <span id="header-submission-text">Submitting...</span>
-                    </span>
-                    <span class="badge badge-yellow" id="header-itms-badge" onclick="switchNavTab(2)" style="cursor:pointer;">
+                    </button>
+                    <button type="button" class="badge badge-yellow" id="header-itms-badge" onclick="switchNavTab(2)" style="cursor:pointer; font-family:inherit;">
                         ● Disconnected
-                    </span>
+                    </button>
                     <a href="{% if is_mobile_device %}{% url 'core:mobile_companion' %}?view=mobile{% else %}javascript:void(0){% endif %}"
                        class="badge {% if is_mobile_device %}badge-yellow{% else %}badge-secondary{% endif %}"
                        id="header-device-mode-badge"
-                       style="text-decoration:none; cursor:{% if is_mobile_device %}pointer{% else %}default{% endif %};"
+                       style="text-decoration:none; cursor:{% if is_mobile_device %}pointer{% else %}default{% endif %}; font-family:inherit;"
                        title="Client Station: {% if is_mobile_device %}Smartphone Capture Station (Tap for Camera UI){% else %}Supervisor Console (Laptop/Desktop){% endif %}">
                         {% if is_mobile_device %}📱 Mobile Station{% else %}💻 Supervisor Station{% endif %}
                     </a>
-                    <span class="badge" id="header-mobile-badge" onclick="openMobileConnectModal()" style="cursor:pointer; background:rgba(2,132,199,0.2); color:#7dd3fc; border:1px solid rgba(2,132,199,0.4);">
+                    <button type="button" class="badge" id="header-mobile-badge" onclick="openMobileConnectModal()" style="cursor:pointer; background:rgba(2,132,199,0.2); color:#7dd3fc; border:1px solid rgba(2,132,199,0.4); font-family:inherit;">
                         📱 Mobile (0/2)
-                    </span>
-                    <span class="badge {% if dry_run %}badge-yellow{% else %}badge-red{% endif %}" id="header-dryrun-badge" onclick="toggleDryRun()" style="cursor:pointer;">
+                    </button>
+                    <button type="button" class="badge {% if dry_run %}badge-yellow{% else %}badge-red{% endif %}" id="header-dryrun-badge" onclick="toggleDryRun()" style="cursor:pointer; font-family:inherit;">
                         {% if dry_run %}● Dry Run{% else %}● Live{% endif %}
-                    </span>
+                    </button>
                 </div>
             </div>
 

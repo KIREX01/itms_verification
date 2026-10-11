@@ -1124,7 +1124,7 @@ async function saveLedgerTargets() {
 
         closeLedgerTargetModal();
         notify('✓ Shift opening balances & target saved successfully!', 'success');
-        refreshStockLedger();
+        await refreshStockLedger();
     } catch (e) {
         notify(`Failed to save targets: ${e.message}`, 'error');
     }
@@ -1149,7 +1149,7 @@ async function syncStock() {
 
         if (data.success) {
             notify('✓ Unified ITMS sync complete!', 'success');
-            refreshStockLedger();
+            await refreshStockLedger();
         } else {
             notify(`Sync warning: ${data.error || 'Server error'}`, 'warning');
         }
@@ -1380,7 +1380,7 @@ async function navigateStockDay(direction) {
         const d = parseDateSuffix(currentStockDateSuffix);
         d.setDate(d.getDate() + (direction === 'prev' ? -1 : 1));
         currentStockDateSuffix = formatDateSuffix(d);
-        refreshStockLedger();
+        await refreshStockLedger();
         return;
     }
 
@@ -1399,18 +1399,18 @@ async function navigateStockDay(direction) {
             else currentStockDateSuffix = '';
         }
     }
-    refreshStockLedger();
+    await refreshStockLedger();
 }
 
 function stockPrevDay() {
-    navigateStockDay('prev');
+    void navigateStockDay('prev');
 }
 
 function stockNextDay() {
-    navigateStockDay('next');
+    void navigateStockDay('next');
 }
 
 function stockToday() {
     currentStockDateSuffix = '';
-    refreshStockLedger();
+    void refreshStockLedger();
 }

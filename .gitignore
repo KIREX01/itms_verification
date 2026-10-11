@@ -38,4 +38,9 @@ itms_bond_stock_*.csv
 Screenshot*.png
 sample_data/AGM*
 sample_data/*STOCK*
+cert.key
+cert.crt
+*.key
+*.pem
+secure/ssl/
 

@@ -10,6 +10,7 @@ Handles:
 import hashlib
 import logging
 import os
+import re
 import shutil
 import uuid
 from datetime import date, datetime
@@ -28,6 +29,11 @@ logger = logging.getLogger(__name__)
 
 VALID_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
 HASH_CHUNK_SIZE = 1024 * 1024
+
+
+def _sanitize_log_str(val: str, max_len: int = 100) -> str:
+    """Sanitizes strings before logging to prevent CRLF log injection (CWE-117)."""
+    return re.sub(r"[\x00-\x1f]", "", str(val or "")).strip()[:max_len]
 
 
 def _resolve_batch_email(account_email: str, user: Optional[Any]) -> str:
@@ -708,7 +714,7 @@ def get_or_create_mobile_batch(
             if linked_img and linked_img.batch and linked_img.batch.source_type == IngestionBatch.SourceType.MOBILE:
                 logger.info(
                     "Pair affinity: Binding bike '%s' to existing batch %s (%d photos)",
-                    clean_bike_id, linked_img.batch.batch_id, linked_img.batch.ingested_count
+                    _sanitize_log_str(clean_bike_id), linked_img.batch.batch_id, linked_img.batch.ingested_count
                 )
                 return linked_img.batch
 
@@ -786,7 +792,7 @@ def get_or_create_uturn_batch(
         source_type=IngestionBatch.SourceType.MOBILE,
         source_label=label,
     )
-    logger.info("Created distinct Off-Conveyor U-Turn batch: %s (%s)", new_batch.batch_id, label)
+    logger.info("Created distinct Off-Conveyor U-Turn batch: %s (%s)", new_batch.batch_id, _sanitize_log_str(label))
     return new_batch
 
 

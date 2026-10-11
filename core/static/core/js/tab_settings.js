@@ -433,7 +433,7 @@ function toggleDeveloperSettingsMode(chk) {
     if (devContainer) {
         devContainer.style.display = chk.checked ? "block" : "none";
     }
-    updateSetting("system.developer_mode", chk.checked);
+    void updateSetting("system.developer_mode", chk.checked);
 }
 
 async function browseGenericPath(inputId, type, title, settingKey) {
@@ -460,7 +460,7 @@ async function browseGenericPath(inputId, type, title, settingKey) {
                 input.value = data.selected_path;
             }
             if (settingKey) {
-                updateSetting(settingKey, data.selected_path);
+                await updateSetting(settingKey, data.selected_path);
             }
         } else if (data.canceled) {
             // canceled

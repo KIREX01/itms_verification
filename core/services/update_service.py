@@ -123,12 +123,25 @@ class UpdateService:
                     published = payload.get("published_at", "")
                     zip_url = payload.get("zipball_url", "")
 
-                    # Check for attached release zip asset
+                    # Check for attached platform-specific release asset (Windows vs Linux)
                     assets = payload.get("assets", [])
+                    matched_asset = None
+                    generic_asset = None
                     for asset in assets:
-                        if asset.get("name", "").endswith(".zip"):
-                            zip_url = asset.get("browser_download_url", zip_url)
+                        aname = asset.get("name", "").lower()
+                        if sys.platform == "win32" and ("-windows.zip" in aname or "windows" in aname and aname.endswith(".zip")):
+                            matched_asset = asset.get("browser_download_url")
                             break
+                        elif sys.platform != "win32" and ("-linux" in aname or "ubuntu" in aname):
+                            matched_asset = asset.get("browser_download_url")
+                            break
+                        elif aname.endswith((".zip", ".tar.gz")):
+                            generic_asset = asset.get("browser_download_url")
+
+                    if matched_asset:
+                        zip_url = matched_asset
+                    elif generic_asset:
+                        zip_url = generic_asset
 
                     newer = is_newer_version(tag_name, __version__)
 

@@ -15,6 +15,7 @@ media/*.bak
 *.log
 *.bak
 *.pt
+dist/
 .pytest_cache/
 .DS_Store
 staticfiles/

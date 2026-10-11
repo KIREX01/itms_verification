@@ -21,6 +21,7 @@ from django.db import IntegrityError
 from django.utils import timezone
 
 from core.models import EvidenceImage, IngestionBatch
+from core.services import platform_service
 from core.vision.plate_enhancer import enhance_whole_image
 
 logger = logging.getLogger(__name__)
@@ -85,17 +86,26 @@ def get_vault_root() -> Path:
     """
     from core.services import config_service
     configured_path = config_service.get_setting("storage.vault_path", None)
+    media_dir = Path(getattr(settings, "MEDIA_ROOT", Path(__file__).resolve().parent.parent.parent / "media"))
+    vault_subdir = getattr(settings, "VAULT_SUBDIR", "vault")
+
     if configured_path and isinstance(configured_path, (str, Path)) and configured_path not in ("media/vault", "media\\vault"):
-        p = Path(configured_path)
-        if not p.is_absolute():
-            base = getattr(settings, "BASE_DIR", None) or Path(__file__).resolve().parent.parent.parent
-            p = (Path(base) / p).resolve()
+        raw_str = str(configured_path).strip()
+        # Cross-platform sanity: ignore POSIX root paths when running on Windows, and Windows drive paths on Linux
+        if platform_service.IS_WINDOWS and raw_str.startswith(("/opt", "/var", "/usr", "/home")):
+            p = media_dir / vault_subdir
+        elif platform_service.IS_POSIX and (":" in raw_str or "\\" in raw_str):
+            p = media_dir / vault_subdir
+        else:
+            p = Path(configured_path)
+            if not p.is_absolute():
+                base = getattr(settings, "BASE_DIR", None) or Path(__file__).resolve().parent.parent.parent
+                p = (Path(base) / p).resolve()
     else:
-        media_dir = Path(getattr(settings, "MEDIA_ROOT", Path(__file__).resolve().parent.parent.parent / "media"))
-        vault_subdir = getattr(settings, "VAULT_SUBDIR", "vault")
         p = Path(getattr(settings, "VAULT_ROOT", media_dir / vault_subdir))
 
     p.mkdir(parents=True, exist_ok=True)
+    platform_service.safe_chmod(p, 0o755)
     try:
         settings.VAULT_ROOT = p
     except Exception:
@@ -149,13 +159,19 @@ def resolve_vault_path(rel_or_abs: Union[str, Path]) -> Path:
 
     # Candidate resolution within allowed roots
     candidates = []
-    # Check 1: strip 'vault/' prefix if path has it
-    if clean_str.startswith("vault/"):
+    # Check 1: strip 'media/vault/' or 'vault/' prefix if path has it
+    if clean_str.startswith("media/vault/"):
+        sub = clean_str[12:].lstrip("/")
+        candidates.append((vault_root / sub, vault_root))
+    elif clean_str.startswith("vault/"):
         sub = clean_str[6:].lstrip("/")
         candidates.append((vault_root / sub, vault_root))
     # Check 2: direct in active vault root
     candidates.append((vault_root / clean_str, vault_root))
     # Check 3: fallback to Django settings.MEDIA_ROOT
+    if clean_str.startswith("media/"):
+        sub = clean_str[6:].lstrip("/")
+        candidates.append((media_root / sub, media_root))
     candidates.append((media_root / clean_str, media_root))
 
     for candidate, base_dir in candidates:
@@ -197,6 +213,7 @@ def get_batch_vault_dir(batch: Optional[IngestionBatch] = None) -> Path:
         target_dir = vault_root / today_str
 
     target_dir.mkdir(parents=True, exist_ok=True)
+    platform_service.safe_chmod(target_dir, 0o755)
     return target_dir
 
 
@@ -414,11 +431,8 @@ def ingest_from_disk(
     vault_abs_path = target_dir / vault_filename
     shutil.copy2(path, vault_abs_path)
 
-    try:
-        os.chmod(target_dir, 0o755)
-        os.chmod(vault_abs_path, 0o644)
-    except Exception:
-        pass
+    platform_service.safe_chmod(target_dir, 0o755)
+    platform_service.safe_chmod(vault_abs_path, 0o644)
 
     # Enhance the vault copy in-place: autocontrast, dynamic contrast,
     # saturation boost, sharpness, brightness normalization.
@@ -564,11 +578,8 @@ def ingest_uploaded_file(
         for chunk in uploaded_file.chunks():
             dest.write(chunk)
 
-    try:
-        os.chmod(target_dir, 0o755)
-        os.chmod(vault_abs_path, 0o644)
-    except Exception:
-        pass
+    platform_service.safe_chmod(target_dir, 0o755)
+    platform_service.safe_chmod(vault_abs_path, 0o644)
 
     # Enhance the vault copy in-place: autocontrast, dynamic contrast,
     # saturation boost, sharpness, brightness normalization.

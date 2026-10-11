@@ -23,6 +23,7 @@ from pathlib import Path
 
 # Always execute with working directory set to the project root
 PROJECT_ROOT = Path(__file__).resolve().parent
+MANAGE_PY = "manage.py"
 os.chdir(PROJECT_ROOT)
 sys.path.insert(0, str(PROJECT_ROOT))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "itms_project.settings")
@@ -116,7 +117,7 @@ def launch_web(extra_args=None, port=443):
         from django.core.management import execute_from_command_line
 
         cmd = [
-            "manage.py", "run_web", "--noreload",
+            MANAGE_PY, "run_web", "--noreload",
             "--port", str(port),
             "--ssl-port", str(port),
         ]
@@ -183,7 +184,7 @@ def start_daemon(extra_args=None, port=443):
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "itms_web.log"
 
-    cmd = [py_exe, "-u", str(PROJECT_ROOT / "manage.py"), "run_web", "--noreload"]
+    cmd = [py_exe, "-u", str(PROJECT_ROOT / MANAGE_PY), "run_web", "--noreload"]
     if extra_args:
         cmd.extend(extra_args)
 
@@ -368,7 +369,7 @@ def run_clear_data(args=None):
         import django
         django.setup()
         from django.core.management import execute_from_command_line
-        execute_from_command_line(["manage.py", "clear_data"] + cleaned_args)
+        execute_from_command_line([MANAGE_PY, "clear_data"] + cleaned_args)
     except Exception as exc:
         print(f"[!] Error during clear_data: {exc}")
 
@@ -381,7 +382,7 @@ def launch_tui(extra_args=None):
         django.setup()
         from django.core.management import execute_from_command_line
 
-        cmd = ["manage.py", "run_tui"]
+        cmd = [MANAGE_PY, "run_tui"]
         if extra_args:
             cmd.extend(extra_args)
         execute_from_command_line(cmd)
@@ -609,7 +610,7 @@ def run_manage(args):
     import django
     django.setup()
     from django.core.management import execute_from_command_line
-    execute_from_command_line(["manage.py"] + args)
+    execute_from_command_line([MANAGE_PY] + args)
 
 
 def main():

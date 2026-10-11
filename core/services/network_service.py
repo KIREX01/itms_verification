@@ -202,7 +202,7 @@ def _apply_cloud_request_context(
             return None
 
         is_secure_conn = request.is_secure() or (request.META.get("HTTP_X_FORWARDED_PROTO") == "https")
-        cloud_scheme = "https" if (is_secure_conn or use_https) else "https"
+        cloud_scheme = "https" if (is_secure_conn or use_https) else "http"
         cloud_url = f"{cloud_scheme}://{req_host}/mobile/"
         badge = f"Cloud Server ({req_host})"
         desc = "Connected via Cloud VPS. Accessible anywhere over cellular (4G/5G) or Wi-Fi — no shared local network needed!"

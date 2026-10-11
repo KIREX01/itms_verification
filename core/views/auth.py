@@ -16,6 +16,8 @@ from core.services import auth_service, device_service, email_service
 
 logger = logging.getLogger(__name__)
 
+SIGNUP_VERIFY_TEMPLATE = "core/signup_verify.html"
+
 
 def _redirect_after_auth(request: HttpRequest, next_url: str = "") -> HttpResponse:
     """
@@ -33,13 +35,16 @@ def _redirect_after_auth(request: HttpRequest, next_url: str = "") -> HttpRespon
     return redirect("core:dashboard")
 
 
-def login_view(request: HttpRequest) -> HttpResponse:
-    """Operator Sign In view."""
+def _resolve_safe_next_url(request: HttpRequest) -> str:
     raw_next = request.GET.get("next") or request.POST.get("next") or ""
     if raw_next and url_has_allowed_host_and_scheme(raw_next, allowed_hosts={request.get_host()}):
-        next_url = raw_next
-    else:
-        next_url = "/"
+        return raw_next
+    return "/"
+
+
+def login_view(request: HttpRequest) -> HttpResponse:
+    """Operator Sign In view."""
+    next_url = _resolve_safe_next_url(request)
 
     if request.user.is_authenticated:
         return _redirect_after_auth(request, next_url)
@@ -74,6 +79,21 @@ def login_view(request: HttpRequest) -> HttpResponse:
     })
 
 
+def _validate_signup_fields(username: str, email: str, password: str, password_confirm: str) -> Optional[str]:
+    """Validates operator registration credentials."""
+    if not username:
+        return "Username is required."
+    if not email:
+        return "A valid work email is required for two-factor authentication."
+    if not password:
+        return "Password is required."
+    if password != password_confirm:
+        return "Passwords do not match."
+    if len(password) < 8:
+        return "Password must be at least 8 characters."
+    return None
+
+
 def signup_view(request: HttpRequest) -> HttpResponse:
     """Operator Registration / Onboarding view with 2FA email verification."""
     if request.user.is_authenticated:
@@ -86,30 +106,10 @@ def signup_view(request: HttpRequest) -> HttpResponse:
         password = request.POST.get("password", "").strip()
         password_confirm = request.POST.get("password_confirm", "").strip()
 
-        # Validation
-        if not username:
+        err_msg = _validate_signup_fields(username, email, password, password_confirm)
+        if err_msg:
             return render(request, "core/signup.html", {
-                "error": "Username is required.",
-                "form_data": request.POST,
-            })
-        if not email:
-            return render(request, "core/signup.html", {
-                "error": "A valid work email is required for two-factor authentication.",
-                "form_data": request.POST,
-            })
-        if not password:
-            return render(request, "core/signup.html", {
-                "error": "Password is required.",
-                "form_data": request.POST,
-            })
-        if password != password_confirm:
-            return render(request, "core/signup.html", {
-                "error": "Passwords do not match.",
-                "form_data": request.POST,
-            })
-        if len(password) < 8:
-            return render(request, "core/signup.html", {
-                "error": "Password must be at least 8 characters.",
+                "error": err_msg,
                 "form_data": request.POST,
             })
 
@@ -155,6 +155,44 @@ def signup_view(request: HttpRequest) -> HttpResponse:
     return render(request, "core/signup.html", {"form_data": {}})
 
 
+def _process_signup_resend(request: HttpRequest, pending: dict, email: str, username: str) -> HttpResponse:
+    """Handles rate-limited resending of the 2FA registration code."""
+    last_sent = pending.get("last_sent_at", 0)
+    now = time.time()
+    if now - last_sent < 30:
+        wait_sec = int(30 - (now - last_sent))
+        return render(request, SIGNUP_VERIFY_TEMPLATE, {
+            "email": email,
+            "error": f"Please wait {wait_sec} seconds before requesting a new code.",
+        })
+
+    new_code = email_service.generate_2fa_code()
+    pending["code"] = new_code
+    pending["expires_at"] = now + 600
+    pending["last_sent_at"] = now
+    request.session["pending_signup"] = pending
+    request.session.modified = True
+
+    ok, msg = email_service.send_2fa_verification_code(email, new_code, username=username)
+    return render(request, SIGNUP_VERIFY_TEMPLATE, {
+        "email": email,
+        "message": "A new 6-digit security code has been sent to your email.",
+        "error": "" if ok else msg,
+    })
+
+
+def _validate_submitted_otp(submitted_code: str, pending: dict) -> Optional[str]:
+    """Validates expiry and matches of submitted verification code."""
+    expected_code = str(pending.get("code", "")).strip()
+    expires_at = pending.get("expires_at", 0)
+
+    if time.time() > expires_at:
+        return "This verification code has expired. Please click 'Resend Code'."
+    if submitted_code != expected_code:
+        return "Invalid verification code. Please check your inbox or spam folder."
+    return None
+
+
 def signup_verify_view(request: HttpRequest) -> HttpResponse:
     """Verifies the 6-digit email 2FA code before activating operator account."""
     if request.user.is_authenticated:
@@ -171,46 +209,15 @@ def signup_verify_view(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         action = request.POST.get("action", "").strip()
 
-        # Handle Resend Code request
         if action == "resend":
-            last_sent = pending.get("last_sent_at", 0)
-            now = time.time()
-            if now - last_sent < 30:
-                wait_sec = int(30 - (now - last_sent))
-                return render(request, "core/signup_verify.html", {
-                    "email": email,
-                    "error": f"Please wait {wait_sec} seconds before requesting a new code.",
-                })
+            return _process_signup_resend(request, pending, email, username)
 
-            new_code = email_service.generate_2fa_code()
-            pending["code"] = new_code
-            pending["expires_at"] = now + 600
-            pending["last_sent_at"] = now
-            request.session["pending_signup"] = pending
-            request.session.modified = True
-
-            ok, msg = email_service.send_2fa_verification_code(email, new_code, username=username)
-            return render(request, "core/signup_verify.html", {
-                "email": email,
-                "message": "A new 6-digit security code has been sent to your email.",
-                "error": "" if ok else msg,
-            })
-
-        # Handle Verification Code submission
         submitted_code = request.POST.get("code", "").strip()
-        expected_code = str(pending.get("code", "")).strip()
-        expires_at = pending.get("expires_at", 0)
-
-        if time.time() > expires_at:
-            return render(request, "core/signup_verify.html", {
+        otp_err = _validate_submitted_otp(submitted_code, pending)
+        if otp_err:
+            return render(request, SIGNUP_VERIFY_TEMPLATE, {
                 "email": email,
-                "error": "This verification code has expired. Please click 'Resend Code'.",
-            })
-
-        if submitted_code != expected_code:
-            return render(request, "core/signup_verify.html", {
-                "email": email,
-                "error": "Invalid verification code. Please check your inbox or spam folder.",
+                "error": otp_err,
             })
 
         # Code is valid! Create the operator account in the database
@@ -222,7 +229,7 @@ def signup_verify_view(request: HttpRequest) -> HttpResponse:
         )
 
         if user is None:
-            return render(request, "core/signup_verify.html", {
+            return render(request, SIGNUP_VERIFY_TEMPLATE, {
                 "email": email,
                 "error": err,
             })
@@ -235,7 +242,7 @@ def signup_verify_view(request: HttpRequest) -> HttpResponse:
         messages.success(request, "Email verified successfully! Welcome to ITMS Verification Copilot.")
         return _redirect_after_auth(request)
 
-    return render(request, "core/signup_verify.html", {
+    return render(request, SIGNUP_VERIFY_TEMPLATE, {
         "email": email,
     })
 

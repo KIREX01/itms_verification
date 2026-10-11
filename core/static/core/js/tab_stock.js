@@ -198,13 +198,13 @@ async function handleUniversalScan(rawVal) {
     if (currentStockMode === 'dispatch') {
         await submitDispatch([val]);
     } else if (currentStockMode === 'movements') {
-        void stageMovementsPlates([val]);
-        void inspectPlate(val);
+        stageMovementsPlates([val]);
+        await inspectPlate(val);
     } else if (currentStockMode === 'audit') {
         await submitAudit([val]);
     } else {
         // Ledger mode - inspect plate
-        void inspectPlate(val);
+        await inspectPlate(val);
     }
 }
 

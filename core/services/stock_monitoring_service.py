@@ -55,6 +55,8 @@ from core.vision import normalizer
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_SPIRO_BOND_NAME = "AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)"
+
 
 def extract_single_plate(text: Any) -> Optional[str]:
     """
@@ -1837,72 +1839,47 @@ def export_blocked_kits_csv(
     return file_path, filename, len(clean_plates)
 
 
-def get_stock_transfer_request_docket(
-    target_date_suffix: Optional[str] = None,
-    blocked_plates: Optional[Iterable[str]] = None,
-    reason: str = "Not on ITMS stock / missing from Safe Room",
+def _classify_docket_item(
+    idx: int,
+    p: str,
+    kit: Optional[Any],
+    installed_orders: set[str],
+    default_reason: str,
 ) -> Dict[str, Any]:
-    """
-    Generates a structured ITMS Stock Transfer & Provisioning Docket for plates that
-    are NOT on stock or were rejected during dispatch verification.
-    Provides:
-    - raw_plates: newline-separated plate numbers ready for bulk ITMS import / search.
-    - formatted_message: formal text docket ready to copy/share directly with ITMS Transfer Manager.
-    - items: array of detailed plate records with status and action instructions.
-    - count: total rejected plate count.
-    """
-    work_d, suffix = resolve_date_and_suffix(target_date_suffix)
-    if blocked_plates is None:
-        blocked_plates = get_blocked_plates_for_date(suffix)
-    clean_plates = parse_plate_input(blocked_plates)
+    """Classifies an individual unstocked plate for the provisioning docket."""
+    category = "PMO" if "PMO" in p.upper() else "PSV"
+    if p in installed_orders or (kit and (kit.status or "").lower() in ("installed", "archived")):
+        status = "ALREADY_INSTALLED"
+        item_reason = "Already installed / archived on an order"
+    elif kit and (kit.status or "").lower() == "new":
+        status = "AWAITING_ALLOCATION"
+        item_reason = f"Kit exists in {kit.warehouse or 'Safe Room'} - awaiting MVR allocation"
+    else:
+        status = "NOT_ON_STOCK"
+        item_reason = default_reason
 
-    active_bond = bond_service.get_active_bond()
-    warehouse = active_bond.get("name", "AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)")
-    active_code = active_bond.get("code", "AGM")
-    now_str = timezone.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    target_codes = [f"IK-{p}" for p in clean_plates]
-    known_kits = {
-        k.registration_number: k
-        for k in InstallationKit.objects.filter(
-            Q(registration_number__in=clean_plates) | Q(kit_code__in=target_codes)
-        )
+    return {
+        "index": idx,
+        "plate": p,
+        "category": category,
+        "status": status,
+        "reason": item_reason,
+        "action": "Set Box Aside",
     }
 
-    installed_orders = set(
-        InstallationOrder.objects.filter(
-            registration_number__in=clean_plates,
-        ).filter(Q(is_archived=True) | Q(order_status__iexact="Installed")).values_list("registration_number", flat=True)
-    )
 
-    items = []
-    for idx, p in enumerate(clean_plates, start=1):
-        kit = known_kits.get(p) or known_kits.get(f"IK-{p}")
-        category = "PMO" if "PMO" in p.upper() else "PSV"
-
-        if p in installed_orders or (kit and (kit.status or "").lower() in ("installed", "archived")):
-            status = "ALREADY_INSTALLED"
-            item_reason = "Already installed / archived on an order"
-        elif kit and (kit.status or "").lower() == "new":
-            status = "AWAITING_ALLOCATION"
-            item_reason = f"Kit exists in {kit.warehouse or 'Safe Room'} - awaiting MVR allocation"
-        else:
-            status = "NOT_ON_STOCK"
-            item_reason = reason
-
-        items.append({
-            "index": idx,
-            "plate": p,
-            "category": category,
-            "status": status,
-            "reason": item_reason,
-            "action": "Set Box Aside",
-        })
-
-    raw_plates = "\n".join(clean_plates)
-    count = len(clean_plates)
-
-    docket_lines = [
+def _build_docket_formatted_text(
+    warehouse: str,
+    active_code: str,
+    work_d: Any,
+    suffix: str,
+    now_str: str,
+    count: int,
+    items: list[dict[str, Any]],
+    raw_plates: str,
+) -> str:
+    """Builds human-readable transfer request message text."""
+    lines = [
         "==================================================",
         "ITMS STOCK TRANSFER & REGISTRATION REQUEST",
         f"Facility: {warehouse} (Code: {active_code})",
@@ -1923,11 +1900,11 @@ def get_stock_transfer_request_docket(
 
     if items:
         for it in items:
-            docket_lines.append(f"  {it['index']:2d}. {it['plate']:<10} [{it['category']}] - {it['reason']}")
+            lines.append(f"  {it['index']:2d}. {it['plate']:<10} [{it['category']}] - {it['reason']}")
     else:
-        docket_lines.append("  [None - All submitted plates are currently in stock]")
+        lines.append("  [None - All submitted plates are currently in stock]")
 
-    docket_lines.extend([
+    lines.extend([
         "",
         "--------------------------------------------------",
         "RAW PLATES FOR BULK ITMS TRANSFER / SEARCH:",
@@ -1938,8 +1915,57 @@ def get_stock_transfer_request_docket(
         "* Verified by: ITMS Verification Copilot (Dispatch Stock Guard)",
         "==================================================",
     ])
+    return "\n".join(lines)
 
-    formatted_message = "\n".join(docket_lines)
+
+def get_stock_transfer_request_docket(
+    target_date_suffix: Optional[str] = None,
+    blocked_plates: Optional[Iterable[str]] = None,
+    reason: str = "Not on ITMS stock / missing from Safe Room",
+) -> Dict[str, Any]:
+    """
+    Generates a structured ITMS Stock Transfer & Provisioning Docket for plates that
+    are NOT on stock or were rejected during dispatch verification.
+    Provides:
+    - raw_plates: newline-separated plate numbers ready for bulk ITMS import / search.
+    - formatted_message: formal text docket ready to copy/share directly with ITMS Transfer Manager.
+    - items: array of detailed plate records with status and action instructions.
+    - count: total rejected plate count.
+    """
+    work_d, suffix = resolve_date_and_suffix(target_date_suffix)
+    if blocked_plates is None:
+        blocked_plates = get_blocked_plates_for_date(suffix)
+    clean_plates = parse_plate_input(blocked_plates)
+
+    active_bond = bond_service.get_active_bond()
+    warehouse = active_bond.get("name", DEFAULT_SPIRO_BOND_NAME)
+    active_code = active_bond.get("code", "AGM")
+    now_str = timezone.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    target_codes = [f"IK-{p}" for p in clean_plates]
+    known_kits = {
+        k.registration_number: k
+        for k in InstallationKit.objects.filter(
+            Q(registration_number__in=clean_plates) | Q(kit_code__in=target_codes)
+        )
+    }
+
+    installed_orders = set(
+        InstallationOrder.objects.filter(
+            registration_number__in=clean_plates,
+        ).filter(Q(is_archived=True) | Q(order_status__iexact="Installed")).values_list("registration_number", flat=True)
+    )
+
+    items = []
+    for idx, p in enumerate(clean_plates, start=1):
+        kit = known_kits.get(p) or known_kits.get(f"IK-{p}")
+        items.append(_classify_docket_item(idx, p, kit, installed_orders, reason))
+
+    raw_plates = "\n".join(clean_plates)
+    count = len(clean_plates)
+    formatted_message = _build_docket_formatted_text(
+        warehouse, active_code, work_d, suffix, now_str, count, items, raw_plates
+    )
 
     return {
         "success": True,
@@ -2185,7 +2211,7 @@ def generate_category_csv_content(category: str, target_date_suffix: Optional[st
 
     active_bond = bond_service.get_active_bond()
     active_code = active_bond.get("code", "AGM")
-    active_name = active_bond.get("name", "AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)")
+    active_name = active_bond.get("name", DEFAULT_SPIRO_BOND_NAME)
 
     out = io.StringIO()
     writer = csv.writer(out)
@@ -2477,7 +2503,7 @@ def reconcile_and_update_shift(
     formatted_date = format_date_suffix_readable(suffix)
     active_bond = bond_service.get_active_bond()
     active_bond_code = active_bond.get("code", "AGM")
-    active_bond_name = active_bond.get("name", "AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)")
+    active_bond_name = active_bond.get("name", DEFAULT_SPIRO_BOND_NAME)
 
     new_dispatches_count = 0
     new_returns_count = 0

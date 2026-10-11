@@ -324,6 +324,8 @@ def api_vault_folder(request: HttpRequest) -> JsonResponse:
     pics_vault = (Path.home() / "Pictures" / "ITMS_Vault").resolve()
 
     if request.method == "POST":
+        if not request.user.is_authenticated:
+            return JsonResponse({"success": False, "error": "Authentication required."}, status=401)
         if not is_admin:
             return JsonResponse({"success": False, "error": "Evidence vault folder configuration is restricted to the TUI console."}, status=403)
         new_path_raw = ""
@@ -342,7 +344,13 @@ def api_vault_folder(request: HttpRequest) -> JsonResponse:
         if not new_path_raw:
             return JsonResponse({"success": False, "error": "Folder path cannot be empty."}, status=400)
 
-        # Handle 'default' keyword
+        if is_prohibited_system_directory(Path(new_path_raw)):
+            return JsonResponse({
+                "success": False,
+                "error": "Specified folder cannot be used as an Evidence Vault because it is a protected system directory."
+            }, status=400)
+
+        # Handle presets and safe custom vault paths
         if new_path_raw.lower() in ("default", "media/vault", "media\\vault"):
             target_path = default_vault
         elif new_path_raw.lower() in ("documents", "docs"):
@@ -350,19 +358,17 @@ def api_vault_folder(request: HttpRequest) -> JsonResponse:
         elif new_path_raw.lower() in ("pictures", "pics"):
             target_path = pics_vault
         else:
-            # Confine custom paths to authorized parent roots to prevent Filesystem Oracle probing (S6549)
-            allowed_base_dirs = [
-                (settings.BASE_DIR / "media").resolve(),
-                (Path.home() / "Documents").resolve(),
-                (Path.home() / "Pictures").resolve(),
-            ]
-            cand = Path(os.path.expanduser(new_path_raw)).resolve()
-            if not any(cand == root or cand.is_relative_to(root) for root in allowed_base_dirs):
+            media_root = (settings.BASE_DIR / "media").resolve()
+            leaf_name = Path(new_path_raw).name
+            cand = (media_root / leaf_name).resolve()
+            try:
+                cand.relative_to(media_root)
+                target_path = cand
+            except ValueError:
                 return JsonResponse({
                     "success": False,
-                    "error": "Custom vault directory must reside within application media folder or user Documents/Pictures."
+                    "error": "Custom vault directory must reside within authorized application folders."
                 }, status=400)
-            target_path = cand
 
         if is_prohibited_system_directory(target_path):
             return JsonResponse({
@@ -449,7 +455,9 @@ def api_browse_vault_folder(request: HttpRequest) -> JsonResponse:
     Launches the host operating system's native folder browser dialog
     and returns the selected folder path with input sanitization and command injection defense.
     """
-    if not (request.user and request.user.is_authenticated and request.user.is_superuser):
+    if not request.user.is_authenticated:
+        return JsonResponse({"success": False, "error": "Authentication required to open native folder browser."}, status=401)
+    if not request.user.is_superuser:
         return JsonResponse({"success": False, "error": "Folder browser is restricted to server administrators."}, status=403)
 
     current_vault = vault_service.get_vault_root().resolve()

@@ -319,19 +319,21 @@ class ITMSWebSessionStore:
         self._session: ITMSWebSessionData = ITMSWebSessionData()
         self.load()
 
+    def _query_session_record(self) -> Optional[Any]:
+        from core.models import OperatorITMSSession
+        if self.user and getattr(self.user, "is_authenticated", False):
+            return OperatorITMSSession.objects.filter(user=self.user).first()
+        if self.user is None:
+            return (
+                OperatorITMSSession.objects.filter(is_authenticated=True).order_by("-saved_at").first()
+                or OperatorITMSSession.objects.order_by("-saved_at").first()
+            )
+        return None
+
     def _load_from_db(self) -> Optional[ITMSWebSessionData]:
         """Attempts to load session from the database (OperatorITMSSession)."""
         try:
-            from core.models import OperatorITMSSession
-            session_obj = None
-            if self.user and getattr(self.user, "is_authenticated", False):
-                session_obj = OperatorITMSSession.objects.filter(user=self.user).first()
-            elif self.user is None:
-                session_obj = (
-                    OperatorITMSSession.objects.filter(is_authenticated=True).order_by("-saved_at").first()
-                    or OperatorITMSSession.objects.order_by("-saved_at").first()
-                )
-
+            session_obj = self._query_session_record()
             if not session_obj:
                 return None
 
@@ -466,6 +468,78 @@ class ITMSWebSessionStore:
         return self._session
 
 
+class _WarehouseHTMLParser(HTMLParser):
+    """Event-driven parser to extract warehouse dropdown options and table cells without regex backtracking."""
+
+    def __init__(self):
+        super().__init__()
+        self.in_select = False
+        self.in_option = False
+        self.in_td = False
+        self.current_val = ""
+        self.current_text: list[str] = []
+        self.extracted_facilities: list[tuple[str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]):
+        attr_dict = {k.lower(): (v or "") for k, v in attrs}
+        if tag == "select":
+            name = attr_dict.get("name", "").lower()
+            elem_id = attr_dict.get("id", "").lower()
+            if "warehouse" in name or "warehouse" in elem_id:
+                self.in_select = True
+        elif tag == "option" and self.in_select:
+            self.in_option = True
+            self.current_val = attr_dict.get("value", "").strip()
+            self.current_text = []
+        elif tag == "td":
+            self.in_td = True
+            self.current_text = []
+
+    def handle_endtag(self, tag: str):
+        if tag == "select":
+            self.in_select = False
+        elif tag == "option" and self.in_option:
+            text = "".join(self.current_text).strip()
+            if self.current_val and text:
+                self.extracted_facilities.append((text, self.current_val))
+            self.in_option = False
+            self.current_val = ""
+            self.current_text = []
+        elif tag == "td" and self.in_td:
+            cell_text = "".join(self.current_text).strip()
+            if "BOND" in cell_text.upper():
+                self.extracted_facilities.append((cell_text, ""))
+            self.in_td = False
+            self.current_text = []
+
+    def handle_data(self, data: str):
+        if (self.in_select and self.in_option) or self.in_td:
+            self.current_text.append(data)
+
+
+def _derive_facility_code(name_clean: str, existing_codes: Iterable[str]) -> str:
+    """Derives a concise facility code and avoids collision with existing codes."""
+    upper_name = name_clean.upper()
+    if "AGM" in upper_name:
+        code = "AGM"
+    elif "SPIRO" in upper_name:
+        code = "SPIRO"
+    elif "BOND" in upper_name:
+        bm = re.search(r"BOND\s*([0-9A-Z]+)", upper_name)
+        code = f"BOND{bm.group(1)}" if bm else "BOND"
+    else:
+        words = [w for w in re.split(r"[^A-Za-z0-9]+", upper_name) if w]
+        code = "".join(w[0] for w in words)[:8] if words else upper_name[:6]
+
+    original_code = code
+    suffix = 2
+    while code in existing_codes:
+        code = f"{original_code}_{suffix}"
+        suffix += 1
+    return code
+
+
+
 class ITMSWebClient:
     """
     Client for interacting with the ITMS Web Application (https://stock.itms.ug).
@@ -523,8 +597,8 @@ class ITMSWebClient:
             pool_connections=10,
             pool_maxsize=20,
         )
-        s.mount("https://", adapter)
-        s.mount("http://", adapter)
+        s.mount(SCHEME_HTTPS, adapter)
+        s.mount(SCHEME_HTTP, adapter)
 
         self._sync_session_cookies(s)
         return s
@@ -703,7 +777,7 @@ class ITMSWebClient:
         try:
             resp = s.get(f"{self.base_url}/", timeout=self.timeout, allow_redirects=True)
             # If redirected to /site/login, session is expired
-            if "/site/login" in resp.url or ("Login" in resp.text and "login-form" in resp.text):
+            if URL_PATH_LOGIN in resp.url or ("Login" in resp.text and "login-form" in resp.text):
                 session_data.is_authenticated = False
                 session_data.last_status_message = "Session has expired on ITMS server."
                 self.session_store.save(session_data)
@@ -1039,7 +1113,7 @@ class ITMSWebClient:
             raw_str = search_params.strip()
             if "/archive" in raw_str:
                 archive = True
-            if raw_str.startswith("http://") or raw_str.startswith("https://") or "?" in raw_str or "=" in raw_str:
+            if raw_str.startswith((SCHEME_HTTP, SCHEME_HTTPS)) or "?" in raw_str or "=" in raw_str:
                 parsed = urllib.parse.urlparse(raw_str)
                 qs = urllib.parse.parse_qs(parsed.query if parsed.query else raw_str)
                 search_params = {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in qs.items()}
@@ -1342,77 +1416,6 @@ class ITMSWebClient:
             "total": len(orders),
         }
 
-class _WarehouseHTMLParser(HTMLParser):
-    """Event-driven parser to extract warehouse dropdown options and table cells without regex backtracking."""
-
-    def __init__(self):
-        super().__init__()
-        self.in_select = False
-        self.in_option = False
-        self.in_td = False
-        self.current_val = ""
-        self.current_text: list[str] = []
-        self.extracted_facilities: list[tuple[str, str]] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]):
-        attr_dict = {k.lower(): (v or "") for k, v in attrs}
-        if tag == "select":
-            name = attr_dict.get("name", "").lower()
-            elem_id = attr_dict.get("id", "").lower()
-            if "warehouse" in name or "warehouse" in elem_id:
-                self.in_select = True
-        elif tag == "option" and self.in_select:
-            self.in_option = True
-            self.current_val = attr_dict.get("value", "").strip()
-            self.current_text = []
-        elif tag == "td":
-            self.in_td = True
-            self.current_text = []
-
-    def handle_endtag(self, tag: str):
-        if tag == "select":
-            self.in_select = False
-        elif tag == "option" and self.in_option:
-            text = "".join(self.current_text).strip()
-            if self.current_val and text:
-                self.extracted_facilities.append((text, self.current_val))
-            self.in_option = False
-            self.current_val = ""
-            self.current_text = []
-        elif tag == "td" and self.in_td:
-            cell_text = "".join(self.current_text).strip()
-            if "BOND" in cell_text.upper():
-                self.extracted_facilities.append((cell_text, ""))
-            self.in_td = False
-            self.current_text = []
-
-    def handle_data(self, data: str):
-        if (self.in_select and self.in_option) or self.in_td:
-            self.current_text.append(data)
-
-
-def _derive_facility_code(name_clean: str, existing_codes: Iterable[str]) -> str:
-    """Derives a concise facility code and avoids collision with existing codes."""
-    upper_name = name_clean.upper()
-    if "AGM" in upper_name:
-        code = "AGM"
-    elif "SPIRO" in upper_name:
-        code = "SPIRO"
-    elif "BOND" in upper_name:
-        bm = re.search(r"BOND\s*([0-9A-Z]+)", upper_name)
-        code = f"BOND{bm.group(1)}" if bm else "BOND"
-    else:
-        words = [w for w in re.split(r"[^A-Za-z0-9]+", upper_name) if w]
-        code = "".join(w[0] for w in words)[:8] if words else upper_name[:6]
-
-    original_code = code
-    suffix = 2
-    while code in existing_codes:
-        code = f"{original_code}_{suffix}"
-        suffix += 1
-    return code
-
-
     def fetch_warehouses_from_itms(self) -> Dict[str, Any]:
         """
         Dynamically extracts bonded warehouse / installation facilities from ITMS WebApp.
@@ -1624,7 +1627,7 @@ def _derive_facility_code(name_clean: str, existing_codes: Iterable[str]) -> str
 
         if isinstance(search_params, str):
             raw_str = search_params.strip()
-            if raw_str.startswith("http://") or raw_str.startswith("https://") or "?" in raw_str or "=" in raw_str:
+            if raw_str.startswith((SCHEME_HTTP, SCHEME_HTTPS)) or "?" in raw_str or "=" in raw_str:
                 parsed = urllib.parse.urlparse(raw_str)
                 qs = urllib.parse.parse_qs(parsed.query if parsed.query else raw_str)
                 for k, v in qs.items():
@@ -1650,7 +1653,7 @@ def _derive_facility_code(name_clean: str, existing_codes: Iterable[str]) -> str
             try:
                 resp = self._request_with_retry("GET", url, params=query_params, timeout=self.timeout)
                 # Check for session expiration / login redirect
-                if "/site/login" in resp.url or ("Login" in resp.text and "login-form" in resp.text):
+                if URL_PATH_LOGIN in resp.url or ("Login" in resp.text and "login-form" in resp.text):
                     logger.warning("Session has expired on ITMS server during installation kits request.")
                     session_data.is_authenticated = False
                     session_data.last_status_message = "Session expired on ITMS server. Please sign in again."

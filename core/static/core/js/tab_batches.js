@@ -582,49 +582,53 @@ async function submitTabBatchUpload() {
         }
     };
 
-    xhr.onload = async () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-                const data = JSON.parse(xhr.responseText);
-                if (data.success) {
-                    lastIngestedBatchId = data.batch_id;
-                    setText("ingest-batch-id", data.batch_id);
-                    setText("ingest-total-photos", `${data.ingested_count || total} photos ingested`);
+    function _handleUploadSuccess(data) {
+        lastIngestedBatchId = data.batch_id;
+        setText("ingest-batch-id", data.batch_id);
+        setText("ingest-total-photos", `${data.ingested_count || total} photos ingested`);
 
-                    // Step 1: Upload Complete
-                    setStepStatus(1, "completed", "UPLOADED", "✓");
-                    setText("ingest-step-1-desc", `Successfully transferred ${total} photo files.`);
+        // Step 1: Upload Complete
+        setStepStatus(1, "completed", "UPLOADED", "✓");
+        setText("ingest-step-1-desc", `Successfully transferred ${total} photo files.`);
 
-                    // Step 2: Vault Cryptographic Storage & Deduplication
-                    setStepStatus(2, "completed", "INGESTED", "✓");
-                    setText("ingest-step-2-desc", `Vaulted ${data.ingested_count} photos. Physical 1:1 pairs established immediately (${Math.min(data.front_count || 0, data.rear_count || 0)} pairs).`);
-                    setStepStatus(2, "completed", "PAIRED", "✅");
+        // Step 2: Vault Cryptographic Storage & Deduplication
+        setStepStatus(2, "completed", "INGESTED", "✓");
+        setText("ingest-step-2-desc", `Vaulted ${data.ingested_count} photos. Physical 1:1 pairs established immediately (${Math.min(data.front_count || 0, data.rear_count || 0)} pairs).`);
+        setStepStatus(2, "completed", "PAIRED", "✅");
 
-                    // Immediately refresh Review Queue so operator sees pairs & photos instantly!
-                    if (typeof fetchPairs === "function") fetchPairs();
-                    if (typeof fetchBatchesList === "function") fetchBatchesList();
-                    if (typeof fetchStats === "function") fetchStats();
-                    updateGlobalBgUploadPill("Photos Vaulted & Paired", 45, "Running Dual-Stream Joint Vision OCR...");
-                    setIngestProgress(40, "Vault ingestion verified. Starting YOLO Vision OCR...");
+        // Immediately refresh Review Queue so operator sees pairs & photos instantly!
+        if (typeof fetchPairs === "function") fetchPairs();
+        if (typeof fetchBatchesList === "function") fetchBatchesList();
+        if (typeof fetchStats === "function") fetchStats();
+        updateGlobalBgUploadPill("Photos Vaulted & Paired", 45, "Running Dual-Stream Joint Vision OCR...");
+        setIngestProgress(40, "Vault ingestion verified. Starting YOLO Vision OCR...");
 
-                    // Clear file selections in memory
-                    tabSelectedFrontFiles = [];
-                    tabSelectedRearFiles = [];
-                    setText("count-tab-front", "0 files selected");
-                    setText("count-tab-rear", "0 files selected");
-                    batchDetailsCache = {};
-                    expandedBatches.add(data.batch_id);
+        // Clear file selections in memory
+        tabSelectedFrontFiles = [];
+        tabSelectedRearFiles = [];
+        setText("count-tab-front", "0 files selected");
+        setText("count-tab-rear", "0 files selected");
+        batchDetailsCache = {};
+        expandedBatches.add(data.batch_id);
 
-                    // Step 3 & 4: Start background pipeline with batch ID
-                    void startIngestionPipelineTracking(data.batch_id, data);
-                } else {
-                    handleIngestError(data.error || "Upload failed from server.");
-                }
-            } catch (err) {
-                handleIngestError("Invalid server response: " + err);
-            }
-        } else {
+        // Step 3 & 4: Start background pipeline with batch ID
+        void startIngestionPipelineTracking(data.batch_id, data);
+    }
+
+    xhr.onload = () => {
+        if (xhr.status < 200 || xhr.status >= 300) {
             handleIngestError(`Server HTTP error ${xhr.status}: ${xhr.statusText}`);
+            return;
+        }
+        try {
+            const data = JSON.parse(xhr.responseText);
+            if (!data.success) {
+                handleIngestError(data.error || "Upload failed from server.");
+                return;
+            }
+            _handleUploadSuccess(data);
+        } catch (err) {
+            handleIngestError("Invalid server response: " + err);
         }
     };
 

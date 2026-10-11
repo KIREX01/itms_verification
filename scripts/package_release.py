@@ -95,9 +95,12 @@ def should_exclude(rel_path_str: str, target: str) -> bool:
     return False
 
 
+SAFE_NAME_REGEX = r"[^0-9a-zA-Z\.\-_]"
+
+
 def build_windows_package(version: str, output_dir: Path) -> Path:
     """Packages the Windows desktop distribution into a ZIP archive."""
-    safe_version = re.sub(r"[^0-9a-zA-Z\.\-_]", "", version)
+    safe_version = re.sub(SAFE_NAME_REGEX, "", version)
     resolved_out = output_dir.resolve()
     archive_name = f"itms-v{safe_version}-windows.zip"
     archive_path = (resolved_out / archive_name).resolve()
@@ -134,7 +137,7 @@ def build_windows_package(version: str, output_dir: Path) -> Path:
 
 def build_linux_package(version: str, output_dir: Path) -> Path:
     """Packages the Linux server distribution into a compressed tarball."""
-    safe_version = re.sub(r"[^0-9a-zA-Z\.\-_]", "", version)
+    safe_version = re.sub(SAFE_NAME_REGEX, "", version)
     resolved_out = output_dir.resolve()
     archive_name = f"itms-v{safe_version}-linux.tar.gz"
     archive_path = (resolved_out / archive_name).resolve()
@@ -161,15 +164,12 @@ def build_linux_package(version: str, output_dir: Path) -> Path:
                 if norm_entry.startswith("/") or ".." in norm_entry.split("/"):
                     continue
 
-                tar_info = tf.gettarinfo(str(full_path), arcname=norm_entry)
-                tar_info.name = norm_entry
+                def _linux_mode_filter(tar_info: tarfile.TarInfo) -> tarfile.TarInfo:
+                    if rel_path.name in ("itms", "install.sh", "uninstall.sh", "deploy_user_data.sh", "setup_vps.sh", "bootstrap.py", "manage.py"):
+                        tar_info.mode = 0o755
+                    return tar_info
 
-                # Ensure executable bit is preserved on Linux scripts
-                if rel_path.name in ("itms", "install.sh", "uninstall.sh", "deploy_user_data.sh", "setup_vps.sh", "bootstrap.py", "manage.py"):
-                    tar_info.mode = 0o755
-
-                with full_path.open("rb") as f_obj:
-                    tf.addfile(tar_info, f_obj)
+                tf.add(str(full_path), arcname=norm_entry, recursive=False, filter=_linux_mode_filter)
                 file_count += 1
 
     size_mb = archive_path.stat().st_size / (1024 * 1024)

@@ -43,19 +43,24 @@ function getOrCreateDeviceId() {
     return id;
 }
 
+function _detectClientOS(ua) {
+    if (/Android/i.test(ua)) return "Android";
+    if (/iPhone|iPad/i.test(ua)) return "iPhone";
+    if (/Windows/i.test(ua)) return "Windows Device";
+    return "Smartphone";
+}
+
+function _detectClientBrowser(ua) {
+    if (/Edg/i.test(ua)) return "Edge";
+    if (/Chrome/i.test(ua)) return "Chrome";
+    if (/Safari/i.test(ua)) return "Safari";
+    if (/Firefox/i.test(ua)) return "Firefox";
+    return "Browser";
+}
+
 function getDeviceName() {
     const ua = navigator.userAgent;
-    let os = "Smartphone";
-    if (/Android/i.test(ua)) os = "Android";
-    else if (/iPhone|iPad/i.test(ua)) os = "iPhone";
-    else if (/Windows/i.test(ua)) os = "Windows Device";
-
-    let browser = "Browser";
-    if (/Chrome/i.test(ua) && !/Edg/i.test(ua)) browser = "Chrome";
-    else if (/Safari/i.test(ua) && !/Chrome/i.test(ua)) browser = "Safari";
-    else if (/Firefox/i.test(ua)) browser = "Firefox";
-
-    return `${os} (${browser})`;
+    return `${_detectClientOS(ua)} (${_detectClientBrowser(ua)})`;
 }
 
 function getInitialUturnBatchIndex() {

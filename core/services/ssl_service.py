@@ -213,8 +213,6 @@ public class PemGen
 def _generate_dynamic_fallback(
     cert_path: Path,
     key_path: Path,
-    san_ips: List[str],
-    san_dns: List[str],
 ) -> bool:
     """Strategy 3: Generates self-signed certificate on-the-fly via OpenSSL CLI if available."""
     try:
@@ -289,7 +287,7 @@ def ensure_ssl_certificates(
         return cert_file, key_file
 
     # Strategy 3: Dynamic OpenSSL generation fallback
-    _generate_dynamic_fallback(cert_file, key_file, default_ips, default_dns)
+    _generate_dynamic_fallback(cert_file, key_file)
     _sync_root_files(cert_file, key_file)
     return cert_file, key_file
 

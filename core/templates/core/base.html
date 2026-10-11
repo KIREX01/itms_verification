@@ -25,10 +25,10 @@
         (function() {
             const originalFetch = window.fetch;
             window.fetch = function(url, options = {}) {
-                const opts = Object.assign({}, options);
+                const opts = { ...options };
                 const method = (opts.method || 'GET').toUpperCase();
                 if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
-                    opts.headers = opts.headers ? Object.assign({}, opts.headers) : {};
+                    opts.headers = opts.headers ? { ...opts.headers } : {};
                     const token = document.querySelector('meta[name="csrf-token"]')?.content
                         || (document.cookie.split('; ').find(row => row.startsWith('csrftoken='))?.split('=')[1] || '');
                     if (token && !opts.headers['X-CSRFToken'] && !opts.headers['x-csrftoken']) {

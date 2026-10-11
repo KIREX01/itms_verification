@@ -391,6 +391,21 @@ function _renderWarehouseOptions(targetSel, warehouses, activeBond) {
     });
 }
 
+function _updateBondSyncUI(data) {
+    const sel = document.getElementById("settings-bond-select");
+    const selItms = document.getElementById("itms-select-bond");
+    if (data.warehouses && data.warehouses.length > 0) {
+        _renderWarehouseOptions(sel, data.warehouses, data.active_bond);
+        _renderWarehouseOptions(selItms, data.warehouses, data.active_bond);
+    }
+    if (data.active_bond) {
+        const badge = document.getElementById("settings-bond-badge");
+        if (badge) badge.innerText = `● Active: ${data.active_bond.code}`;
+        const itmsBadge = document.getElementById("itms-active-bond-badge");
+        if (itmsBadge) itmsBadge.innerText = `${data.active_bond.name} (${data.active_bond.code})`;
+    }
+}
+
 async function syncBondsFromITMS() {
     const btn = document.getElementById("btn-sync-bonds");
     if (btn) {
@@ -403,18 +418,7 @@ async function syncBondsFromITMS() {
         const data = await res.json();
         if (data.success) {
             showToast(`Discovered ${data.count || 0} bonded warehouses from ITMS!`, "success");
-            const sel = document.getElementById("settings-bond-select");
-            const selItms = document.getElementById("itms-select-bond");
-            if (data.warehouses && data.warehouses.length > 0) {
-                _renderWarehouseOptions(sel, data.warehouses, data.active_bond);
-                _renderWarehouseOptions(selItms, data.warehouses, data.active_bond);
-            }
-            if (data.active_bond) {
-                const badge = document.getElementById("settings-bond-badge");
-                if (badge) badge.innerText = `● Active: ${data.active_bond.code}`;
-                const itmsBadge = document.getElementById("itms-active-bond-badge");
-                if (itmsBadge) itmsBadge.innerText = `${data.active_bond.name} (${data.active_bond.code})`;
-            }
+            _updateBondSyncUI(data);
         } else {
             showToast(data.error || "Could not sync bonds from ITMS.", "warning");
         }

@@ -45,7 +45,7 @@ function switchNavTab(tabIndex) {
         }
     } else if (tabIndex === 8) {
         if (typeof stockToday === "function") {
-            void stockToday();
+            stockToday();
         }
     }
 }

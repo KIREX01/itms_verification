@@ -29,8 +29,9 @@ from core.services.update_service import UpdateService
 class SecurityAuditRemediationTests(TestCase):
     def setUp(self):
         self.client = Client()
-        self.user = User.objects.create_user(
+        self.user = User.objects.create_superuser(
             username="security_tester",
+            email="sec@example.com",
             password="password123",
         )
         self.client.login(username="security_tester", password="password123")

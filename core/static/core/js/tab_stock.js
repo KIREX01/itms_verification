@@ -17,7 +17,7 @@ let isSyncingStock = false;
 
 document.addEventListener('DOMContentLoaded', () => {
     // Initial fetch for today
-    refreshStockLedger();
+    void refreshStockLedger();
 
     // Universal scan input listener
     const scanInput = document.getElementById('stock-universal-scan');
@@ -28,7 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const val = scanInput.value.trim();
                 scanInput.value = '';
                 if (val) {
-                    handleUniversalScan(val);
+                    void handleUniversalScan(val);
                 }
             }
         });
@@ -92,7 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 openStockPasteModal();
             } else if (e.key === 's' || e.key === 'S') {
                 e.preventDefault();
-                syncStock();
+                void syncStock();
             } else if (e.key === 'e' || e.key === 'E') {
                 e.preventDefault();
                 exportStockCSV();
@@ -101,7 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 openLedgerTargetModal();
             } else if (e.key === 'r' || e.key === 'R') {
                 e.preventDefault();
-                refreshStockLedger();
+                void refreshStockLedger();
             }
         }
     });
@@ -198,13 +198,13 @@ async function handleUniversalScan(rawVal) {
     if (currentStockMode === 'dispatch') {
         await submitDispatch([val]);
     } else if (currentStockMode === 'movements') {
-        stageMovementsPlates([val]);
-        inspectPlate(val);
+        void stageMovementsPlates([val]);
+        void inspectPlate(val);
     } else if (currentStockMode === 'audit') {
         await submitAudit([val]);
     } else {
         // Ledger mode - inspect plate
-        inspectPlate(val);
+        void inspectPlate(val);
     }
 }
 
@@ -397,8 +397,8 @@ async function submitDispatch(platesList) {
                     feedback.innerHTML = `⛔ ${blocked.length} KIT(S) BLOCKED: Dispatched ${newCount}. Set ${blocked.length} physical boxes aside!`;
                 }
                 notify(`⚠️ Dispatched ${newCount} kits. ${blocked.length} kit(s) blocked.`, 'warning');
-                inspectPlate(blocked[0]);
-                openNotOnStockModal(data.docket || data);
+                await inspectPlate(blocked[0]);
+                await openNotOnStockModal(data.docket || data);
             } else {
                 const bgSyncNote = data.enriching_in_background ? ' Background ITMS sync initiated ⚡' : '';
                 if (feedback) {
@@ -407,13 +407,13 @@ async function submitDispatch(platesList) {
                 }
                 notify(`✓ Dispatched ${newCount} ${category} plates.${bgSyncNote}`, 'success');
                 if (platesList.length === 1) {
-                    inspectPlate(platesList[0]);
+                    await inspectPlate(platesList[0]);
                 } else if (data.verified_plates && data.verified_plates.length > 0) {
-                    inspectPlate(data.verified_plates[0]);
+                    await inspectPlate(data.verified_plates[0]);
                 }
             }
 
-            refreshStockLedger();
+            await refreshStockLedger();
         } else {
             const blocked = (data.rejected_not_on_stock || []).concat(data.already_installed || []);
             if (blocked.length > 0) {
@@ -421,15 +421,15 @@ async function submitDispatch(platesList) {
                     feedback.className = 'alert alert-danger';
                     feedback.innerHTML = `⛔ ${blocked.length} KIT(S) BLOCKED: 0 dispatched. Set physical boxes aside!`;
                 }
-                inspectPlate(blocked[0]);
-                openNotOnStockModal(data.docket || data);
+                await inspectPlate(blocked[0]);
+                await openNotOnStockModal(data.docket || data);
             } else {
                 if (feedback) {
                     feedback.className = 'alert alert-danger';
                     feedback.innerHTML = `⛔ Dispatch failed: ${data.error}`;
                 }
                 if (platesList.length === 1) {
-                    inspectPlate(platesList[0], data.error);
+                    await inspectPlate(platesList[0], data.error);
                 }
             }
             notify(`Dispatch failed: ${data.error}`, 'error');
@@ -453,7 +453,7 @@ function clearDispatchesToday() {
         .then(data => {
             if (data.success) {
                 notify(`✓ Cleared ${data.cleared_count || 0} dispatches for shift ${data.date_suffix || currentStockDateSuffix}.`, 'success');
-                refreshStockLedger();
+                void refreshStockLedger();
             } else {
                 notify(`Failed to clear dispatches: ${data.error}`, 'error');
             }
@@ -554,7 +554,7 @@ async function commitMovement() {
                 notify(`✓ Recorded ${moveType} for ${count} plates!`, 'success');
             }
             clearMovementStaged();
-            refreshStockLedger();
+            await refreshStockLedger();
         } else {
             notify(`Movement failed: ${data.error}`, 'error');
         }
@@ -612,12 +612,12 @@ async function submitAudit(platesList) {
             }
 
             if (platesList.length === 1) {
-                inspectPlate(platesList[0]);
+                await inspectPlate(platesList[0]);
             } else if (data.verified_plates && data.verified_plates.length > 0) {
-                inspectPlate(data.verified_plates[0]);
+                await inspectPlate(data.verified_plates[0]);
             }
 
-            refreshStockLedger();
+            await refreshStockLedger();
         } else {
             notify(`Audit failed: ${data.error}`, 'error');
             if (feedback) {
@@ -632,7 +632,7 @@ async function submitAudit(platesList) {
 
 async function setManualAuditCount() {
     const val = document.getElementById('audit-manual-count').value;
-    if (!val || isNaN(val)) {
+    if (!val || Number.isNaN(Number(val))) {
         notify('Please enter a valid numeric physical count (e.g. 1200).', 'warning');
         return;
     }
@@ -642,14 +642,14 @@ async function setManualAuditCount() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                physical_count: parseInt(val, 10),
+                physical_count: Number.parseInt(val, 10),
                 date_suffix: currentStockDateSuffix,
             }),
         });
         const data = await res.json();
         if (data.success) {
-            notify(`✓ Physical count updated to ${parseInt(val, 10).toLocaleString()} plates!`, 'success');
-            refreshStockLedger();
+            notify(`✓ Physical count updated to ${Number.parseInt(val, 10).toLocaleString()} plates!`, 'success');
+            await refreshStockLedger();
         } else {
             notify(`Failed to update physical count: ${data.error}`, 'error');
         }
@@ -772,7 +772,7 @@ async function checkStockPasteAvailability() {
             } else {
                 closeStockPasteModal();
                 notify(`⚠️ Stock Check: ${validCount} in stock, ${blocked.length} NOT on stock!`, 'warning');
-                openNotOnStockModal(data.docket || data);
+                await openNotOnStockModal(data.docket || data);
             }
         } else {
             notify(`Stock verification failed: ${data.error}`, 'error');
@@ -1062,8 +1062,8 @@ function closeLedgerTargetModal() {
 }
 
 function updateTotalOpening() {
-    const psv = parseInt(document.getElementById('ledger-opening-psv').value || '0', 10);
-    const pmo = parseInt(document.getElementById('ledger-opening-pmo').value || '0', 10);
+    const psv = Number.parseInt(document.getElementById('ledger-opening-psv').value || '0', 10);
+    const pmo = Number.parseInt(document.getElementById('ledger-opening-pmo').value || '0', 10);
     const totEl = document.getElementById('ledger-opening-total');
     if (totEl) {
         totEl.innerText = (psv + pmo).toLocaleString();
@@ -1103,8 +1103,8 @@ async function saveLedgerTargets() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    opening_psv: parseInt(psv || '0', 10),
-                    opening_pmo: parseInt(pmo || '0', 10),
+                    opening_psv: Number.parseInt(psv || '0', 10),
+                    opening_pmo: Number.parseInt(pmo || '0', 10),
                     notes: remarks,
                     date_suffix: currentStockDateSuffix,
                 }),
@@ -1116,7 +1116,7 @@ async function saveLedgerTargets() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    scheduled_target: parseInt(target, 10),
+                    scheduled_target: Number.parseInt(target, 10),
                     date_suffix: currentStockDateSuffix,
                 }),
             });
@@ -1346,9 +1346,9 @@ function renderAuditsTable(audits) {
 
 function parseDateSuffix(suffix) {
     if (!suffix || suffix.length !== 6) return new Date();
-    const dd = parseInt(suffix.substring(0, 2), 10);
-    const mm = parseInt(suffix.substring(2, 4), 10) - 1;
-    const yy = parseInt(suffix.substring(4, 6), 10);
+    const dd = Number.parseInt(suffix.substring(0, 2), 10);
+    const mm = Number.parseInt(suffix.substring(2, 4), 10) - 1;
+    const yy = Number.parseInt(suffix.substring(4, 6), 10);
     return new Date(2000 + yy, mm, dd);
 }
 

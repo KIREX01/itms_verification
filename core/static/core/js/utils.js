@@ -266,7 +266,7 @@ async function pollMobileCompanionStatus() {
         if (lastKnownPhotosCount !== null && batchPhotos > lastKnownPhotosCount) {
             const delta = batchPhotos - lastKnownPhotosCount;
             if (typeof fetchStats === "function") {
-                fetchStats();
+                void fetchStats();
             }
             if (typeof showToast === "function") {
                 showToast(`📷 ${delta} new photo${delta > 1 ? "s" : ""} synced from smartphone!`, "success");

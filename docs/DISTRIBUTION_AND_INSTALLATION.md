@@ -1,296 +1,215 @@
-# ITMS Verification Copilot - Distribution, Installation & Update Guide
+# ITMS Verification Copilot - Distribution, Installation \& Update Guide
 
 Welcome to the **ITMS Verification Copilot** distribution guide. This document provides step-by-step instructions for operators, technicians, and developers to install, execute, maintain, and upgrade the application on **Windows**, **macOS** (both Apple Silicon M-series and Intel), and **Linux** workstations with zero manual configuration.
 
----
+\---
 
-## 1. Architectural Highlights
+## 1\. Architectural Highlights
 
 * **Zero-Configuration 1-Click Startup**: Launch the complete application stack with a single double-click. Environment setup, dependencies, AI weights, directory structures, and database migrations are self-healing and fully automated.
-* **Default Secure Web Console (`https://127.0.0.1/`)**: Automatically launches with built-in HTTPS on default port 443 using repository-tracked offline SSL certificates and 3-tier self-healing PKI fallback. Unlocks modern mobile browser Secure Context (`isSecureContext`) for live camera and barcode/QR scanning.
-* **24/7 Background Windows Service**: Runs continuously in the background via Windows Service Control Manager, featuring Windows Away Mode (`SetThreadExecutionState`) to survive laptop lid-closes and idle sleep states.
-* **Automated Resource Provisioning (`scripts/bootstrap.py`)**: Checks and provisions all required runtime dependencies, fine-tuned license plate detection weights (`license-plate-finetune-v1n.pt`, `license-plate-finetune-v1s.pt`), OCR engines, `.env` files with secure keys, and default operator credentials.
-* **In-Place Non-Destructive Updates**: Seamlessly pulls semantic updates from GitHub Releases (`https://github.com/KIREX01/itms_verification/releases`) with 100% data protection guarantees for SQLite databases, encrypted credentials, and evidence photo vaults.
+* **Default Web Console Experience**: The application automatically starts the local HTTP server and opens your system's default web browser to the modern Uganda-themed Operator Console (`http://127.0.0.1:8000/`).
+* **Automated Resource Provisioning (`scripts/bootstrap.py`)**: Checks and provisions all required runtime dependencies, missing AI weights (`yolov8n.pt`, `license-plate-finetune-v1n.pt`), OCR engines, `.env` files with secure keys, and default operator credentials.
+* **In-Place Non-Destructive Updates**: Seamlessly pulls semantic updates from GitHub Releases (`https://github.com/KIREX01/itms\\\_verification/releases`) with 100% data protection guarantees for SQLite databases, encrypted credentials, and evidence photo vaults.
 
----
+\---
 
-## 2. System Prerequisites
+## 2\. System Prerequisites
 
-| Component | Minimum Specification | Recommended Specification |
-| :--- | :--- | :--- |
-| **Operating System** | Windows 10/11 (64-bit)<br>macOS 12+ (Intel or Apple Silicon M1-M4)<br>Ubuntu 20.04+ / Debian 11+ | Windows 11 (64-bit)<br>macOS 14+ (Apple Silicon M-series)<br>Ubuntu 22.04 LTS |
-| **Python** | Python 3.10, 3.11, or 3.12 | Python 3.11 or 3.12 |
-| **RAM** | 4 GB | 8 GB or more (for rapid YOLOv8 & OCR batch inference) |
-| **Disk Space** | 2.5 GB free space | 10 GB+ free space (accommodates evidence vault growth) |
-| **Network** | Offline supported after initial bootstrap | Broadband connection for initial setup and updates |
+|Component|Minimum Specification|Recommended Specification|
+|-|-|-|
+|**Operating System**|Windows 10/11 (64-bit)<br>macOS 12+ (Intel or Apple Silicon M1-M4)<br>Ubuntu 20.04+ / Debian 11+|Windows 11 (64-bit)<br>macOS 14+ (Apple Silicon M-series)<br>Ubuntu 22.04 LTS|
+|**Python**|Python 3.10, 3.11, or 3.12|Python 3.11 or 3.12|
+|**RAM**|4 GB|8 GB or more (for rapid YOLOv8 \& OCR batch inference)|
+|**Disk Space**|2.5 GB free space|10 GB+ free space (accommodates evidence vault growth)|
+|**Network**|Offline supported after initial bootstrap|Broadband connection for initial setup and updates|
 
----
+\---
 
-## 3. 60-Second Quick Start
+## 3\. 60-Second Quick Start
 
-### Windows 1-Command Web/PowerShell Install (Recommended)
-Open PowerShell (Win + X -> Terminal or PowerShell) and run:
-```powershell
-Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process; irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.ps1 | iex
-```
-* **What this does**:
-  1. Downloads and installs the application to your user profile directory (`%LOCALAPPDATA%\Programs\ITMS-Verification`).
-  2. Configures the global system command `itms` in your `PATH` and `%LOCALAPPDATA%\Microsoft\WindowsApps`.
-  3. Automatically places an **"ITMS Verification Copilot"** shortcut on your **Desktop** and in your **Start Menu** (targeting `itms.cmd`).
-  4. Automatically provisions Python, `.venv`, AI plate detector weights, ensures SSL certificates, and opens `https://127.0.0.1/` in your browser.
-  5. **Requires zero administrator privileges!**
+### Windows Installation
 
----
+1. Extract or clone the `itms\\\_verification` folder to your computer (e.g. `C:\\\\ITMS\\\\itms\\\_verification` or `D:\\\\itms\\\_verification`).
+2. **Double-click `run.bat`** (or open PowerShell/Terminal and run `.\\\\run.bat`).
+3. The launcher will automatically:
 
-### Manual Windows Installation (Archive or Git)
-1. Extract or clone the `itms_verification` folder to your computer (e.g. `C:\ITMS\itms_verification` or `D:\itms_verification`).
-2. **Double-click `itms.cmd`** (or type `itms` in PowerShell/CMD).
-3. The launcher will automatically detect/provision Python, prepare `.venv\`, download fine-tuned AI weights, apply database migrations, and open the Web Operator Console at `https://127.0.0.1/`.
+   * Detect your Python installation.
+   * Create the local virtual environment (`.venv\\\\`).
+   * Install/verify all requirements via pip.
+   * Provision missing AI weights, directories, and database tables.
+   * Launch the Web Operator Console and open your default browser at `http://127.0.0.1:8000/`.
 
-> **Tip**: You can also run `.\install.ps1` locally to register the system-wide command and Desktop shortcuts.
+> \\\*\\\*Tip\\\*\\\*: You can create a Desktop shortcut to `run.bat` for instant 1-click access.
 
----
+\---
 
-### macOS / Linux 1-Command Install
-Open Terminal and run:
+### macOS Installation (Apple Silicon \& Intel)
+
+1. Extract or clone the project folder on your Mac.
+2. In Finder, navigate to the folder and **double-click `run.command`**.
+
+   * *If macOS flags the script on first run*: Right-click (Control-click) `run.command` -> select **Open** -> click **Open**.
+   * *Terminal Alternative*:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.sh | bash
-```
-Installs to `~/.local/share/itms-verification`, links the global `itms` command to `~/.local/bin/itms`, provisions the environment, and launches the console.
+     chmod +x run.command run.sh update.command update.sh
+     ./run.command
+     ```
 
----
+3. The script automatically sets up the environment, prepares AI models, starts the server, and launches Safari/Chrome at `http://127.0.0.1:8000/`.
 
-### macOS & Linux Manual Installation
-1. Open a terminal in the extracted project folder.
-2. Run:
-   ```bash
-   chmod +x itms scripts/bootstrap.py
-   ./itms
+\\---
+
+### Linux Installation (Ubuntu / Debian / RHEL)
+
+1. Open a terminal in the project directory.
+2. Ensure execution permissions and run:
+
+```bash
+   chmod +x run.sh update.sh
+   ./run.sh
    ```
-3. To launch the Terminal UI instead, run:
-   ```bash
-   ./itms --tui
-   ```
 
----
+3. The launcher provisions the environment and opens the Web Console in your default browser.
 
-## 4. Filesystem Architecture: Where Does the App Sit & Where is Data Stored?
+\---
 
-### Default Installation Paths
-| Operating System | Default Install Location (`InstallDir`) | Shortcut Location |
-| :--- | :--- | :--- |
-| **Windows (PowerShell 1-Click)** | `%LOCALAPPDATA%\Programs\ITMS-Verification\`<br>*(e.g. `C:\Users\<User>\AppData\Local\Programs\ITMS-Verification\`)* | **Desktop**: `ITMS Verification Copilot.lnk`<br>**Start Menu**: `ITMS Verification Copilot` |
-| **Windows (Manual Extract)** | Custom folder chosen by operator (e.g. `C:\ITMS\itms_verification\` or `D:\itms_verification\`) | Operator creates shortcut to `run.bat` |
-| **macOS / Linux (1-Click)** | `~/.local/share/itms-verification/` | Terminal command or Desktop launcher |
-
-> **Why `%LOCALAPPDATA%\Programs` on Windows?**
-> - **Zero Administrator Privileges Required**: Any operator can install and run the application on corporate or restricted workstations without IT administrative elevation (UAC prompt).
-> - **Follows Microsoft Standards**: This is the official per-user application directory used by Microsoft (VS Code User Edition), Google Chrome, and modern CLI tools.
-> - **Clean Per-User Isolation**: Multi-user computers keep each operator's local database, credentials, and settings isolated.
-
-### Anatomy of Stored Data & Persistence Guarantees
-Inside the installation directory, data is cleanly segregated into immutable code vs persistent operator state:
-
-```
-ITMS-Verification/
-├── .venv/                      # Python isolated virtual environment & installed packages
-├── core/                       # Application source code & Web UI assets
-├── models/                     # Fine-tuned YOLOv8 plate detection AI weights
-│   ├── license-plate-finetune-v1n.pt
-│   └── license-plate-finetune-v1s.pt
-├── tools/                      # Portable self-contained runtimes (e.g. Tesseract OCR)
-├── db.sqlite3                  # Local SQLite database (Orders, batches, audit history, pairs)
-├── secure/                     # Cryptographic secrets & ITMS encrypted session tokens
-│   └── auth/
-├── exports/                    # CSV shift reports & audit exports
-└── media/                      # Evidence storage
-    ├── vault/                  # [DEFAULT] Cryptographic SHA-256 evidence photo vault
-    └── crops/                  # Temporary high-resolution plate crops
-```
-
-### Custom Vault Storage (Network Drives & External Disks)
-The Evidence Vault (`media/vault/`) does not have to remain on the system drive. It can be redirected to **any storage location**:
-1. Open the TUI or Web UI -> Enable **Developer Mode**.
-2. Under **Vault Location**, click **Browse Folder** to select any external SSD, secondary hard disk (e.g. `D:\ITMS_Vault\`), or network mapped drive (`Z:\SharedVault\`).
-3. The system immediately routes all incoming evidence ingestion batches to the selected drive without modifying application code or database integrity.
-
----
-
-## 5. What Happens During Bootstrap?
+## 4\. What Happens During Bootstrap?
 
 When you run the 1-click launcher, `scripts/bootstrap.py` executes an automated health check:
 
 ```
 ======================================================================
-  ITMS Verification Copilot - System Environment Diagnostic & Bootstrap
+  ITMS Verification Copilot - System Environment Diagnostic \\\& Bootstrap
 ======================================================================
-[OK] Environment: Windows-10-10.0.26100-SP0 (AMD64) | Python 3.14.0
-[OK] Directory verified: media\vault
-[OK] Directory verified: media\crops
-[OK] Directory verified: secure\auth
-[OK] Directory verified: exports
-[OK] Directory verified: models
-[OK] Secure configuration file .env verified.
-[OK] Fine-tuned plate models verified: models\license-plate-finetune-v1n.pt, models\license-plate-finetune-v1s.pt
-[OK] OCR Engine verified: Tesseract OCR (C:\Program Files\Tesseract-OCR\tesseract.exe)
-[OK] Database schema up to date.
-[OK] Default operator credentials verified.
+\\\[OK] Environment: Windows-10-10.0.26100-SP0 (AMD64) | Python 3.14.0
+\\\[OK] Directory verified: media\\\\vault
+\\\[OK] Directory verified: media\\\\crops
+\\\[OK] Directory verified: secure\\\\auth
+\\\[OK] Directory verified: exports
+\\\[OK] Directory verified: models
+\\\[OK] Secure configuration file .env verified.
+\\\[OK] Model weights verified: models\\\\yolov8n.pt (6.2 MB)
+\\\[OK] Model weights verified: models\\\\license-plate-finetune-v1n.pt (6.3 MB)
+\\\[OK] OCR Engine verified: Tesseract OCR (C:\\\\Program Files\\\\Tesseract-OCR\\\\tesseract.exe)
+\\\[OK] Database schema up to date.
+\\\[OK] Default operator credentials verified.
 ======================================================================
-[SUCCESS] System bootstrap complete. ITMS Verification Copilot is ready!
+\\\[SUCCESS] System bootstrap complete. ITMS Verification Copilot is ready!
 ======================================================================
 ```
 
 To run a verification check at any time without starting the server:
+
 ```bash
 python scripts/bootstrap.py --verify-only
 ```
 
----
+\---
 
-## 5. Version Control & Automated Updates (GitHub Releases)
+## 5\. Version Control \& Automated Updates (GitHub Releases)
 
-The ITMS Verification Copilot includes a built-in semantic update engine linked to the official GitHub repository (`https://github.com/KIREX01/itms_verification`).
+The ITMS Verification Copilot includes a built-in semantic update engine linked to the official GitHub repository (`https://github.com/KIREX01/itms\\\_verification`).
 
 ### Method 1: In-App Web Updates (Recommended)
+
 1. Open the Web Console (`http://127.0.0.1:8000/`).
-2. Click on the **Settings & System (Tab 6)** tab in the top navigation bar.
-3. Locate the **Version Control & System Updates** card.
+2. Click on the **Settings \& System (Tab 6)** tab in the top navigation bar.
+3. Locate the **Version Control \& System Updates** card.
 4. Click **Check for Updates**:
+
    * The system contacts GitHub Releases (or uses local 12-hour cache).
    * Displays the latest version number, release name, and detailed changelog notes.
 5. If an update is available, click **Update System Now**.
 6. The system downloads the release archive, updates application files, applies database migrations, and prompts you to restart.
 
----
+\---
 
-### Method 2: Universal CLI Update
-Anywhere in your terminal (PowerShell, CMD, Bash, or Zsh), simply run:
+### Method 2: 1-Click Update Scripts
+
+When the application is closed, you can update with a single click:
+
+* **Windows**: Double-click `update.bat`
+* **macOS**: Double-click `update.command`
+* **Linux**: Run `./update.sh`
+
+These scripts run:
+
 ```bash
-itms update
+python manage.py check\\\_updates --force --apply
 ```
-This automatically invokes the release engine: detects running background Windows Services and stops them cleanly, pulls the latest code and verified certificates from GitHub, applies database migrations, and automatically restarts or installs the service.
 
----
+\---
 
-### Method 3: Command Line Updates via Django
+### Method 3: Command Line Updates
+
 Inspect and apply updates via Django management commands:
+
 ```bash
 # Check status without applying:
-python manage.py check_updates
+python manage.py check\\\_updates
 
 # Bypass 12-hour cache and check live:
-python manage.py check_updates --force
+python manage.py check\\\_updates --force
 
 # Check and apply immediately:
-python manage.py check_updates --apply
+python manage.py check\\\_updates --apply
 ```
 
----
+\---
 
-## 6. Windows Service Architecture & 24/7 Background Operations
-
-For warehouse environments, verification checkpoints, and mobile camera companion hubs where the server and automated background crawler must run **24 hours a day, 7 days a week without human intervention**, ITMS Verification Copilot includes a production-grade native Windows Service (`windows_service.py`).
-
-### Key Operational Capabilities
-1. **Survives User Logout & Unattended Reboots**: Runs under the local Windows system service architecture. Operators do not need to keep a terminal window open or remain logged in.
-2. **Laptop Lid-Close & Sleep Mode Immunity (Away Mode)**:
-   - Utilizes Windows Power Management API:
-     `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED)`
-   - When a laptop's lid is closed or the machine enters display sleep, Windows enters **Away Mode**.
-   - The CPU continues running, network sockets on port 443 remain active, mobile scanners stay connected, and the 3-hour stock synchronizer continues crawling without interruption.
-3. **Automated SCM Watchdog Recovery**:
-   - The Windows Service Control Manager (SCM) monitors the background process.
-   - If an unexpected error or memory crash occurs, SCM automatically restarts the service (5s first failure, 10s second failure, 30s subsequent failures).
-4. **Clean Process Tree Termination**:
-   - Stopping or restarting the service executes a clean process tree kill (`taskkill /F /T /PID`), immediately releasing port 443 and eliminating zombie worker processes.
-5. **Integrated Background Tasks**:
-   - Concurrently executes the HTTPS Web Server (`manage.py run_web --noreload --no-browser --host 0.0.0.0 --port 443 --ssl-port 443`) and the periodic 3-hour Safe Room Stock Crawler (`MorningKitSyncDaemon`).
-
-### Universal CLI Service Management
-Manage the Windows service directly using the `itms` command from any terminal:
-
-```bash
-# Check current service state (Running, Stopped, or Not Installed)
-itms service status
-
-# Install and register the Windows Service (prompts for UAC elevation)
-itms service install
-
-# Start the background service
-itms service start
-
-# Stop the background service
-itms service stop
-
-# Restart the service (clean process tree termination and relaunch)
-itms service restart
-
-# Uninstall and unregister the service
-itms service remove
-```
-
-### Automated Lifecycle Integration
-* **`itms update`**: Automatically detects if the Windows Service is installed and running. It safely stops the service, pulls the latest code and migrations, and then automatically restarts the service with zero manual intervention.
-* **`itms uninstall`**: Automatically halts and removes the service from Windows SCM before deleting application directories.
-
----
-
-## 7. Operator Data Protection Guarantees
+## 6\. Operator Data Protection Guarantees
 
 During any update (via Git pull or ZIP release unpacking), the update engine strictly protects and preserves all operator data:
 
-| Protected Path | Contents & Guarantee |
-| :--- | :--- |
-| `db.sqlite3` | SQLite production database. Contains all batches, evidence links, vehicle pairs, audit logs, and operator accounts. **Never overwritten or deleted.** |
-| `.env` | Environment configuration, cryptographic secret keys, and passwords. **Preserved across all updates.** |
-| `config.json` | Operator customization settings and confidence thresholds. **Preserved.** |
-| `secure/` | Encrypted session tokens, ITMS login cookies, and offline caches. **Preserved.** |
-| `cert.crt` / `cert.key` | Verified default SSL certificates and private keys. **Tracked & preserved.** |
-| `media/vault/` | Vault containing ingested front and rear vehicle photos organized by date. **Untouched.** |
-| `media/crops/` | Cached AI plate crops and vehicle detections. **Untouched.** |
-| `exports/` | Exported verification spreadsheets and audit files. **Untouched.** |
-| `.venv/` | Python virtual environment. Preserved and incrementally updated. |
+|Protected Path|Contents \& Guarantee|
+|-|-|
+|`db.sqlite3`|SQLite production database. Contains all batches, evidence links, vehicle pairs, audit logs, and operator accounts. **Never overwritten or deleted.**|
+|`.env`|Environment configuration, cryptographic secret keys, and passwords. **Preserved across all updates.**|
+|`config.json`|Operator customization settings and confidence thresholds. **Preserved.**|
+|`secure/`|Encrypted session tokens, ITMS login cookies, and offline caches. **Preserved.**|
+|`media/vault/`|Vault containing ingested front and rear vehicle photos organized by date. **Untouched.**|
+|`media/crops/`|Cached AI plate crops and vehicle detections. **Untouched.**|
+|`exports/`|Exported verification spreadsheets and audit files. **Untouched.**|
+|`.venv/`|Python virtual environment. Preserved and incrementally updated.|
 
----
+\---
 
-## 8. Directory Structure Guide
+## 7\. Directory Structure Guide
 
 ```text
-itms_verification/
+itms\\\_verification/
 │
-├── itms                      # Universal CLI Launcher for Linux & macOS (bash)
-├── itms.cmd                  # Universal CLI Launcher for Windows (CMD & Explorer)
-├── itms.ps1                  # Universal CLI Launcher for PowerShell
-├── itms_cli.py               # Central Python CLI dispatcher
-├── windows_service.py        # 24/7 Background Windows Service with Away Mode
-├── cert.crt                  # Default offline SSL certificate (tracked in repo)
-├── cert.key                  # Default offline SSL private key (tracked in repo)
-├── install.ps1               # 1-Click Installer for Windows
-├── install.sh                # 1-Click Installer for Linux & macOS
+├── run.bat                   # 1-Click Launcher for Windows (Web UI default)
+├── run.command               # 1-Click Launcher for macOS Finder
+├── run.sh                    # Terminal Launcher for Linux / macOS
 │
-├── manage.py                 # Django command-line administrative utility
-├── requirements.txt          # Python application dependencies
+├── update.bat                # 1-Click Updater for Windows
+├── update.command            # 1-Click Updater for macOS Finder
+├── update.sh                 # Shell Updater for Linux / macOS
+│
+├── manage.py                 # Django command-line utility
+├── requirements.txt          # Python dependencies
 │
 ├── core/                     # Application source code
 │   ├── models.py             # Database models (Evidence, Orders, Batches, Audits)
-│   ├── views.py              # REST API & Web view controllers
+│   ├── views.py              # REST API \\\& Web view controllers
 │   ├── urls.py               # Application routing endpoints
-│   ├── version.py            # Version tracking & GitHub metadata
+│   ├── version.py            # Version tracking \\\& GitHub metadata
 │   ├── services/             # Core business logic services
-│   │   ├── config_service.py # System configuration manager
-│   │   ├── ssl_service.py    # Self-healing SSL/HTTPS engine
-│   │   ├── vault_service.py  # Image vault storage & file hasher
-│   │   └── update_service.py # GitHub Releases update engine
-│   ├── vision/               # Computer vision & OCR pipelines
+│   │   ├── config\\\_service.py # System configuration manager
+│   │   ├── vault\\\_service.py  # Image vault storage \\\& file hasher
+│   │   └── update\\\_service.py # GitHub Releases update engine
+│   ├── vision/               # Computer vision \\\& OCR pipelines
 │   ├── static/core/          # Stylesheets (CSS), icons, and JavaScript
 │   └── templates/core/       # HTML5 Jinja/Django templates
 │
 ├── scripts/
-│   └── bootstrap.py          # Automated resource provisioning & diagnostic tool
+│   └── bootstrap.py          # Automated resource provisioning \\\& diagnostic tool
 │
-├── models/                   # Fine-tuned YOLO plate detector weights
-│   ├── license-plate-finetune-v1n.pt # Nano plate detector weights (fastest)
-│   └── license-plate-finetune-v1s.pt # Small plate detector weights (high accuracy)
+├── models/                   # YOLO \\\& OCR model weight files
+│   ├── yolov8n.pt            # Vehicle detector weights
+│   └── license-plate-finetune-v1n.pt # Plate detector weights
 │
 ├── media/                    # Operator evidence vault
 │   ├── vault/                # Timestamped immutable original images
@@ -298,112 +217,54 @@ itms_verification/
 │
 ├── secure/                   # Secure storage
 │   ├── auth/                 # Encrypted session credentials
-│   └── .update_cache.json    # 12-hour GitHub release cache
+│   └── .update\\\_cache.json    # 12-hour GitHub release cache
 │
 └── exports/                  # Audit reports and CSV export outputs
 ```
 
----
+\---
 
-## 9. Zero-Configuration Provisioning & Self-Healing Ladder
+## 8\. Offline \& Air-Gapped Workstations
 
-In real-world field environments (e.g. fresh Windows workstations, restricted enterprise machines without Windows Package Manager / Microsoft Store, or machines without administrator privileges), the system executes an automated, self-healing provisioning ladder:
+For inspection stations or remote checkpoints without continuous internet connectivity:
 
-### 1. SSL/HTTPS Certificates Ladder
-Mobile cameras and barcode/QR scanners require a Secure Context (`https://` or `localhost`). ITMS guarantees certificates out-of-the-box:
-1. **Repository-Tracked Default Certificates**: Root `cert.crt` and `cert.key` are tracked in version control, ensuring all installations have working certificates immediately.
-2. **Dynamic Generation Fallback**: If certificates are deleted or corrupt, `core/services/ssl_service.py` automatically generates new certificates using:
-   * Python `cryptography` library in-memory.
-   * Windows PowerShell .NET PKI certificate generation.
-   * Hardcoded verified 10-year fallback certificate and RSA key.
-3. Automatically synchronized to root `cert.crt` and `cert.key`.
+1. **One-Time Preparation**: Run `run.bat` or `run.command` once on an internet-connected computer to download all models, weights, and dependencies.
+2. **Copying to Offline PC**: Copy the entire `itms\\\_verification` directory (including `.venv`, `models/`, and `.env`) onto a USB drive and paste it onto the offline workstation.
+3. **Offline Resilience**:
 
-### 2. What Happens if Python is Not Installed and `winget` Fails?
-1. **Local & Standard Path Detection**: `run.bat` checks for existing virtual environments (`.venv`), local portable Python (`tools\python\python.exe`), and standard un-indexed locations (`%LocalAppData%\Programs\Python\Python311`, `C:\Python311`, etc.) in case Python was previously installed without adding to PATH.
-2. **Winget Attempt**: If not found, it attempts installation via `winget install Python.Python.3.11`.
-3. **Direct Fallback (When winget Fails)**: If `winget` is missing, blocked, or errors out, `run.bat` automatically:
-   * Downloads the official 64-bit Python installer (`python-3.11.9-amd64.exe`) directly from `python.org` using built-in Windows PowerShell.
-   * Runs a silent user-space installation (`/quiet InstallAllUsers=0 PrependPath=1 Include_pip=1`). Because it installs to user space, **no Administrator/UAC elevation is required**.
-   * Injects the new Python path into the current session and immediately continues initializing `.venv` and dependencies.
+   * The application operates completely offline for image ingestion, YOLO detection, OCR extraction, plate normalization, and pairing.
+   * The update engine detects network offline state and displays a clean status notice without freezing or stalling the UI.
 
-### 3. What Happens if Tesseract-OCR is Not Installed and `winget` Fails?
-1. **Local & System Detection**: `scripts/bootstrap.py` checks `tools/tesseract/tesseract.exe`, `C:\Program Files\Tesseract-OCR\tesseract.exe`, and PATH.
-2. **Winget Attempt**: If missing, it attempts `winget install UB-Mannheim.TesseractOCR`.
-3. **Direct Local Provisioning (When winget Fails)**: If `winget` fails or is absent, `bootstrap.py`:
-   * Downloads the official UB-Mannheim Tesseract 5.4 installer directly.
-   * Executes a silent local unpack directly into the project's `tools\tesseract\` folder:
-     ```cmd
-     tesseract-setup.exe /S /D=<PROJECT_DIR>\tools\tesseract
-     ```
-   * Because it installs into the project folder rather than `C:\Program Files\`, **no Administrator privileges are required**.
-   * `core/vision/ocr_engine.py` automatically detects `tools/tesseract/tesseract.exe` and configures `TESSDATA_PREFIX` for immediate character recognition.
+\---
 
----
-
-## 10. Offline & Air-Gapped Workstations
-
-For inspection stations or remote checkpoints without any internet connectivity:
-
-1. **One-Time USB Preparation**: Run `run.bat` once on any internet-connected computer. This downloads:
-   * Python virtual environment (`.venv/`)
-   * Fine-tuned plate detection models (`models/license-plate-finetune-v1n.pt` and `v1s.pt`)
-   * Tesseract OCR (`tools/tesseract/`)
-   * SSL certificates (`cert.crt`, `cert.key`)
-2. **Transfer to Offline Machine**: Copy the complete `itms_verification` directory to a USB thumb drive and paste it onto the offline PC.
-3. **Offline Execution**:
-   * Double-clicking `itms.cmd` (or typing `itms`) will find `.venv`, `tools/tesseract`, and `models/` locally and launch the Web Console instantly with 0 network calls.
-   * Computer vision inference, plate cropping, OCR extraction, and local database operations run 100% offline.
-
----
-
-## 11. Complete System Uninstallation
-
-To cleanly and completely purge ITMS Verification Copilot, its background service, shortcuts, and global command shims:
-
-### Via Command Line
-```bash
-itms uninstall
-```
-*(Automatically stops and unregisters the Windows Service before purging files).*
-
-### Windows 1-Click PowerShell Uninstaller
-```powershell
-Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process; irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/uninstall.ps1 | iex
-```
-
-### macOS / Linux 1-Click Shell Uninstaller
-```bash
-curl -fsSL https://raw.githubusercontent.com/KIREX01/itms_verification/main/uninstall.sh | bash
-```
-
----
-
-## 12. Troubleshooting & FAQ
+## 9\. Troubleshooting \& FAQ
 
 ### Q1: The browser does not open automatically.
-If your browser does not launch automatically upon running `itms`, open your web browser and navigate directly to:
+
+If your browser does not launch automatically upon running `run.bat` or `run.command`, simply open Chrome, Edge, Safari, or Firefox and navigate to:
+
 ```
-https://127.0.0.1/
+http://127.0.0.1:8000/
 ```
 
-### Q2: Browser shows "Your connection is not private" or self-signed warning.
-Because the server operates offline using an autonomous self-signed SSL certificate:
-* Click **Advanced** -> **Proceed to 127.0.0.1 (unsafe)** (in Chrome/Edge) or **Advanced** -> **Accept the Risk and Continue** (in Firefox).
-* On mobile companion devices, tap **Advanced** -> **Proceed to [LAN-IP]**. This unlocks the browser's Secure Context for camera and barcode scanning.
+### Q2: What are the default operator credentials?
 
-### Q3: What are the default operator credentials?
 The automatic bootstrap seeds a default administrator account:
+
 * **Username**: `admin`
-* **Password**: `admin`
-*(You can change this password or create new operators in the Web Console or via `itms manage createsuperuser`).*
+* **Password**: `admin123`
+*(You can change this password or create new operators in the Django Admin at `http://127.0.0.1:8000/admin/` or via `python manage.py createsuperuser`).*
 
-### Q4: How do I manually configure Tesseract OCR?
-If you prefer manual setup rather than automated provisioning:
-* **Windows**: Download and install from UB-Mannheim: `https://github.com/UB-Mannheim/tesseract/wiki` or copy files to `tools\tesseract\`.
-* **macOS**: `brew install tesseract`
-* **Linux**: `sudo apt install tesseract-ocr`
+### Q3: Tesseract OCR is not detected.
 
-### Q5: Model weights manual download links.
-If your network blocks automated Hugging Face downloads, manually download these files to `models/`:
-1. `models/license-plate-finetune-v1n.pt`: `https://huggingface.co/morsetechlab/yolov11-license-plate-detection/resolve/main/license-plate-finetune-v1n.pt`
-2. `models/license-plate-finetune-v1s.pt`: `https://huggingface.co/morsetechlab/yolov11-license-plate-detection/resolve/main/license-plate-finetune-v1s.pt`
+* **Windows**: Install Tesseract OCR from UB-Mannheim: `https://github.com/UB-Mannheim/tesseract/wiki`. Ensure it installs to `C:\\\\Program Files\\\\Tesseract-OCR\\\\tesseract.exe`.
+* **macOS**: Install via Homebrew: `brew install tesseract`
+* **Linux**: Install via apt: `sudo apt-get install tesseract-ocr`
+
+### Q4: Model weights fail to download automatically.
+
+If your network blocks automated GitHub asset downloads, manually download the following files and place them in the `models/` directory:
+
+1. `models/yolov8n.pt` from `https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.pt`
+2. `models/license-plate-finetune-v1n.pt` from your team's model repository or backup.
+

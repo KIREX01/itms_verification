@@ -376,6 +376,21 @@ async function changeActiveBond(selectEl) {
     }
 }
 
+function _renderWarehouseOptions(targetSel, warehouses, activeBond) {
+    if (!targetSel) return;
+    const currVal = targetSel.value;
+    targetSel.innerHTML = "";
+    warehouses.forEach(w => {
+        const opt = document.createElement("option");
+        opt.value = w.code;
+        opt.textContent = `${w.code} - ${w.name}`;
+        if (w.code === currVal || (activeBond && w.code === activeBond.code)) {
+            opt.selected = true;
+        }
+        targetSel.appendChild(opt);
+    });
+}
+
 async function syncBondsFromITMS() {
     const btn = document.getElementById("btn-sync-bonds");
     if (btn) {
@@ -391,22 +406,8 @@ async function syncBondsFromITMS() {
             const sel = document.getElementById("settings-bond-select");
             const selItms = document.getElementById("itms-select-bond");
             if (data.warehouses && data.warehouses.length > 0) {
-                const renderOptions = (targetSel) => {
-                    if (!targetSel) return;
-                    const currVal = targetSel.value;
-                    targetSel.innerHTML = "";
-                    data.warehouses.forEach(w => {
-                        const opt = document.createElement("option");
-                        opt.value = w.code;
-                        opt.textContent = `${w.code} - ${w.name}`;
-                        if (w.code === currVal || (data.active_bond && w.code === data.active_bond.code)) {
-                            opt.selected = true;
-                        }
-                        targetSel.appendChild(opt);
-                    });
-                };
-                renderOptions(sel);
-                renderOptions(selItms);
+                _renderWarehouseOptions(sel, data.warehouses, data.active_bond);
+                _renderWarehouseOptions(selItms, data.warehouses, data.active_bond);
             }
             if (data.active_bond) {
                 const badge = document.getElementById("settings-bond-badge");

@@ -15,7 +15,7 @@ import platform
 import stat
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ def is_posix() -> bool:
     return IS_POSIX
 
 
-def safe_chmod(path: Union[str, Path], mode: int) -> None:
+def safe_chmod(path: str | Path, mode: int) -> None:
     """
     Applies POSIX file permissions safely on Unix/Linux systems.
     - Strictly no-ops on Windows to avoid OS errors and unsupported mode bits.
@@ -59,7 +59,7 @@ def safe_chmod(path: Union[str, Path], mode: int) -> None:
         # Restrict permissions: strip world-writable (S_IWOTH) permission
         safe_mode = mode & ~stat.S_IWOTH
         os.chmod(p, safe_mode)
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         logger.debug("safe_chmod could not update permissions for %s: %s", path, exc)
 
 
@@ -79,7 +79,7 @@ def normalize_rel_path(path_str: str) -> str:
     return "/".join(parts)
 
 
-def resolve_platform_path(path_val: Union[str, Path], base_dir: Path) -> Path:
+def resolve_platform_path(path_val: str | Path, base_dir: Path) -> Path:
     """
     Resolves a path against a base directory, correctly handling both Windows and Linux paths.
     """
@@ -97,7 +97,7 @@ def resolve_platform_path(path_val: Union[str, Path], base_dir: Path) -> Path:
     return (base_dir / p).resolve()
 
 
-def get_platform_diagnostics() -> Dict[str, Any]:
+def get_platform_diagnostics() -> dict[str, Any]:
     """Returns detailed diagnostics about the current platform and filesystem."""
     return {
         "os_name": os.name,

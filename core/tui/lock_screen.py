@@ -21,6 +21,10 @@ from textual.widgets import Button, Input, Static
 from core.services import config_service
 
 
+INPUT_MASTER_PIN_ID = "input-master-pin"
+INPUT_MASTER_PIN_SELECTOR = "#input-master-pin"
+
+
 class TUIMasterLockScreen(ModalScreen[bool]):
     """
     Dedicated Master Security Lock modal screen for ITMS Operator TUI.
@@ -93,8 +97,7 @@ class TUIMasterLockScreen(ModalScreen[bool]):
         self._countdown_timer = None
 
     def compose(self) -> ComposeResult:
-        with Center():
-            with Vertical(id="lock-modal-container"):
+        with Center(), Vertical(id="lock-modal-container"):
                 yield Static(
                     "[bold yellow]🔒 ITMS VERIFICATION COPILOT[/bold yellow]\n"
                     "[bold white]MASTER CONSOLE SECURITY LOCK[/bold white]",
@@ -109,7 +112,7 @@ class TUIMasterLockScreen(ModalScreen[bool]):
                     yield Input(
                         placeholder="● ● ● ● ● ●",
                         password=True,
-                        id="input-master-pin",
+                        id=INPUT_MASTER_PIN_ID,
                         max_length=12,
                     )
                 with Horizontal(id="lock-actions-row"):
@@ -121,11 +124,11 @@ class TUIMasterLockScreen(ModalScreen[bool]):
                 )
 
     def on_mount(self) -> None:
-        self.query_one("#input-master-pin", Input).focus()
+        self.query_one(INPUT_MASTER_PIN_SELECTOR, Input).focus()
         self._countdown_timer = self.set_interval(1.0, self._check_lockout_tick)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "input-master-pin":
+        if event.input.id == INPUT_MASTER_PIN_ID:
             self._attempt_unlock()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -141,7 +144,7 @@ class TUIMasterLockScreen(ModalScreen[bool]):
     def _check_lockout_tick(self) -> None:
         """Updates lockout countdown if terminal is in rate-limit cooldown."""
         err_label = self.query_one("#lock-error-label", Static)
-        pin_input = self.query_one("#input-master-pin", Input)
+        pin_input = self.query_one(INPUT_MASTER_PIN_SELECTOR, Input)
 
         now = time.time()
         if now < self.lockout_until:
@@ -156,7 +159,7 @@ class TUIMasterLockScreen(ModalScreen[bool]):
                 err_label.update("[dim cyan]Cooldown expired. You may try entering the PIN again.[/dim cyan]")
 
     def _attempt_unlock(self) -> None:
-        pin_input = self.query_one("#input-master-pin", Input)
+        pin_input = self.query_one(INPUT_MASTER_PIN_SELECTOR, Input)
         err_label = self.query_one("#lock-error-label", Static)
 
         now = time.time()

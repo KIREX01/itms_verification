@@ -30,6 +30,34 @@ VALID_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
 HASH_CHUNK_SIZE = 1024 * 1024
 
 
+def _resolve_batch_email(account_email: str, user: Optional[Any]) -> str:
+    """Resolves active account email for batch attribution."""
+    if account_email:
+        return account_email
+    if user and getattr(user, "is_authenticated", False):
+        itms_sess = getattr(user, "itms_session", None)
+        if itms_sess and getattr(itms_sess, "itms_email", None):
+            return str(itms_sess.itms_email)
+    try:
+        from core.services.itms_web_client import get_current_itms_account
+        return get_current_itms_account() or ""
+    except Exception:
+        return ""
+
+
+def _resolve_batch_label(source_label: str, user: Optional[Any], fallback_id: str) -> str:
+    """Formats human-readable batch label including operator attribution."""
+    label = (source_label or "").strip()
+    if user and getattr(user, "is_authenticated", False):
+        uname = getattr(user, "username", "Operator")
+        if not label:
+            return f"Uploaded by {uname}"
+        if f"({uname})" not in label and uname not in label:
+            return f"{label} ({uname})"
+        return label
+    return label or fallback_id
+
+
 def create_ingestion_batch(
     source_type: str = IngestionBatch.SourceType.CLI,
     source_label: str = "",
@@ -42,40 +70,16 @@ def create_ingestion_batch(
     short_uuid = uuid.uuid4().hex[:6]
     batch_id = f"{batch_prefix}-{short_uuid}"
 
-    email = account_email or ""
-    if not email and user and getattr(user, "is_authenticated", False):
-        try:
-            itms_sess = getattr(user, "itms_session", None)
-            if itms_sess and itms_sess.itms_email:
-                email = itms_sess.itms_email
-        except Exception:
-            pass
+    email = _resolve_batch_email(account_email, user)
+    label = _resolve_batch_label(source_label, user, batch_id)
 
-    if not email:
-        try:
-            from core.services.itms_web_client import get_current_itms_account
-            email = get_current_itms_account()
-        except Exception:
-            pass
-
-    label = (source_label or "").strip()
-    if user and getattr(user, "is_authenticated", False):
-        uname = getattr(user, "username", "Operator")
-        if not label:
-            label = f"Uploaded by {uname}"
-        elif f"({uname})" not in label and uname not in label:
-            label = f"{label} ({uname})"
-    elif not label:
-        label = batch_id
-
-    batch = IngestionBatch.objects.create(
+    return IngestionBatch.objects.create(
         batch_id=batch_id,
         source_type=source_type,
         source_label=label,
         account_email=email,
         created_at=now,
     )
-    return batch
 
 
 def get_vault_root() -> Path:

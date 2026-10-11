@@ -18,8 +18,27 @@
     <link rel="stylesheet" href="{% static 'core/css/tab_reports.css' %}?v=7">
     <link rel="stylesheet" href="{% static 'core/css/tab_stock.css' %}?v=9">
     <link rel="stylesheet" href="{% static 'core/css/modals.css' %}?v=7">
+    <meta name="csrf-token" content="{{ csrf_token }}">
     {% block extra_css %}{% endblock %}
     <script>
+        // Automatic CSRF token injection for state-mutating requests
+        (function() {
+            const originalFetch = window.fetch;
+            window.fetch = function(url, options = {}) {
+                const opts = Object.assign({}, options);
+                const method = (opts.method || 'GET').toUpperCase();
+                if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+                    opts.headers = opts.headers ? Object.assign({}, opts.headers) : {};
+                    const token = document.querySelector('meta[name="csrf-token"]')?.content
+                        || (document.cookie.split('; ').find(row => row.startsWith('csrftoken='))?.split('=')[1] || '');
+                    if (token && !opts.headers['X-CSRFToken'] && !opts.headers['x-csrftoken']) {
+                        opts.headers['X-CSRFToken'] = token;
+                    }
+                }
+                return originalFetch.call(this, url, opts);
+            };
+        })();
+
         window.handlePhotoError = function(type) {
             const img = document.getElementById(`qimg-${type}`);
             const ph = document.getElementById(`q${type}-placeholder`);

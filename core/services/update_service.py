@@ -76,6 +76,25 @@ def _save_cache(result: Dict[str, Any]) -> None:
         logger.debug("Could not write update cache: %s", exc)
 
 
+def _is_platform_asset_match(aname: str) -> bool:
+    """Matches release archive name against host OS conventions."""
+    if sys.platform == "win32":
+        return "-windows.zip" in aname or ("windows" in aname and aname.endswith(".zip"))
+    return "-linux" in aname or "ubuntu" in aname
+
+
+def _resolve_platform_asset(assets: list[dict[str, Any]]) -> Optional[str]:
+    """Finds best matching platform release asset URL or fallback archive."""
+    generic_asset = None
+    for asset in assets:
+        aname = asset.get("name", "").lower()
+        if _is_platform_asset_match(aname):
+            return asset.get("browser_download_url")
+        if aname.endswith((".zip", ".tar.gz")):
+            generic_asset = asset.get("browser_download_url")
+    return generic_asset
+
+
 class UpdateService:
     """Manages update checks and safe system upgrading via GitHub Releases."""
 
@@ -125,23 +144,9 @@ class UpdateService:
 
                     # Check for attached platform-specific release asset (Windows vs Linux)
                     assets = payload.get("assets", [])
-                    matched_asset = None
-                    generic_asset = None
-                    for asset in assets:
-                        aname = asset.get("name", "").lower()
-                        if sys.platform == "win32" and ("-windows.zip" in aname or "windows" in aname and aname.endswith(".zip")):
-                            matched_asset = asset.get("browser_download_url")
-                            break
-                        elif sys.platform != "win32" and ("-linux" in aname or "ubuntu" in aname):
-                            matched_asset = asset.get("browser_download_url")
-                            break
-                        elif aname.endswith((".zip", ".tar.gz")):
-                            generic_asset = asset.get("browser_download_url")
-
+                    matched_asset = _resolve_platform_asset(assets)
                     if matched_asset:
                         zip_url = matched_asset
-                    elif generic_asset:
-                        zip_url = generic_asset
 
                     newer = is_newer_version(tag_name, __version__)
 

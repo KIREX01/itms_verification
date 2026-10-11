@@ -37,7 +37,10 @@ import time
 import urllib.parse
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from html.parser import HTMLParser
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from core.services import platform_service
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -45,6 +48,12 @@ from urllib3.util import Retry
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_ITMS_BASE_URL: str = "https://stock.itms.ug"
+SCHEME_HTTP: str = "http://"
+SCHEME_HTTPS: str = "https://"
+URL_PATH_LOGIN: str = "/site/login"
+URL_PATH_LOGOUT: str = "/site/logout"
 
 
 def normalize_itms_url(raw_url: Optional[str]) -> str:
@@ -56,26 +65,26 @@ def normalize_itms_url(raw_url: Optional[str]) -> str:
     4. Empty or invalid values safely default to 'https://stock.itms.ug'.
     """
     if not raw_url or not str(raw_url).strip():
-        return "https://stock.itms.ug"
+        return DEFAULT_ITMS_BASE_URL
 
     clean = str(raw_url).strip().rstrip("/")
 
     # If the user literally typed 'site/login' or '/site/login' or 'site/logout':
     if clean.lstrip("/") in ("site/login", "site/logout", "site", "login", "logout"):
-        return "https://stock.itms.ug"
+        return DEFAULT_ITMS_BASE_URL
 
     # Add scheme if missing (e.g. 'stock.itms.ug' or 'stock.itms.ug/site/login')
-    if not clean.startswith("http://") and not clean.startswith("https://"):
-        clean = f"https://{clean.lstrip('/')}"
+    if not clean.startswith((SCHEME_HTTP, SCHEME_HTTPS)):
+        clean = f"{SCHEME_HTTPS}{clean.lstrip('/')}"
 
     # Strip subpaths like /site/login or /site/logout from base_url
-    for suffix in ("/site/login", "/site/logout", "/site", "/login"):
+    for suffix in (URL_PATH_LOGIN, URL_PATH_LOGOUT, "/site", "/login"):
         if clean.endswith(suffix):
             clean = clean[:-len(suffix)].rstrip("/")
 
     parsed = urllib.parse.urlparse(clean)
     if not parsed.netloc:
-        return "https://stock.itms.ug"
+        return DEFAULT_ITMS_BASE_URL
 
     return clean
 
@@ -83,11 +92,11 @@ def normalize_itms_url(raw_url: Optional[str]) -> str:
 def get_itms_base_url() -> str:
     try:
         if settings.configured:
-            configured = getattr(settings, "ITMS_API_BASE_URL", "https://stock.itms.ug")
+            configured = getattr(settings, "ITMS_API_BASE_URL", DEFAULT_ITMS_BASE_URL)
             return normalize_itms_url(configured)
     except Exception:
         pass
-    return "https://stock.itms.ug"
+    return DEFAULT_ITMS_BASE_URL
 
 def get_default_session_file() -> Path:
     from core.services.secure_storage import get_secure_auth_path
@@ -266,7 +275,7 @@ def prepare_multipart_image_bytes(
 
 @dataclass
 class ITMSWebSessionData:
-    base_url: str = "https://stock.itms.ug"
+    base_url: str = DEFAULT_ITMS_BASE_URL
     user_email: str = ""
     user_uuid: str = ""
     user_display_name: str = ""
@@ -310,8 +319,8 @@ class ITMSWebSessionStore:
         self._session: ITMSWebSessionData = ITMSWebSessionData()
         self.load()
 
-    def load(self) -> ITMSWebSessionData:
-        db_loaded = False
+    def _load_from_db(self) -> Optional[ITMSWebSessionData]:
+        """Attempts to load session from the database (OperatorITMSSession)."""
         try:
             from core.models import OperatorITMSSession
             session_obj = None
@@ -323,44 +332,50 @@ class ITMSWebSessionStore:
                     or OperatorITMSSession.objects.order_by("-saved_at").first()
                 )
 
-            if session_obj:
-                saved_ts = session_obj.saved_at.timestamp() if session_obj.saved_at else 0.0
-                exp_ts = session_obj.expires_at.timestamp() if session_obj.expires_at else 0.0
-                ver_ts = session_obj.last_verified_at.timestamp() if session_obj.last_verified_at else 0.0
-                self._session = ITMSWebSessionData(
-                    base_url=session_obj.base_url or "https://stock.itms.ug",
-                    user_email=session_obj.itms_email or "",
-                    user_uuid=session_obj.itms_user_uuid or "",
-                    user_display_name=session_obj.itms_display_name or "",
-                    cookies=dict(session_obj.cookies or {}),
-                    csrf_token=session_obj.csrf_token or "",
-                    is_authenticated=bool(session_obj.is_authenticated),
-                    saved_at=saved_ts,
-                    expires_at=exp_ts,
-                    last_verified_at=ver_ts,
-                    last_status_message=session_obj.last_status_message or "",
-                )
-                db_loaded = True
+            if not session_obj:
+                return None
+
+            saved_ts = session_obj.saved_at.timestamp() if session_obj.saved_at else 0.0
+            exp_ts = session_obj.expires_at.timestamp() if session_obj.expires_at else 0.0
+            ver_ts = session_obj.last_verified_at.timestamp() if session_obj.last_verified_at else 0.0
+            return ITMSWebSessionData(
+                base_url=session_obj.base_url or DEFAULT_ITMS_BASE_URL,
+                user_email=session_obj.itms_email or "",
+                user_uuid=session_obj.itms_user_uuid or "",
+                user_display_name=session_obj.itms_display_name or "",
+                cookies=dict(session_obj.cookies or {}),
+                csrf_token=session_obj.csrf_token or "",
+                is_authenticated=bool(session_obj.is_authenticated),
+                saved_at=saved_ts,
+                expires_at=exp_ts,
+                last_verified_at=ver_ts,
+                last_status_message=session_obj.last_status_message or "",
+            )
         except Exception as exc:
             logger.debug("Database load note for ITMS session: %s", exc)
+            return None
 
-        if not db_loaded and self.storage_path.is_file():
-            try:
-                with open(self.storage_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                self._session = ITMSWebSessionData.from_dict(data)
-                # Auto-migrate disk session to DB if user is available and DB is ready
-                if self.user and getattr(self.user, "is_authenticated", False) and (self._session.cookies or self._session.is_authenticated):
-                    try:
-                        self.save(self._session)
-                    except Exception:
-                        pass
-            except Exception as exc:
-                logger.warning("Failed to load ITMS web session from %s: %s", self.storage_path, exc)
-                self._session = ITMSWebSessionData()
-        elif not db_loaded:
-            self._session = ITMSWebSessionData()
+    def _load_from_disk(self) -> Optional[ITMSWebSessionData]:
+        """Attempts to load session from disk JSON cache."""
+        if not self.storage_path.is_file():
+            return None
+        try:
+            with open(self.storage_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            sess = ITMSWebSessionData.from_dict(data)
+            if self.user and getattr(self.user, "is_authenticated", False) and (sess.cookies or sess.is_authenticated):
+                try:
+                    self.save(sess)
+                except Exception:
+                    pass
+            return sess
+        except Exception as exc:
+            logger.warning("Failed to load ITMS web session from %s: %s", self.storage_path, exc)
+            return None
 
+    def load(self) -> ITMSWebSessionData:
+        loaded = self._load_from_db() or self._load_from_disk()
+        self._session = loaded if loaded is not None else ITMSWebSessionData()
         return self._session
 
     def save(self, session_data: ITMSWebSessionData) -> ITMSWebSessionData:
@@ -413,10 +428,7 @@ class ITMSWebSessionStore:
             self.storage_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.storage_path, "w", encoding="utf-8") as f:
                 json.dump(session_data.to_dict(), f, indent=2)
-            try:
-                os.chmod(self.storage_path, 0o600)
-            except Exception:
-                pass
+            platform_service.safe_chmod(self.storage_path, 0o600)
         except Exception as exc:
             logger.warning("Failed to write ITMS web session to %s: %s", self.storage_path, exc)
 
@@ -768,7 +780,13 @@ class ITMSWebClient:
         if not email or not password:
             return False, "Email and password are required.", {}
 
-        login_url = f"{self.base_url}/site/login"
+        safe_base = normalize_itms_url(self.base_url)
+        parsed_base = urllib.parse.urlsplit(safe_base)
+        if parsed_base.scheme not in ("http", "https") or not parsed_base.netloc:
+            return False, "Invalid ITMS base URL specified.", {}
+        safe_origin = f"{parsed_base.scheme}://{parsed_base.netloc}"
+        login_url = urllib.parse.urljoin(safe_origin, URL_PATH_LOGIN)
+
         s = requests.Session()
         s.headers.update({
             "User-Agent": USER_AGENT,
@@ -791,7 +809,7 @@ class ITMSWebClient:
             post_headers = {
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Referer": login_url,
-                "Origin": self.base_url,
+                "Origin": safe_origin,
             }
             form_data = {
                 "_csrf-frontend": csrf_token,
@@ -1324,6 +1342,77 @@ class ITMSWebClient:
             "total": len(orders),
         }
 
+class _WarehouseHTMLParser(HTMLParser):
+    """Event-driven parser to extract warehouse dropdown options and table cells without regex backtracking."""
+
+    def __init__(self):
+        super().__init__()
+        self.in_select = False
+        self.in_option = False
+        self.in_td = False
+        self.current_val = ""
+        self.current_text: list[str] = []
+        self.extracted_facilities: list[tuple[str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]):
+        attr_dict = {k.lower(): (v or "") for k, v in attrs}
+        if tag == "select":
+            name = attr_dict.get("name", "").lower()
+            elem_id = attr_dict.get("id", "").lower()
+            if "warehouse" in name or "warehouse" in elem_id:
+                self.in_select = True
+        elif tag == "option" and self.in_select:
+            self.in_option = True
+            self.current_val = attr_dict.get("value", "").strip()
+            self.current_text = []
+        elif tag == "td":
+            self.in_td = True
+            self.current_text = []
+
+    def handle_endtag(self, tag: str):
+        if tag == "select":
+            self.in_select = False
+        elif tag == "option" and self.in_option:
+            text = "".join(self.current_text).strip()
+            if self.current_val and text:
+                self.extracted_facilities.append((text, self.current_val))
+            self.in_option = False
+            self.current_val = ""
+            self.current_text = []
+        elif tag == "td" and self.in_td:
+            cell_text = "".join(self.current_text).strip()
+            if "BOND" in cell_text.upper():
+                self.extracted_facilities.append((cell_text, ""))
+            self.in_td = False
+            self.current_text = []
+
+    def handle_data(self, data: str):
+        if (self.in_select and self.in_option) or self.in_td:
+            self.current_text.append(data)
+
+
+def _derive_facility_code(name_clean: str, existing_codes: Iterable[str]) -> str:
+    """Derives a concise facility code and avoids collision with existing codes."""
+    upper_name = name_clean.upper()
+    if "AGM" in upper_name:
+        code = "AGM"
+    elif "SPIRO" in upper_name:
+        code = "SPIRO"
+    elif "BOND" in upper_name:
+        bm = re.search(r"BOND\s*([0-9A-Z]+)", upper_name)
+        code = f"BOND{bm.group(1)}" if bm else "BOND"
+    else:
+        words = [w for w in re.split(r"[^A-Za-z0-9]+", upper_name) if w]
+        code = "".join(w[0] for w in words)[:8] if words else upper_name[:6]
+
+    original_code = code
+    suffix = 2
+    while code in existing_codes:
+        code = f"{original_code}_{suffix}"
+        suffix += 1
+    return code
+
+
     def fetch_warehouses_from_itms(self) -> Dict[str, Any]:
         """
         Dynamically extracts bonded warehouse / installation facilities from ITMS WebApp.
@@ -1342,26 +1431,8 @@ class ITMSWebClient:
             if not name_clean or name_clean.lower() in ("all", "select warehouse", "any", "prompt", "--"):
                 return
             upper_name = name_clean.upper()
-
-            # Derive concise facility code
-            if "AGM" in upper_name:
-                code = "AGM"
-            elif "SPIRO" in upper_name:
-                code = "SPIRO"
-            elif "BOND" in upper_name:
-                bm = re.search(r"BOND\s*([0-9A-Z]+)", upper_name)
-                code = f"BOND{bm.group(1)}" if bm else "BOND"
-            else:
-                words = [w for w in re.split(r"[^A-Za-z0-9]+", upper_name) if w]
-                code = "".join(w[0] for w in words)[:8] if words else upper_name[:6]
-
-            # Avoid collision by appending suffix if code exists with different name
-            original_code = code
-            suffix = 2
-            while code in discovered and discovered[code]["name"].upper() != upper_name:
-                code = f"{original_code}_{suffix}"
-                suffix += 1
-
+            existing_codes = [c for c, f in discovered.items() if f["name"].upper() != upper_name]
+            code = _derive_facility_code(name_clean, existing_codes)
             discovered[code] = {
                 "code": code,
                 "name": name_clean,
@@ -1369,41 +1440,15 @@ class ITMSWebClient:
                 "source": "ITMS_LIVE",
             }
 
-        # 1. Live scrape of ITMS filter dropdown
+        # 1. Live scrape of ITMS filter dropdown without regex backtracking
         if session_data.is_cookie_valid():
             try:
                 resp = self._request_with_retry("GET", url, timeout=self.timeout)
                 if resp.status_code == 200:
-                    html_content = resp.text
-                    # Search for warehouse_id select element
-                    sel_match = re.search(
-                        r'<select[^>]*(?:name=["\'][^"\']*warehouse_id[^"\']*["\']|id=["\'][^"\']*warehouse_id[^"\']*["\'])[^>]*>(.*?)</select>',
-                        html_content,
-                        re.DOTALL | re.IGNORECASE,
-                    )
-                    if not sel_match:
-                        sel_match = re.search(
-                            r'<select[^>]*name=["\']InstallationOrderSearch\[(?:warehouse|warehouse_id)\]["\'][^>]*>(.*?)</select>',
-                            html_content,
-                            re.DOTALL | re.IGNORECASE,
-                        )
-
-                    if sel_match:
-                        inner_opts = sel_match.group(1)
-                        for opt_m in re.finditer(
-                            r'<option[^>]*value=["\']([^"\']*)["\'][^>]*>(.*?)</option>',
-                            inner_opts,
-                            re.DOTALL | re.IGNORECASE,
-                        ):
-                            val = opt_m.group(1).strip()
-                            lbl = re.sub(r"<[^>]+>", "", opt_m.group(2)).strip()
-                            if val:
-                                _add_facility(name=lbl, wh_id=val)
-
-                    # Also scan rows for warehouse column
-                    row_wh_matches = re.findall(r'<td[^>]*>([^<]*BOND[^<]*)</td>', html_content, re.IGNORECASE)
-                    for r_wh in row_wh_matches:
-                        _add_facility(name=r_wh)
+                    parser = _WarehouseHTMLParser()
+                    parser.feed(resp.text)
+                    for lbl, val in parser.extracted_facilities:
+                        _add_facility(name=lbl, wh_id=val)
             except Exception as exc:
                 logger.warning("Error querying live ITMS warehouse options: %s", exc)
 
@@ -1432,10 +1477,9 @@ class ITMSWebClient:
 
         # Check active bond validity
         active_bond = config_service.get_active_bond()
-        if not any(f["code"] == active_bond.get("code") for f in facility_list):
-            if facility_list:
-                config_service.set_active_bond(facility_list[0]["code"], facility_list[0]["name"])
-                active_bond = config_service.get_active_bond()
+        if not any(f["code"] == active_bond.get("code") for f in facility_list) and facility_list:
+            config_service.set_active_bond(facility_list[0]["code"], facility_list[0]["name"])
+            active_bond = config_service.get_active_bond()
 
         return {
             "success": True,

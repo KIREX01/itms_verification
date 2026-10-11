@@ -616,7 +616,7 @@ async function submitTabBatchUpload() {
                     expandedBatches.add(data.batch_id);
 
                     // Step 3 & 4: Start background pipeline with batch ID
-                    startIngestionPipelineTracking(data.batch_id, data);
+                    void startIngestionPipelineTracking(data.batch_id, data);
                 } else {
                     handleIngestError(data.error || "Upload failed from server.");
                 }
@@ -653,8 +653,65 @@ function handleIngestError(errorMsg) {
     }
 }
 
+async function _finalizePipelineTracking(batchId, batchData) {
+    if (activeIngestPollInterval) {
+        clearInterval(activeIngestPollInterval);
+        activeIngestPollInterval = null;
+    }
+    isBatchIngesting = false;
+
+    setStepStatus(3, "completed", "DONE", "✓");
+    setStepStatus(4, "completed", "PAIRED", "✓");
+    setText("ingest-step-3-desc", "YOLO plate detection and Ugandan OCR complete.");
+    setText("ingest-step-4-desc", "Front and rear photos correlated; matched against active orders.");
+    setIngestProgress(100, "Ingestion & processing pipeline completed successfully!");
+
+    const titleBadge = document.getElementById("batch-upload-status-badge");
+    if (titleBadge) {
+        titleBadge.innerText = "✓ COMPLETE";
+        titleBadge.className = "badge badge-green";
+    }
+
+    const sumCard = document.getElementById("ingest-summary-card");
+    if (sumCard) {
+        sumCard.style.display = "flex";
+        setText("ingest-sum-ingested", batchData.ingested_count || batchData.total_files || 0);
+        setText("ingest-sum-duplicates", batchData.duplicate_count || 0);
+        setText("ingest-sum-pairs", "Loading...");
+    }
+
+    try {
+        const bRes = await fetch(`/api/batches/${encodeURIComponent(batchId)}/`);
+        const bData = await bRes.json();
+        if (bData.images) {
+            const pairedImages = bData.images.filter(img => img.pair);
+            const numPairs = Math.round(pairedImages.length / 2);
+            setText("ingest-sum-pairs", numPairs > 0 ? numPairs : "0");
+        }
+    } catch (e) {
+        setText("ingest-sum-pairs", "Ready");
+    }
+
+    const btnBg = document.getElementById("btn-ingest-background");
+    if (btnBg) btnBg.style.display = "none";
+    const btnQueue = document.getElementById("btn-ingest-open-queue");
+    if (btnQueue) btnQueue.style.display = "inline-flex";
+    const btnPhotos = document.getElementById("btn-ingest-view-photos");
+    if (btnPhotos) btnPhotos.style.display = "inline-flex";
+    const btnDone = document.getElementById("btn-ingest-done");
+    if (btnDone) btnDone.style.display = "inline-flex";
+
+    void fetchStats();
+    void fetchBatchesList();
+    void fetchPairs();
+
+    showToast(`Batch ${batchId} successfully ingested and processed!`, "success");
+    appendConsoleLog(`Batch ${batchId}: Ingestion and vision pipeline complete.`, "success");
+    updateGlobalBgUploadPill("Pipeline Complete!", 100, "All pairs verified.");
+    setTimeout(hideGlobalBgUploadPill, 4000);
+}
+
 async function startIngestionPipelineTracking(batchId, batchData) {
-    // Step 3: YOLO Vision Active
     setStepStatus(3, "active", "RUNNING", "🔄");
     setText("ingest-step-3-desc", "Running Dual-Stream Joint Vision OCR on motorcycle pairs...");
     setIngestProgress(45, "Running Dual-Stream Joint Vision OCR...");
@@ -672,93 +729,36 @@ async function startIngestionPipelineTracking(batchId, batchData) {
     let pollCount = 0;
     if (activeIngestPollInterval) clearInterval(activeIngestPollInterval);
 
-    activeIngestPollInterval = setInterval(async () => {
+    activeIngestPollInterval = setInterval(() => {
         pollCount++;
-        try {
-            const res = await fetch("/api/pipeline/status/");
-            const st = await res.json();
-
-            if (st.running) {
-                if (st.stage === "VISION_PROCESSING") {
-                    setStepStatus(3, "active", "DETECTING", "🔄");
-                    setText("ingest-step-3-desc", st.message || "Running YOLO vision detection & OCR...");
-                    const prog = Math.min(68, 45 + Math.round((st.progress_pct || 25) * 0.25));
-                    setIngestProgress(prog, `Vision stage: ${st.message || 'Detecting plates...'}`);
-                } else if (st.stage === "PAIR_ASSOCIATION") {
-                    setStepStatus(3, "completed", "DONE", "✓");
-                    setStepStatus(4, "active", "MATCHING", "🔄");
-                    setText("ingest-step-4-desc", st.message || "Pairing front and rear cameras, linking orders...");
-                    const prog = Math.min(95, 70 + Math.round((st.progress_pct || 70) * 0.25));
-                    setIngestProgress(prog, `Pair matching: ${st.message || 'Linking orders...'}`);
-                }
-            } else {
-                // Pipeline complete
-                clearInterval(activeIngestPollInterval);
-                activeIngestPollInterval = null;
-                isBatchIngesting = false;
-
-                setStepStatus(3, "completed", "DONE", "✓");
-                setStepStatus(4, "completed", "PAIRED", "✓");
-                setText("ingest-step-3-desc", "YOLO plate detection and Ugandan OCR complete.");
-                setText("ingest-step-4-desc", "Front and rear photos correlated; matched against active orders.");
-                setIngestProgress(100, "Ingestion & processing pipeline completed successfully!");
-
-                const titleBadge = document.getElementById("batch-upload-status-badge");
-                if (titleBadge) {
-                    titleBadge.innerText = "✓ COMPLETE";
-                    titleBadge.className = "badge badge-green";
-                }
-
-                // Show summary card
-                const sumCard = document.getElementById("ingest-summary-card");
-                if (sumCard) {
-                    sumCard.style.display = "flex";
-                    setText("ingest-sum-ingested", batchData.ingested_count || batchData.total_files || 0);
-                    setText("ingest-sum-duplicates", batchData.duplicate_count || 0);
-                    setText("ingest-sum-pairs", "Loading...");
-                }
-
-                // Query batch details to show pairs formed count
-                try {
-                    const bRes = await fetch(`/api/batches/${encodeURIComponent(batchId)}/`);
-                    const bData = await bRes.json();
-                    if (bData.images) {
-                        const pairedImages = bData.images.filter(img => img.pair);
-                        const numPairs = Math.round(pairedImages.length / 2);
-                        setText("ingest-sum-pairs", numPairs > 0 ? numPairs : "0");
+        fetch("/api/pipeline/status/")
+            .then(res => res.json())
+            .then(st => {
+                if (st.running) {
+                    if (st.stage === "VISION_PROCESSING") {
+                        setStepStatus(3, "active", "DETECTING", "🔄");
+                        setText("ingest-step-3-desc", st.message || "Running YOLO vision detection & OCR...");
+                        const prog = Math.min(68, 45 + Math.round((st.progress_pct || 25) * 0.25));
+                        setIngestProgress(prog, `Vision stage: ${st.message || 'Detecting plates...'}`);
+                    } else if (st.stage === "PAIR_ASSOCIATION") {
+                        setStepStatus(3, "completed", "DONE", "✓");
+                        setStepStatus(4, "active", "MATCHING", "🔄");
+                        setText("ingest-step-4-desc", st.message || "Pairing front and rear cameras, linking orders...");
+                        const prog = Math.min(95, 70 + Math.round((st.progress_pct || 70) * 0.25));
+                        setIngestProgress(prog, `Pair matching: ${st.message || 'Linking orders...'}`);
                     }
-                } catch (e) {
-                    setText("ingest-sum-pairs", "Ready");
+                } else {
+                    void _finalizePipelineTracking(batchId, batchData);
                 }
-
-                // Update footer buttons
-                const btnBg = document.getElementById("btn-ingest-background");
-                if (btnBg) btnBg.style.display = "none";
-                const btnQueue = document.getElementById("btn-ingest-open-queue");
-                if (btnQueue) btnQueue.style.display = "inline-flex";
-                const btnPhotos = document.getElementById("btn-ingest-view-photos");
-                if (btnPhotos) btnPhotos.style.display = "inline-flex";
-                const btnDone = document.getElementById("btn-ingest-done");
-                if (btnDone) btnDone.style.display = "inline-flex";
-
-                fetchStats();
-                fetchBatchesList();
-                fetchPairs();
-
-                showToast(`Batch ${batchId} successfully ingested and processed!`, "success");
-                appendConsoleLog(`Batch ${batchId}: Ingestion and vision pipeline complete.`, "success");
-                updateGlobalBgUploadPill("Pipeline Complete!", 100, "All pairs verified.");
-                setTimeout(hideGlobalBgUploadPill, 4000);
-            }
-        } catch (pollErr) {
-            console.warn("Ingestion status poll error:", pollErr);
-            if (pollCount > 60) {
-                // Timeout safety after 60s
-                clearInterval(activeIngestPollInterval);
-                activeIngestPollInterval = null;
-                isBatchIngesting = false;
-            }
-        }
+            })
+            .catch(pollErr => {
+                console.warn("Ingestion status poll error:", pollErr);
+                if (pollCount > 60) {
+                    clearInterval(activeIngestPollInterval);
+                    activeIngestPollInterval = null;
+                    isBatchIngesting = false;
+                }
+            });
     }, 1000);
 }
 

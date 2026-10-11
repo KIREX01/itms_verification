@@ -5,7 +5,6 @@ import json
 import logging
 
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from core.models import (
@@ -57,7 +56,6 @@ def api_stock_reconciliation(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
-@csrf_exempt
 @require_POST
 def api_stock_dispatch(request: HttpRequest) -> JsonResponse:
     """
@@ -128,7 +126,6 @@ def api_stock_dispatch(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
-@csrf_exempt
 @require_POST
 def api_stock_delivery(request: HttpRequest) -> JsonResponse:
     """
@@ -211,7 +208,6 @@ def api_stock_delivery(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
-@csrf_exempt
 @require_POST
 def api_stock_return(request: HttpRequest) -> JsonResponse:
     """
@@ -267,7 +263,6 @@ def api_stock_return(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
-@csrf_exempt
 @require_POST
 def api_stock_bond_transfer(request: HttpRequest) -> JsonResponse:
     """
@@ -332,7 +327,6 @@ def api_stock_bond_transfer(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
-@csrf_exempt
 @require_POST
 def api_stock_scheduled(request: HttpRequest) -> JsonResponse:
     """
@@ -385,7 +379,6 @@ def api_stock_scheduled(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
-@csrf_exempt
 @require_POST
 def api_stock_opening(request: HttpRequest) -> JsonResponse:
     """Manually sets or adjusts Opening Balance for PSV (White) and PMO (Yellow)."""
@@ -432,7 +425,6 @@ def api_stock_opening(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
-@csrf_exempt
 @require_POST
 def api_stock_physical_count(request: HttpRequest) -> JsonResponse:
     """Records an end-of-shift physical stock count audit and computes variance."""
@@ -522,7 +514,6 @@ def api_stock_delivery_detail(request: HttpRequest, delivery_id: int) -> JsonRes
     return JsonResponse({"success": True, "delivery_note": detail})
 
 
-@csrf_exempt
 @require_POST
 def api_stock_upload_delivery_note(request: HttpRequest) -> JsonResponse:
     """
@@ -599,7 +590,6 @@ def api_stock_blocked_plates(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
-@csrf_exempt
 @require_POST
 def api_stock_verify_batch(request: HttpRequest) -> JsonResponse:
     """
@@ -671,7 +661,6 @@ def api_stock_verify_batch(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
-@csrf_exempt
 @require_POST
 def api_stock_shift_reconcile(request: HttpRequest) -> JsonResponse:
     """
@@ -767,7 +756,6 @@ def api_stock_export_category_csv(request: HttpRequest, category: str) -> HttpRe
     return response
 
 
-@csrf_exempt
 @require_POST
 def api_stock_kits_sync(request: HttpRequest) -> JsonResponse:
     """
@@ -812,7 +800,6 @@ def api_stock_kits_sync(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
-@csrf_exempt
 def api_stock_kits_readiness(request: HttpRequest) -> JsonResponse:
     """
     Returns the warehouse stock readiness status for morning take-for-work dispatches.
@@ -1152,7 +1139,6 @@ def api_stock_inspect(request: HttpRequest) -> JsonResponse:
     })
 
 
-@csrf_exempt
 @require_POST
 def api_stock_dispatch_clear(request: HttpRequest) -> JsonResponse:
     """Clears all dispatched plates for the shift, matching TUI _handle_clear_dispatches."""
@@ -1179,7 +1165,6 @@ def api_stock_dispatch_clear(request: HttpRequest) -> JsonResponse:
     })
 
 
-@csrf_exempt
 @require_POST
 def api_stock_audit(request: HttpRequest) -> JsonResponse:
     """Performs safe room physical stocktaking audit from scanned or pasted plates."""

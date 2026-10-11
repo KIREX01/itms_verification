@@ -30,6 +30,7 @@ from typing import Any, Dict, Optional
 import requests
 from django.conf import settings
 
+from core.services import platform_service
 from core.services.itms_mock import ITMSError, StepResult
 
 logger = logging.getLogger(__name__)
@@ -133,11 +134,7 @@ class TokenStore:
             self.storage_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.storage_path, "w", encoding="utf-8") as f:
                 json.dump(asdict(self._tokens), f, indent=2)
-            # Restrict file permissions on Unix if applicable
-            try:
-                os.chmod(self.storage_path, 0o600)
-            except Exception:
-                pass
+            platform_service.safe_chmod(self.storage_path, 0o600)
         except Exception as exc:
             logger.warning("Failed to write ITMS token file %s: %s", self.storage_path, exc)
 

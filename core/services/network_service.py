@@ -21,9 +21,9 @@ def is_private_or_loopback_ip(ip: str) -> bool:
     if not ip:
         return True
     ip = ip.strip()
-    if ip.startswith("127.") or ip.startswith("localhost"):
+    if ip.startswith(("127.", "localhost")):
         return True
-    if ip.startswith("192.168.") or ip.startswith("10."):
+    if ip.startswith(("192.168.", "10.")):
         return True
     if ip.startswith("169.254."):
         return True
@@ -190,6 +190,59 @@ def get_local_ipv4_addresses() -> List[Dict[str, Any]]:
     return results
 
 
+def _apply_cloud_request_context(
+    request: HttpRequest,
+    use_https: bool,
+    candidate_urls: list[dict[str, Any]],
+) -> Optional[dict[str, Any]]:
+    """Inspects HTTP request host for public Cloud VPS deployment and creates HTTPS endpoints."""
+    try:
+        req_host = request.get_host().strip()
+        if not is_cloud_or_domain_host(req_host):
+            return None
+
+        is_secure_conn = request.is_secure() or (request.META.get("HTTP_X_FORWARDED_PROTO") == "https")
+        cloud_scheme = "https" if (is_secure_conn or use_https) else "https"
+        cloud_url = f"{cloud_scheme}://{req_host}/mobile/"
+        badge = f"Cloud Server ({req_host})"
+        desc = "Connected via Cloud VPS. Accessible anywhere over cellular (4G/5G) or Wi-Fi — no shared local network needed!"
+
+        for c in candidate_urls:
+            c["is_primary"] = False
+
+        cloud_candidate = {
+            "ip": req_host,
+            "type": "☁️ Cloud Server (Accessible Anywhere)",
+            "mode": "CLOUD_VPS",
+            "badge": badge,
+            "description": desc,
+            "url": cloud_url,
+            "https_url": cloud_url,
+            "http_url": cloud_url,
+            "is_primary": True,
+            "is_hotspot": False,
+            "is_laptop_hotspot": False,
+            "is_phone_hotspot": False,
+            "is_cloud": True,
+        }
+        candidate_urls.insert(0, cloud_candidate)
+
+        return {
+            "primary_mode": "CLOUD_VPS",
+            "primary_ip": req_host.split(":")[0],
+            "primary_url": cloud_url,
+            "https_primary_url": cloud_url,
+            "http_primary_url": cloud_url,
+            "active_scheme": cloud_scheme,
+            "connection_badge": badge,
+            "connection_desc": desc,
+            "is_cloud": True,
+        }
+    except Exception as exc:
+        logger.debug("Could not inspect request host for cloud pairing: %s", exc)
+        return None
+
+
 def get_mobile_connection_info(
     port: int = 8000,
     ssl_port: int = 443,
@@ -241,46 +294,18 @@ def get_mobile_connection_info(
     connection_badge = primary.get("badge", "")
     connection_desc = primary.get("description", "")
 
-    # Check incoming request host for Cloud VPS production deployment (e.g. close.kirex.online)
     if request is not None:
-        try:
-            req_host = request.get_host().strip()
-            is_secure_conn = request.is_secure() or (request.META.get("HTTP_X_FORWARDED_PROTO") == "https")
-            cloud_scheme = "https" if (is_secure_conn or use_https) else "http"
-
-            if is_cloud_or_domain_host(req_host):
-                is_cloud = True
-                primary_mode = "CLOUD_VPS"
-                primary_ip = req_host.split(":")[0]
-                primary_url = f"{cloud_scheme}://{req_host}/mobile/"
-                https_primary_url = f"https://{req_host}/mobile/"
-                http_primary_url = f"http://{req_host}/mobile/"
-                active_scheme = cloud_scheme
-                connection_badge = f"Cloud Server ({req_host})"
-                connection_desc = "Connected via Cloud VPS. Accessible anywhere over cellular (4G/5G) or Wi-Fi — no shared local network needed!"
-
-                # Unmark previous primary candidates
-                for c in candidate_urls:
-                    c["is_primary"] = False
-
-                # Insert cloud URL as candidate #1
-                candidate_urls.insert(0, {
-                    "ip": req_host,
-                    "type": "☁️ Cloud Server (Accessible Anywhere)",
-                    "mode": "CLOUD_VPS",
-                    "badge": connection_badge,
-                    "description": connection_desc,
-                    "url": primary_url,
-                    "https_url": https_primary_url,
-                    "http_url": http_primary_url,
-                    "is_primary": True,
-                    "is_hotspot": False,
-                    "is_laptop_hotspot": False,
-                    "is_phone_hotspot": False,
-                    "is_cloud": True,
-                })
-        except Exception as exc:
-            logger.debug("Could not inspect request host for cloud pairing: %s", exc)
+        cloud_info = _apply_cloud_request_context(request, use_https, candidate_urls)
+        if cloud_info:
+            is_cloud = True
+            primary_mode = cloud_info["primary_mode"]
+            primary_ip = cloud_info["primary_ip"]
+            primary_url = cloud_info["primary_url"]
+            https_primary_url = cloud_info["https_primary_url"]
+            http_primary_url = cloud_info["http_primary_url"]
+            active_scheme = cloud_info["active_scheme"]
+            connection_badge = cloud_info["connection_badge"]
+            connection_desc = cloud_info["connection_desc"]
 
     return {
         "success": True,

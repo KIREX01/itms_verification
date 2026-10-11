@@ -4,6 +4,7 @@ Django settings for itms_project.
 All secrets/config are read from environment variables (.env) via django-environ.
 See .env.example for the full list of variables this project expects.
 """
+import os
 from pathlib import Path
 import environ
 
@@ -107,7 +108,10 @@ DEBUG = safe_env_bool("DJANGO_DEBUG", default=False)
 
 # Allowed Hosts: strictly bounded when DEBUG=False, allows local and configured domain
 configured_hosts = env.list("DJANGO_ALLOWED_HOSTS", default=[])
-default_hosts = ["close.kirex.online", "16.170.39.187", "127.0.0.1", "localhost"]
+server_ip = os.environ.get("SERVER_PUBLIC_IP", "").strip()
+default_hosts = ["close.kirex.online", "127.0.0.1", "localhost"]
+if server_ip:
+    default_hosts.append(server_ip)
 ALLOWED_HOSTS = list(set(default_hosts + configured_hosts))
 if DEBUG and "*" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("*")

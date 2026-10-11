@@ -1268,16 +1268,16 @@ class StockPane(Vertical):
             self.notify(f"Error exporting CSV: {exc}", severity="error")
 
     def action_show_phone_scanner(self) -> None:
-        import socket
+        from core.services import network_service
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            local_ip = s.getsockname()[0]
-            s.close()
+            endpoints = network_service.get_connection_endpoints(port=8000, ssl_port=443, request=None)
+            primary = endpoints.get("primary_endpoint") or {}
+            url = primary.get("url") or "http://127.0.0.1:8000/mobile/"
+            if not url.endswith("/mobile/"):
+                url = url.rstrip("/") + "/mobile/"
         except Exception:
-            local_ip = "127.0.0.1"
+            url = "http://127.0.0.1:8000/mobile/"
 
-        url = f"http://{local_ip}:8000/mobile/"
         self.notify(f"📱 Phone Scanner URL: {url}\nSelect Mode 3 (WAREHOUSE & BOND STOCK SCANNER).", severity="information", timeout=8)
 
     # ------------------------------------------------------------------------

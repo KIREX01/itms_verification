@@ -25,27 +25,27 @@ function switchNavTab(tabIndex) {
 
     // Lazy load tab data on entry
     if (tabIndex === 2 && itmsCurrentSubview !== "CONNECT" && itmsExplorerOrders.length === 0) {
-        fetchItmsExplorerOrders();
+        void fetchItmsExplorerOrders();
     } else if (tabIndex === 3) {
-        fetchBatchesList();
+        void fetchBatchesList();
     } else if (tabIndex === 4) {
         if (typeof fetchPairs === "function") {
-            fetchPairs();
+            void fetchPairs();
         }
     } else if (tabIndex === 5) {
-        fetchHistoryEvents();
+        void fetchHistoryEvents();
     } else if (tabIndex === 6) {
-        checkForUpdates(false);
+        void checkForUpdates(false);
         if (typeof loadVaultSettings === "function") {
-            loadVaultSettings();
+            void loadVaultSettings();
         }
     } else if (tabIndex === 7) {
         if (typeof fetchReportTotals === "function") {
-            fetchReportTotals();
+            void fetchReportTotals();
         }
     } else if (tabIndex === 8) {
         if (typeof stockToday === "function") {
-            stockToday();
+            void stockToday();
         }
     }
 }

@@ -31,6 +31,9 @@ from textual.widgets import Button, Input, Label, Static, Switch
 
 from core.services import config_service, vault_service
 
+INPUT_BOND_CODE_ID = "input-bond-code"
+INPUT_BOND_CODE_SELECTOR = "#input-bond-code"
+
 
 class SettingsPane(Vertical):
     """Interactive Settings and System Configuration Pane (Tab 7)."""
@@ -178,7 +181,7 @@ class SettingsPane(Vertical):
 
                     with Horizontal(classes="settings-row"):
                         yield Static("[b]Active Bond Code[/b]\n[dim]Warehouse facility code for scoping orders and stock (e.g. AGM, KLA_CENTRAL)[/dim]", classes="settings-label")
-                        yield Input(value=bond_code, id="input-bond-code", classes="settings-input")
+                        yield Input(value=bond_code, id=INPUT_BOND_CODE_ID, classes="settings-input")
 
                     with Horizontal(classes="settings-row"):
                         yield Static("[b]Strict Bond Scoping[/b]\n[dim]Restrict orders, kits, and reconciliation strictly to the active bond warehouse[/dim]", classes="settings-label")
@@ -594,7 +597,7 @@ class SettingsPane(Vertical):
                 act = res.get("active_bond", {})
                 if act:
                     try:
-                        self.query_one("#input-bond-code", Input).value = act.get("code", "AGM")
+                        self.query_one(INPUT_BOND_CODE_SELECTOR, Input).value = act.get("code", "AGM")
                     except Exception:
                         pass
             else:
@@ -850,7 +853,7 @@ class SettingsPane(Vertical):
 
             # Operator: Bond Facility
             try:
-                b_code = self.query_one("#input-bond-code", Input).value.strip().upper() or "AGM"
+                b_code = self.query_one(INPUT_BOND_CODE_SELECTOR, Input).value.strip().upper() or "AGM"
                 b_strict = self.query_one("#switch-strict-bond", Switch).value
                 cfg.setdefault("bond", {})
                 cfg["bond"]["active_bond_code"] = b_code
@@ -1029,7 +1032,7 @@ class SettingsPane(Vertical):
             self.query_one("#switch-dev-mode", Switch).value = False
 
             try:
-                self.query_one("#input-bond-code", Input).value = "AGM"
+                self.query_one(INPUT_BOND_CODE_SELECTOR, Input).value = "AGM"
                 self.query_one("#switch-strict-bond", Switch).value = True
                 self.query_one("#switch-auto-sync", Switch).value = True
                 self.query_one("#input-sync-interval", Input).value = "60"

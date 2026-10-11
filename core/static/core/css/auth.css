@@ -79,15 +79,15 @@
 }
 
 .alert-banner.warning {
-    background-color: rgba(252, 220, 4, 0.15);
-    border: 1px solid rgba(252, 220, 4, 0.45);
-    color: var(--ug-yellow, #ffd100);
+    background-color: #362803;
+    border: 1px solid #854d0e;
+    color: #ffffff;
 }
 
 .alert-banner.success {
-    background-color: rgba(35, 134, 54, 0.15);
-    border: 1px solid rgba(35, 134, 54, 0.45);
-    color: #3fb950;
+    background-color: #0d2818;
+    border: 1px solid #166534;
+    color: #ffffff;
 }
 
 .form-field {

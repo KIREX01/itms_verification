@@ -112,9 +112,9 @@ body {
 }
 
 .btn-switch-supervisor {
-    background: rgba(234, 179, 8, 0.15);
-    border: 1px solid rgba(234, 179, 8, 0.45);
-    color: #fde047;
+    background: #18181b;
+    border: 1px solid rgba(234, 179, 8, 0.6);
+    color: #ffffff;
     border-radius: 16px;
     font-size: 0.68rem;
     font-weight: 700;

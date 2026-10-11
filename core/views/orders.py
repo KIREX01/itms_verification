@@ -83,7 +83,6 @@ def api_orders_list(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"success": True, "orders": orders})
 
 
-@csrf_exempt
 @require_POST
 def api_sync_orders(request: HttpRequest) -> JsonResponse:
     """Triggers background order sync from ITMS WebApp or seeds mock orders."""
@@ -100,7 +99,6 @@ def api_sync_orders(request: HttpRequest) -> JsonResponse:
     })
 
 
-@csrf_exempt
 @require_POST
 def api_seed_orders(request: HttpRequest) -> JsonResponse:
     """Seeds demo/synthetic installation orders for developer or testing workflows."""
@@ -126,7 +124,6 @@ def api_itms_status(request: HttpRequest) -> JsonResponse:
     })
 
 
-@csrf_exempt
 def api_itms_warehouses(request: HttpRequest) -> JsonResponse:
     """
     GET: Returns active operating bond and all discovered warehouse facilities.
@@ -163,7 +160,6 @@ def api_itms_warehouses(request: HttpRequest) -> JsonResponse:
     })
 
 
-@csrf_exempt
 def api_sync_bonds(request: HttpRequest) -> JsonResponse:
     """Dynamically queries ITMS WebApp and extracts available warehouse/bond facilities."""
     try:
@@ -172,11 +168,10 @@ def api_sync_bonds(request: HttpRequest) -> JsonResponse:
         res = client.fetch_warehouses_from_itms()
         return JsonResponse(res)
     except Exception as exc:
-        logger.error("api_sync_bonds error: %s", exc)
+        logger.exception("api_sync_bonds error: %s", exc)
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
-@csrf_exempt
 @require_POST
 def api_itms_connect(request: HttpRequest) -> JsonResponse:
     """Connects and authenticates against live ITMS WebApp (stock.itms.ug)."""
@@ -215,7 +210,6 @@ def api_itms_connect(request: HttpRequest) -> JsonResponse:
     }, status=200 if ok else 401)
 
 
-@csrf_exempt
 @require_POST
 def api_itms_disconnect(request: HttpRequest) -> JsonResponse:
     """Disconnects from ITMS WebApp by clearing local session cookies."""
@@ -732,7 +726,6 @@ def api_itms_order_detail(request: HttpRequest, order_ident: str) -> JsonRespons
     })
 
 
-@csrf_exempt
 @require_POST
 def api_itms_sync_now(request: HttpRequest) -> JsonResponse:
     """
@@ -839,7 +832,6 @@ def api_itms_plate_lifecycle(request: HttpRequest) -> JsonResponse:
     })
 
 
-@csrf_exempt
 def api_itms_kits(request: HttpRequest) -> JsonResponse:
     """
     Lists or synchronizes ITMS Installation Kits stock inventory.

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import secrets
 from typing import Tuple
 
@@ -22,6 +23,11 @@ logger = logging.getLogger(__name__)
 def generate_2fa_code() -> str:
     """Generates a cryptographically secure 6-digit numeric verification code."""
     return "".join(secrets.choice("0123456789") for _ in range(6))
+
+
+def _sanitize_log_str(val: str, max_len: int = 100) -> str:
+    """Sanitizes strings before logging to prevent CRLF log injection (CWE-117)."""
+    return re.sub(r"[\r\n\x00-\x1f]", "", str(val or "")).strip()[:max_len]
 
 
 def get_resend_api_key() -> str:
@@ -49,11 +55,14 @@ def send_2fa_verification_code(to_email: str, code: str, username: str = "") -> 
     from_email = get_resend_from_email()
 
     if not api_key:
+        safe_user = _sanitize_log_str(username) or "operator"
+        safe_to = _sanitize_log_str(to_email)
+        safe_code = _sanitize_log_str(code)
         logger.warning(
             "[2FA DEV FALLBACK] No RESEND_API_KEY found. Simulated 2FA Code for '%s' (%s): [%s]",
-            username or "operator",
-            to_email,
-            code,
+            safe_user,
+            safe_to,
+            safe_code,
         )
         return True, "Simulated 2FA code generated (Check server console/logs)."
 
@@ -151,12 +160,15 @@ def send_2fa_verification_code(to_email: str, code: str, username: str = "") -> 
         if response.status_code in (200, 201):
             res_data = response.json()
             email_id = res_data.get("id", "")
-            logger.info("2FA code sent via Resend to %s (id: %s)", to_email, email_id)
+            safe_to = _sanitize_log_str(to_email)
+            safe_id = _sanitize_log_str(email_id)
+            logger.info("2FA code sent via Resend to %s (id: %s)", safe_to, safe_id)
             return True, "Verification code sent to your email."
         else:
             err_detail = response.text
-            logger.error("Resend API error (%s): %s", response.status_code, err_detail)
+            safe_status = _sanitize_log_str(str(response.status_code))
+            logger.error("Resend API error (%s): %s", safe_status, err_detail)
             return False, f"Could not send email: {err_detail}"
     except Exception as exc:
-        logger.error("Failed to connect to Resend API: %s", exc)
+        logger.exception("Failed to connect to Resend API")
         return False, f"Network error sending verification email: {exc}"

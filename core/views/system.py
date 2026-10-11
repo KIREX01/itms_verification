@@ -65,7 +65,6 @@ def is_prohibited_system_directory(p: Path) -> bool:
     return False
 
 
-@csrf_exempt
 @require_POST
 def api_run_pipeline(request: HttpRequest) -> JsonResponse:
     """Triggers background AI vision detection and pair matching."""
@@ -169,7 +168,6 @@ def api_export_report(request: HttpRequest) -> HttpResponse:
     return response
 
 
-@csrf_exempt
 def api_settings(request: HttpRequest) -> JsonResponse:
     """
     GET: Returns current system configuration, user settings, developer settings, and active engine.
@@ -251,7 +249,6 @@ def api_settings(request: HttpRequest) -> JsonResponse:
     })
 
 
-@csrf_exempt
 @require_POST
 def api_toggle_dry_run(request: HttpRequest) -> JsonResponse:
     """Toggles or sets safe simulation / dry-run mode for ITMS submissions."""
@@ -280,7 +277,6 @@ def api_check_updates(request: HttpRequest) -> JsonResponse:
     return JsonResponse(result)
 
 
-@csrf_exempt
 @require_POST
 def api_apply_update(request: HttpRequest) -> JsonResponse:
     """Safely applies pending update from GitHub Releases."""
@@ -317,7 +313,6 @@ def _get_dir_disk_stats(path: Path) -> dict:
         return {"total_gb": 0, "used_gb": 0, "free_gb": 0}
 
 
-@csrf_exempt
 def api_vault_folder(request: HttpRequest) -> JsonResponse:
     """
     GET: Returns current active Evidence Vault folder, disk space, and presets.
@@ -350,8 +345,24 @@ def api_vault_folder(request: HttpRequest) -> JsonResponse:
         # Handle 'default' keyword
         if new_path_raw.lower() in ("default", "media/vault", "media\\vault"):
             target_path = default_vault
+        elif new_path_raw.lower() in ("documents", "docs"):
+            target_path = docs_vault
+        elif new_path_raw.lower() in ("pictures", "pics"):
+            target_path = pics_vault
         else:
-            target_path = Path(os.path.expanduser(new_path_raw)).resolve()
+            # Confine custom paths to authorized parent roots to prevent Filesystem Oracle probing (S6549)
+            allowed_base_dirs = [
+                (settings.BASE_DIR / "media").resolve(),
+                (Path.home() / "Documents").resolve(),
+                (Path.home() / "Pictures").resolve(),
+            ]
+            cand = Path(os.path.expanduser(new_path_raw)).resolve()
+            if not any(cand == root or cand.is_relative_to(root) for root in allowed_base_dirs):
+                return JsonResponse({
+                    "success": False,
+                    "error": "Custom vault directory must reside within application media folder or user Documents/Pictures."
+                }, status=400)
+            target_path = cand
 
         if is_prohibited_system_directory(target_path):
             return JsonResponse({
@@ -433,7 +444,6 @@ def api_vault_folder(request: HttpRequest) -> JsonResponse:
     })
 
 
-@csrf_exempt
 def api_browse_vault_folder(request: HttpRequest) -> JsonResponse:
     """
     Launches the host operating system's native folder browser dialog
@@ -570,7 +580,6 @@ def serve_media(request: HttpRequest, path: str) -> HttpResponse:
 
 
 
-@csrf_exempt
 def api_browse_path(request: HttpRequest) -> JsonResponse:
     if not request.user.is_authenticated:
         return JsonResponse({"success": False, "error": "Authentication required"}, status=401)

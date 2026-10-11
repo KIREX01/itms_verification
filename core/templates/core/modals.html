@@ -795,7 +795,7 @@
 <div class="toast-container" id="toast-container"></div>
 
 <!-- Floating Background Batch Ingestion Progress Widget -->
-<div id="global-bg-upload-pill" style="display:none; position:fixed; bottom:20px; right:20px; z-index:99999; background:rgba(18,20,29,0.95); border:1px solid rgba(255,255,255,0.15); border-left:4px solid #fcdc04; box-shadow:0 8px 30px rgba(0,0,0,0.6); padding:10px 14px; border-radius:8px; backdrop-filter:blur(10px); min-width:280px; max-width:380px; cursor:pointer;" onclick="openModal('modal-batch-upload')" title="Click to view batch upload stepper">
+<div id="global-bg-upload-pill" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ')openModal('modal-batch-upload')" style="display:none; position:fixed; bottom:20px; right:20px; z-index:99999; background:rgba(18,20,29,0.95); border:1px solid rgba(255,255,255,0.15); border-left:4px solid #fcdc04; box-shadow:0 8px 30px rgba(0,0,0,0.6); padding:10px 14px; border-radius:8px; backdrop-filter:blur(10px); min-width:280px; max-width:380px; cursor:pointer;" onclick="openModal('modal-batch-upload')" title="Click to view batch upload stepper">
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:5px;">
         <span id="global-bg-upload-title" style="font-size:0.75rem; font-weight:800; color:#fff; display:flex; align-items:center; gap:6px;">
             <span class="live-pulse-dot" id="global-bg-upload-dot" style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#fcdc04; animation:pulse 1.5s infinite;"></span>

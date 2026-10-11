@@ -6,6 +6,8 @@ from typing import Optional
 
 from django.conf import settings
 
+from core.services import platform_service
+
 logger = logging.getLogger(__name__)
 
 SECURE_DIR_NAME = 'secure'
@@ -28,10 +30,7 @@ def get_secure_dir(base_dir: Optional[Path] = None) -> Path:
     root = Path(base_dir) if base_dir else get_project_root()
     secure_dir = root / SECURE_DIR_NAME
     secure_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(secure_dir, 0o700)
-    except OSError as exc:
-        logger.debug('Could not set permissions on %s: %s', secure_dir, exc)
+    platform_service.safe_chmod(secure_dir, 0o700)
     return secure_dir
 
 
@@ -39,10 +38,7 @@ def get_secure_auth_dir(base_dir: Optional[Path] = None) -> Path:
     """Returns and ensures the secure/auth directory exists with restricted permissions."""
     auth_dir = get_secure_dir(base_dir) / AUTH_DIR_NAME
     auth_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(auth_dir, 0o700)
-    except OSError as exc:
-        logger.debug('Could not set permissions on %s: %s', auth_dir, exc)
+    platform_service.safe_chmod(auth_dir, 0o700)
     return auth_dir
 
 
@@ -55,10 +51,7 @@ def get_secure_config_path(base_dir: Optional[Path] = None) -> Path:
     if not secure_path.is_file() and legacy_path.is_file():
         try:
             shutil.copy2(legacy_path, secure_path)
-            try:
-                os.chmod(secure_path, 0o600)
-            except OSError:
-                pass
+            platform_service.safe_chmod(secure_path, 0o600)
             logger.info('Migrated legacy config.json to secure storage: %s', secure_path)
             try:
                 legacy_path.unlink()
@@ -115,10 +108,7 @@ def get_secure_auth_path(
                 if legacy_path.is_relative_to(vault_root) and legacy_path.is_file():
                     try:
                         shutil.copy2(legacy_path, target_path)
-                        try:
-                            os.chmod(target_path, 0o600)
-                        except OSError:
-                            pass
+                        platform_service.safe_chmod(target_path, 0o600)
                         legacy_path.unlink()
                         logger.info('Migrated legacy auth file %s -> %s', legacy_path, target_path)
                     except Exception as exc:
@@ -129,10 +119,5 @@ def get_secure_auth_path(
 
 def set_secure_file_permissions(file_path: Path) -> None:
     """Restricts file permissions to owner read/write (0600) when supported by the OS."""
-    try:
-        p = Path(file_path)
-        if p.is_file():
-            os.chmod(p, 0o600)
-    except OSError as exc:
-        logger.debug('Could not set permissions on %s: %s', file_path, exc)
+    platform_service.safe_chmod(Path(file_path), 0o600)
 

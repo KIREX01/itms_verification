@@ -14,6 +14,7 @@ Usage:
 """
 import argparse
 import os
+import re
 import shutil
 import sys
 import tarfile
@@ -86,20 +87,23 @@ def should_exclude(rel_path_str: str, target: str) -> bool:
             return True
 
     # Target-specific exclusions
-    if target == "windows":
-        if normalized in LINUX_ONLY_FILES:
-            return True
-    elif target == "linux":
-        if normalized in WINDOWS_ONLY_FILES:
-            return True
+    if target == "windows" and normalized in LINUX_ONLY_FILES:
+        return True
+    if target == "linux" and normalized in WINDOWS_ONLY_FILES:
+        return True
 
     return False
 
 
 def build_windows_package(version: str, output_dir: Path) -> Path:
     """Packages the Windows desktop distribution into a ZIP archive."""
-    archive_name = f"itms-v{version}-windows.zip"
-    archive_path = output_dir / archive_name
+    safe_version = re.sub(r"[^0-9a-zA-Z\.\-_]", "", version)
+    resolved_out = output_dir.resolve()
+    archive_name = f"itms-v{safe_version}-windows.zip"
+    archive_path = (resolved_out / archive_name).resolve()
+    if not str(archive_path).startswith(str(resolved_out)):
+        raise ValueError(f"Invalid output path: {archive_path}")
+
     print(f"[*] Packaging Windows release: {archive_path.name}...")
 
     file_count = 0
@@ -111,13 +115,16 @@ def build_windows_package(version: str, output_dir: Path) -> Path:
                 if not should_exclude(str(Path(root, d).relative_to(PROJECT_ROOT)), "windows")
             ]
             for f in files:
-                full_path = Path(root, f)
+                full_path = Path(root, f).resolve()
                 rel_path = full_path.relative_to(PROJECT_ROOT)
                 if should_exclude(str(rel_path), "windows"):
                     continue
                 # Place inside top-level folder 'itms_verification/' inside archive
-                archive_internal_path = f"itms_verification/{rel_path.as_posix()}"
-                zf.write(full_path, arcname=archive_internal_path)
+                arc_entry = f"itms_verification/{rel_path.as_posix()}"
+                norm_entry = os.path.normpath(arc_entry).replace("\\", "/")
+                if norm_entry.startswith("/") or ".." in norm_entry.split("/"):
+                    continue
+                zf.write(full_path, arcname=norm_entry)
                 file_count += 1
 
     size_mb = archive_path.stat().st_size / (1024 * 1024)
@@ -127,8 +134,13 @@ def build_windows_package(version: str, output_dir: Path) -> Path:
 
 def build_linux_package(version: str, output_dir: Path) -> Path:
     """Packages the Linux server distribution into a compressed tarball."""
-    archive_name = f"itms-v{version}-linux.tar.gz"
-    archive_path = output_dir / archive_name
+    safe_version = re.sub(r"[^0-9a-zA-Z\.\-_]", "", version)
+    resolved_out = output_dir.resolve()
+    archive_name = f"itms-v{safe_version}-linux.tar.gz"
+    archive_path = (resolved_out / archive_name).resolve()
+    if not str(archive_path).startswith(str(resolved_out)):
+        raise ValueError(f"Invalid output path: {archive_path}")
+
     print(f"[*] Packaging Linux release: {archive_path.name}...")
 
     file_count = 0
@@ -139,13 +151,18 @@ def build_linux_package(version: str, output_dir: Path) -> Path:
                 if not should_exclude(str(Path(root, d).relative_to(PROJECT_ROOT)), "linux")
             ]
             for f in files:
-                full_path = Path(root, f)
+                full_path = Path(root, f).resolve()
                 rel_path = full_path.relative_to(PROJECT_ROOT)
                 if should_exclude(str(rel_path), "linux"):
                     continue
 
-                archive_internal_path = f"itms_verification/{rel_path.as_posix()}"
-                tar_info = tf.gettarinfo(str(full_path), arcname=archive_internal_path)
+                arc_entry = f"itms_verification/{rel_path.as_posix()}"
+                norm_entry = os.path.normpath(arc_entry).replace("\\", "/")
+                if norm_entry.startswith("/") or ".." in norm_entry.split("/"):
+                    continue
+
+                tar_info = tf.gettarinfo(str(full_path), arcname=norm_entry)
+                tar_info.name = norm_entry
 
                 # Ensure executable bit is preserved on Linux scripts
                 if rel_path.name in ("itms", "install.sh", "uninstall.sh", "deploy_user_data.sh", "setup_vps.sh", "bootstrap.py", "manage.py"):
@@ -167,8 +184,8 @@ def main():
     parser.add_argument("--out", default=str(PROJECT_ROOT / "dist"), help="Output directory for build archives")
     args = parser.parse_args()
 
-    version = args.version.lstrip("vV")
-    output_dir = Path(args.out)
+    version = re.sub(r"[^0-9a-zA-Z\.\-_]", "", args.version.lstrip("vV"))
+    output_dir = Path(args.out).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     target = args.target.lower()

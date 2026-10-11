@@ -259,7 +259,6 @@ def api_pair_detail(request: HttpRequest, pair_id: int) -> JsonResponse:
     })
 
 
-@csrf_exempt
 def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
     """Executes an operator decision or action on a pair."""
     if request.method != "POST":
@@ -537,7 +536,6 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
     return JsonResponse({"success": False, "error": f"Unknown action: {action}"}, status=400)
 
 
-@csrf_exempt
 @require_POST
 def api_batch_submit(request: HttpRequest) -> JsonResponse:
     """Submits approved pairs to ITMS in a single operation, scoped to shift or batch."""

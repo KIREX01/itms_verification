@@ -81,9 +81,8 @@ def get_effective_view_mode(request: HttpRequest) -> str:
     if query_view in ("mobile", "desktop"):
         request.session["preferred_view"] = query_view
         return query_view
-    elif query_view in ("auto", "reset"):
-        if "preferred_view" in request.session:
-            del request.session["preferred_view"]
+    elif query_view in ("auto", "reset") and "preferred_view" in request.session:
+        del request.session["preferred_view"]
 
     # Check remembered session preference
     saved_pref = request.session.get("preferred_view")

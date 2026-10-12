@@ -909,3 +909,15 @@ class OperatorITMSSession(models.Model):
     def __str__(self):
         status_str = f"Authenticated as {self.itms_email}" if self.is_authenticated else "Disconnected"
         return f"ITMS Session for {self.user.username} ({status_str})"
+
+    def is_cookie_valid(self, buffer_seconds: int = 120) -> bool:
+        """Return True if session cookies exist and have not expired."""
+        if not self.is_authenticated or not self.cookies:
+            return False
+        if not self.cookies.get("_identity-frontend"):
+            return False
+        if not self.expires_at:
+            return True
+        from django.utils import timezone
+        import datetime
+        return timezone.now() < (self.expires_at - datetime.timedelta(seconds=buffer_seconds))

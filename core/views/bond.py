@@ -11,11 +11,13 @@ from core.models import (
     StockDelivery,
 )
 from core.services import bond_service
+from core.services.security_envelope import require_itms_envelope
 
 logger = logging.getLogger(__name__)
 
 
 @require_GET
+@require_itms_envelope
 def api_stock_shift_dates(request: HttpRequest) -> JsonResponse:
     """Returns available shift date suffixes to enable correct Prev/Next navigation."""
     from core.models import StockDispatchScan, StockDelivery, SafeAuditScan
@@ -36,6 +38,7 @@ def api_stock_shift_dates(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
+@require_itms_envelope
 def api_stock_reconciliation(request: HttpRequest) -> JsonResponse:
     """
     Returns live daily stock reconciliation metrics, opening/closing balance,
@@ -57,6 +60,7 @@ def api_stock_reconciliation(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
+@require_itms_envelope
 def api_stock_dispatch(request: HttpRequest) -> JsonResponse:
     """
     Records plates scanned when taken out of stock and issued to the
@@ -127,6 +131,7 @@ def api_stock_dispatch(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
+@require_itms_envelope
 def api_stock_delivery(request: HttpRequest) -> JsonResponse:
     """
     Records an inbound delivery of license plates into warehouse physical stock.
@@ -209,6 +214,7 @@ def api_stock_delivery(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
+@require_itms_envelope
 def api_stock_return(request: HttpRequest) -> JsonResponse:
     """
     Records plates returned to stock uninstalled (motorcycle no-show, defect, cancellation).
@@ -264,6 +270,7 @@ def api_stock_return(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
+@require_itms_envelope
 def api_stock_bond_transfer(request: HttpRequest) -> JsonResponse:
     """
     Records a bond transfer:
@@ -328,6 +335,7 @@ def api_stock_bond_transfer(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
+@require_itms_envelope
 def api_stock_scheduled(request: HttpRequest) -> JsonResponse:
     """
     Manually feeds in the target scheduled number of plates to be installed
@@ -380,6 +388,7 @@ def api_stock_scheduled(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
+@require_itms_envelope
 def api_stock_opening(request: HttpRequest) -> JsonResponse:
     """Manually sets or adjusts Opening Balance for PSV (White) and PMO (Yellow)."""
     from core.services import stock_monitoring_service
@@ -426,6 +435,7 @@ def api_stock_opening(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
+@require_itms_envelope
 def api_stock_physical_count(request: HttpRequest) -> JsonResponse:
     """Records an end-of-shift physical stock count audit and computes variance."""
     from core.services import stock_monitoring_service
@@ -468,6 +478,7 @@ def api_stock_physical_count(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
+@require_itms_envelope
 def api_stock_export_csv(request: HttpRequest) -> HttpResponse:
     """Exports shift stock reconciliation and dispatched plates as a downloadable CSV."""
     from core.services import stock_monitoring_service
@@ -487,6 +498,7 @@ def api_stock_export_csv(request: HttpRequest) -> HttpResponse:
 
 
 @require_GET
+@require_itms_envelope
 def api_stock_delivery_notes(request: HttpRequest) -> JsonResponse:
     """Returns stored delivery notes for a specific date or suffix."""
     from core.services import stock_monitoring_service
@@ -505,6 +517,7 @@ def api_stock_delivery_notes(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
+@require_itms_envelope
 def api_stock_delivery_detail(request: HttpRequest, delivery_id: int) -> JsonResponse:
     """Returns detailed information and plates list for a specific delivery note."""
     from core.services import stock_monitoring_service
@@ -515,6 +528,7 @@ def api_stock_delivery_detail(request: HttpRequest, delivery_id: int) -> JsonRes
 
 
 @require_POST
+@require_itms_envelope
 def api_stock_upload_delivery_note(request: HttpRequest) -> JsonResponse:
     """
     Uploads a photo of the paper delivery note and attaches it to an existing
@@ -555,6 +569,7 @@ def api_stock_upload_delivery_note(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
+@require_itms_envelope
 def api_stock_mvr_docket(request: HttpRequest) -> JsonResponse:
     """Returns the MVR Allocation Exception Docket (raw plates list and formatted text)."""
     from core.services import stock_monitoring_service
@@ -573,6 +588,7 @@ def api_stock_mvr_docket(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
+@require_itms_envelope
 def api_stock_blocked_plates(request: HttpRequest) -> JsonResponse:
     """Returns the list of plates not on stock and the ITMS Transfer Manager request docket."""
     from core.services import stock_monitoring_service
@@ -591,6 +607,7 @@ def api_stock_blocked_plates(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
+@require_itms_envelope
 def api_stock_verify_batch(request: HttpRequest) -> JsonResponse:
     """
     Verifies a pasted batch of license plates against stock without creating dispatches.
@@ -662,6 +679,7 @@ def api_stock_verify_batch(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
+@require_itms_envelope
 def api_stock_shift_reconcile(request: HttpRequest) -> JsonResponse:
     """
     Unified Shift Stock Reconciliation and Inventory System Update:
@@ -729,6 +747,7 @@ def api_stock_shift_reconcile(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
+@require_itms_envelope
 def api_stock_export_category_csv(request: HttpRequest, category: str) -> HttpResponse:
     """
     Downloads standardized shift CSV for a given category:
@@ -757,6 +776,7 @@ def api_stock_export_category_csv(request: HttpRequest, category: str) -> HttpRe
 
 
 @require_POST
+@require_itms_envelope
 def api_stock_kits_sync(request: HttpRequest) -> JsonResponse:
     """
     Synchronizes installation kits from ITMS, inbound deliveries, and safe stock-taking,
@@ -800,6 +820,7 @@ def api_stock_kits_sync(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
+@require_itms_envelope
 def api_stock_kits_readiness(request: HttpRequest) -> JsonResponse:
     """
     Returns the warehouse stock readiness status for morning take-for-work dispatches.
@@ -869,6 +890,7 @@ def api_stock_kits_readiness(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
+@require_itms_envelope
 def api_stock_shift_details(request: HttpRequest) -> JsonResponse:
     """Returns detailed lists of dispatches, movements, and audits for the web UI."""
     from django.utils import timezone
@@ -978,6 +1000,7 @@ def api_stock_shift_details(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
+@require_itms_envelope
 def api_stock_inspect(request: HttpRequest) -> JsonResponse:
     """
     Returns full hardware profile, stock status, ITMS order linkage, and line
@@ -1140,6 +1163,7 @@ def api_stock_inspect(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
+@require_itms_envelope
 def api_stock_dispatch_clear(request: HttpRequest) -> JsonResponse:
     """Clears all dispatched plates for the shift, matching TUI _handle_clear_dispatches."""
     from core.models import StockDispatchScan
@@ -1166,6 +1190,7 @@ def api_stock_dispatch_clear(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
+@require_itms_envelope
 def api_stock_audit(request: HttpRequest) -> JsonResponse:
     """Performs safe room physical stocktaking audit from scanned or pasted plates."""
     from core.services import stock_monitoring_service
@@ -1206,6 +1231,7 @@ def api_stock_audit(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
+@require_itms_envelope
 def api_stock_previous_closing(request: HttpRequest) -> JsonResponse:
     """Returns previous shift closing balances for auto-carry in Opening & Target modal."""
     from core.services import stock_monitoring_service
@@ -1219,6 +1245,7 @@ def api_stock_previous_closing(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
+@require_itms_envelope
 def api_stock_export_unregistered_csv(request: HttpRequest) -> HttpResponse:
     """Exports safe room audit unregistered kits CSV."""
     from core.services import stock_monitoring_service

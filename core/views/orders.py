@@ -19,12 +19,14 @@ from core.models import (
 from core.services import auth_service, bond_service
 from core.services.itms_web_client import get_web_client
 from core.services.pipeline_runner import runner as pipeline_runner
+from core.services.security_envelope import require_itms_envelope
 from core.vision import normalizer
 
 logger = logging.getLogger(__name__)
 
 
 @require_GET
+@require_itms_envelope
 def api_orders_list(request: HttpRequest) -> JsonResponse:
     """Returns list of installation orders for search / manual linking dropdowns."""
     search = request.GET.get("search", "").strip()
@@ -84,6 +86,7 @@ def api_orders_list(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
+@require_itms_envelope
 def api_sync_orders(request: HttpRequest) -> JsonResponse:
     """Triggers background order sync from ITMS WebApp or seeds mock orders."""
     started = pipeline_runner.start_pipeline("sync_orders")
@@ -229,6 +232,7 @@ def api_itms_disconnect(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
+@require_itms_envelope
 def api_itms_orders_explorer(request: HttpRequest) -> JsonResponse:
     """
     ITMS Orders & Archive Explorer API.
@@ -560,6 +564,7 @@ def api_itms_orders_explorer(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
+@require_itms_envelope
 def api_itms_order_detail(request: HttpRequest, order_ident: str) -> JsonResponse:
     """
     Returns full metadata, telematics (GPS tracker, front/rear beacons),
@@ -727,6 +732,7 @@ def api_itms_order_detail(request: HttpRequest, order_ident: str) -> JsonRespons
 
 
 @require_POST
+@require_itms_envelope
 def api_itms_sync_now(request: HttpRequest) -> JsonResponse:
     """
     Directly triggers synchronization of active orders, archive orders, or
@@ -812,6 +818,7 @@ def api_itms_sync_now(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
+@require_itms_envelope
 def api_itms_plate_lifecycle(request: HttpRequest) -> JsonResponse:
     """
     Detects and returns the ITMS plate lifecycle state for a given license plate
@@ -832,6 +839,7 @@ def api_itms_plate_lifecycle(request: HttpRequest) -> JsonResponse:
     })
 
 
+@require_itms_envelope
 def api_itms_kits(request: HttpRequest) -> JsonResponse:
     """
     Lists or synchronizes ITMS Installation Kits stock inventory.

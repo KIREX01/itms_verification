@@ -597,9 +597,9 @@ async function submitTabBatchUpload() {
         setStepStatus(2, "completed", "PAIRED", "✅");
 
         // Immediately refresh Review Queue so operator sees pairs & photos instantly!
-        if (typeof fetchPairs === "function") fetchPairs();
-        if (typeof fetchBatchesList === "function") fetchBatchesList();
-        if (typeof fetchStats === "function") fetchStats();
+        if (typeof fetchPairs === "function") void fetchPairs();
+        if (typeof fetchBatchesList === "function") void fetchBatchesList();
+        if (typeof fetchStats === "function") void fetchStats();
         updateGlobalBgUploadPill("Photos Vaulted & Paired", 45, "Running Dual-Stream Joint Vision OCR...");
         setIngestProgress(40, "Vault ingestion verified. Starting YOLO Vision OCR...");
 

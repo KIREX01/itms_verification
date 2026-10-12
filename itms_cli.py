@@ -24,6 +24,9 @@ from pathlib import Path
 # Always execute with working directory set to the project root
 PROJECT_ROOT = Path(__file__).resolve().parent
 MANAGE_PY = "manage.py"
+MSG_ALREADY_STARTED: str = MSG_ALREADY_STARTED
+MSG_SERVICE_STOPPED: str = MSG_SERVICE_STOPPED
+WINDOWS_SERVICE_PY: str = WINDOWS_SERVICE_PY
 os.chdir(PROJECT_ROOT)
 sys.path.insert(0, str(PROJECT_ROOT))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "itms_project.settings")
@@ -146,7 +149,7 @@ def start_daemon(extra_args=None, port=443):
         import subprocess
         print("[*] Starting ITMSVerificationService Windows Service...")
         res = subprocess.run(["net", "start", "ITMSVerificationService"], capture_output=True, text=True)
-        if res.returncode == 0 or "has already been started" in res.stdout or "has already been started" in res.stderr:
+        if res.returncode == 0 or MSG_ALREADY_STARTED in res.stdout or MSG_ALREADY_STARTED in res.stderr:
             print("[+] ITMSVerificationService is running.")
             return
         elif "Access is denied" in res.stderr or "Access is denied" in res.stdout or "System error 5" in res.stderr or "System error 5" in res.stdout:
@@ -252,7 +255,7 @@ def stop_server(extra_args=None):
         print("[*] Stopping ITMSVerificationService Windows Service...")
         res = subprocess.run(["net", "stop", "ITMSVerificationService"], capture_output=True, text=True)
         if res.returncode == 0 or "is not started" in res.stdout or "is not started" in res.stderr:
-            print("[+] ITMSVerificationService stopped.")
+            print(MSG_SERVICE_STOPPED)
         elif "Access is denied" in res.stderr or "Access is denied" in res.stdout or "System error 5" in res.stderr or "System error 5" in res.stdout:
             print("[!] Access denied. Elevating privileges to stop service...")
             try:
@@ -445,14 +448,14 @@ def run_update(extra_args=None):
         # Ensure Windows Service is kept in sync (installed or updated & restarted)
         if sys.platform == "win32":
             try:
-                service_py = PROJECT_ROOT / "windows_service.py"
+                service_py = PROJECT_ROOT / WINDOWS_SERVICE_PY
                 install_bat = PROJECT_ROOT / "install_service.bat"
                 res = subprocess.run(["sc", "query", "ITMSVerificationService"], capture_output=True, text=True)
                 if "SERVICE_NAME" in res.stdout:
                     print("[*] Updating and restarting ITMSVerificationService Windows Service...")
                     subprocess.run([py_exe, str(service_py), "update", "--startup=auto"], check=False)
                     start_res = subprocess.run(["net", "start", "ITMSVerificationService"], capture_output=True, text=True)
-                    if start_res.returncode != 0 and "has already been started" not in start_res.stdout:
+                    if start_res.returncode != 0 and MSG_ALREADY_STARTED not in start_res.stdout:
                         subprocess.run(
                             ["powershell", "-NoProfile", "-Command", "Start-Process cmd -ArgumentList '/c net stop ITMSVerificationService & net start ITMSVerificationService' -Verb RunAs -Wait"],
                             check=False
@@ -468,7 +471,7 @@ def run_update(extra_args=None):
                         check=False
                     )
                     print("[+] ITMSVerificationService installed and running in background.")
-            except Exception as svc_err:
+            except Exception:
                 print(f"[!] Windows service update notice: {svc_err}")
     except Exception as post_exc:
         print(f"[!] Post-update task notice: {post_exc}")
@@ -483,7 +486,7 @@ def run_uninstall(extra_args=None):
             if "SERVICE_NAME" in res.stdout:
                 print("[*] Stopping and removing ITMSVerificationService Windows Service...")
                 uninstall_bat = PROJECT_ROOT / "uninstall_service.bat"
-                service_py = PROJECT_ROOT / "windows_service.py"
+                service_py = PROJECT_ROOT / WINDOWS_SERVICE_PY
                 if uninstall_bat.is_file():
                     subprocess.run(
                         ["powershell", "-NoProfile", "-Command", f"Start-Process cmd -ArgumentList '/c `\"{uninstall_bat}`\" /nopause' -Verb RunAs -Wait"],
@@ -494,7 +497,7 @@ def run_uninstall(extra_args=None):
                     subprocess.run([get_python_exe(), str(service_py), "remove"], check=False, capture_output=True)
                 subprocess.run(["sc", "delete", "ITMSVerificationService"], check=False, capture_output=True)
                 print("[+] ITMSVerificationService stopped and removed.")
-        except Exception as svc_err:
+        except Exception:
             pass
 
         uninstall_ps1 = PROJECT_ROOT / "uninstall.ps1"
@@ -522,7 +525,7 @@ def run_service(args):
         print("[!] Windows Service is only supported on Windows.")
         return
     action = args[0].lower() if args else "status"
-    service_script = PROJECT_ROOT / "windows_service.py"
+    service_script = PROJECT_ROOT / WINDOWS_SERVICE_PY
     py_exe = get_python_exe()
 
     if action in ("install", "setup"):
@@ -571,7 +574,7 @@ def run_service(args):
             print("    To install, run: itms service install (or double-click install_service.bat)")
     elif action == "start":
         start_res = subprocess.run(["net", "start", "ITMSVerificationService"], capture_output=True, text=True)
-        if start_res.returncode == 0 or "has already been started" in start_res.stdout:
+        if start_res.returncode == 0 or MSG_ALREADY_STARTED in start_res.stdout:
             print("[+] ITMSVerificationService is running.")
         else:
             print("[*] Requesting UAC elevation to start ITMSVerificationService...")
@@ -588,13 +591,13 @@ def run_service(args):
     elif action == "stop":
         stop_res = subprocess.run(["net", "stop", "ITMSVerificationService"], capture_output=True, text=True)
         if stop_res.returncode == 0:
-            print("[+] ITMSVerificationService stopped.")
+            print(MSG_SERVICE_STOPPED)
         else:
             subprocess.run(
                 ["powershell", "-NoProfile", "-Command", "Start-Process cmd -ArgumentList '/c net stop ITMSVerificationService' -Verb RunAs -Wait"],
                 check=False
             )
-            print("[+] ITMSVerificationService stopped.")
+            print(MSG_SERVICE_STOPPED)
     elif action == "restart":
         subprocess.run(
             ["powershell", "-NoProfile", "-Command", "Start-Process cmd -ArgumentList '/c net stop ITMSVerificationService & net start ITMSVerificationService' -Verb RunAs -Wait"],

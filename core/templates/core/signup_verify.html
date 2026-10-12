@@ -98,7 +98,7 @@
                 {% endif %}
 
                 {% if message %}
-                    <div class="alert-banner success" style="background: rgba(35, 134, 54, 0.2); border: 1px solid #238636; color: #3fb950; padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; font-size: 0.85rem;">
+                    <div class="alert-banner success" style="background: rgba(35, 134, 54, 0.2); border: 1px solid #238636; color: #ffffff; padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; font-size: 0.85rem;">
                         <span>✅ {{ message }}</span>
                     </div>
                 {% endif %}
@@ -148,7 +148,7 @@
         const codeInput = document.getElementById('code');
         if (codeInput) {
             codeInput.addEventListener('input', function(e) {
-                this.value = this.value.replace(/[^0-9]/g, '');
+                this.value = this.value.replace(/\D/g, '');
             });
         }
     </script>

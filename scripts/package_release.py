@@ -164,8 +164,8 @@ def build_linux_package(version: str, output_dir: Path) -> Path:
                 if norm_entry.startswith("/") or ".." in norm_entry.split("/"):
                     continue
 
-                def _linux_mode_filter(tar_info: tarfile.TarInfo) -> tarfile.TarInfo:
-                    if rel_path.name in ("itms", "install.sh", "uninstall.sh", "deploy_user_data.sh", "setup_vps.sh", "bootstrap.py", "manage.py"):
+                def _linux_mode_filter(tar_info: tarfile.TarInfo, file_name: str = rel_path.name) -> tarfile.TarInfo:
+                    if file_name in EXECUTABLE_SCRIPTS:
                         tar_info.mode = 0o755
                     return tar_info
 

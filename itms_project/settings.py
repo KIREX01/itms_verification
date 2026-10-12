@@ -217,13 +217,14 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 # --- Evidence vault / media ---
-MEDIA_ROOT = BASE_DIR / env("MEDIA_ROOT", default="media")
+_media_root_env = env("MEDIA_ROOT", default="media").strip() or "media"
+MEDIA_ROOT = BASE_DIR / _media_root_env
 MEDIA_URL = "/media/"
-VAULT_SUBDIR = env("VAULT_SUBDIR", default="vault")
+VAULT_SUBDIR = env("VAULT_SUBDIR", default="vault").strip() or "vault"
 _vault_cfg = get_setting("storage.vault_path", "media/vault")
 _vault_p = Path(_vault_cfg)
 VAULT_ROOT = _vault_p if _vault_p.is_absolute() else (BASE_DIR / _vault_p)
-CROPS_SUBDIR = env("CROPS_SUBDIR", default="crops")
+CROPS_SUBDIR = env("CROPS_SUBDIR", default="crops").strip() or "crops"
 CROPS_ROOT = MEDIA_ROOT / CROPS_SUBDIR
 
 # --- Secure Storage (Configuration & Credentials) ---

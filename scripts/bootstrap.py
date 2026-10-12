@@ -582,7 +582,7 @@ def main() -> int:
     # 7. Local HTTPS Certificates
     try:
         from core.services.ssl_service import ensure_ssl_certificates
-        c, k = ensure_ssl_certificates()
+        c, _ = ensure_ssl_certificates()
         log_success(f"Local HTTPS certificates verified ({c.name}, cert.crt).")
     except Exception as ssl_err:
         log_warning(f"SSL certificate notice: {ssl_err}")

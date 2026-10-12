@@ -195,9 +195,9 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
         order_plate = pair.order.registration_number if (pair and pair.order) else ""
 
         front_file = str(pair.front_image.vault_file).replace("\\", "/") if (pair and pair.front_image) else None
-        front_url = f"/media/{front_file}" if front_file else None
+        front_url = (f"/{front_file}" if front_file.startswith("media/") else f"/media/{front_file}") if front_file else None
         rear_file = str(pair.rear_image.vault_file).replace("\\", "/") if (pair and pair.rear_image) else None
-        rear_url = f"/media/{rear_file}" if rear_file else None
+        rear_url = (f"/{rear_file}" if rear_file.startswith("media/") else f"/media/{rear_file}") if rear_file else None
 
         is_item_today = bool(l.timestamp and l.timestamp.date() == today)
 
@@ -246,9 +246,9 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
         sub_time = p.submitted_at or p.updated_at
         is_item_today = bool(sub_time and sub_time.date() == today)
         front_file = str(p.front_image.vault_file).replace("\\", "/") if (p.front_image and p.front_image.vault_file) else None
-        front_url = f"/media/{front_file}" if front_file else None
+        front_url = (f"/{front_file}" if front_file.startswith("media/") else f"/media/{front_file}") if front_file else None
         rear_file = str(p.rear_image.vault_file).replace("\\", "/") if (p.rear_image and p.rear_image.vault_file) else None
-        rear_url = f"/media/{rear_file}" if rear_file else None
+        rear_url = (f"/{rear_file}" if rear_file.startswith("media/") else f"/media/{rear_file}") if rear_file else None
 
         action_name = "VERIFY_PAIR"
         if p.verification_status == VehicleInstallationPair.VerificationStatus.SUBMITTED:

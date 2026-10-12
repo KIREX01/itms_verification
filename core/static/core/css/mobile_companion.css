@@ -265,7 +265,7 @@ body {
     align-items: center;
     gap: 10px;
     padding: 10px 16px;
-    background: rgba(16, 185, 129, 0.12);
+    background: #064e3b;
     border-bottom: 1px solid rgba(16, 185, 129, 0.35);
     animation: fadeIn 0.3s ease;
 }
@@ -381,7 +381,7 @@ body {
 
 .step-pill.active {
     border-color: var(--ug-yellow);
-    background: rgba(245, 158, 11, 0.12);
+    background: #78350f;
     box-shadow: 0 0 8px var(--ug-yellow-glow);
     color: #ffffff !important;
 }

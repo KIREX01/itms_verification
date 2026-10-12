@@ -85,6 +85,33 @@ class SecurityAuditRemediationTests(TestCase):
             resp = self.client.get(f"/media/{p}")
             self.assertEqual(resp.status_code, 404, f"Path traversal attempt '{p}' did not return 404")
 
+    def test_serve_media_valid_vault_file_and_media_prefix_success(self):
+        """Valid images requested via /media/vault/... and /media/media/vault/... must succeed with 200."""
+        vault_root = vault_service.get_vault_root().resolve()
+        vault_root.mkdir(parents=True, exist_ok=True)
+        test_file = vault_root / "test_display_valid.jpg"
+        test_file.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb")
+        resp1 = None
+        resp2 = None
+        try:
+            # 1. Direct /media/vault/...
+            resp1 = self.client.get("/media/vault/test_display_valid.jpg")
+            self.assertEqual(resp1.status_code, 200)
+
+            # 2. Tolerant /media/media/vault/...
+            resp2 = self.client.get("/media/media/vault/test_display_valid.jpg")
+            self.assertEqual(resp2.status_code, 200)
+        finally:
+            if resp1 and hasattr(resp1, "close"):
+                resp1.close()
+            if resp2 and hasattr(resp2, "close"):
+                resp2.close()
+            if test_file.exists():
+                try:
+                    test_file.unlink()
+                except OSError:
+                    pass
+
     def test_serve_media_null_byte_blocked(self):
         """Attempts with null bytes must return 404."""
         resp = self.client.get("/media/vault/test%00.jpg")

@@ -586,7 +586,7 @@ def api_stock_blocked_plates(request: HttpRequest) -> JsonResponse:
         docket = stock_monitoring_service.get_stock_transfer_request_docket(date_suffix)
         return JsonResponse({"success": True, "docket": docket})
     except Exception as exc:
-        logger.error("api_stock_blocked_plates error: %s", exc)
+        logger.exception("api_stock_blocked_plates error: %s", exc)
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
@@ -657,7 +657,7 @@ def api_stock_verify_batch(request: HttpRequest) -> JsonResponse:
             "docket": docket,
         })
     except Exception as exc:
-        logger.error("api_stock_verify_batch error: %s", exc)
+        logger.exception("api_stock_verify_batch error: %s", exc)
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 

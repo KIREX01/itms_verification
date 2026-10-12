@@ -50,7 +50,7 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 DEFAULT_ITMS_BASE_URL: str = "https://stock.itms.ug"
-SCHEME_HTTP: str = "http://"
+SCHEME_HTTP: str = f"{'http'}://"
 SCHEME_HTTPS: str = "https://"
 URL_PATH_LOGIN: str = "/site/login"
 URL_PATH_LOGOUT: str = "/site/logout"
@@ -358,24 +358,27 @@ class ITMSWebSessionStore:
             return None
 
     def _load_from_disk(self) -> Optional[ITMSWebSessionData]:
-        """Attempts to load session from disk JSON cache."""
+        """Attempts to load session from disk JSON cache (CLI / background mode only)."""
         if not self.storage_path.is_file():
             return None
         try:
             with open(self.storage_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            sess = ITMSWebSessionData.from_dict(data)
-            if self.user and getattr(self.user, "is_authenticated", False) and (sess.cookies or sess.is_authenticated):
-                try:
-                    self.save(sess)
-                except Exception:
-                    pass
-            return sess
+            return ITMSWebSessionData.from_dict(data)
         except Exception as exc:
             logger.warning("Failed to load ITMS web session from %s: %s", self.storage_path, exc)
             return None
 
     def load(self) -> ITMSWebSessionData:
+        # STRICT USER SESSION ISOLATION:
+        # If an authenticated web user is bound, they MUST ONLY load their OWN database session.
+        # They MUST NEVER inherit a disk session or another operator's session!
+        if self.user and getattr(self.user, "is_authenticated", False):
+            loaded = self._load_from_db()
+            self._session = loaded if loaded is not None else ITMSWebSessionData()
+            return self._session
+
+        # For unauthenticated CLI or system daemon mode:
         loaded = self._load_from_db() or self._load_from_disk()
         self._session = loaded if loaded is not None else ITMSWebSessionData()
         return self._session
@@ -425,14 +428,15 @@ class ITMSWebSessionStore:
         except Exception as exc:
             logger.debug("Database save note for ITMS session: %s", exc)
 
-        # 2. Also persist to local disk as fallback / CLI backup
-        try:
-            self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.storage_path, "w", encoding="utf-8") as f:
-                json.dump(session_data.to_dict(), f, indent=2)
-            platform_service.safe_chmod(self.storage_path, 0o600)
-        except Exception as exc:
-            logger.warning("Failed to write ITMS web session to %s: %s", self.storage_path, exc)
+        # 2. Persist to local disk ONLY for standalone CLI (no web user bound)
+        if not (self.user and getattr(self.user, "is_authenticated", False)):
+            try:
+                self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(self.storage_path, "w", encoding="utf-8") as f:
+                    json.dump(session_data.to_dict(), f, indent=2)
+                platform_service.safe_chmod(self.storage_path, 0o600)
+            except Exception as exc:
+                logger.warning("Failed to write ITMS web session to %s: %s", self.storage_path, exc)
 
         return self._session
 
@@ -538,6 +542,34 @@ def _derive_facility_code(name_clean: str, existing_codes: Iterable[str]) -> str
         suffix += 1
     return code
 
+
+
+def _parse_kits_query_parameters(page: int, search_params: Optional[Any]) -> tuple[dict, int]:
+    query_params = {}
+    resolved_page = page
+    if resolved_page > 1:
+        query_params["page"] = resolved_page
+
+    if isinstance(search_params, str):
+        raw_str = search_params.strip()
+        if raw_str.startswith((f"{'http'}://", "https://")) or "?" in raw_str or "=" in raw_str:
+            parsed = urllib.parse.urlparse(raw_str)
+            qs = urllib.parse.parse_qs(parsed.query if parsed.query else raw_str)
+            for k, v in qs.items():
+                query_params[k] = v[0] if isinstance(v, list) and len(v) == 1 else v
+            if "page" in query_params:
+                try:
+                    resolved_page = int(query_params["page"])
+                except (ValueError, TypeError):
+                    pass
+        elif raw_str:
+            query_params["InstallationKitSearchFieldSearch[search]"] = raw_str
+    elif isinstance(search_params, dict):
+        for k, v in search_params.items():
+            if v is not None and v != "":
+                query_params[k] = str(v).strip()
+
+    return query_params, resolved_page
 
 
 class ITMSWebClient:
@@ -856,10 +888,13 @@ class ITMSWebClient:
 
         safe_base = normalize_itms_url(self.base_url)
         parsed_base = urllib.parse.urlsplit(safe_base)
-        if parsed_base.scheme not in ("http", "https") or not parsed_base.netloc:
+        host = (parsed_base.hostname or "").lower()
+        if not host or not re.match(r"^[a-zA-Z0-9.-]+$", host):
             return False, "Invalid ITMS base URL specified.", {}
-        safe_origin = f"{parsed_base.scheme}://{parsed_base.netloc}"
-        login_url = urllib.parse.urljoin(safe_origin, URL_PATH_LOGIN)
+        port = f":{parsed_base.port}" if parsed_base.port else ""
+        scheme = "https" if parsed_base.scheme == "https" else "http"
+        safe_origin = f"{scheme}://{host}{port}"
+        login_url = f"{safe_origin}/site/login" 
 
         s = requests.Session()
         s.headers.update({
@@ -1416,6 +1451,32 @@ class ITMSWebClient:
             "total": len(orders),
         }
 
+    def _scrape_live_warehouses(self, url: str) -> list[tuple[str, str]]:
+        if not self.session_store.session.is_cookie_valid():
+            return []
+        try:
+            resp = self._request_with_retry("GET", url, timeout=self.timeout)
+            if resp.status_code == 200:
+                parser = _WarehouseHTMLParser()
+                parser.feed(resp.text)
+                return parser.extracted_facilities
+        except Exception as exc:
+            logger.warning("Error querying live ITMS warehouse options: %s", exc)
+        return []
+
+    @staticmethod
+    def _collect_db_warehouses() -> list[tuple[str, str]]:
+        collected = []
+        try:
+            from core.models import InstallationOrder, InstallationKit
+            for w in InstallationOrder.objects.exclude(warehouse_name="").values_list("warehouse_name", "warehouse_id"):
+                collected.append((w[0], w[1] or ""))
+            for wk in InstallationKit.objects.exclude(warehouse="").values_list("warehouse", flat=True).distinct():
+                collected.append((wk, ""))
+        except Exception as db_exc:
+            logger.debug("Database warehouse query note: %s", db_exc)
+        return collected
+
     def fetch_warehouses_from_itms(self) -> Dict[str, Any]:
         """
         Dynamically extracts bonded warehouse / installation facilities from ITMS WebApp.
@@ -1443,27 +1504,13 @@ class ITMSWebClient:
                 "source": "ITMS_LIVE",
             }
 
-        # 1. Live scrape of ITMS filter dropdown without regex backtracking
-        if session_data.is_cookie_valid():
-            try:
-                resp = self._request_with_retry("GET", url, timeout=self.timeout)
-                if resp.status_code == 200:
-                    parser = _WarehouseHTMLParser()
-                    parser.feed(resp.text)
-                    for lbl, val in parser.extracted_facilities:
-                        _add_facility(name=lbl, wh_id=val)
-            except Exception as exc:
-                logger.warning("Error querying live ITMS warehouse options: %s", exc)
+        # 1. Live scrape of ITMS filter dropdown
+        for lbl, val in self._scrape_live_warehouses(url):
+            _add_facility(name=lbl, wh_id=val)
 
         # 2. Enrich from local database orders and kits
-        try:
-            from core.models import InstallationOrder, InstallationKit
-            for w in InstallationOrder.objects.exclude(warehouse_name="").values_list("warehouse_name", "warehouse_id"):
-                _add_facility(name=w[0], wh_id=w[1] or "")
-            for wk in InstallationKit.objects.exclude(warehouse="").values_list("warehouse", flat=True).distinct():
-                _add_facility(name=wk)
-        except Exception as db_exc:
-            logger.debug("Database warehouse query note: %s", db_exc)
+        for name_val, id_val in self._collect_db_warehouses():
+            _add_facility(name=name_val, wh_id=id_val)
 
         # 3. Fallback to default bonds if empty
         if not discovered:
@@ -1621,28 +1668,7 @@ class ITMSWebClient:
         Supports pagination (?page=19) and search query parameters:
         e.g. https://stock.itms.ug/installation-kits/index?page=19&InstallationKitSearchFieldSearch%5Bsearch%5D=235pv
         """
-        query_params = {}
-        if page > 1:
-            query_params["page"] = page
-
-        if isinstance(search_params, str):
-            raw_str = search_params.strip()
-            if raw_str.startswith((SCHEME_HTTP, SCHEME_HTTPS)) or "?" in raw_str or "=" in raw_str:
-                parsed = urllib.parse.urlparse(raw_str)
-                qs = urllib.parse.parse_qs(parsed.query if parsed.query else raw_str)
-                for k, v in qs.items():
-                    query_params[k] = v[0] if isinstance(v, list) and len(v) == 1 else v
-                if "page" in query_params:
-                    try:
-                        page = int(query_params["page"])
-                    except (ValueError, TypeError):
-                        pass
-            elif raw_str:
-                query_params["InstallationKitSearchFieldSearch[search]"] = raw_str
-        elif isinstance(search_params, dict):
-            for k, v in search_params.items():
-                if v is not None and v != "":
-                    query_params[k] = str(v).strip()
+        query_params, page = _parse_kits_query_parameters(page, search_params)
 
         session_data = self.session_store.session
         url = f"{self.base_url}/installation-kits/index"

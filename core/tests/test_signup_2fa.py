@@ -98,3 +98,34 @@ class Signup2FATestCase(TestCase):
         # Verify session pending state cleared
         session = self.client.session
         self.assertNotIn("pending_signup", session)
+
+    @patch("core.services.email_service.send_2fa_verification_code")
+    def test_new_user_mfa_signup_never_linked_to_existing_itms_session(self, mock_send):
+        """Verify that new user completing MFA does NOT inherit any existing ITMS session from disk or database."""
+        from core.models import OperatorITMSSession
+        from core.services.itms_web_client import get_web_client
+
+        mock_send.return_value = (True, "Sent")
+        self.client.post(self.signup_url, {
+            "username": "fresh_user",
+            "full_name": "Fresh User",
+            "email": "fresh@info.kirex.online",
+            "password": "SecurePassword123!",
+            "password_confirm": "SecurePassword123!",
+        })
+
+        session = self.client.session
+        correct_code = session["pending_signup"]["code"]
+
+        res = self.client.post(self.verify_url, {"code": correct_code})
+        self.assertEqual(res.status_code, 302)
+
+        user = User.objects.get(username="fresh_user")
+
+        # Must not have any existing session linked in database
+        self.assertFalse(OperatorITMSSession.objects.filter(user=user).exists())
+
+        # Web client session for new user must be unauthenticated with empty email
+        client = get_web_client(user=user)
+        self.assertFalse(client.session_store.session.is_authenticated)
+        self.assertEqual(client.session_store.session.user_email, "")

@@ -25,7 +25,7 @@ $ErrorActionPreference = "Stop"
 # Allow executing scripts within the uninstaller process
 try {
     Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force -ErrorAction SilentlyContinue
-} catch {}
+} catch { Write-Verbose "Service removal note: $_" }
 
 Write-Host "====================================================================" -ForegroundColor Red
 Write-Host "   ITMS VERIFICATION COPILOT - COMPLETE SYSTEM UNINSTALLER" -ForegroundColor Red

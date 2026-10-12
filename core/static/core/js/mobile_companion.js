@@ -912,7 +912,7 @@ function showScanDetectionBanner(text, isError = false) {
         viewport.classList.remove("detected-error", "detected");
         viewport.classList.add(isError ? "detected-error" : "detected");
         setTimeout(() => {
-            if (viewport) viewport.classList.remove("detected-error", "detected");
+            viewport.classList.remove("detected-error", "detected");
         }, 450);
     }
     if (liveBadge && detectedSpan) {
@@ -959,7 +959,12 @@ function handleStockBarcodeDetected(rawCode) {
         playScanBeep(false);
         if (navigator.vibrate) navigator.vibrate([140, 70, 140]);
 
-        const dupType = isBlocked ? "BLOCKED (not in stock)" : (isAlreadySynced ? "already synced to server" : "already in queue");
+                let dupType = "already in queue";
+        if (isBlocked) {
+            dupType = "BLOCKED (not in stock)";
+        } else if (isAlreadySynced) {
+            dupType = "already synced to server";
+        }
         showMobileToast(`⚠️ Duplicate: Plate ${cleanPlate} ${dupType}!`, true);
         return;
     }
@@ -997,7 +1002,7 @@ function submitSingleStockPlate() {
 }
 
 function toggleAutoSyncPreference(checkbox) {
-    MobileState.stock.autoSync = !!(checkbox && checkbox.checked);
+    MobileState.stock.autoSync = Boolean(checkbox?.checked);
     localStorage.setItem("itms_mobile_auto_sync", MobileState.stock.autoSync ? "true" : "false");
     showMobileToast(MobileState.stock.autoSync ? "⚡ Auto-Sync ON: Scans send to server instantly" : "⏸ Auto-Sync OFF: Scans stage in queue");
     if (MobileState.stock.autoSync && MobileState.stock.queue.length > 0) {

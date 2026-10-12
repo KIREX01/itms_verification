@@ -793,8 +793,8 @@ async function checkShiftBlockedPlates() {
             lastNotOnStockData = data.docket;
             if (lbl) lbl.innerText = data.docket.count;
             if (btn) btn.style.display = 'inline-flex';
-        } else {
-            if (btn) btn.style.display = 'none';
+        } else if (btn) {
+            btn.style.display = 'none';
         }
     } catch (e) {
         console.debug('checkShiftBlockedPlates notice:', e);
@@ -825,7 +825,12 @@ async function openNotOnStockModal(data) {
 
     lastNotOnStockData = data;
 
-    const count = data.count !== undefined ? data.count : (data.blocked_plates ? data.blocked_plates.length : 0);
+        let count = 0;
+    if (data.count !== undefined) {
+        count = data.count;
+    } else if (data.blocked_plates) {
+        count = data.blocked_plates.length;
+    }
     const total = data.total_submitted !== undefined ? data.total_submitted : count;
     const valid = data.verified_plates ? data.verified_plates.length : Math.max(0, total - count);
 
@@ -954,7 +959,7 @@ function _fallbackCopyText(text, successMsg) {
     document.body.appendChild(el);
     el.select();
     document.execCommand('copy');
-    document.body.removeChild(el);
+    el.remove();
     notify(successMsg, 'success');
 }
 
@@ -969,7 +974,7 @@ function copyNotOnStockRawPlates() {
         return;
     }
 
-    if (navigator.clipboard && navigator.clipboard.writeText) {
+    if (navigator.clipboard?.writeText) {
         navigator.clipboard.writeText(raw).then(() => {
             notify('📋 Copied raw plates to clipboard! (Ready to paste into ITMS)', 'success');
         }).catch(() => {
@@ -990,7 +995,7 @@ function copyNotOnStockMessage() {
         return;
     }
 
-    if (navigator.clipboard && navigator.clipboard.writeText) {
+    if (navigator.clipboard?.writeText) {
         navigator.clipboard.writeText(msg).then(() => {
             notify('💬 Copied Transfer Manager message to clipboard! (Ready for WhatsApp/Email)', 'success');
         }).catch(() => {
@@ -1017,7 +1022,7 @@ function downloadNotOnStockDocket() {
     link.download = `ITMS_Stock_Transfer_Request_${currentStockDateSuffix || 'shift'}.txt`;
     document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link);
+    link.remove();
     notify('📥 Downloaded ITMS Stock Transfer Request docket (.txt)', 'success');
 }
 

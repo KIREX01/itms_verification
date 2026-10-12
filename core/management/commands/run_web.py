@@ -114,6 +114,8 @@ class Command(BaseCommand):
         ssl_port = options.get("ssl_port") or port
         enable_ssl_primary = not options.get("no_ssl", False)
         no_ssl = options.get("no_ssl", False)
+        if no_ssl:
+            settings.SECURE_SSL_REDIRECT = False
         bind_host = options.get("host", "0.0.0.0")
         no_browser = options.get("no_browser", False)
         noreload = options.get("noreload", False)

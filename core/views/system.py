@@ -34,10 +34,22 @@ FORBIDDEN_MEDIA_EXTENSIONS = {
 }
 
 
-def is_prohibited_system_directory(p: Path) -> bool:
-    """Verifies that a folder path does not point to critical OS or system directories (CWE-22/CWE-552)."""
+def is_prohibited_system_directory(p: Union[Path, str]) -> bool:
+    """Verifies that a folder path does not point to critical OS or system directories (CWE-22/CWE-552/S6549)."""
     try:
-        resolved = p.resolve()
+        raw_str = str(p).strip()
+        if not raw_str or "\x00" in raw_str:
+            return True
+        norm_str = raw_str.replace("/", "\\")
+        parts = [part for part in norm_str.split("\\") if part]
+        if any(part in (".", "..") for part in parts):
+            return True
+        norm_upper = os.path.normpath(norm_str).upper()
+        blocked_roots = ("C:\\WINDOWS", "C:\\PROGRAM FILES", "C:\\PROGRAM FILES (X86)", "\\ETC", "\\BIN", "\\SBIN", "\\USR", "\\SYS", "\\PROC", "\\DEV")
+        if any(norm_upper == root or norm_upper.startswith(root + "\\") for root in blocked_roots):
+            return True
+
+        resolved = Path(raw_str).resolve()
         if len(resolved.parts) <= 1:  # Root directory (e.g. C:\ or /)
             return True
         prohibited_prefixes = [
@@ -556,25 +568,36 @@ def serve_media(request: HttpRequest, path: str) -> HttpResponse:
     vault_root = vault_service.get_vault_root().resolve()
     media_root = Path(settings.MEDIA_ROOT).resolve()
 
+    # Normalize clean_path if it starts with 'media/'
+    normalized_path = clean_path
+    if normalized_path.startswith("media/"):
+        normalized_path = normalized_path[6:].lstrip("/")
+
     candidate_files = []
 
     # Check if path starts with 'vault/'
-    if clean_path.startswith("vault/"):
-        sub_rel = clean_path[6:].lstrip("/")
+    if normalized_path.startswith("vault/"):
+        sub_rel = normalized_path[6:].lstrip("/")
         candidate_files.append((vault_root / sub_rel, vault_root))
 
     # Check vault root directly
-    candidate_files.append((vault_root / clean_path, vault_root))
+    candidate_files.append((vault_root / normalized_path, vault_root))
 
     # Fallback to settings.MEDIA_ROOT (e.g. for crops/)
+    candidate_files.append((media_root / normalized_path, media_root))
     candidate_files.append((media_root / clean_path, media_root))
+
+    # Delegate to vault_service.resolve_vault_path for comprehensive resolution
+    service_resolved = vault_service.resolve_vault_path(normalized_path)
+    if service_resolved != vault_root and service_resolved.is_file():
+        candidate_files.append((service_resolved, vault_root if service_resolved.is_relative_to(vault_root) else media_root))
 
     for target, base_dir in candidate_files:
         try:
             resolved_target = target.resolve()
             if (
                 resolved_target.is_file()
-                and resolved_target.is_relative_to(base_dir)
+                and (resolved_target.is_relative_to(vault_root) or resolved_target.is_relative_to(media_root) or resolved_target.is_relative_to(base_dir))
                 and not resolved_target.name.startswith(".")
                 and resolved_target.suffix.lower() not in FORBIDDEN_MEDIA_EXTENSIONS
             ):

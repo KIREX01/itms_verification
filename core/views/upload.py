@@ -290,11 +290,18 @@ def api_batch_detail(request: HttpRequest, batch_id: str) -> JsonResponse:
                 "order_plate": p.order.registration_number if p.order else None,
             }
 
-        vault_path = str(img.vault_file).replace("\\", "/")
+        vault_path = str(img.vault_file).replace("\\", "/").strip().lstrip("/")
+        img_url = f"/{vault_path}" if vault_path.startswith("media/") else f"/media/{vault_path}"
+        thumb_path = str(img.thumbnail_file or "").replace("\\", "/").strip().lstrip("/")
+        thumb_url = (f"/{thumb_path}" if thumb_path.startswith("media/") else f"/media/{thumb_path}") if thumb_path else None
+        preview_path = str(img.preview_file or "").replace("\\", "/").strip().lstrip("/")
+        preview_url = (f"/{preview_path}" if preview_path.startswith("media/") else f"/media/{preview_path}") if preview_path else None
         images.append({
             "id": str(img.id),
             "file_name": Path(img.original_source_path or img.vault_file).name,
-            "url": f"/media/{vault_path}",
+            "url": img_url,
+            "thumb_url": thumb_url,
+            "preview_url": preview_url,
             "vault_file": vault_path,
             "status": img.status,
             "orientation": img.orientation,

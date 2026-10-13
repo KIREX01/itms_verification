@@ -88,6 +88,12 @@ class InstallationOrder(models.Model):
     details_json = models.JSONField(default=dict, blank=True)
     photos_json = models.JSONField(default=list, blank=True)
     info_fetched_at = models.DateTimeField(null=True, blank=True)
+    facility_code = models.CharField(
+        max_length=32,
+        db_index=True,
+        default="AGM",
+        help_text="Operating warehouse/bond facility code, e.g. AGM, SPIRO",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -98,6 +104,8 @@ class InstallationOrder(models.Model):
             models.Index(fields=["status", "-created_at"]),
             models.Index(fields=["registration_number", "status"]),
             models.Index(fields=["is_active_on_itms", "is_archived"]),
+            models.Index(fields=["facility_code", "status"]),
+            models.Index(fields=["facility_code", "-created_at"]),
         ]
 
     def __str__(self):
@@ -137,6 +145,20 @@ class IngestionBatch(models.Model):
         db_index=True,
         help_text="Active ITMS account email at time of ingestion.",
     )
+    operator = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ingestion_batches",
+        help_text="Local operator account that captured or ingested this batch.",
+    )
+    facility_code = models.CharField(
+        max_length=32,
+        db_index=True,
+        default="AGM",
+        help_text="Operating warehouse/bond facility code.",
+    )
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     total_files = models.PositiveIntegerField(default=0)
     ingested_count = models.PositiveIntegerField(default=0)
@@ -146,6 +168,10 @@ class IngestionBatch(models.Model):
     class Meta:
         ordering = ["-created_at"]
         verbose_name_plural = "Ingestion batches"
+        indexes = [
+            models.Index(fields=["operator", "-created_at"]),
+            models.Index(fields=["facility_code", "-created_at"]),
+        ]
 
     def __str__(self):
         return f"{self.batch_id} ({self.source_type}) - {self.ingested_count} ingested"
@@ -348,6 +374,20 @@ class VehicleInstallationPair(models.Model):
         db_index=True,
         help_text="ITMS account email associated with this pair.",
     )
+    operator = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="verification_pairs",
+        help_text="Operator who reviewed, approved, or owns this pair.",
+    )
+    facility_code = models.CharField(
+        max_length=32,
+        db_index=True,
+        default="AGM",
+        help_text="Operating warehouse/bond facility code.",
+    )
     is_complete = models.BooleanField(default=False, db_index=True)
 
     operator_note = models.TextField(blank=True)
@@ -368,6 +408,8 @@ class VehicleInstallationPair(models.Model):
             models.Index(fields=["verification_status", "is_complete"]),
             models.Index(fields=["verification_status", "-updated_at"]),
             models.Index(fields=["registration_number_detected", "verification_status"]),
+            models.Index(fields=["operator", "verification_status"]),
+            models.Index(fields=["facility_code", "verification_status"]),
             models.Index(fields=["-updated_at"]),
         ]
 
@@ -472,12 +514,22 @@ class InstallationKit(models.Model):
     rear_tracker_mac = models.CharField(max_length=64, blank=True, default="")
     details_json = models.JSONField(default=dict, blank=True)
     last_synced_at = models.DateTimeField(null=True, blank=True)
+    facility_code = models.CharField(
+        max_length=32,
+        db_index=True,
+        default="AGM",
+        help_text="Operating warehouse/bond facility code, e.g. AGM, SPIRO",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["facility_code", "status"]),
+            models.Index(fields=["facility_code", "registration_number"]),
+        ]
 
     def __str__(self):
         return f"{self.kit_code} ({self.registration_number})"
@@ -498,6 +550,7 @@ class InstallationKit(models.Model):
             "sim_mac": self.sim_mac,
             "created_date": self.created_date,
             "created_by_user": self.created_by_user,
+            "facility_code": self.facility_code,
             "kit_uuid": self.kit_uuid,
             "detail_url": self.detail_url,
         }
@@ -921,3 +974,67 @@ class OperatorITMSSession(models.Model):
         from django.utils import timezone
         import datetime
         return timezone.now() < (self.expires_at - datetime.timedelta(seconds=buffer_seconds))
+
+
+class OperatorProfile(models.Model):
+    """
+    Profile settings and facility scoping for an individual operator.
+    Enforces logical multi-tenant isolation and transfer workflows.
+    """
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="profile",
+    )
+    active_facility = models.CharField(max_length=32, default="AGM", db_index=True)
+    allowed_facilities = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Operator Profile"
+        verbose_name_plural = "Operator Profiles"
+
+    def __str__(self):
+        return f"Profile for {self.user.username} ({self.active_facility})"
+
+
+class FacilitySyncMetadata(models.Model):
+    """
+    Tracks facility-level synchronization status and timestamps for cache deduplication.
+    Prevents redundant network strain when multiple operators are stationed at the same bond.
+    """
+    facility_code = models.CharField(max_length=32, primary_key=True)
+    last_kits_synced_at = models.DateTimeField(null=True, blank=True)
+    last_orders_synced_at = models.DateTimeField(null=True, blank=True)
+    total_kits = models.IntegerField(default=0)
+    total_orders = models.IntegerField(default=0)
+    synced_by_operator = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="facility_syncs",
+    )
+
+    class Meta:
+        verbose_name = "Facility Sync Metadata"
+        verbose_name_plural = "Facility Sync Metadata"
+
+    def is_kits_fresh(self, ttl_minutes: int = 180) -> bool:
+        if not self.last_kits_synced_at:
+            return False
+        from django.utils import timezone
+        import datetime
+        return timezone.now() < (self.last_kits_synced_at + datetime.timedelta(minutes=ttl_minutes))
+
+    def is_orders_fresh(self, ttl_minutes: int = 60) -> bool:
+        if not self.last_orders_synced_at:
+            return False
+        from django.utils import timezone
+        import datetime
+        return timezone.now() < (self.last_orders_synced_at + datetime.timedelta(minutes=ttl_minutes))
+
+    def __str__(self):
+        return f"Sync Metadata for {self.facility_code} ({self.total_kits} kits, {self.total_orders} orders)"
+

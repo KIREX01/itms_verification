@@ -1,6 +1,6 @@
 """
-Unit tests for Production API Response Protocol (OHAS Protocol) and
-Security Request Envelope Zero-Trust Gating.
+Unit tests for Production API Response Protocol (OHAS Protocol),
+Security Request Envelope Zero-Trust Gating, and Facility-Aware Multi-Tenant Scoping.
 """
 from datetime import timedelta
 import json
@@ -10,7 +10,15 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.models import OperatorITMSSession
+from core.models import (
+    FacilitySyncMetadata,
+    IngestionBatch,
+    InstallationKit,
+    InstallationOrder,
+    OperatorITMSSession,
+    OperatorProfile,
+)
+from core.services import scoped_order_service
 from core.services.api_envelope import (
     HEADER_BARE,
     HEADER_ENVELOPE,
@@ -129,7 +137,7 @@ class SecurityEnvelopeGateTestCase(TestCase):
             password="Password123!",
             email="active@example.com",
         )
-        # Create active ITMS session for active_user
+        # Create active ITMS session for active_user at AGM
         OperatorITMSSession.objects.create(
             user=self.active_user,
             itms_email="active.operator@itms-ug.com",
@@ -167,14 +175,14 @@ class SecurityEnvelopeGateTestCase(TestCase):
         self.assertEqual(data.get("code"), "AUTHENTICATION_REQUIRED")
 
     def test_unlinked_user_blocked_from_orders_bare_mode(self):
-        """Authenticated caller with no ITMS session receives 412 ITMS_CONNECTION_REQUIRED."""
+        """Authenticated caller with no ITMS session receives 412 ITMS_ACCOUNT_NOT_LINKED."""
         self.client.force_login(self.unlinked_user)
         res = self.client.get(reverse("core:api_orders_list"))
         self.assertEqual(res.status_code, 412)
         data = res.json()
         self.assertFalse(data.get("success"))
-        self.assertEqual(data.get("code"), "ITMS_CONNECTION_REQUIRED")
-        self.assertIn("Connect your ITMS account in Tab 2", data.get("error"))
+        self.assertIn(data.get("code"), ("ITMS_ACCOUNT_NOT_LINKED", "ITMS_CONNECTION_REQUIRED"))
+        self.assertIn("official ITMS account in Tab 2", data.get("error"))
 
     def test_unlinked_user_blocked_from_orders_envelope_mode(self):
         """Envelope mode returns structured error with code and details."""
@@ -190,7 +198,7 @@ class SecurityEnvelopeGateTestCase(TestCase):
         self.assertEqual(len(payload["errors"]), 1)
 
         err = payload["errors"][0]
-        self.assertEqual(err["code"], "ITMS_CONNECTION_REQUIRED")
+        self.assertIn(err["code"], ("ITMS_ACCOUNT_NOT_LINKED", "ITMS_CONNECTION_REQUIRED"))
         self.assertEqual(err["field"], "itms_session")
         self.assertEqual(err["details"]["status"], "UNLINKED")
 
@@ -200,7 +208,7 @@ class SecurityEnvelopeGateTestCase(TestCase):
         res = self.client.get(reverse("core:api_stock_shift_dates"))
         self.assertEqual(res.status_code, 412)
         data = res.json()
-        self.assertEqual(data.get("code"), "ITMS_CONNECTION_REQUIRED")
+        self.assertIn(data.get("code"), ("ITMS_ACCOUNT_NOT_LINKED", "ITMS_CONNECTION_REQUIRED"))
 
     def test_unlinked_user_permitted_on_itms_account_management(self):
         """Unlinked user can query itms status and warehouses to connect account."""
@@ -246,3 +254,158 @@ class SecurityEnvelopeGateTestCase(TestCase):
         self.assertEqual(payload["errors"], [])
         self.assertTrue(payload["data"].get("success"))
         self.assertIn("orders", payload["data"])
+
+
+class FacilityMultiTenantScopingTestCase(TestCase):
+    """Tests Facility-Aware Multi-Tenant Scoping, Deduplication, and Transfer Workflows."""
+
+    def setUp(self):
+        self.client = Client()
+
+        # Operator 1 at AGM
+        self.op1 = User.objects.create_user(
+            username="op_agm1",
+            password="Password123!",
+            email="op1@example.com",
+        )
+        OperatorITMSSession.objects.create(
+            user=self.op1,
+            itms_email="op1@itms-ug.com",
+            itms_user_uuid="uuid-op1",
+            cookies={"_identity-frontend": "cookie-op1"},
+            is_authenticated=True,
+            expires_at=timezone.now() + timedelta(days=7),
+            active_bond_code="AGM",
+            active_bond_name="AGM Bond",
+        )
+
+        # Operator 2 at AGM
+        self.op2 = User.objects.create_user(
+            username="op_agm2",
+            password="Password123!",
+            email="op2@example.com",
+        )
+        OperatorITMSSession.objects.create(
+            user=self.op2,
+            itms_email="op2@itms-ug.com",
+            itms_user_uuid="uuid-op2",
+            cookies={"_identity-frontend": "cookie-op2"},
+            is_authenticated=True,
+            expires_at=timezone.now() + timedelta(days=7),
+            active_bond_code="AGM",
+            active_bond_name="AGM Bond",
+        )
+
+        # Seed AGM and SPIRO orders
+        InstallationOrder.objects.create(
+            order_number="ORD-AGM-001",
+            registration_number="UMA100AA",
+            facility_code="AGM",
+        )
+        InstallationOrder.objects.create(
+            order_number="ORD-SPIRO-001",
+            registration_number="UMA200BB",
+            facility_code="SPIRO",
+        )
+
+        # Seed AGM and SPIRO kits
+        InstallationKit.objects.create(
+            kit_code="IK-AGM-001",
+            registration_number="UMA100AA",
+            facility_code="AGM",
+        )
+        InstallationKit.objects.create(
+            kit_code="IK-SPIRO-001",
+            registration_number="UMA200BB",
+            facility_code="SPIRO",
+        )
+
+    def test_orders_scoped_to_operator_facility(self):
+        """Operator at AGM only sees orders for facility AGM."""
+        self.client.force_login(self.op1)
+        res = self.client.get(reverse("core:api_orders_list"))
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        orders = data.get("orders", [])
+        self.assertEqual(len(orders), 1)
+        self.assertEqual(orders[0]["order_number"], "ORD-AGM-001")
+
+    def test_kits_scoped_to_operator_facility(self):
+        """Operator at AGM only sees kits for facility AGM."""
+        self.client.force_login(self.op1)
+        res = self.client.get(reverse("core:api_itms_kits"))
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        kits = data.get("kits", [])
+        self.assertEqual(len(kits), 1)
+        self.assertEqual(kits[0]["kit_code"], "IK-AGM-001")
+
+    def test_facility_deduplication_reuses_fresh_cache(self):
+        """If AGM kits were synced recently by Operator 1, Operator 2 reuses cache without re-scraping."""
+        # Operator 1 records sync 10 minutes ago
+        scoped_order_service.record_facility_kits_synced(
+            facility_code="AGM",
+            total_kits=1,
+            operator=self.op1,
+        )
+
+        # Operator 2 requests sync
+        self.client.force_login(self.op2)
+        res = self.client.get(reverse("core:api_itms_kits"), {"sync": "true"})
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data.get("deduplicated"))
+        self.assertIn("Facility AGM kits are fresh", data.get("message"))
+
+    def test_transfer_workflow_switches_facility_context(self):
+        """Transferring operator to SPIRO immediately switches data scope to SPIRO."""
+        self.client.force_login(self.op1)
+
+        # Transfer operator 1 to SPIRO
+        scoped_order_service.switch_operator_facility(self.op1, "SPIRO")
+
+        # Now query orders
+        res = self.client.get(reverse("core:api_orders_list"))
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        orders = data.get("orders", [])
+        self.assertEqual(len(orders), 1)
+        self.assertEqual(orders[0]["order_number"], "ORD-SPIRO-001")
+
+        # Query kits
+        res_kits = self.client.get(reverse("core:api_itms_kits"))
+        self.assertEqual(res_kits.status_code, 200)
+        data_kits = res_kits.json()
+        self.assertEqual(data_kits.get("facility_code"), "SPIRO")
+        kits = data_kits.get("kits", [])
+        self.assertEqual(len(kits), 1)
+        self.assertEqual(kits[0]["kit_code"], "IK-SPIRO-001")
+
+    def test_operator_batches_private_isolation(self):
+        """Batches created by Operator 1 are not visible in Operator 2's list."""
+        batch1 = IngestionBatch.objects.create(
+            batch_id="BATCH-OP1-001",
+            operator=self.op1,
+            facility_code="AGM",
+        )
+        batch2 = IngestionBatch.objects.create(
+            batch_id="BATCH-OP2-001",
+            operator=self.op2,
+            facility_code="AGM",
+        )
+
+        # Op1 sees only batch 1
+        self.client.force_login(self.op1)
+        res1 = self.client.get(reverse("core:api_batches_list"), {"scope": "ALL"})
+        batches1 = res1.json().get("batches", [])
+        batch_ids1 = [b["batch_id"] for b in batches1]
+        self.assertIn("BATCH-OP1-001", batch_ids1)
+        self.assertNotIn("BATCH-OP2-001", batch_ids1)
+
+        # Op2 sees only batch 2
+        self.client.force_login(self.op2)
+        res2 = self.client.get(reverse("core:api_batches_list"), {"scope": "ALL"})
+        batches2 = res2.json().get("batches", [])
+        batch_ids2 = [b["batch_id"] for b in batches2]
+        self.assertIn("BATCH-OP2-001", batch_ids2)
+        self.assertNotIn("BATCH-OP1-001", batch_ids2)

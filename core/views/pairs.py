@@ -54,6 +54,15 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
         "order", "front_image", "rear_image", "front_image__batch", "rear_image__batch"
     )
 
+    envelope = getattr(request, "envelope", None)
+    if envelope and envelope.is_valid:
+        qs = qs.filter(
+            Q(operator=request.user) | Q(front_image__batch__operator=request.user) | Q(operator__isnull=True),
+            facility_code=envelope.facility_code,
+        )
+    elif request.user and getattr(request.user, "is_authenticated", False):
+        qs = qs.filter(Q(operator=request.user) | Q(front_image__batch__operator=request.user) | Q(operator__isnull=True))
+
     today_q = (
         Q(created_at__date=today) |
         Q(front_image__batch__created_at__date=today) |

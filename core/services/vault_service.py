@@ -69,6 +69,7 @@ def create_ingestion_batch(
     source_label: str = "",
     account_email: str = "",
     user: Optional[Any] = None,
+    facility_code: Optional[str] = None,
 ) -> IngestionBatch:
     """Creates a new IngestionBatch with a human-readable identifier and operator attribution."""
     now = timezone.now()
@@ -79,11 +80,30 @@ def create_ingestion_batch(
     email = _resolve_batch_email(account_email, user)
     label = _resolve_batch_label(source_label, user, batch_id)
 
+    facility = str(facility_code).strip().upper() if facility_code else ""
+    if not facility and user and getattr(user, "is_authenticated", False):
+        try:
+            from core.models import OperatorProfile, OperatorITMSSession
+            prof = OperatorProfile.objects.filter(user=user).first()
+            if prof and prof.active_facility:
+                facility = prof.active_facility.strip().upper()
+            else:
+                sess = OperatorITMSSession.objects.filter(user=user).first()
+                if sess and sess.active_bond_code:
+                    facility = sess.active_bond_code.strip().upper()
+        except Exception:
+            pass
+    if not facility:
+        from core.services import config_service
+        facility = config_service.get_active_bond().get("code", "AGM")
+
     return IngestionBatch.objects.create(
         batch_id=batch_id,
         source_type=source_type,
         source_label=label,
         account_email=email,
+        operator=user if (user and getattr(user, "is_authenticated", False)) else None,
+        facility_code=facility,
         created_at=now,
     )
 

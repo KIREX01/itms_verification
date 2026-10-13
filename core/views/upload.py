@@ -333,10 +333,19 @@ def api_batch_detail(request: HttpRequest, batch_id: str) -> JsonResponse:
 def api_batches_list(request: HttpRequest) -> JsonResponse:
     """Returns list of photo ingestion batches with shift scope filtering."""
     today = timezone.localdate()
-    latest_batch = IngestionBatch.objects.order_by("-created_at").first()
     scope = request.GET.get("scope", "TODAY").upper().strip()
 
     qs = IngestionBatch.objects.all().order_by("-created_at")
+    envelope = getattr(request, "envelope", None)
+    if envelope and envelope.is_valid:
+        qs = qs.filter(
+            Q(operator=request.user) | Q(operator__isnull=True),
+            facility_code=envelope.facility_code,
+        )
+    elif request.user and getattr(request.user, "is_authenticated", False):
+        qs = qs.filter(Q(operator=request.user) | Q(operator__isnull=True))
+
+    latest_batch = qs.first()
     total_batches = qs.count()
     today_batches_cnt = qs.filter(created_at__date=today).count()
     carryover_batches_cnt = qs.exclude(created_at__date=today).count()

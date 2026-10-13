@@ -16,7 +16,7 @@ from core.models import (
     InstallationOrder,
     VehicleInstallationPair,
 )
-from core.services import auth_service, bond_service
+from core.services import auth_service, bond_service, scoped_order_service
 from core.services.itms_web_client import get_web_client
 from core.services.pipeline_runner import runner as pipeline_runner
 from core.services.security_envelope import require_itms_envelope
@@ -35,15 +35,13 @@ def api_orders_list(request: HttpRequest) -> JsonResponse:
     except (ValueError, TypeError):
         limit = 50
 
-    qs = InstallationOrder.objects.all().only(
-        "id", "order_number", "registration_number", "vin", "warehouse_name", "status"
-    )
-    if search:
-        qs = qs.filter(
-            Q(order_number__icontains=search) |
-            Q(registration_number__icontains=search) |
-            Q(vin__icontains=search)
+    envelope = getattr(request, "envelope", None)
+    if envelope and envelope.is_valid:
+        qs = scoped_order_service.get_scoped_orders(envelope=envelope, search=search).only(
+            "id", "order_number", "registration_number", "vin", "warehouse_name", "status", "facility_code"
         )
+    else:
+        qs = InstallationOrder.objects.none()
 
     orders = [
         {
@@ -53,6 +51,7 @@ def api_orders_list(request: HttpRequest) -> JsonResponse:
             "vin": o.vin,
             "warehouse_name": o.warehouse_name,
             "status": o.status,
+            "facility_code": getattr(o, "facility_code", "AGM"),
         }
         for o in qs[:limit]
     ]
@@ -150,6 +149,9 @@ def api_itms_warehouses(request: HttpRequest) -> JsonResponse:
             return JsonResponse({"success": False, "error": "Warehouse/Bond code is required."}, status=400)
 
         ok = bond_service.set_active_bond(code, name or None)
+        if ok and request.user and getattr(request.user, "is_authenticated", False):
+            scoped_order_service.switch_operator_facility(user=request.user, new_facility=code)
+
         return JsonResponse({
             "success": ok,
             "active_bond": bond_service.get_active_bond(),
@@ -843,22 +845,51 @@ def api_itms_plate_lifecycle(request: HttpRequest) -> JsonResponse:
 def api_itms_kits(request: HttpRequest) -> JsonResponse:
     """
     Lists or synchronizes ITMS Installation Kits stock inventory.
+    Enforces facility deduplication: reuses cached facility kits when fresh,
+    avoiding duplicate scraping from multiple operators at the same bond.
     """
+    envelope = getattr(request, "envelope", None)
     client = get_web_client(user=request.user)
+
     if request.method == "POST" or request.GET.get("sync") == "true":
         if not client.session_store.session.is_cookie_valid():
             return JsonResponse({"success": False, "error": "ITMS session not authenticated."}, status=401)
+
+        force = request.GET.get("force") in ("true", "1", "yes") or request.POST.get("force") in ("true", "1", "yes")
+        # Facility deduplication check
+        if not force and envelope and not scoped_order_service.should_sync_facility_kits(envelope=envelope):
+            meta = scoped_order_service.get_facility_sync_status(envelope.facility_code)
+            return JsonResponse({
+                "success": True,
+                "deduplicated": True,
+                "message": f"Facility {envelope.facility_code} kits are fresh (synced at {meta.last_kits_synced_at}). Reusing local cache.",
+                "total_kits": meta.total_kits,
+                "facility_code": envelope.facility_code,
+            })
+
         from core.services.order_sync import OrderSyncService
         sync_svc = OrderSyncService(client=client)
         pages_to_sync = int(request.GET.get("pages", 25) or 25)
         res = sync_svc.sync_installation_kits_scoped(max_pages=pages_to_sync, force=True)
-        return JsonResponse({"success": True, "sync": res})
+
+        facility_code = envelope.facility_code if envelope else "AGM"
+        total_kits = InstallationKit.objects.filter(facility_code=facility_code).count()
+        scoped_order_service.record_facility_kits_synced(
+            facility_code=facility_code,
+            total_kits=total_kits,
+            operator=request.user,
+        )
+        return JsonResponse({"success": True, "sync": res, "facility_code": facility_code})
 
     q = request.GET.get("q", "").strip()
     status_filter = request.GET.get("status", "").strip()
     wh_filter = request.GET.get("warehouse", "").strip()
 
-    kits_qs = InstallationKit.objects.all().order_by("-created_date", "-id")
+    if envelope and envelope.is_valid:
+        kits_qs = scoped_order_service.get_scoped_kits(envelope=envelope, status=status_filter or None).order_by("-created_date", "-id")
+    else:
+        kits_qs = InstallationKit.objects.none()
+
     if q:
         clean_q = normalizer.canonicalize(q) or q.upper()
         kits_qs = kits_qs.filter(
@@ -868,8 +899,6 @@ def api_itms_kits(request: HttpRequest) -> JsonResponse:
             Q(rear_plate__icontains=q) |
             Q(gps_tracker__icontains=q)
         )
-    if status_filter:
-        kits_qs = kits_qs.filter(status__iexact=status_filter)
     if wh_filter:
         kits_qs = kits_qs.filter(warehouse__icontains=wh_filter)
 
@@ -879,6 +908,7 @@ def api_itms_kits(request: HttpRequest) -> JsonResponse:
     return JsonResponse({
         "success": True,
         "total": total,
+        "facility_code": envelope.facility_code if envelope else "AGM",
         "kits": kits_data,
     })
 

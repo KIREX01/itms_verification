@@ -6,6 +6,7 @@ synced, or displayed unless the operator possesses a validated, active ITMS conn
 from __future__ import annotations
 
 import functools
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
@@ -23,25 +24,47 @@ from core.services.api_envelope import (
 @dataclass(frozen=True)
 class OperatorRequestEnvelope:
     """Immutable capability token and operational context attached to incoming requests."""
+    # 1. Local Identity
     user_id: Optional[int]
     username: str
-    itms_email: str
-    itms_user_uuid: str
+
+    # 2. ITMS Identity & Proof of Authentication
+    itms_email: str             # e.g., "e.akena@itms-ug.com"
+    itms_user_uuid: str         # Extracted from official ITMS session cookie
     itms_auth_status: str       # "ACTIVE", "EXPIRED", "UNLINKED", "ANONYMOUS"
+
+    # 3. Geographical / Facility Scope
     facility_code: str          # e.g., "AGM", "SPIRO", "BOND1"
-    trace_id: str
-    timestamp: str
+
+    # 4. Request Metadata
+    request_id: str             # Unique UUID for audit tracing
+    trace_id: str               # Alias for request_id / distributed tracing
+    client_ip: str
+    timestamp: float            # Unix timestamp
     is_valid: bool              # True only if user is authenticated AND has live ITMS session
+
+    @property
+    def iso_timestamp(self) -> str:
+        return datetime.fromtimestamp(self.timestamp, tz=timezone.utc).isoformat()
+
+
+def extract_client_ip(request: HttpRequest) -> str:
+    """Extracts client IP address respecting reverse proxies."""
+    xff = request.META.get("HTTP_X_FORWARDED_FOR")
+    if xff:
+        return str(xff).split(",")[0].strip()
+    return str(request.META.get("REMOTE_ADDR") or "127.0.0.1")
 
 
 def build_operator_envelope(request: HttpRequest) -> OperatorRequestEnvelope:
     """
     Constructs an OperatorRequestEnvelope for the given request.
     Verifies user authentication, isolated OperatorITMSSession in DB,
-    and resolves the current facility context.
+    and resolves the current facility context from OperatorProfile or session.
     """
-    trace_id = getattr(request, "trace_id", None) or generate_trace_id(request)
-    now_iso = datetime.now(timezone.utc).isoformat()
+    req_id = getattr(request, "trace_id", None) or generate_trace_id(request)
+    now_ts = time.time()
+    client_ip = extract_client_ip(request)
     active_facility = config_service.get_active_bond().get("code", "AGM")
 
     user = getattr(request, "user", None)
@@ -53,17 +76,29 @@ def build_operator_envelope(request: HttpRequest) -> OperatorRequestEnvelope:
             itms_user_uuid="",
             itms_auth_status="ANONYMOUS",
             facility_code=active_facility,
-            trace_id=trace_id,
-            timestamp=now_iso,
+            request_id=req_id,
+            trace_id=req_id,
+            client_ip=client_ip,
+            timestamp=now_ts,
             is_valid=False,
         )
 
-    # User is authenticated on Copilot - inspect their isolated ITMS session
+    # User is authenticated on Copilot - inspect their active facility preference
+    try:
+        from core.models import OperatorProfile
+        profile = OperatorProfile.objects.filter(user=user).first()
+        if profile and profile.active_facility:
+            active_facility = profile.active_facility.strip().upper()
+    except Exception:
+        pass
+
+    # Inspect their isolated ITMS session
     try:
         from core.models import OperatorITMSSession
         itms_sess = OperatorITMSSession.objects.filter(user=user).first()
+        facility = (itms_sess.active_bond_code if itms_sess and itms_sess.active_bond_code else active_facility)
+
         if itms_sess and itms_sess.is_authenticated and itms_sess.is_cookie_valid():
-            facility = itms_sess.active_bond_code or active_facility
             return OperatorRequestEnvelope(
                 user_id=user.pk,
                 username=user.username,
@@ -71,12 +106,13 @@ def build_operator_envelope(request: HttpRequest) -> OperatorRequestEnvelope:
                 itms_user_uuid=itms_sess.itms_user_uuid or "",
                 itms_auth_status="ACTIVE",
                 facility_code=facility,
-                trace_id=trace_id,
-                timestamp=now_iso,
+                request_id=req_id,
+                trace_id=req_id,
+                client_ip=client_ip,
+                timestamp=now_ts,
                 is_valid=True,
             )
         elif itms_sess and itms_sess.itms_email:
-            facility = itms_sess.active_bond_code or active_facility
             # Session was previously linked but cookie has expired
             return OperatorRequestEnvelope(
                 user_id=user.pk,
@@ -85,8 +121,10 @@ def build_operator_envelope(request: HttpRequest) -> OperatorRequestEnvelope:
                 itms_user_uuid=itms_sess.itms_user_uuid or "",
                 itms_auth_status="EXPIRED",
                 facility_code=facility,
-                trace_id=trace_id,
-                timestamp=now_iso,
+                request_id=req_id,
+                trace_id=req_id,
+                client_ip=client_ip,
+                timestamp=now_ts,
                 is_valid=False,
             )
     except Exception:
@@ -100,8 +138,10 @@ def build_operator_envelope(request: HttpRequest) -> OperatorRequestEnvelope:
         itms_user_uuid="",
         itms_auth_status="UNLINKED",
         facility_code=active_facility,
-        trace_id=trace_id,
-        timestamp=now_iso,
+        request_id=req_id,
+        trace_id=req_id,
+        client_ip=client_ip,
+        timestamp=now_ts,
         is_valid=False,
     )
 
@@ -148,12 +188,16 @@ def require_itms_envelope(
                         request=request,
                     )
 
-                # UNLINKED
+                # UNLINKED / NOT LINKED
                 error = create_error_detail(
-                    code="ITMS_CONNECTION_REQUIRED",
-                    message="Official ITMS account connection required. Connect your ITMS account in Tab 2 to access facility data.",
+                    code="ITMS_ACCOUNT_NOT_LINKED",
+                    message="Please connect your official ITMS account in Tab 2 to access orders and kits.",
                     field="itms_session",
-                    details={"status": "UNLINKED", "facility_code": envelope.facility_code},
+                    details={
+                        "status": "UNLINKED",
+                        "facility_code": envelope.facility_code,
+                        "legacy_code": "ITMS_CONNECTION_REQUIRED",
+                    },
                 )
                 return format_api_response(
                     errors=[error],

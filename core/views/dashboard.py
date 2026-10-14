@@ -39,7 +39,7 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
 
     db_info = config_service.get_active_database_info()
     dry_run = config_service.get_setting("submission.dry_run_mode", True)
-    itms_status = auth_service.get_itms_status()
+    itms_status = auth_service.get_itms_status(user=request.user)
 
     context = {
         "app_title": "ITMS Verification Copilot",

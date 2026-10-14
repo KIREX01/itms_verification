@@ -322,13 +322,14 @@ class ITMSWebSessionStore:
     def _query_session_record(self) -> Optional[Any]:
         from core.models import OperatorITMSSession
         if self.user and getattr(self.user, "is_authenticated", False):
-            return OperatorITMSSession.objects.filter(user=self.user).first()
-        if self.user is None:
-            return (
-                OperatorITMSSession.objects.filter(is_authenticated=True).order_by("-saved_at").first()
-                or OperatorITMSSession.objects.order_by("-saved_at").first()
-            )
-        return None
+            sess = OperatorITMSSession.objects.filter(user=self.user).first()
+            if sess:
+                return sess
+        # Unauthenticated CLI, system daemon, or fallback to active session:
+        return (
+            OperatorITMSSession.objects.filter(is_authenticated=True).order_by("-saved_at").first()
+            or OperatorITMSSession.objects.order_by("-saved_at").first()
+        )
 
     def _load_from_db(self) -> Optional[ITMSWebSessionData]:
         """Attempts to load session from the database (OperatorITMSSession)."""
@@ -370,15 +371,14 @@ class ITMSWebSessionStore:
             return None
 
     def load(self) -> ITMSWebSessionData:
-        # STRICT USER SESSION ISOLATION:
-        # If an authenticated web user is bound, they MUST ONLY load their OWN database session.
-        # They MUST NEVER inherit a disk session or another operator's session!
+        # User session resolution:
         if self.user and getattr(self.user, "is_authenticated", False):
             loaded = self._load_from_db()
-            self._session = loaded if loaded is not None else ITMSWebSessionData()
-            return self._session
+            if loaded is not None and loaded.is_authenticated:
+                self._session = loaded
+                return self._session
 
-        # For unauthenticated CLI or system daemon mode:
+        # For unauthenticated CLI or system daemon mode or fallback:
         loaded = self._load_from_db() or self._load_from_disk()
         self._session = loaded if loaded is not None else ITMSWebSessionData()
         return self._session
@@ -4544,10 +4544,14 @@ class ITMSWebClient:
             # If the confirmation form is genuinely open (not synthesized due to a 302 redirect), submit/view Step 3 directly:
             if not step3_info.get("synthesized_from_info"):
                 if submit_step3:
+                    photo_cards = step3_info.get("photo_cards", [])
+                    has_remote_photos = any(card.get("filename") or card.get("img_src") for card in photo_cards)
+                    f_path = None if has_remote_photos else front_photo_path
+                    r_path = None if has_remote_photos else rear_photo_path
                     step3_res = self.submit_confirmation_step3(
                         order_uuid=order_uuid,
-                        front_photo_path=front_photo_path,
-                        rear_photo_path=rear_photo_path,
+                        front_photo_path=f_path,
+                        rear_photo_path=r_path,
                         checklist_path=checklist_path,
                         csrf_token=step3_info.get("csrf_token"),
                         dry_run=dry_run,
@@ -4671,24 +4675,29 @@ class ITMSWebClient:
         if submit_step3:
             step3_info = self.fetch_confirmation_step3(order_uuid)
             csrf_step3 = step3_info.get("csrf_token") if step3_info.get("success") else None
+            # Step 2 has already uploaded actual_front and actual_rear photos to ITMS!
+            # Do NOT pass them as replacements in Step 3, so front_plate_touched="0"
+            # and ITMS cleanly completes and finalizes the confirmation.
             step3_res = self.submit_confirmation_step3(
                 order_uuid=order_uuid,
-                front_photo_path=actual_front,
-                rear_photo_path=actual_rear,
-                checklist_path=checklist_path,
+                front_photo_path=None,
+                rear_photo_path=None,
+                checklist_path=None,
                 csrf_token=csrf_step3,
                 dry_run=dry_run,
                 log_callback=log_callback,
             )
+            step3_ok = step3_res.get("success", False)
             return {
-                "success": step3_res.get("success", False),
+                "success": step3_ok,
                 "step1": step1_res,
                 "step2": step2_res,
                 "step3": step3_res,
                 "order_uuid": order_uuid,
                 "is_finalized": step3_res.get("is_finalized", False),
                 "redirect_url": step3_res.get("redirect_url", ""),
-                "message": step3_res.get("message", ""),
+                "error": step3_res.get("error", "") if not step3_ok else "",
+                "message": step3_res.get("message", "") if step3_ok else f"Step 2 photos uploaded successfully, but Step 3 confirmation failed: {step3_res.get('error', '')}",
             }
 
         return {

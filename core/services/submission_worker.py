@@ -95,11 +95,12 @@ def submit_pair(
         return SubmissionOutcome(pair_id=pair.id, success=False, error="Incomplete evidence", backend=backend_mode, dry_run=is_dry_run)
 
     order = pair.order
+    effective_operator = operator if (operator and getattr(operator, "is_authenticated", False)) else getattr(pair, "operator", None)
 
     # Cross-Account Safety Check: ensure session matches order account ownership
     if backend_mode in ("live_web", "web", "live"):
         from core.services.itms_web_client import get_web_client
-        web_client = get_web_client()
+        web_client = get_web_client(user=effective_operator)
 
         active_session_email = (web_client.session_store.session.user_email or "").strip().lower()
         order_acc = (order.account_email or "").strip().lower()
@@ -108,7 +109,7 @@ def submit_pair(
                 f"Cross-account submission blocked: Order #{order.order_number} is linked to "
                 f"'{order.account_email}', but active ITMS session is '{active_session_email}'."
             )
-            _log(pair, SubmissionAuditLog.Action.SUBMIT, SubmissionAuditLog.ResultStatus.FAILURE, err_msg, operator=operator)
+            _log(pair, SubmissionAuditLog.Action.SUBMIT, SubmissionAuditLog.ResultStatus.FAILURE, err_msg, operator=effective_operator)
             pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
             pair.save(update_fields=["verification_status"])
             return SubmissionOutcome(pair_id=pair.id, success=False, error=err_msg, backend=backend_mode, dry_run=is_dry_run)
@@ -126,13 +127,13 @@ def submit_pair(
                 f"Front ({front_hash[:8]} vs {pair.front_image.file_hash[:8]}), "
                 f"Rear ({rear_hash[:8]} vs {pair.rear_image.file_hash[:8]})."
             )
-            _log(pair, SubmissionAuditLog.Action.VALIDATE, SubmissionAuditLog.ResultStatus.FAILURE, err_msg, operator=operator)
+            _log(pair, SubmissionAuditLog.Action.VALIDATE, SubmissionAuditLog.ResultStatus.FAILURE, err_msg, operator=effective_operator)
             pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
             pair.save(update_fields=["verification_status"])
             return SubmissionOutcome(pair_id=pair.id, success=False, error=err_msg, backend=backend_mode, dry_run=is_dry_run)
     elif not getattr(settings, "TESTING", False) and not is_dry_run and backend_mode != "mock":
         err_msg = f"Evidence file missing on disk: Front={front_path.exists()}, Rear={rear_path.exists()}"
-        _log(pair, SubmissionAuditLog.Action.VALIDATE, SubmissionAuditLog.ResultStatus.FAILURE, err_msg, operator=operator)
+        _log(pair, SubmissionAuditLog.Action.VALIDATE, SubmissionAuditLog.ResultStatus.FAILURE, err_msg, operator=effective_operator)
         pair.verification_status = VehicleInstallationPair.VerificationStatus.FAILED
         pair.save(update_fields=["verification_status"])
         return SubmissionOutcome(pair_id=pair.id, success=False, error=err_msg, backend=backend_mode, dry_run=is_dry_run)
@@ -140,12 +141,15 @@ def submit_pair(
     # Live Web Wizard Backend (Yii2 WebApp stock.itms.ug)
     if backend_mode in ("live_web", "web", "live"):
         from core.services.itms_web_client import get_web_client
-        web_client = get_web_client()
+        web_client = get_web_client(user=effective_operator)
+
+        actual_front_path = str(front_path) if front_path.is_file() else pair.front_image.vault_file
+        actual_rear_path = str(rear_path) if rear_path.is_file() else pair.rear_image.vault_file
 
         res = web_client.execute_installation_order_workflow(
             order_identifier=order.order_number,
-            front_photo_path=pair.front_image.vault_file,
-            rear_photo_path=pair.rear_image.vault_file,
+            front_photo_path=actual_front_path,
+            rear_photo_path=actual_rear_path,
             pair_id=pair.id,
             dry_run=is_dry_run,
             submit_step3=is_submit_step3,
@@ -211,11 +215,13 @@ def submit_pair(
     else:
         # Failsafe: if somehow not handled by live_web, route through live_web
         from core.services.itms_web_client import get_web_client
-        web_client = get_web_client()
+        web_client = get_web_client(user=effective_operator)
+        actual_front_path = str(front_path) if front_path.is_file() else pair.front_image.vault_file
+        actual_rear_path = str(rear_path) if rear_path.is_file() else pair.rear_image.vault_file
         res = web_client.execute_installation_order_workflow(
             order_identifier=order.order_number,
-            front_photo_path=pair.front_image.vault_file,
-            rear_photo_path=pair.rear_image.vault_file,
+            front_photo_path=actual_front_path,
+            rear_photo_path=actual_rear_path,
             pair_id=pair.id,
             dry_run=is_dry_run,
             submit_step3=is_submit_step3,

@@ -1295,3 +1295,120 @@ class SmartCompressionAndOfflineOutboxTests(TestCase):
         mock_app.action_process_vision.assert_called_once()
 
 
+class WindowsWebUISubmissionTests(TestCase):
+    """Tests for Windows Web UI photo submission, vault path resolution, and operator session binding."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        self.user = User.objects.create_user(username="op_tester", password="secretpassword")
+        self.order = InstallationOrder.objects.create(
+            order_number="PO-TEST-123456",
+            registration_number="UMA999Z",
+            account_email="op_tester@itms.ug",
+            itms_order_uuid="uuid-order-1234",
+        )
+        self.front_img = EvidenceImage.objects.create(
+            file_hash="hash_front_test",
+            original_source_path="front.jpg",
+            vault_file="vault/2026-10-14/batch_test/front.jpg",
+            orientation=EvidenceImage.Orientation.FRONT,
+        )
+        self.rear_img = EvidenceImage.objects.create(
+            file_hash="hash_rear_test",
+            original_source_path="rear.jpg",
+            vault_file="vault/2026-10-14/batch_test/rear.jpg",
+            orientation=EvidenceImage.Orientation.REAR,
+        )
+        self.pair = VehicleInstallationPair.objects.create(
+            registration_number_detected="UMA999Z",
+            order=self.order,
+            front_image=self.front_img,
+            rear_image=self.rear_img,
+            is_complete=True,
+            verification_status=VehicleInstallationPair.VerificationStatus.APPROVED,
+            operator=self.user,
+        )
+
+    def test_vault_path_resolution_fallback_no_duplicate_vault(self):
+        """Verifies resolve_vault_path strips vault/ prefix in fallback, preventing media/vault/vault/."""
+        from core.services.vault_service import resolve_vault_path, get_vault_root
+        vault_root = get_vault_root().resolve()
+        resolved = resolve_vault_path("vault/nonexistent_test_sample.jpg")
+        self.assertEqual(resolved, (vault_root / "nonexistent_test_sample.jpg").resolve())
+        self.assertNotIn("vault/vault", str(resolved).replace("\\", "/"))
+
+    def test_submit_pair_passes_operator_to_web_client(self):
+        """Verifies submit_pair passes user=operator to get_web_client and binds operator session."""
+        from core.services.submission_worker import submit_pair
+        from core.services.itms_web_client import ITMSWebSessionData
+
+        mock_client = MagicMock()
+        mock_client.session_store.session = ITMSWebSessionData(
+            user_email="op_tester@itms.ug",
+            is_authenticated=True,
+        )
+        mock_client.execute_installation_order_workflow.return_value = {
+            "success": True,
+            "order_uuid": "uuid-order-1234",
+            "is_finalized": True,
+            "message": "Step 3 completed",
+        }
+
+        with self.settings(TESTING=True), \
+             patch("core.services.itms_web_client.get_web_client", return_value=mock_client) as mock_get_client:
+            outcome = submit_pair(self.pair, backend="web", dry_run=True, operator=self.user)
+            self.assertTrue(outcome.success)
+            mock_get_client.assert_called_with(user=self.user)
+
+    def test_execute_workflow_step2_to_step3_does_not_replace_photos(self):
+        """Verifies that after Step 2 photo upload succeeds, Step 3 is called with None for photo paths."""
+        from core.services.itms_web_client import ITMSWebClient
+
+        client = ITMSWebClient()
+        client.session_store.session.is_authenticated = True
+        client.session_store.session.user_email = "op_tester@itms.ug"
+
+        client.detect_order_stage = MagicMock(return_value={
+            "success": True,
+            "order_uuid": "uuid-step2-test",
+            "stage": "STAGE_2_APPROVE",
+        })
+        client.fetch_approve_step2 = MagicMock(return_value={
+            "success": True,
+            "csrf_token": "csrf_test_step2",
+        })
+        client.upload_installation_step2_photos = MagicMock(return_value={
+            "success": True,
+            "step": 2,
+            "status_code": 302,
+            "step3_ready": True,
+            "order_uuid": "uuid-step2-test",
+        })
+        client.fetch_confirmation_step3 = MagicMock(return_value={
+            "success": True,
+            "csrf_token": "csrf_test_step3",
+        })
+        client.submit_confirmation_step3 = MagicMock(return_value={
+            "success": True,
+            "step": 3,
+            "is_finalized": True,
+            "order_uuid": "uuid-step2-test",
+        })
+
+        res = client.execute_installation_order_workflow(
+            order_identifier="PO-TEST-123456",
+            front_photo_path="fake_front.jpg",
+            rear_photo_path="fake_rear.jpg",
+            dry_run=True,
+            submit_step3=True,
+        )
+        self.assertTrue(res["success"])
+        client.upload_installation_step2_photos.assert_called_once()
+        client.submit_confirmation_step3.assert_called_once()
+        _, step3_kwargs = client.submit_confirmation_step3.call_args
+        self.assertIsNone(step3_kwargs["front_photo_path"])
+        self.assertIsNone(step3_kwargs["rear_photo_path"])
+
+
+

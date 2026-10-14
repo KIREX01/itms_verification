@@ -214,7 +214,12 @@ def resolve_vault_path(rel_or_abs: Union[str, Path]) -> Path:
 
     # Default fallback within vault_root
     try:
-        fallback = (vault_root / clean_str).resolve()
+        clean_rel = clean_str
+        if clean_str.startswith("media/vault/"):
+            clean_rel = clean_str[12:].lstrip("/")
+        elif clean_str.startswith("vault/"):
+            clean_rel = clean_str[6:].lstrip("/")
+        fallback = (vault_root / clean_rel).resolve()
         if fallback.is_relative_to(vault_root):
             return fallback
     except (ValueError, OSError):

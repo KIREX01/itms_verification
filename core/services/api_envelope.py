@@ -141,6 +141,7 @@ def format_api_response(
             "errors": errs_list,
         }
         resp = JsonResponse(payload, status=status_code, safe=False)
+        resp["Content-Type"] = "application/vnd.ohas.envelope+json"
     else:
         # Bare mode (legacy compatibility)
         if resolved_errors and (data is None or status_code >= 400):

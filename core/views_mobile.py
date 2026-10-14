@@ -12,6 +12,7 @@ import logging
 from datetime import datetime
 
 from django.conf import settings
+from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
@@ -35,6 +36,7 @@ def _get_client_ip(request: HttpRequest) -> str:
 
 
 @require_GET
+@login_required(login_url="/login/?next=/mobile/")
 def mobile_companion_view(request: HttpRequest) -> HttpResponse:
     """
     Renders the Mobile Web Companion touch UI for smartphones.
@@ -124,6 +126,9 @@ def api_mobile_ping(request: HttpRequest) -> JsonResponse:
 @require_POST
 def api_mobile_disconnect(request: HttpRequest) -> JsonResponse:
     """Explicitly releases an active smartphone companion session."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     device_id = request.POST.get("device_id") or request.GET.get("device_id", "")
     if device_id:
         session_manager.disconnect_device(device_id.strip())
@@ -136,6 +141,9 @@ def api_network_info(request: HttpRequest) -> JsonResponse:
     Returns discovered local network interfaces, candidate URLs,
     and Windows Mobile Hotspot detection status.
     """
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     port = request.get_port() or 8000
     try:
         port = int(port)
@@ -159,6 +167,9 @@ def api_network_info(request: HttpRequest) -> JsonResponse:
 @require_GET
 def api_mobile_status(request: HttpRequest) -> JsonResponse:
     """Returns current active mobile session statistics and connected devices."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     batch = vault_service.get_or_create_mobile_batch()
     front_count = batch.images.filter(orientation=EvidenceImage.Orientation.FRONT).count()
     rear_count = batch.images.filter(orientation=EvidenceImage.Orientation.REAR).count()
@@ -202,6 +213,9 @@ def api_mobile_upload(request: HttpRequest) -> JsonResponse:
     - On-Conveyor Mode: Direct 1-by-1 bike pairing preserving source of truth.
     - Off-Conveyor Mode: Sequential U-Turn walk batching.
     """
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     photo_file = request.FILES.get("photo") or request.FILES.get("file")
     if not photo_file:
         return JsonResponse({"success": False, "error": "No photo file provided."}, status=400)
@@ -352,6 +366,9 @@ def api_mobile_new_batch(request: HttpRequest) -> JsonResponse:
     Explicitly seals the active batch and opens a new sequential mobile batch.
     Allows operators to segment inspection runs (e.g. by shift or parking bay).
     """
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     source_label = request.POST.get("source_label", "").strip()
     new_batch = vault_service.get_or_create_mobile_batch(source_label=source_label, force_new=True)
     max_photos = getattr(settings, "MAX_MOBILE_BATCH_PHOTOS", 200)
@@ -372,6 +389,9 @@ def api_mobile_uturn_finish(request: HttpRequest) -> JsonResponse:
     """
     Completes / seals an Off-Conveyor U-Turn batch and triggers final association & vision processing.
     """
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     uturn_session_id = ""
     batch_index = None
 

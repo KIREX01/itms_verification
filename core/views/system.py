@@ -83,6 +83,9 @@ def is_prohibited_system_directory(p: Union[Path, str]) -> bool:
 @require_POST
 def api_run_pipeline(request: HttpRequest) -> JsonResponse:
     """Triggers background AI vision detection and pair matching."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     task_type = request.POST.get("task_type", "full_pipeline").strip()
     batch_id = request.POST.get("batch_id", "").strip() or None
     if task_type not in ("full_pipeline", "vision", "matcher"):
@@ -104,6 +107,9 @@ def api_run_pipeline(request: HttpRequest) -> JsonResponse:
 @require_GET
 def api_pipeline_status(request: HttpRequest) -> JsonResponse:
     """Returns current execution progress, stage, and recent logs from background runner."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     status = pipeline_runner.get_status()
     return JsonResponse(status)
 
@@ -111,6 +117,9 @@ def api_pipeline_status(request: HttpRequest) -> JsonResponse:
 @require_GET
 def api_stream_events(request: HttpRequest) -> HttpResponse:
     """Streams real-time pipeline events and stats via Server-Sent Events (SSE)."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return HttpResponse("Unauthorized", status=401)
+
     import time
 
     def event_stream():
@@ -132,6 +141,9 @@ def api_stream_events(request: HttpRequest) -> HttpResponse:
 @require_GET
 def api_export_report(request: HttpRequest) -> HttpResponse:
     """Exports shift verification report as a clean downloadable CSV file."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return HttpResponse("Unauthorized", status=401)
+
     pairs = (
         VehicleInstallationPair.objects.all()
         .select_related("order", "front_image", "rear_image")
@@ -188,6 +200,9 @@ def api_settings(request: HttpRequest) -> JsonResponse:
     GET: Returns current system configuration, user settings, developer settings, and active engine.
     POST: Updates configuration parameters dynamically.
     """
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     is_admin = bool(request.user and request.user.is_authenticated and request.user.is_superuser)
 
     if request.method == "POST":
@@ -267,6 +282,9 @@ def api_settings(request: HttpRequest) -> JsonResponse:
 @require_POST
 def api_toggle_dry_run(request: HttpRequest) -> JsonResponse:
     """Toggles or sets safe simulation / dry-run mode for ITMS submissions."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     mode_param = request.POST.get("mode") or request.POST.get("dry_run")
     if mode_param is not None and str(mode_param).strip() != "":
         new_val = str(mode_param).strip().lower() in ("true", "1", "yes", "dry_run", "dry")
@@ -287,6 +305,9 @@ def api_toggle_dry_run(request: HttpRequest) -> JsonResponse:
 @require_GET
 def api_check_updates(request: HttpRequest) -> JsonResponse:
     """Checks GitHub Releases for updates."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     force = request.GET.get("force", "false").lower() in ("true", "1", "yes")
     result = update_service.check_for_updates(force=force)
     return JsonResponse(result)
@@ -333,6 +354,9 @@ def api_vault_folder(request: HttpRequest) -> JsonResponse:
     GET: Returns current active Evidence Vault folder, disk space, and presets.
     POST: Updates and persists the Evidence Vault storage location in config.json.
     """
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     is_admin = bool(request.user and request.user.is_authenticated and request.user.is_superuser)
     default_vault = (settings.BASE_DIR / "media" / "vault").resolve()
     docs_vault = (Path.home() / "Documents" / "ITMS_Vault").resolve()
@@ -554,6 +578,9 @@ def serve_media(request: HttpRequest, path: str) -> HttpResponse:
     Resolves vault files against the active vault root, even if outside MEDIA_ROOT.
     Includes strict path traversal guards to prevent arbitrary file disclosure.
     """
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return HttpResponse("Unauthorized media access", status=401, content_type="text/plain")
+
     import mimetypes
 
     from django.http import FileResponse, Http404

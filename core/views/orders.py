@@ -131,6 +131,9 @@ def api_itms_warehouses(request: HttpRequest) -> JsonResponse:
     GET: Returns active operating bond and all discovered warehouse facilities.
     POST: Sets the active operating bond facility (code, name).
     """
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     if request.method == "POST":
         code = ""
         name = ""
@@ -167,6 +170,9 @@ def api_itms_warehouses(request: HttpRequest) -> JsonResponse:
 
 def api_sync_bonds(request: HttpRequest) -> JsonResponse:
     """Dynamically queries ITMS WebApp and extracts available warehouse/bond facilities."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     try:
         from core.services.itms_web_client import get_web_client
         client = get_web_client(user=request.user)
@@ -180,6 +186,9 @@ def api_sync_bonds(request: HttpRequest) -> JsonResponse:
 @require_POST
 def api_itms_connect(request: HttpRequest) -> JsonResponse:
     """Connects and authenticates against live ITMS WebApp (stock.itms.ug)."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     email = request.POST.get("email")
     password = request.POST.get("password")
     base_url = request.POST.get("base_url")
@@ -218,6 +227,9 @@ def api_itms_connect(request: HttpRequest) -> JsonResponse:
 @require_POST
 def api_itms_disconnect(request: HttpRequest) -> JsonResponse:
     """Disconnects from ITMS WebApp by clearing local session cookies."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     try:
         from core.services.itms_web_client import get_web_client
         client = get_web_client(user=request.user)

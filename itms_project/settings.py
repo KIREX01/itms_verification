@@ -168,6 +168,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "core.middleware.envelope_middleware.EnvelopeTracingMiddleware",
+    "core.middleware.api_auth_middleware.ApiAuthMiddleware",
 ]
 
 ROOT_URLCONF = "itms_project.urls"

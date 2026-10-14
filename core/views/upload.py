@@ -162,6 +162,9 @@ def upload_photos_view(request: HttpRequest) -> HttpResponse:
 
 def api_upload_photos(request: HttpRequest) -> JsonResponse:
     """REST API endpoint for multi-photo upload from curl or third-party tools."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed. Use POST."}, status=405)
 
@@ -258,6 +261,9 @@ def api_upload_photos(request: HttpRequest) -> JsonResponse:
 
 def api_batch_detail(request: HttpRequest, batch_id: str) -> JsonResponse:
     """Returns batch metadata and list of associated images with pair assignments."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     batch = IngestionBatch.objects.filter(batch_id=batch_id).first()
     if not batch:
         return JsonResponse({"success": False, "error": f"Batch '{batch_id}' not found."}, status=404)
@@ -332,6 +338,9 @@ def api_batch_detail(request: HttpRequest, batch_id: str) -> JsonResponse:
 @require_GET
 def api_batches_list(request: HttpRequest) -> JsonResponse:
     """Returns list of photo ingestion batches with shift scope filtering."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     today = timezone.localdate()
     scope = request.GET.get("scope", "TODAY").upper().strip()
 

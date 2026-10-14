@@ -65,6 +65,9 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
 @require_GET
 def api_stats(request: HttpRequest) -> JsonResponse:
     """Returns real-time operational summary metrics for the header ribbon and dashboard."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     today = timezone.localdate()
 
     total_orders = InstallationOrder.objects.count()
@@ -150,6 +153,9 @@ def api_reports_totals(request: HttpRequest) -> JsonResponse:
     Returns comprehensive system and shift totals across photos, batches,
     pairs, orders, kits, hardware components, and date-driven category totals.
     """
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     from core.services import report_service
     scope = request.GET.get("scope", "ALL").strip().upper()
     if scope not in ("ALL", "TODAY"):
@@ -168,6 +174,9 @@ def api_reports_totals(request: HttpRequest) -> JsonResponse:
 @require_GET
 def api_history_list(request: HttpRequest) -> JsonResponse:
     """Returns historical verification events and audit logs for the History tab with date scoping."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     today = timezone.localdate()
 
     flt = request.GET.get("filter", "ALL").strip().upper()

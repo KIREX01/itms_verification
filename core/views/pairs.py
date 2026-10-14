@@ -37,6 +37,9 @@ def _clean_media_url(file_path):
 @require_GET
 def api_pairs_list(request: HttpRequest) -> JsonResponse:
     """Returns filtered list of vehicle installation pairs for the work queue with batch clarity."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     today = timezone.localdate()
 
     status_filter = request.GET.get("status", "ALL").upper().strip()
@@ -186,6 +189,9 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
 @require_GET
 def api_pair_detail(request: HttpRequest, pair_id: int) -> JsonResponse:
     """Returns complete details of a specific pair for high-resolution inspection."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     pair = VehicleInstallationPair.objects.select_related(
         "order", "front_image", "rear_image", "front_image__batch", "rear_image__batch"
     ).filter(id=pair_id).first()
@@ -270,6 +276,9 @@ def api_pair_detail(request: HttpRequest, pair_id: int) -> JsonResponse:
 
 def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
     """Executes an operator decision or action on a pair."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     if request.method != "POST":
         return JsonResponse({"success": False, "error": "POST required"}, status=405)
 
@@ -548,6 +557,9 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
 @require_POST
 def api_batch_submit(request: HttpRequest) -> JsonResponse:
     """Submits approved pairs to ITMS in a single operation, scoped to shift or batch."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
     today = timezone.localdate()
 
     dry_run_param = request.POST.get("dry_run")

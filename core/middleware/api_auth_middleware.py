@@ -84,5 +84,13 @@ class ApiAuthMiddleware:
             full_path = request.get_full_path()
             return redirect(f"/login/?next={full_path}")
 
+        # 3. For authenticated users: if opening an /api/ endpoint directly via browser URL bar, redirect to dashboard
+        if is_authenticated and path.startswith("/api/"):
+            sec_dest = request.headers.get("Sec-Fetch-Dest", "")
+            sec_mode = request.headers.get("Sec-Fetch-Mode", "")
+            accept = request.headers.get("Accept", "")
+            if sec_dest == "document" or (sec_mode == "navigate" and "text/html" in accept):
+                return redirect("/")
+
         # Authenticated user - proceed normally
         return self.get_response(request)

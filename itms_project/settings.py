@@ -216,7 +216,8 @@ TIME_ZONE = env("DJANGO_TIME_ZONE", default="Africa/Kampala")
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # --- Evidence vault / media ---
 _media_root_env = env("MEDIA_ROOT", default="media").strip() or "media"

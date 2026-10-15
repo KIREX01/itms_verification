@@ -672,6 +672,11 @@ class ITMSWebClient:
         Optionally attaches a deterministic X-Idempotency-Key header.
         """
         import random
+        from core.services import config_service
+
+        if not config_service.is_itms_enabled():
+            raise requests.RequestException("ITMS Master Switch is PAUSED. Remote network request aborted.")
+
         last_exc = None
         headers = kwargs.setdefault("headers", {})
         if idempotency_key:
@@ -805,6 +810,16 @@ class ITMSWebClient:
                 "session": session_data.to_dict(),
             }
 
+        from core.services import config_service
+        if not config_service.is_itms_enabled():
+            return {
+                "valid": session_data.is_authenticated,
+                "cached": True,
+                "paused": True,
+                "message": "ITMS Master Switch is PAUSED. Remote reachability check skipped; using offline session state.",
+                "session": session_data.to_dict(),
+            }
+
         s = self.get_session()
         try:
             resp = s.get(f"{self.base_url}/", timeout=self.timeout, allow_redirects=True)
@@ -882,6 +897,10 @@ class ITMSWebClient:
         """
         email = (email or "").strip()
         password = password or ""
+
+        from core.services import config_service
+        if not config_service.is_itms_enabled():
+            return False, "ITMS Master Switch is PAUSED. Remote login suspended.", {"paused": True}
 
         if not email or not password:
             return False, "Email and password are required.", {}
@@ -4506,9 +4525,17 @@ class ITMSWebClient:
           In dry_run mode, no mutating POST request is transmitted to the live ITMS server.
         """
         dry_run = resolve_dry_run(dry_run)
+        from core.services import config_service
+
+        if not config_service.is_itms_enabled():
+            return {
+                "success": False,
+                "error": "ITMS Master Switch is PAUSED. Remote execution halted.",
+                "paused": True,
+            }
+
         if submit_step3 is None:
             try:
-                from core.services import config_service
                 submit_step3 = config_service.get_setting("submission.submit_step3", True)
             except Exception:
                 submit_step3 = True

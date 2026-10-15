@@ -137,6 +137,17 @@ class OrderSyncService:
         now = time.time()
         elapsed = now - _LAST_SYNC_TIMESTAMP
 
+        from core.services import config_service
+        if not config_service.is_itms_enabled():
+            return {
+                "success": False,
+                "synced": False,
+                "paused": True,
+                "message": "ITMS Master Switch is PAUSED. Sync aborted.",
+                "created": 0,
+                "updated": 0,
+            }
+
         # 1. Check Rate-Limiting / Cache Cooldown (unless forced or filtering)
         if not force and not search_filter and _LAST_SYNC_TIMESTAMP > 0 and elapsed < SYNC_COOLDOWN_SECONDS:
             remaining = int(SYNC_COOLDOWN_SECONDS - elapsed)
@@ -447,6 +458,18 @@ class OrderSyncService:
         global _LAST_ARCHIVE_SYNC_TIMESTAMP
         now = time.time()
         elapsed = now - _LAST_ARCHIVE_SYNC_TIMESTAMP
+
+        from core.services import config_service
+        if not config_service.is_itms_enabled():
+            return {
+                "success": False,
+                "synced": False,
+                "paused": True,
+                "message": "ITMS Master Switch is PAUSED. Archive sync aborted.",
+                "created": 0,
+                "updated": 0,
+            }
+
         if not force and _LAST_ARCHIVE_SYNC_TIMESTAMP > 0 and elapsed < SYNC_COOLDOWN_SECONDS:
             remaining = int(SYNC_COOLDOWN_SECONDS - elapsed)
             return {
@@ -586,6 +609,18 @@ class OrderSyncService:
         global _LAST_KIT_SYNC_TIMESTAMP
         now = time.time()
         elapsed = now - _LAST_KIT_SYNC_TIMESTAMP
+
+        from core.services import config_service
+        if not config_service.is_itms_enabled():
+            return {
+                "success": False,
+                "synced": False,
+                "paused": True,
+                "message": "ITMS Master Switch is PAUSED. Kits sync aborted.",
+                "created": 0,
+                "updated": 0,
+            }
+
         if not force and not plate_or_code and _LAST_KIT_SYNC_TIMESTAMP > 0 and elapsed < SYNC_COOLDOWN_SECONDS:
             remaining = int(SYNC_COOLDOWN_SECONDS - elapsed)
             return {
@@ -652,6 +687,17 @@ class OrderSyncService:
         3. Installation kits: recent stock kits (3 pages) to update 'New' stock status.
         Finishes cleanly, guarantees zero missing records from today, and prevents runaway pagination!
         """
+        from core.services import config_service
+        if not config_service.is_itms_enabled():
+            return {
+                "success": False,
+                "synced": False,
+                "paused": True,
+                "message": "ITMS Master Switch is PAUSED. Shift sync aborted.",
+                "created": 0,
+                "updated": 0,
+            }
+
         # Step 1: Active orders (up to 25 pages = 500 orders, automatically stops when queue ends)
         active_res = self.sync_active_orders(force=force, max_pages=25)
 

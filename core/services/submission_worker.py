@@ -138,6 +138,17 @@ def submit_pair(
         pair.save(update_fields=["verification_status"])
         return SubmissionOutcome(pair_id=pair.id, success=False, error=err_msg, backend=backend_mode, dry_run=is_dry_run)
 
+    # Check ITMS Master Service Switch
+    if backend_mode != "mock" and not config_service.is_itms_enabled():
+        err_msg = "ITMS Master Switch is PAUSED. Local vehicle pair held in current state; remote submission suspended."
+        _log(pair, SubmissionAuditLog.Action.SUBMIT, SubmissionAuditLog.ResultStatus.INFO, err_msg, operator=effective_operator)
+        if log_callback:
+            try:
+                log_callback(f"[bold yellow][ITMS PAUSED][/bold yellow] Held {pair.registration_number_detected} locally (master switch is off).")
+            except Exception:
+                pass
+        return SubmissionOutcome(pair_id=pair.id, success=False, error=err_msg, backend=backend_mode, dry_run=is_dry_run)
+
     # Live Web Wizard Backend (Yii2 WebApp stock.itms.ug)
     if backend_mode in ("live_web", "web", "live"):
         from core.services.itms_web_client import get_web_client
@@ -390,6 +401,16 @@ def drain_offline_outbox(
     Submits every pair currently in OFFLINE_OUTBOX status when network connection is restored.
     Seamlessly resumes the queue without re-verification.
     """
+    from core.services import config_service
+
+    if not config_service.is_itms_enabled():
+        if log_callback:
+            try:
+                log_callback("[bold yellow][ITMS PAUSED][/bold yellow] Offline outbox drain skipped (master switch is off).")
+            except Exception:
+                pass
+        return []
+
     outbox_qs = list(
         VehicleInstallationPair.objects.filter(
             verification_status=VehicleInstallationPair.VerificationStatus.OFFLINE_OUTBOX,

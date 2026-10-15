@@ -53,6 +53,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "postgres_user": "postgres",
         "postgres_password": "",
     },
+    "itms": {
+        "enabled": True,                       # Master service switch: when False, remote ITMS network traffic is paused
+        "paused_at": "",                       # ISO 8601 timestamp when paused
+        "paused_by": "",                       # Username, 'CLI', or 'TUI' that paused the service
+        "pause_reason": "",                    # Operational reason for the pause
+    },
     "submission": {
         "dry_run_mode": True,                  # Safe simulation mode for ITMS submissions
         "submit_step3": True,                  # Auto-finalize Step 3 remote installation
@@ -268,6 +274,13 @@ DEVELOPER_SETTINGS_SCHEMA: Dict[str, Dict[str, Any]] = {
         "type": "int",
         "default": 3,
         "category": "Network & Sockets",
+    },
+    "itms.enabled": {
+        "label": "ITMS Remote Service Master Switch",
+        "description": "Master switch to enable or pause remote ITMS network requests, sync polling, and uploads.",
+        "type": "bool",
+        "default": True,
+        "category": "Submission & Network",
     },
     "database.sqlite_busy_timeout_ms": {
         "label": "SQLite Busy Timeout (ms)",
@@ -584,6 +597,34 @@ def get_available_bonds(base_dir: Optional[Path] = None) -> List[Dict[str, Any]]
 def is_developer_mode(base_dir: Optional[Path] = None) -> bool:
     """Returns True if developer mode is enabled."""
     return bool(get_setting("system.developer_mode", False, base_dir))
+
+
+def is_itms_enabled(base_dir: Optional[Path] = None) -> bool:
+    """Return whether remote ITMS interactions are currently enabled."""
+    return bool(get_setting("itms.enabled", default=True, base_dir=base_dir))
+
+
+def set_itms_enabled(
+    enabled: bool,
+    paused_by: str = "",
+    reason: str = "",
+    base_dir: Optional[Path] = None,
+) -> bool:
+    """Toggle the ITMS master service switch with audit metadata."""
+    from django.utils import timezone
+
+    cfg = load_config(base_dir)
+    cfg.setdefault("itms", {})
+    cfg["itms"]["enabled"] = bool(enabled)
+    if not enabled:
+        cfg["itms"]["paused_at"] = timezone.now().isoformat()
+        cfg["itms"]["paused_by"] = paused_by or "operator"
+        cfg["itms"]["pause_reason"] = reason or "Manual pause via master switch"
+    else:
+        cfg["itms"]["paused_at"] = ""
+        cfg["itms"]["paused_by"] = ""
+        cfg["itms"]["pause_reason"] = ""
+    return save_config(cfg, base_dir)
 
 
 def get_database_config(base_dir: Path) -> Dict[str, Any]:
@@ -1099,6 +1140,19 @@ class ConfigService:
     @staticmethod
     def is_developer_mode(base_dir: Optional[Path] = None) -> bool:
         return is_developer_mode(base_dir)
+
+    @staticmethod
+    def is_itms_enabled(base_dir: Optional[Path] = None) -> bool:
+        return is_itms_enabled(base_dir)
+
+    @staticmethod
+    def set_itms_enabled(
+        enabled: bool,
+        paused_by: str = "",
+        reason: str = "",
+        base_dir: Optional[Path] = None,
+    ) -> bool:
+        return set_itms_enabled(enabled, paused_by, reason, base_dir)
 
     @staticmethod
     def get_database_config(base_dir: Optional[Path] = None) -> Dict[str, Any]:

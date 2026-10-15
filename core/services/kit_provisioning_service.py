@@ -102,6 +102,12 @@ def sync_and_provision_warehouse_kits(
     itms_pages_crawled = 0
     itms_status = "Skipped"
     itms_error = None
+
+    from core.services import config_service
+    if sync_itms and not config_service.is_itms_enabled():
+        sync_itms = False
+        itms_status = "Paused (ITMS Master Switch is OFF)"
+
     if sync_itms:
         try:
             client = get_web_client()

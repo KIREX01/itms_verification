@@ -126,6 +126,7 @@ class SettingsPane(Vertical):
         uturn_threshold = str(cfg.get("matcher", {}).get("uturn_threshold_seconds", 1800))
 
         # Developer settings: Network & Submission
+        itms_enabled = cfg.get("itms", {}).get("enabled", True)
         timeout = str(cfg.get("submission", {}).get("request_timeout_seconds", 15))
         circuit_breaker = str(cfg.get("submission", {}).get("circuit_breaker_threshold", 3))
         compression_enabled = cfg.get("compression", {}).get("enabled", True)
@@ -332,7 +333,15 @@ class SettingsPane(Vertical):
 
                     # Card 2B: Submission & Network Fine-Tuning
                     with Vertical(classes="settings-card"):
-                        yield Static("[bold cyan]⚡ Submission & Network Fine-Tuning (Developer Mode)[/bold cyan]", classes="settings-card-title")
+                        yield Static("[bold cyan]⚡ ITMS Master Switch & Network Fine-Tuning (Developer Mode)[/bold cyan]", classes="settings-card-title")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static(
+                                "[b]ITMS Remote Service Master Switch[/b]\n"
+                                "[dim]Enable or pause all remote ITMS uploads, sync polling, and API requests without stopping the server[/dim]",
+                                classes="settings-label",
+                            )
+                            yield Switch(value=itms_enabled, id="switch-itms-enabled")
 
                         with Horizontal(classes="settings-row"):
                             yield Static("[b]Smart Multipart Photo Compression[/b]\n[dim]Downsample 12-48MP photos for HTTP upload (Master photos in vault remain untouched)[/dim]", classes="settings-label")
@@ -521,6 +530,17 @@ class SettingsPane(Vertical):
                     app.log_message(
                         f"System Mode: Developer Mode {'ENABLED' if event.value else 'DISABLED'}.",
                         level="INFO",
+                    )
+            elif sw_id == "switch-itms-enabled":
+                state_str = "ONLINE" if event.value else "PAUSED (Local Only)"
+                app.notify(
+                    f"ITMS Remote Service: {state_str}",
+                    severity="information" if event.value else "warning",
+                )
+                if hasattr(app, "log_message"):
+                    app.log_message(
+                        f"ITMS Master Switch: Remote ITMS interactions are now {state_str}.",
+                        level="INFO" if event.value else "WARNING",
                     )
 
     def on_key(self, event: events.Key) -> None:
@@ -904,6 +924,24 @@ class SettingsPane(Vertical):
                 uturn = int(self.query_one("#input-uturn-threshold", Input).value.strip() or 1800)
                 cfg.setdefault("matcher", {})
                 cfg["matcher"]["uturn_threshold_seconds"] = uturn
+            except Exception:
+                pass
+
+            # Developer Mode: ITMS Master Switch
+            try:
+                itms_on = self.query_one("#switch-itms-enabled", Switch).value
+                cfg.setdefault("itms", {})
+                was_on = cfg["itms"].get("enabled", True)
+                cfg["itms"]["enabled"] = itms_on
+                if not itms_on and was_on:
+                    from django.utils import timezone
+                    cfg["itms"]["paused_at"] = timezone.now().isoformat()
+                    cfg["itms"]["paused_by"] = "TUI-Developer"
+                    cfg["itms"]["pause_reason"] = "Paused via TUI Developer Settings"
+                elif itms_on and not was_on:
+                    cfg["itms"]["paused_at"] = ""
+                    cfg["itms"]["paused_by"] = ""
+                    cfg["itms"]["pause_reason"] = ""
             except Exception:
                 pass
 

@@ -99,10 +99,16 @@ function openHistoryModal(logId) {
     const photosContainer = document.getElementById("hist-modal-photos-container");
     const imgF = document.getElementById("hist-img-front");
     const imgR = document.getElementById("hist-img-rear");
-    if (photosContainer && (log.front_url || log.rear_url)) {
+    if (photosContainer && (log.front_url || log.rear_url || log.front_thumb_url || log.rear_thumb_url)) {
         photosContainer.style.display = "flex";
-        if (imgF) imgF.src = log.front_url || "";
-        if (imgR) imgR.src = log.rear_url || "";
+        if (imgF) {
+            imgF.src = log.front_thumb_url || log.front_url || "";
+            imgF.dataset.fullUrl = log.front_url || "";
+        }
+        if (imgR) {
+            imgR.src = log.rear_thumb_url || log.rear_url || "";
+            imgR.dataset.fullUrl = log.rear_url || "";
+        }
     } else if (photosContainer) {
         photosContainer.style.display = "none";
     }

@@ -205,8 +205,12 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
 
         front_file = str(pair.front_image.vault_file).replace("\\", "/") if (pair and pair.front_image) else None
         front_url = (f"/{front_file}" if front_file.startswith("media/") else f"/media/{front_file}") if front_file else None
+        front_thumb = str(pair.front_image.thumbnail_file or pair.front_image.preview_file or pair.front_image.vault_file).replace("\\", "/") if (pair and pair.front_image) else None
+        front_thumb_url = (f"/{front_thumb}" if front_thumb.startswith("media/") else f"/media/{front_thumb}") if front_thumb else None
         rear_file = str(pair.rear_image.vault_file).replace("\\", "/") if (pair and pair.rear_image) else None
         rear_url = (f"/{rear_file}" if rear_file.startswith("media/") else f"/media/{rear_file}") if rear_file else None
+        rear_thumb = str(pair.rear_image.thumbnail_file or pair.rear_image.preview_file or pair.rear_image.vault_file).replace("\\", "/") if (pair and pair.rear_image) else None
+        rear_thumb_url = (f"/{rear_thumb}" if rear_thumb.startswith("media/") else f"/media/{rear_thumb}") if rear_thumb else None
 
         is_item_today = bool(l.timestamp and l.timestamp.date() == today)
 
@@ -225,6 +229,8 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
             "pair_status": pair.verification_status if pair else "N/A",
             "front_url": front_url,
             "rear_url": rear_url,
+            "front_thumb_url": front_thumb_url,
+            "rear_thumb_url": rear_thumb_url,
             "simulated_token": l.simulated_token or "",
         })
 
@@ -256,8 +262,12 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
         is_item_today = bool(sub_time and sub_time.date() == today)
         front_file = str(p.front_image.vault_file).replace("\\", "/") if (p.front_image and p.front_image.vault_file) else None
         front_url = (f"/{front_file}" if front_file.startswith("media/") else f"/media/{front_file}") if front_file else None
+        front_thumb = str(p.front_image.thumbnail_file or p.front_image.preview_file or p.front_image.vault_file).replace("\\", "/") if (p.front_image and p.front_image.vault_file) else None
+        front_thumb_url = (f"/{front_thumb}" if front_thumb.startswith("media/") else f"/media/{front_thumb}") if front_thumb else None
         rear_file = str(p.rear_image.vault_file).replace("\\", "/") if (p.rear_image and p.rear_image.vault_file) else None
         rear_url = (f"/{rear_file}" if rear_file.startswith("media/") else f"/media/{rear_file}") if rear_file else None
+        rear_thumb = str(p.rear_image.thumbnail_file or p.rear_image.preview_file or p.rear_image.vault_file).replace("\\", "/") if (p.rear_image and p.rear_image.vault_file) else None
+        rear_thumb_url = (f"/{rear_thumb}" if rear_thumb.startswith("media/") else f"/media/{rear_thumb}") if rear_thumb else None
 
         action_name = "VERIFY_PAIR"
         if p.verification_status == VehicleInstallationPair.VerificationStatus.SUBMITTED:
@@ -287,6 +297,8 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
             "pair_status": p.verification_status,
             "front_url": front_url,
             "rear_url": rear_url,
+            "front_thumb_url": front_thumb_url,
+            "rear_thumb_url": rear_thumb_url,
             "simulated_token": getattr(p, "submission_receipt_token", "") or "",
         })
 

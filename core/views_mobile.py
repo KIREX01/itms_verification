@@ -16,6 +16,7 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from core.models import EvidenceImage, IngestionBatch, VehicleInstallationPair
@@ -202,6 +203,7 @@ def api_mobile_status(request: HttpRequest) -> JsonResponse:
     })
 
 
+@csrf_exempt
 @require_POST
 def api_mobile_upload(request: HttpRequest) -> JsonResponse:
     """

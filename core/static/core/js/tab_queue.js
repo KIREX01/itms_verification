@@ -293,25 +293,29 @@ async function selectPair(pairId) {
             const phFront = document.getElementById("qfront-placeholder");
             const phRear = document.getElementById("qrear-placeholder");
 
-            if (front && front.url) {
+            if (front && (front.preview_url || front.thumb_url || front.url)) {
                 imgFront.style.opacity = "1";
-                imgFront.src = front.url;
+                imgFront.src = front.preview_url || front.thumb_url || front.url;
+                imgFront.dataset.fullUrl = front.url || "";
                 imgFront.style.display = "block";
                 if (phFront) phFront.style.display = "none";
             } else {
                 imgFront.src = "";
+                imgFront.dataset.fullUrl = "";
                 imgFront.style.opacity = "1";
                 imgFront.style.display = "none";
                 if (phFront) phFront.style.display = "flex";
             }
 
-            if (rear && rear.url) {
+            if (rear && (rear.preview_url || rear.thumb_url || rear.url)) {
                 imgRear.style.opacity = "1";
-                imgRear.src = rear.url;
+                imgRear.src = rear.preview_url || rear.thumb_url || rear.url;
+                imgRear.dataset.fullUrl = rear.url || "";
                 imgRear.style.display = "block";
                 if (phRear) phRear.style.display = "none";
             } else {
                 imgRear.src = "";
+                imgRear.dataset.fullUrl = "";
                 imgRear.style.opacity = "1";
                 imgRear.style.display = "none";
                 if (phRear) phRear.style.display = "flex";

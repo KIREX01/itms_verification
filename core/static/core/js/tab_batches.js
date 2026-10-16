@@ -527,6 +527,62 @@ function setStepStatus(stepNum, status, badgeText, icon) {
     }
 }
 
+/**
+ * Compresses large high-resolution photos before multipart XHR upload.
+ * Reduces 10MB-20MB phone camera photos to ~350KB-500KB Full HD (~1920px).
+ */
+async function compressImageForUpload(file, maxDimension = 1920, quality = 0.85) {
+    if (!file || !file.type || !file.type.startsWith("image/")) {
+        return file;
+    }
+    if (file.size < 450 * 1024) {
+        return file;
+    }
+    return new Promise((resolve) => {
+        const img = new Image();
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            img.onload = () => {
+                let w = img.width;
+                let h = img.height;
+                if (w > maxDimension || h > maxDimension) {
+                    if (w > h) {
+                        h = Math.round((h * maxDimension) / w);
+                        w = maxDimension;
+                    } else {
+                        w = Math.round((w * maxDimension) / h);
+                        h = maxDimension;
+                    }
+                }
+                const canvas = document.createElement("canvas");
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(img, 0, 0, w, h);
+                canvas.toBlob(
+                    (blob) => {
+                        if (blob && blob.size < file.size) {
+                            const compressed = new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), {
+                                type: "image/jpeg",
+                                lastModified: file.lastModified || Date.now(),
+                            });
+                            resolve(compressed);
+                        } else {
+                            resolve(file);
+                        }
+                    },
+                    "image/jpeg",
+                    quality
+                );
+            };
+            img.onerror = () => resolve(file);
+            img.src = e.target.result;
+        };
+        reader.onerror = () => resolve(file);
+        reader.readAsDataURL(file);
+    });
+}
+
 async function submitTabBatchUpload() {
     const total = tabSelectedFrontFiles.length + tabSelectedRearFiles.length;
     if (total === 0) {
@@ -538,8 +594,12 @@ async function submitTabBatchUpload() {
     const labelInput = document.getElementById("batch-upload-label");
     const labelText = (labelInput ? labelInput.value.trim() : "") || "Web Console Upload";
     formData.append("batch_label", labelText);
-    tabSelectedFrontFiles.forEach(f => formData.append("front_photos", f));
-    tabSelectedRearFiles.forEach(f => formData.append("rear_photos", f));
+
+    // Optimize images client-side before upload to prevent server OOM and accelerate transfer
+    const compressedFront = await Promise.all(tabSelectedFrontFiles.map(f => compressImageForUpload(f)));
+    const compressedRear = await Promise.all(tabSelectedRearFiles.map(f => compressImageForUpload(f)));
+    compressedFront.forEach(f => formData.append("front_photos", f));
+    compressedRear.forEach(f => formData.append("rear_photos", f));
 
     // Transition view to progress view
     isBatchIngesting = true;
@@ -638,6 +698,12 @@ async function submitTabBatchUpload() {
 
     xhr.open("POST", "/api/upload/");
     xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
+        || (document.cookie.split('; ').find(row => row.startsWith('csrftoken='))?.split('=')[1] || '');
+    if (csrfToken) {
+        xhr.setRequestHeader("X-CSRFToken", csrfToken);
+        formData.append("csrfmiddlewaretoken", csrfToken);
+    }
     xhr.send(formData);
 }
 

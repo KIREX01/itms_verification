@@ -365,10 +365,16 @@ def _align_and_pair_candidates(
             Q(front_image=f_img) | Q(rear_image=r_img) | Q(front_image=r_img) | Q(rear_image=f_img)
         ).exclude(verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED).delete()
 
+        batch_cand = (f_img.batch if f_img and f_img.batch else None) or (r_img.batch if r_img and r_img.batch else None)
+        pair_operator = batch_cand.operator if batch_cand else None
+        pair_email = (batch_cand.account_email or (pair_operator.email if pair_operator else "")) if batch_cand else ""
+
         pair = VehicleInstallationPair.objects.create(
             registration_number_detected=canonical_plate,
             front_image=f_img,
             rear_image=r_img,
+            operator=pair_operator,
+            account_email=pair_email,
             is_complete=True,
             operator_note=full_note,
             verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW,
@@ -542,10 +548,14 @@ def _associate_batch_sequences(
             Q(front_image=f_img) | Q(rear_image=f_img)
         ).exclude(verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED).delete()
 
+        surplus_op = batch.operator
+        surplus_email = batch.account_email or (surplus_op.email if surplus_op else "")
         pair = VehicleInstallationPair.objects.create(
             registration_number_detected=clean_plate,
             front_image=f_img,
             rear_image=None,
+            operator=surplus_op,
+            account_email=surplus_email,
             is_complete=False,
             verification_status=VehicleInstallationPair.VerificationStatus.INCOMPLETE,
             operator_note=f"Discrepancy: Rear photo missing in batch sequence ({total_batch_fronts} Fronts vs {total_batch_rears} Rears)",
@@ -571,10 +581,14 @@ def _associate_batch_sequences(
             Q(front_image=r_img) | Q(rear_image=r_img)
         ).exclude(verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED).delete()
 
+        surplus_op = batch.operator
+        surplus_email = batch.account_email or (surplus_op.email if surplus_op else "")
         pair = VehicleInstallationPair.objects.create(
             registration_number_detected=clean_plate,
             front_image=None,
             rear_image=r_img,
+            operator=surplus_op,
+            account_email=surplus_email,
             is_complete=False,
             verification_status=VehicleInstallationPair.VerificationStatus.INCOMPLETE,
             operator_note=f"Discrepancy: Front photo missing in batch sequence ({total_batch_fronts} Fronts vs {total_batch_rears} Rears)",
@@ -853,10 +867,16 @@ def run_association(batch_id: Optional[str] = None) -> AssociationSummary:
             missing_side = "REAR" if orient_tag == "FRONT" else "FRONT"
             plate_tag = res_img.detected_plate or f"UNPAIRED-{orient_tag}-{res_img.id.hex[:6].upper()}"
 
+            batch_cand = res_img.batch if res_img and res_img.batch else None
+            res_op = batch_cand.operator if batch_cand else None
+            res_email = (batch_cand.account_email or (res_op.email if res_op else "")) if batch_cand else ""
+
             new_pair = VehicleInstallationPair.objects.create(
                 registration_number_detected=plate_tag,
                 front_image=res_img if orient_tag == "FRONT" else None,
                 rear_image=res_img if orient_tag == "REAR" else None,
+                operator=res_op,
+                account_email=res_email,
                 is_complete=False,
                 verification_status=VehicleInstallationPair.VerificationStatus.INCOMPLETE,
                 operator_note=f"Unpaired {orient_tag} photo: Missing {missing_side} partner",

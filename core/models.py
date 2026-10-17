@@ -464,6 +464,7 @@ class SubmissionAuditLog(models.Model):
         related_name="audit_logs",
     )
     operator_username = models.CharField(max_length=150, blank=True, default="System")
+    operator_email = models.CharField(max_length=255, blank=True, default="")
     action = models.CharField(max_length=32, choices=Action.choices, db_index=True)
     result = models.CharField(max_length=8, choices=ResultStatus.choices, db_index=True)
     message = models.TextField(blank=True)
@@ -476,6 +477,38 @@ class SubmissionAuditLog(models.Model):
             models.Index(fields=["pair", "action", "-timestamp"]),
             models.Index(fields=["action", "-timestamp"]),
         ]
+
+    def save(self, *args, **kwargs):
+        # Automatically resolve operator from pair or batch if omitted
+        if not self.operator and self.pair:
+            if self.pair.operator:
+                self.operator = self.pair.operator
+            else:
+                batch = (self.pair.front_image.batch if self.pair.front_image and self.pair.front_image.batch else None) or (
+                    self.pair.rear_image.batch if self.pair.rear_image and self.pair.rear_image.batch else None
+                )
+                if batch and batch.operator:
+                    self.operator = batch.operator
+
+        if self.operator:
+            full_name = self.operator.get_full_name().strip()
+            uname = getattr(self.operator, "username", "Operator")
+            if not self.operator_username or self.operator_username == "System":
+                self.operator_username = full_name or uname
+            if not self.operator_email and getattr(self.operator, "email", ""):
+                self.operator_email = self.operator.email.strip()
+
+        if not self.operator_email and self.pair:
+            if self.pair.account_email:
+                self.operator_email = self.pair.account_email.strip()
+            else:
+                batch = (self.pair.front_image.batch if self.pair.front_image and self.pair.front_image.batch else None) or (
+                    self.pair.rear_image.batch if self.pair.rear_image and self.pair.rear_image.batch else None
+                )
+                if batch and batch.account_email:
+                    self.operator_email = batch.account_email.strip()
+
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"[{self.timestamp:%Y-%m-%d %H:%M:%S}] {self.action} -> {self.result}"

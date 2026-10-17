@@ -41,6 +41,8 @@ def _resolve_batch_email(account_email: str, user: Optional[Any]) -> str:
     if account_email:
         return account_email
     if user and getattr(user, "is_authenticated", False):
+        if getattr(user, "email", None) and str(user.email).strip():
+            return str(user.email).strip()
         itms_sess = getattr(user, "itms_session", None)
         if itms_sess and getattr(itms_sess, "itms_email", None):
             return str(itms_sess.itms_email)

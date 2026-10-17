@@ -489,11 +489,17 @@ class _WarehouseHTMLParser(HTMLParser):
         if tag == "select":
             name = attr_dict.get("name", "").lower()
             elem_id = attr_dict.get("id", "").lower()
-            if "warehouse" in name or "warehouse" in elem_id:
+            if any(k in name or k in elem_id for k in ("warehouse", "bond", "facility", "center", "installation")):
                 self.in_select = True
         elif tag == "option" and self.in_select:
             self.in_option = True
             self.current_val = attr_dict.get("value", "").strip()
+            self.current_text = []
+        elif tag == "li" and "select2-results__option" in attr_dict.get("class", ""):
+            # ITMS uses Select2 for dynamic warehouse/facility selection
+            val = attr_dict.get("data-select2-id", "").strip() or attr_dict.get("id", "").strip()
+            self.in_option = True
+            self.current_val = val
             self.current_text = []
         elif tag == "td":
             self.in_td = True
@@ -502,9 +508,9 @@ class _WarehouseHTMLParser(HTMLParser):
     def handle_endtag(self, tag: str):
         if tag == "select":
             self.in_select = False
-        elif tag == "option" and self.in_option:
+        elif tag in ("option", "li") and self.in_option:
             text = "".join(self.current_text).strip()
-            if self.current_val and text:
+            if self.current_val and text and text.lower() not in ("all", "select warehouse", "any", "prompt", "--"):
                 self.extracted_facilities.append((text, self.current_val))
             self.in_option = False
             self.current_val = ""
@@ -517,17 +523,33 @@ class _WarehouseHTMLParser(HTMLParser):
             self.current_text = []
 
     def handle_data(self, data: str):
-        if (self.in_select and self.in_option) or self.in_td:
+        if self.in_option or self.in_td:
             self.current_text.append(data)
 
 
 def _derive_facility_code(name_clean: str, existing_codes: Iterable[str]) -> str:
     """Derives a concise facility code and avoids collision with existing codes."""
     upper_name = name_clean.upper()
-    if "AGM" in upper_name:
+    if "AGM" in upper_name or "SPIRO" in upper_name:
         code = "AGM"
-    elif "SPIRO" in upper_name:
-        code = "SPIRO"
+    elif "NAGURU" in upper_name:
+        code = "NAGURU"
+    elif "EAGLE" in upper_name or "HAOJUE" in upper_name:
+        code = "EAGLE"
+    elif "CFAO" in upper_name:
+        code = "CFAO"
+    elif "MOTOR CENTER" in upper_name:
+        code = "MOTOR_CENTER"
+    elif "MOWT" in upper_name:
+        code = "MOWT"
+    elif "YUVRAJ" in upper_name:
+        code = "YUVRAJ"
+    elif "KAWEMPE" in upper_name:
+        code = "KAWEMPE"
+    elif "MARKH" in upper_name:
+        code = "MARKH"
+    elif "MAYBACH" in upper_name:
+        code = "MAYBACH"
     elif "BOND" in upper_name:
         bm = re.search(r"BOND\s*([0-9A-Z]+)", upper_name)
         code = f"BOND{bm.group(1)}" if bm else "BOND"

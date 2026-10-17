@@ -37,7 +37,7 @@ def set_active_bond(code: str, name: Optional[str] = None) -> bool:
 def get_all_discovered_warehouses() -> List[Dict[str, Any]]:
     """
     Returns unified list of bonded warehouse facilities by combining:
-    1. Pre-configured standard bonds (AGM, Kampala Central, Jinja, Mbale, Mbarara).
+    1. Pre-configured standard bonds (AGM, Naguru, Eagle, CFAO, Motor Center, MOWT, Yuvraj, Kawempe, Markh, Maybach).
     2. Dynamic warehouses discovered in local InstallationOrder and InstallationKit tables.
     """
     known_bonds = config_service.get_available_bonds()

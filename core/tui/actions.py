@@ -470,10 +470,19 @@ class OperatorActionsMixin:
             return
 
         from core.models import InstallationOrder
-        op_name = self.current_user.username if getattr(self, "current_user", None) else "Operator"
+        op_user = getattr(self, "current_user", None)
+        op_name = (op_user.get_full_name().strip() or op_user.username) if op_user else "Operator"
+        op_email = op_user.email.strip() if (op_user and getattr(op_user, "email", None)) else ""
         was_failed = pair.verification_status == VehicleInstallationPair.VerificationStatus.FAILED
         pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
-        pair.save(update_fields=["verification_status"])
+        update_cols = ["verification_status"]
+        if op_user:
+            pair.operator = op_user
+            update_cols.append("operator")
+            if op_email and not pair.account_email:
+                pair.account_email = op_email
+                update_cols.append("account_email")
+        pair.save(update_fields=update_cols)
 
         if pair.order and pair.order.status == InstallationOrder.Status.FAILED:
             pair.order.status = InstallationOrder.Status.PENDING
@@ -486,6 +495,9 @@ class OperatorActionsMixin:
         )
         SubmissionAuditLog.objects.create(
             pair=pair,
+            operator=op_user,
+            operator_username=op_name,
+            operator_email=op_email,
             action=SubmissionAuditLog.Action.OPERATOR_APPROVE,
             result=SubmissionAuditLog.ResultStatus.SUCCESS,
             message=audit_msg,
@@ -515,11 +527,23 @@ class OperatorActionsMixin:
             self.notify("Need both front and rear images to swap assignments.", severity="warning")
             return
 
-        op_name = self.current_user.username if getattr(self, "current_user", None) else "Operator"
+        op_user = getattr(self, "current_user", None)
+        op_name = (op_user.get_full_name().strip() or op_user.username) if op_user else "Operator"
+        op_email = op_user.email.strip() if (op_user and getattr(op_user, "email", None)) else ""
         pair.front_image, pair.rear_image = pair.rear_image, pair.front_image
-        pair.save(update_fields=["front_image", "rear_image"])
+        update_cols = ["front_image", "rear_image"]
+        if op_user:
+            pair.operator = op_user
+            update_cols.append("operator")
+            if op_email and not pair.account_email:
+                pair.account_email = op_email
+                update_cols.append("account_email")
+        pair.save(update_fields=update_cols)
         SubmissionAuditLog.objects.create(
             pair=pair,
+            operator=op_user,
+            operator_username=op_name,
+            operator_email=op_email,
             action=SubmissionAuditLog.Action.OPERATOR_SWAP,
             result=SubmissionAuditLog.ResultStatus.SUCCESS,
             message=f"Operator '{op_name}' swapped front and rear image assignments in TUI.",

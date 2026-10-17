@@ -110,14 +110,19 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     },
     "bond": {
         "active_bond_code": "AGM",
-        "active_bond_name": "AGM Bonded Warehouse",
+        "active_bond_name": "AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)",
         "strict_bond_scoping": True,
         "available_bonds": [
-            {"code": "AGM", "name": "AGM Bonded Warehouse", "warehouse_id": "agm-bond"},
-            {"code": "KLA_CENTRAL", "name": "Kampala Central Bond", "warehouse_id": "kla-central"},
-            {"code": "JINJA", "name": "Jinja Regional Bond", "warehouse_id": "jinja-bond"},
-            {"code": "MBALE", "name": "Mbale Bond", "warehouse_id": "mbale-bond"},
-            {"code": "MBR", "name": "Mbarara Bond", "warehouse_id": "mbarara-bond"},
+            {"code": "AGM", "name": "AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)", "warehouse_id": "24"},
+            {"code": "NAGURU", "name": "Naguru Police HQ", "warehouse_id": "22"},
+            {"code": "EAGLE", "name": "EAGLE (INSTALLATION) GENERAL TRADERS (HAOJUE)", "warehouse_id": "23"},
+            {"code": "CFAO", "name": "CFAO MOBILITY (U) LTD (INSTALLATION)", "warehouse_id": "25"},
+            {"code": "MOTOR_CENTER", "name": "MOTOR CENTER INSTALLATION CENTER", "warehouse_id": "26"},
+            {"code": "MOWT", "name": "MOWT Inst Facility", "warehouse_id": "27"},
+            {"code": "YUVRAJ", "name": "YUVRAJ INSTALLATION INTERNATIONAL (U) LTD", "warehouse_id": "28"},
+            {"code": "KAWEMPE", "name": "KAWEMPE installation wh", "warehouse_id": "29"},
+            {"code": "MARKH", "name": "MARKH INVESTMENTS LTD (INSTALLATION)", "warehouse_id": "30"},
+            {"code": "MAYBACH", "name": "MAYBACH", "warehouse_id": "31"},
         ],
     },
 }
@@ -557,13 +562,13 @@ def set_developer_setting(key_path: str, value: Any, base_dir: Optional[Path] = 
 def get_active_bond(base_dir: Optional[Path] = None) -> Dict[str, str]:
     """Returns active bond code and human-readable bond name."""
     raw_code = get_setting("bond.active_bond_code", "AGM", base_dir)
-    raw_name = get_setting("bond.active_bond_name", "AGM Bonded Warehouse", base_dir)
+    raw_name = get_setting("bond.active_bond_name", "AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)", base_dir)
     code_str = str(raw_code or "").strip().upper()
     if not code_str or "<" in code_str or "mock" in code_str.lower():
         code_str = "AGM"
     name_str = str(raw_name or "").strip()
-    if not name_str or "<" in name_str or "mock" in name_str.lower():
-        name_str = "AGM Bonded Warehouse"
+    if not name_str or "<" in name_str or "mock" in name_str.lower() or name_str == "AGM Bonded Warehouse":
+        name_str = "AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)"
     return {"code": code_str, "name": name_str}
 
 

@@ -214,6 +214,11 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
 
         is_item_today = bool(l.timestamp and l.timestamp.date() == today)
 
+        op_obj = l.operator or (pair.operator if pair else None)
+        op_name = (op_obj.get_full_name().strip() or op_obj.username) if op_obj else (getattr(l, "operator_username", "Operator") or "Operator")
+        op_email = (getattr(l, "operator_email", "") or (op_obj.email if op_obj else "") or (pair.account_email if pair else "")).strip()
+        op_display = f"{op_name} ({op_email})" if (op_email and op_email not in op_name) else op_name
+
         history_items.append({
             "id": f"log_{l.id}",
             "timestamp": l.timestamp.strftime("%Y-%m-%d %H:%M:%S") if l.timestamp else "",
@@ -224,7 +229,9 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
             "action": l.action,
             "result": l.result,
             "message": l.message,
-            "operator": getattr(l, "operator_username", "Operator") or "Operator",
+            "operator": op_display,
+            "operator_name": op_name,
+            "operator_email": op_email,
             "pair_id": pair.id if pair else None,
             "pair_status": pair.verification_status if pair else "N/A",
             "front_url": front_url,
@@ -282,6 +289,14 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
             VehicleInstallationPair.VerificationStatus.SUBMITTED
         ) else ("REVIEW" if p.verification_status == VehicleInstallationPair.VerificationStatus.PENDING_REVIEW else "FAILED")
 
+        batch_obj = (p.front_image.batch if p.front_image and p.front_image.batch else None) or (
+            p.rear_image.batch if p.rear_image and p.rear_image.batch else None
+        )
+        op_obj = p.operator or (batch_obj.operator if batch_obj else None)
+        op_name = (op_obj.get_full_name().strip() or op_obj.username) if op_obj else "Operator"
+        op_email = (p.account_email or (op_obj.email if op_obj else "") or (batch_obj.account_email if batch_obj else "")).strip()
+        op_display = f"{op_name} ({op_email})" if (op_email and op_email not in op_name) else op_name
+
         history_items.append({
             "id": f"pair_{p.id}",
             "timestamp": sub_time.strftime("%Y-%m-%d %H:%M:%S") if sub_time else "",
@@ -292,7 +307,9 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
             "action": action_name,
             "result": res_status,
             "message": f"Status: {p.verification_status} | Match: {p.match_type or 'None'} ({p.match_score or 0}%) | Strategy: {p.matched_via or 'Vision'}",
-            "operator": "Operator",
+            "operator": op_display,
+            "operator_name": op_name,
+            "operator_email": op_email,
             "pair_id": p.id,
             "pair_status": p.verification_status,
             "front_url": front_url,

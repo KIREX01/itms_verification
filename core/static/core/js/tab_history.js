@@ -80,7 +80,8 @@ function openHistoryModal(logId) {
 
     setText("hist-modal-title", `📜 Verification Activity Log #${log.id}`);
     setText("hist-modal-time", log.timestamp || "--");
-    setText("hist-modal-operator", log.operator || "Operator");
+    setText("hist-modal-operator", log.operator_name || (log.operator ? log.operator.split(" (")[0] : "Operator"));
+    setText("hist-modal-email", log.operator_email || "");
 
     const resultBadge = document.getElementById("hist-modal-result");
     if (resultBadge) {

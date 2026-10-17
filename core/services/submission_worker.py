@@ -38,8 +38,11 @@ def _log(
     token: str = "",
     operator: Optional[Any] = None,
 ):
+    if operator is None and pair and pair.operator:
+        operator = pair.operator
     op_user = operator if (operator and getattr(operator, "is_authenticated", False)) else None
-    op_name = getattr(op_user, "username", str(operator)) if operator else "System"
+    op_name = (op_user.get_full_name().strip() or op_user.username) if op_user else (str(operator) if operator else "System")
+    op_email = op_user.email.strip() if (op_user and getattr(op_user, "email", None)) else (pair.account_email if pair else "")
     return SubmissionAuditLog.objects.create(
         pair=pair,
         action=action,
@@ -48,6 +51,7 @@ def _log(
         simulated_token=token,
         operator=op_user,
         operator_username=op_name,
+        operator_email=op_email,
     )
 
 
@@ -60,6 +64,8 @@ def submit_pair(
     operator: Optional[Any] = None,
 ) -> SubmissionOutcome:
     """Drive a single pair through the ITMS workflow (mock, live API, or live_web) with full audit logging."""
+    if operator is None and pair and pair.operator:
+        operator = pair.operator
     from core.services import config_service, vault_service
     backend_mode = (
         (backend or "").strip()

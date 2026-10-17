@@ -132,6 +132,10 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
         is_latest = bool(batch_obj and latest_batch and batch_obj.id == latest_batch.id)
         is_carryover = bool(batch_obj and batch_obj.created_at and timezone.localdate(batch_obj.created_at) < today)
 
+        op_obj = p.operator or (batch_obj.operator if batch_obj else None)
+        op_name = (op_obj.get_full_name().strip() or op_obj.username) if op_obj else ""
+        op_email = (p.account_email or (op_obj.email if op_obj else "") or (batch_obj.account_email if batch_obj else "")).strip()
+
         pairs_data.append({
             "id": p.id,
             "registration_number_detected": p.registration_number_detected,
@@ -147,6 +151,8 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
             "rear_url": rear_url,
             "front_thumb_url": front_thumb_url,
             "rear_thumb_url": rear_thumb_url,
+            "operator": op_name,
+            "operator_email": op_email,
             "batch_id": batch_obj.batch_id if batch_obj else "Carryover",
             "batch_label": (batch_obj.source_label or batch_obj.batch_id) if batch_obj else "Carryover Batch",
             "batch_created_at": batch_obj.created_at.strftime("%Y-%m-%d %H:%M") if (batch_obj and batch_obj.created_at) else "",
@@ -308,7 +314,8 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
 
     action = action.lower().strip()
     operator_user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
-    operator_name = operator_user.username if operator_user else (request.headers.get("X-Operator-Username") or "operator")
+    operator_name = (operator_user.get_full_name().strip() or operator_user.username) if operator_user else (request.headers.get("X-Operator-Username") or "operator")
+    operator_email = operator_user.email.strip() if (operator_user and getattr(operator_user, "email", None)) else ""
 
     if action == "approve":
         # Attempt auto-linking if order is missing (matches TUI parity)
@@ -328,7 +335,14 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
 
         was_failed = (pair.verification_status == VehicleInstallationPair.VerificationStatus.FAILED)
         pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
-        pair.save(update_fields=["verification_status"])
+        update_cols = ["verification_status"]
+        if operator_user:
+            pair.operator = operator_user
+            update_cols.append("operator")
+            if operator_email and not pair.account_email:
+                pair.account_email = operator_email
+                update_cols.append("account_email")
+        pair.save(update_fields=update_cols)
 
         if pair.order and pair.order.status == InstallationOrder.Status.FAILED:
             pair.order.status = InstallationOrder.Status.PENDING
@@ -338,6 +352,7 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
             pair=pair,
             operator=operator_user,
             operator_username=operator_name,
+            operator_email=operator_email,
             action=SubmissionAuditLog.Action.OPERATOR_APPROVE,
             result=SubmissionAuditLog.ResultStatus.SUCCESS,
             message="Pair approved by operator via Web Console." if not was_failed else "Pair reset from FAILED to APPROVED for retry via Web Console.",
@@ -353,11 +368,19 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
             return JsonResponse({"success": False, "error": "Both front and rear photos required to swap."}, status=400)
 
         pair.front_image, pair.rear_image = pair.rear_image, pair.front_image
-        pair.save(update_fields=["front_image", "rear_image"])
+        update_cols = ["front_image", "rear_image"]
+        if operator_user:
+            pair.operator = operator_user
+            update_cols.append("operator")
+            if operator_email and not pair.account_email:
+                pair.account_email = operator_email
+                update_cols.append("account_email")
+        pair.save(update_fields=update_cols)
         SubmissionAuditLog.objects.create(
             pair=pair,
             operator=operator_user,
             operator_username=operator_name,
+            operator_email=operator_email,
             action=SubmissionAuditLog.Action.OPERATOR_SWAP,
             result=SubmissionAuditLog.ResultStatus.SUCCESS,
             message="Operator swapped front and rear image assignments via Web Console.",
@@ -464,6 +487,10 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
         elif canonical_plate:
             pair.operator_note = f"Manual plate updated: {canonical_plate}"
 
+        if operator_user:
+            pair.operator = operator_user
+            if operator_email and not pair.account_email:
+                pair.account_email = operator_email
         pair.save()
 
         order_desc = f"linked to order #{target_order.order_number}" if target_order else "no matching order; plate updated directly"
@@ -471,6 +498,7 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
             pair=pair,
             operator=operator_user,
             operator_username=operator_name,
+            operator_email=operator_email,
             action=SubmissionAuditLog.Action.MANUAL_PLATE_ASSIGN,
             result=SubmissionAuditLog.ResultStatus.SUCCESS,
             message=f"Operator Link/Override: plate='{pair.registration_number_detected}' ({order_desc}), status='{pair.verification_status}'.",
@@ -502,12 +530,20 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
         pair.matched_via = VehicleInstallationPair.MatchedVia.MANUAL
         pair.match_score = 0.0
         pair.is_manual_override = True
-        pair.save(update_fields=["order", "match_type", "matched_via", "match_score", "is_manual_override"])
+        update_cols = ["order", "match_type", "matched_via", "match_score", "is_manual_override"]
+        if operator_user:
+            pair.operator = operator_user
+            update_cols.append("operator")
+            if operator_email and not pair.account_email:
+                pair.account_email = operator_email
+                update_cols.append("account_email")
+        pair.save(update_fields=update_cols)
 
         SubmissionAuditLog.objects.create(
             pair=pair,
             operator=operator_user,
             operator_username=operator_name,
+            operator_email=operator_email,
             action=SubmissionAuditLog.Action.OPERATOR_OVERRIDE,
             result=SubmissionAuditLog.ResultStatus.SUCCESS,
             message=f"Operator unlinked order #{prev_order.order_number if prev_order else 'N/A'} via Web Console.",
@@ -545,7 +581,14 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
         # Auto-approve if currently PENDING_REVIEW or FAILED (operator decision to submit)
         if pair.verification_status != VehicleInstallationPair.VerificationStatus.APPROVED:
             pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
-            pair.save(update_fields=["verification_status"])
+        update_cols = ["verification_status"]
+        if operator_user:
+            pair.operator = operator_user
+            update_cols.append("operator")
+            if operator_email and not pair.account_email:
+                pair.account_email = operator_email
+                update_cols.append("account_email")
+        pair.save(update_fields=update_cols)
 
         outcome = submission_worker.submit_pair(pair, backend="web", dry_run=is_dry_run, operator=operator_user)
         return JsonResponse({

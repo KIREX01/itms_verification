@@ -181,7 +181,7 @@ class SettingsPane(Vertical):
                     yield Static("[bold yellow]🏢 Operating Facility & Bonded Warehouse[/bold yellow]", classes="settings-card-title")
 
                     with Horizontal(classes="settings-row"):
-                        yield Static("[b]Active Bond Code[/b]\n[dim]Warehouse facility code for scoping orders and stock (e.g. AGM, KLA_CENTRAL)[/dim]", classes="settings-label")
+                        yield Static("[b]Active Bond Code[/b]\n[dim]Warehouse facility code for scoping orders and stock (e.g. AGM, NAGURU, CFAO, EAGLE)[/dim]", classes="settings-label")
                         yield Input(value=bond_code, id=INPUT_BOND_CODE_ID, classes="settings-input")
 
                     with Horizontal(classes="settings-row"):

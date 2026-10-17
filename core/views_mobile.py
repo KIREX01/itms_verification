@@ -58,11 +58,18 @@ def mobile_companion_view(request: HttpRequest) -> HttpResponse:
     conn_info = network_service.get_mobile_connection_info(request=request)
     is_cloud = conn_info.get("is_cloud", False)
 
+    from core.services import date_service
+    active_shift_d = date_service.get_active_shift_date()
+    shift_suffix = date_service.format_date_suffix(active_shift_d)
+    shift_date_str = date_service.format_date_standard(active_shift_d)
+
     return render(request, "core/mobile_companion.html", {
         "version": __version__,
         "active_batch_id": batch.batch_id,
         "active_batch_label": batch.source_label,
         "server_time": timezone.now().isoformat(),
+        "active_shift_date": shift_date_str,
+        "active_shift_suffix": shift_suffix,
         "max_devices": session_manager.get_max_allowed(),
         "is_mobile_device": is_mobile,
         "device_type": device_type,

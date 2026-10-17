@@ -117,7 +117,9 @@ const MobileState = {
 
     // Stock & Inventory Scanner State
     stock: {
-        subMode: "DISPATCH", // 'DISPATCH' | 'DELIVERY' | 'RETURN'
+        shiftSuffix: document.querySelector('meta[name="shift-suffix"]')?.getAttribute("content") || "",
+        shiftDate: document.querySelector('meta[name="shift-date"]')?.getAttribute("content") || "",
+        subMode: "DISPATCH", // 'DISPATCH' | 'DELIVERY' | 'RETURN' | 'AUDIT'
         category: "PSV",     // 'PSV' | 'PMO'
         queue: [],
         blockedPlates: [],
@@ -564,10 +566,12 @@ function setStockSubMode(subMode) {
     const pillDispatch = document.getElementById("pill-stock-dispatch");
     const pillDelivery = document.getElementById("pill-stock-delivery");
     const pillReturn = document.getElementById("pill-stock-return");
+    const pillAudit = document.getElementById("pill-stock-audit");
 
     const isDispatch = subMode === "DISPATCH";
     const isDelivery = subMode === "DELIVERY";
     const isReturn = subMode === "RETURN";
+    const isAudit = subMode === "AUDIT";
 
     if (pillDispatch) {
         pillDispatch.classList.toggle("active", isDispatch);
@@ -583,18 +587,111 @@ function setStockSubMode(subMode) {
     }
     if (pillReturn) {
         pillReturn.classList.toggle("active", isReturn);
-        pillReturn.style.background = isReturn ? "#dc2626" : "#1e293b";
-        pillReturn.style.borderColor = isReturn ? "#f87171" : "#475569";
+        pillReturn.style.background = isReturn ? "#d97706" : "#1e293b";
+        pillReturn.style.borderColor = isReturn ? "#f59e0b" : "#475569";
         pillReturn.style.color = "#ffffff";
+    }
+    if (pillAudit) {
+        pillAudit.classList.toggle("active", isAudit);
+        pillAudit.style.background = isAudit ? "#7c3aed" : "#1e293b";
+        pillAudit.style.borderColor = isAudit ? "#a78bfa" : "#475569";
+        pillAudit.style.color = "#ffffff";
     }
 
     const titleMap = {
         "DISPATCH": "Dispatch to Line (Line Out)",
         "DELIVERY": "Inbound Shipment Delivery",
-        "RETURN": "Uninstalled Plates Return",
+        "RETURN": "Returned Plates (Line Return to Safe Room)",
+        "AUDIT": "Safe Room Stock Audit (Physical Inventory)",
     };
     const titleElem = document.getElementById("stock-target-title");
     if (titleElem) titleElem.textContent = titleMap[subMode] || "Plate Intake";
+}
+
+
+function updateMobileStockStatusBadge(cleanPlate, stockStatus, category, isBlocked) {
+    const viewport = document.getElementById("stock-camera-viewport");
+    const liveBadge = document.getElementById("stock-scan-live-badge");
+    const statusPill = document.getElementById("stock-live-badge-status");
+    const plateSpan = document.getElementById("stock-live-badge-plate");
+    const catSpan = document.getElementById("stock-live-badge-cat");
+    const descDiv = document.getElementById("stock-live-badge-desc");
+
+    const insCard = document.getElementById("stock-live-inspector-card");
+    const insPlate = document.getElementById("mobile-ins-plate");
+    const insStatus = document.getElementById("mobile-ins-status");
+    const insCat = document.getElementById("mobile-ins-cat");
+    const insDesc = document.getElementById("mobile-ins-desc");
+
+    const badgeText = stockStatus.badge || (isBlocked ? "🔴 NOT ON STOCK" : "🟢 ON STOCK");
+    const badgeDesc = stockStatus.desc || (isBlocked ? "Not found in warehouse stock. Set physical box aside!" : "Ready in warehouse stock. Clean to dispatch.");
+    const statusCode = stockStatus.code || (isBlocked ? "NOT_ON_STOCK" : "ON_STOCK");
+
+    // Viewport aim-frame glow classes
+    if (viewport) {
+        viewport.classList.remove("detected-on-stock", "detected-not-on-stock", "detected-dispatched", "detected-installed", "detected");
+        if (isBlocked) {
+            viewport.classList.add("detected-not-on-stock");
+        } else if (statusCode === "DISPATCHED") {
+            viewport.classList.add("detected-dispatched");
+        } else if (statusCode === "ALREADY_INSTALLED") {
+            viewport.classList.add("detected-installed");
+        } else {
+            viewport.classList.add("detected-on-stock");
+        }
+        setTimeout(() => {
+            if (viewport) viewport.classList.remove("detected-on-stock", "detected-not-on-stock", "detected-dispatched", "detected-installed", "detected");
+        }, 1200);
+    }
+
+    // Viewport Live Badge
+    if (liveBadge && statusPill && plateSpan) {
+        plateSpan.textContent = cleanPlate;
+        if (catSpan) catSpan.textContent = category || "PSV";
+        statusPill.textContent = badgeText;
+        if (descDiv) descDiv.textContent = badgeDesc;
+
+        if (isBlocked) {
+            liveBadge.style.borderColor = "#ef4444";
+            statusPill.style.background = "#dc2626";
+            statusPill.style.color = "#ffffff";
+        } else if (statusCode === "DISPATCHED") {
+            liveBadge.style.borderColor = "#f59e0b";
+            statusPill.style.background = "#d97706";
+            statusPill.style.color = "#ffffff";
+        } else if (statusCode === "ALREADY_INSTALLED") {
+            liveBadge.style.borderColor = "#3b82f6";
+            statusPill.style.background = "#2563eb";
+            statusPill.style.color = "#ffffff";
+        } else {
+            liveBadge.style.borderColor = "#22c55e";
+            statusPill.style.background = "#16a34a";
+            statusPill.style.color = "#ffffff";
+        }
+
+        liveBadge.style.display = "block";
+        if (window._liveBadgeTimer) clearTimeout(window._liveBadgeTimer);
+        window._liveBadgeTimer = setTimeout(() => {
+            if (liveBadge) liveBadge.style.display = "none";
+        }, 3500);
+    }
+
+    // Persistent Inspector Card
+    if (insCard && insPlate) {
+        insCard.style.display = "block";
+        insPlate.textContent = cleanPlate;
+        if (insCat) {
+            insCat.textContent = category || "PSV";
+            insCat.className = `badge ${category === "PMO" ? "badge-yellow" : "badge-muted"}`;
+        }
+        if (insStatus) {
+            insStatus.textContent = badgeText;
+            insStatus.className = `badge ${stockStatus.badge_class || (isBlocked ? "badge-red" : "badge-green")}`;
+        }
+        if (insDesc) {
+            insDesc.textContent = badgeDesc;
+        }
+    }
 }
 
 function setStockCategory(cat) {
@@ -733,14 +830,22 @@ async function startStockCameraScanner() {
         const constraints = {
             video: {
                 facingMode: { ideal: MobileState.stock.cameraFacing },
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
+                width: { ideal: 1280, min: 640 },
+                height: { ideal: 720, min: 480 },
+                focusMode: { ideal: "continuous" },
+                advanced: [{ focusMode: "continuous" }]
             },
             audio: false,
         };
 
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
         MobileState.stock.cameraStream = stream;
+        const trackObj = stream.getVideoTracks()[0];
+        if (trackObj && trackObj.applyConstraints) {
+            trackObj.applyConstraints({
+                advanced: [{ focusMode: "continuous" }]
+            }).catch(() => {});
+        }
         MobileState.stock.isScanning = true;
 
         if (video) {
@@ -861,11 +966,15 @@ function startStockScanLoop() {
     if (!video) return;
 
     let isDetecting = false;
+    let lastDetectTick = 0;
 
-    async function tick() {
+    async function tick(timestamp) {
         if (!MobileState.stock.isScanning) return;
 
-        if (video.readyState === video.HAVE_ENOUGH_DATA && !isDetecting) {
+        // Throttle detection loop to every 100ms (10 scans/sec)
+        // Eliminates CPU thermal throttling and frame drops on mobile devices
+        if (timestamp - lastDetectTick >= 100 && video.readyState === video.HAVE_ENOUGH_DATA && !isDetecting) {
+            lastDetectTick = timestamp;
             isDetecting = true;
             try {
                 if (MobileState.stock.barcodeDetector) {
@@ -928,38 +1037,32 @@ function showScanDetectionBanner(text, isError = false) {
     }
 }
 
-function handleStockBarcodeDetected(rawCode) {
+async function handleStockBarcodeDetected(rawCode) {
     if (!rawCode) return;
     const cleanPlate = extractPlateFromScannedCode(rawCode);
     if (!cleanPlate || cleanPlate.length < 3) return;
 
     const now = Date.now();
 
-    // 1. Per-Plate Debounce Cooldown:
-    // Ignore the identical plate if seen within the last 10 seconds.
-    // This stops rapid 60 FPS repeat-scanning when holding a box in front of camera.
+    // 1. Per-Plate Debounce Cooldown: 2500ms
     const lastSeen = MobileState.stock.recentScansCooldown.get(cleanPlate) || 0;
-    if (now - lastSeen < 10000) {
+    if (now - lastSeen < 2500) {
         return;
     }
 
     // 2. Duplicate Detection:
-    // Check if this plate is already in the current staged queue OR already synced during this session.
-    const isAlreadyInQueue = MobileState.stock.queue.includes(cleanPlate);
+    const isAlreadyInQueue = MobileState.stock.queue.some(item => (typeof item === 'string' ? item : item.plate) === cleanPlate);
     const isAlreadySynced = MobileState.stock.syncedSessionPlates.has(cleanPlate);
     const isBlocked = MobileState.stock.blockedPlates.includes(cleanPlate);
 
     if (isAlreadyInQueue || isAlreadySynced || isBlocked) {
         MobileState.stock.recentScansCooldown.set(cleanPlate, now);
 
-        // Visual alert on camera viewport
-        showScanDetectionBanner(`⚠️ DUPLICATE: ${cleanPlate}`, true);
-
-        // Low error pitch buzzer & double haptic vibration
+        showScanDetectionBanner(`DUPLICATE: ${cleanPlate}`, true);
         playScanBeep(false);
         if (navigator.vibrate) navigator.vibrate([140, 70, 140]);
 
-                let dupType = "already in queue";
+        let dupType = "already in queue";
         if (isBlocked) {
             dupType = "BLOCKED (not in stock)";
         } else if (isAlreadySynced) {
@@ -969,24 +1072,66 @@ function handleStockBarcodeDetected(rawCode) {
         return;
     }
 
-    // 3. New Valid Plate!
+    // 3. New Valid Plate Detection!
     MobileState.stock.recentScansCooldown.set(cleanPlate, now);
-
-    // Visual feedback on camera viewport
-    showScanDetectionBanner(`✅ SCANNED: ${cleanPlate}`, false);
-
-    // High success chime & crisp single vibration
     playScanBeep(true);
     if (navigator.vibrate) navigator.vibrate(60);
 
-    // Add to staged queue
+    // Instant local stock inspection (<30ms)
+    const suffix = MobileState.stock.shiftSuffix || "";
+    try {
+        const inspectRes = await fetch(`/api/stock/inspect/?plate=${encodeURIComponent(cleanPlate)}&date_suffix=${encodeURIComponent(suffix)}`);
+        const inspectData = await inspectRes.json();
+
+        if (inspectData.success) {
+            const stockStatus = inspectData.stock_status || {};
+            const isItemBlocked = Boolean(inspectData.is_blocked);
+            const category = inspectData.category || MobileState.stock.category || "PSV";
+
+            // Update live stock indicators immediately
+            updateMobileStockStatusBadge(cleanPlate, stockStatus, category, isItemBlocked);
+
+            if (isItemBlocked && MobileState.stock.subMode === "DISPATCH") {
+                // NOT ON STOCK: Alert operator immediately
+                playScanBeep(false);
+                if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+                if (!MobileState.stock.blockedPlates.includes(cleanPlate)) {
+                    MobileState.stock.blockedPlates.push(cleanPlate);
+                    renderBlockedPlatesTray();
+                }
+                showMobileToast(`🚫 Plate ${cleanPlate} NOT ON STOCK! Set physical box aside!`, true);
+                return;
+            }
+
+            // Plate is valid / on stock
+            addPlateToStockQueue(cleanPlate, {
+                category: category,
+                statusBadge: stockStatus.badge || "🟢 ON STOCK",
+                badgeClass: stockStatus.badge_class || "badge-green",
+                statusCode: stockStatus.code || "ON_STOCK",
+                desc: stockStatus.desc || ""
+            });
+
+            // Auto-sync immediately if enabled
+            if (MobileState.stock.autoSync) {
+                setTimeout(() => {
+                    void syncStockScansToServer();
+                }, 100);
+            }
+            return;
+        }
+    } catch (err) {
+        console.warn("Stock inspection network fallback:", err);
+    }
+
+    // Fallback if inspect fails
+    showScanDetectionBanner(`✓ SCANNED: ${cleanPlate}`, false);
     addPlateToStockQueue(cleanPlate);
 
-    // Auto-sync immediately if enabled
     if (MobileState.stock.autoSync) {
         setTimeout(() => {
             void syncStockScansToServer();
-        }, 150);
+        }, 100);
     }
 }
 
@@ -1067,15 +1212,25 @@ function loadStockQueueFromStorage() {
     }
 }
 
-function addPlateToStockQueue(plateStr) {
+function addPlateToStockQueue(plateStr, meta = null) {
     let clean = plateStr.replace(/^IK-/, "").replace(/[^A-Z0-9]/g, "");
     if (!clean) return;
 
-    if (!MobileState.stock.queue.includes(clean)) {
-        MobileState.stock.queue.push(clean);
+    const existingIdx = MobileState.stock.queue.findIndex(item => (typeof item === 'string' ? item : item.plate) === clean);
+    if (existingIdx === -1) {
+        const itemObj = {
+            plate: clean,
+            category: meta?.category || MobileState.stock.category || "PSV",
+            statusBadge: meta?.statusBadge || "🟢 ON STOCK",
+            badgeClass: meta?.badgeClass || "badge-green",
+            statusCode: meta?.statusCode || "ON_STOCK",
+            desc: meta?.desc || "",
+            timestamp: Date.now(),
+        };
+        MobileState.stock.queue.push(itemObj);
         saveStockQueueToStorage();
         renderStockQueueList();
-        showMobileToast(`✅ Added ${clean} (${MobileState.stock.queue.length} in queue)`);
+        showMobileToast(`✓ Added ${clean} (${MobileState.stock.queue.length} staged)`);
     }
 }
 
@@ -1083,6 +1238,16 @@ function removeStockPlate(idx) {
     MobileState.stock.queue.splice(idx, 1);
     saveStockQueueToStorage();
     renderStockQueueList();
+}
+
+function clearStockQueue() {
+    if (MobileState.stock.queue.length === 0) return;
+    if (confirm("Clear all staged plates from queue?")) {
+        MobileState.stock.queue = [];
+        saveStockQueueToStorage();
+        renderStockQueueList();
+        showMobileToast("Staged queue cleared.");
+    }
 }
 
 function renderStockQueueList() {
@@ -1100,21 +1265,34 @@ function renderStockQueueList() {
         return;
     }
 
-    listElem.innerHTML = q.map((p, idx) => `
-        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 8px; border-bottom:1px solid #1e293b;">
-            <span style="font-weight:bold; color:#f8fafc;">${idx + 1}. ${p}</span>
-            <span style="color:var(--ug-yellow); font-size:0.75rem;">[${MobileState.stock.category}]</span>
-            <button onclick="removeStockPlate(${idx})" style="background:none; border:none; color:#ef4444; font-size:1.1rem; cursor:pointer;">✕</button>
-        </div>
-    `).join("");
+    listElem.innerHTML = q.map((item, idx) => {
+        const p = typeof item === 'string' ? item : item.plate;
+        const cat = typeof item === 'object' && item.category ? item.category : MobileState.stock.category;
+        const badge = typeof item === 'object' && item.statusBadge ? item.statusBadge : "🟢 ON STOCK";
+        const badgeClass = typeof item === 'object' && item.badgeClass ? item.badgeClass : "badge-green";
+
+        return `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:7px 8px; border-bottom:1px solid #1e293b;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-weight:800; color:#f8fafc; font-size:0.95rem;">${idx + 1}. ${p}</span>
+                    <span class="badge ${cat === 'PMO' ? 'badge-yellow' : 'badge-muted'}" style="font-size:0.7rem; padding:2px 6px;">${cat}</span>
+                    <span class="badge ${badgeClass}" style="font-size:0.7rem; padding:2px 6px;">${badge}</span>
+                </div>
+                <button onclick="removeStockPlate(${idx})" style="background:none; border:none; color:#ef4444; font-size:1.1rem; cursor:pointer; padding:2px 6px;" title="Remove plate">✕</button>
+            </div>
+        `;
+    }).join("");
 }
 
 async function syncStockScansToServer() {
     if (MobileState.stock.isSyncing) return;
-    const q = [...MobileState.stock.queue];
-    if (q.length === 0) {
+    const rawQ = [...MobileState.stock.queue];
+    if (rawQ.length === 0) {
         return;
     }
+
+    // Extract plate strings
+    const platesList = rawQ.map(item => (typeof item === 'string' ? item : item.plate));
 
     MobileState.stock.isSyncing = true;
     const btn = document.getElementById("btn-sync-stock");
@@ -1125,22 +1303,45 @@ async function syncStockScansToServer() {
 
     const subMode = MobileState.stock.subMode;
     const category = MobileState.stock.category;
+    const suffix = MobileState.stock.shiftSuffix || "";
 
     let endpoint = "/api/stock/dispatch/";
     let payload = {
-        plates: q,
+        plates: platesList,
         plate_category: category,
+        date_suffix: suffix,
         operator_name: MobileState.deviceName,
         auto_create_kits: true,
+        check_itms_live: false, // Instant floor response; background worker enriches ITMS
     };
 
     if (subMode === "DELIVERY") {
         endpoint = "/api/stock/delivery/";
-        payload.delivery_number = `DEL-MOB-${Date.now().toString(36).toUpperCase()}`;
-        payload.auto_create_kits = true;
+        payload = {
+            plates: platesList,
+            delivery_number: `DEL-MOB-${Date.now().toString(36).toUpperCase()}`,
+            plate_category: category,
+            date_suffix: suffix,
+            operator_name: MobileState.deviceName,
+            auto_create_kits: true,
+        };
     } else if (subMode === "RETURN") {
         endpoint = "/api/stock/return/";
-        payload.reason = "LINE_ROLLOVER";
+        payload = {
+            plates: platesList,
+            reason: "LINE_ROLLOVER",
+            date_suffix: suffix,
+            operator_name: MobileState.deviceName,
+            notes: "Mobile Companion uninstalled plates return",
+        };
+    } else if (subMode === "AUDIT") {
+        endpoint = "/api/stock/audit/";
+        payload = {
+            plates: platesList,
+            date_suffix: suffix,
+            operator_name: MobileState.deviceName,
+            notes: "Mobile Companion safe room physical audit",
+        };
     }
 
     try {
@@ -1155,17 +1356,23 @@ async function syncStockScansToServer() {
 
         if (data.success) {
             // Successfully processed plates: add to session history
-            const processedPlates = data.verified_plates || q;
+            const processedPlates = data.verified_plates || data.scanned_plates || platesList;
             processedPlates.forEach(p => MobileState.stock.syncedSessionPlates.add(p));
 
             // Remove processed plates from queue
-            MobileState.stock.queue = MobileState.stock.queue.filter(p => !processedPlates.includes(p));
+            MobileState.stock.queue = MobileState.stock.queue.filter(item => {
+                const p = typeof item === 'string' ? item : item.plate;
+                return !processedPlates.includes(p);
+            });
 
             // Check if any plates were blocked
             const blocked = data.rejected_not_on_stock || data.blocked_plates || [];
             if (blocked.length > 0) {
-                // Remove blocked from active queue so queue doesn't stay blocked!
-                MobileState.stock.queue = MobileState.stock.queue.filter(p => !blocked.includes(p));
+                // Remove blocked from active queue so queue doesn't stay stuck
+                MobileState.stock.queue = MobileState.stock.queue.filter(item => {
+                    const p = typeof item === 'string' ? item : item.plate;
+                    return !blocked.includes(p);
+                });
                 blocked.forEach(p => {
                     if (!MobileState.stock.blockedPlates.includes(p)) {
                         MobileState.stock.blockedPlates.push(p);
@@ -1177,18 +1384,20 @@ async function syncStockScansToServer() {
                 showMobileToast(`⚠️ ${blocked.length} kit(s) NOT ON STOCK! Set box aside!`, true);
             } else {
                 playScanBeep(true);
-                let newlyCount = data.newly_dispatched !== undefined ? data.newly_dispatched : processedPlates.length;
-                showMobileToast(`✅ Synced ${newlyCount} plates (${subMode} - ${category})!`, false);
+                let newlyCount = data.newly_dispatched ?? data.newly_returned ?? data.total_scanned ?? processedPlates.length;
+                showMobileToast(`✓ Synced ${newlyCount} plates (${subMode} - ${category})!`, false);
             }
 
             saveStockQueueToStorage();
             renderStockQueueList();
         } else {
-            // Server error / rejection (e.g. 400 Bad Request because kits not in stock)
+            // Server rejection (e.g. 400 Bad Request because kits not in stock)
             const blocked = data.rejected_not_on_stock || data.blocked_plates || [];
             if (blocked.length > 0) {
-                // Remove blocked plates from active queue so future scans don't fail!
-                MobileState.stock.queue = MobileState.stock.queue.filter(p => !blocked.includes(p));
+                MobileState.stock.queue = MobileState.stock.queue.filter(item => {
+                    const p = typeof item === 'string' ? item : item.plate;
+                    return !blocked.includes(p);
+                });
                 blocked.forEach(p => {
                     if (!MobileState.stock.blockedPlates.includes(p)) {
                         MobileState.stock.blockedPlates.push(p);
@@ -1199,7 +1408,7 @@ async function syncStockScansToServer() {
                 renderStockQueueList();
                 playScanBeep(false);
                 if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-                showMobileToast(`⚠️ BLOCKED: ${blocked.join(", ")} NOT ON STOCK (Set box aside!)`, true);
+                showMobileToast(`🚫 BLOCKED: ${blocked.join(", ")} NOT ON STOCK (Set box aside!)`, true);
             } else {
                 playScanBeep(false);
                 showMobileToast(data.error || "Server sync failed", true);
@@ -1211,9 +1420,10 @@ async function syncStockScansToServer() {
         MobileState.stock.isSyncing = false;
         if (btn) {
             btn.disabled = false;
-            btn.textContent = "⚡ Sync to Server";
+            btn.textContent = "🚀 Sync to Server";
         }
     }
+}
 }
 
 function renderBlockedPlatesTray() {

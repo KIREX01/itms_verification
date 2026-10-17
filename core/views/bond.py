@@ -70,6 +70,7 @@ def api_stock_dispatch(request: HttpRequest) -> JsonResponse:
 
     auto_create_kits = False
     require_stock_verification = None
+    check_itms_live = False
 
     if request.content_type == "application/json" and request.body:
         try:
@@ -82,6 +83,8 @@ def api_stock_dispatch(request: HttpRequest) -> JsonResponse:
             auto_create_kits = bool(body.get("auto_create_kits", False))
             if "require_stock_verification" in body:
                 require_stock_verification = bool(body.get("require_stock_verification"))
+            if "check_itms_live" in body:
+                check_itms_live = bool(body.get("check_itms_live"))
         except Exception:
             pass
 
@@ -100,6 +103,8 @@ def api_stock_dispatch(request: HttpRequest) -> JsonResponse:
             auto_create_kits = request.POST.get("auto_create_kits") in ("true", "True", "1")
         if "require_stock_verification" in request.POST:
             require_stock_verification = request.POST.get("require_stock_verification") in ("true", "True", "1")
+        if "check_itms_live" in request.POST:
+            check_itms_live = request.POST.get("check_itms_live") in ("true", "True", "1")
 
     if not plates_raw:
         return JsonResponse({"success": False, "error": "No plate numbers provided in 'plates'."}, status=400)
@@ -114,7 +119,7 @@ def api_stock_dispatch(request: HttpRequest) -> JsonResponse:
             dispatched_by=user,
             notes=notes,
             require_stock_verification=require_stock_verification if require_stock_verification is not None else True,
-            check_itms_live=True,
+            check_itms_live=check_itms_live,
             auto_create_kits=auto_create_kits,
         )
         status_code = 200 if res.get("success") else 400
@@ -1020,7 +1025,7 @@ def api_stock_shift_details(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
-@require_itms_envelope
+@require_itms_envelope(allow_expired=True)
 def api_stock_inspect(request: HttpRequest) -> JsonResponse:
     """
     Returns full hardware profile, stock status, ITMS order linkage, and line

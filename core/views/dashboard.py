@@ -81,7 +81,7 @@ def api_stats(request: HttpRequest) -> JsonResponse:
             VehicleInstallationPair.VerificationStatus.OFFLINE_OUTBOX,
         ]
     )
-    pair_counts = VehicleInstallationPair.objects.aggregate(
+    pair_counts = VehicleInstallationPair.objects.filter(is_deleted=False).aggregate(
         total=Count("id"),
         pending_review=Count("id", filter=Q(verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW)),
         approved=Count("id", filter=Q(verification_status=VehicleInstallationPair.VerificationStatus.APPROVED)),
@@ -96,7 +96,7 @@ def api_stats(request: HttpRequest) -> JsonResponse:
     total_photos = EvidenceImage.objects.count()
     batches_count = IngestionBatch.objects.count()
 
-    today_pairs_qs = VehicleInstallationPair.objects.filter(
+    today_pairs_qs = VehicleInstallationPair.objects.filter(is_deleted=False).filter(
         Q(created_at__date=today) |
         Q(front_image__batch__created_at__date=today) |
         Q(rear_image__batch__created_at__date=today)

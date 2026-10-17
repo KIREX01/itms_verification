@@ -12,6 +12,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from core.matcher import order_matcher
 from core.models import (
+    EvidenceImage,
     IngestionBatch,
     InstallationOrder,
     SubmissionAuditLog,
@@ -53,7 +54,7 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
 
     latest_batch = IngestionBatch.objects.order_by("-created_at").first()
 
-    qs = VehicleInstallationPair.objects.all().select_related(
+    qs = VehicleInstallationPair.objects.filter(is_deleted=False).select_related(
         "order", "front_image", "rear_image", "front_image__batch", "rear_image__batch"
     )
 
@@ -180,9 +181,11 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
     ]
 
     today_approved_count = VehicleInstallationPair.objects.filter(
+        is_deleted=False,
         verification_status=VehicleInstallationPair.VerificationStatus.APPROVED
     ).filter(today_q).count()
     carryover_approved_count = VehicleInstallationPair.objects.filter(
+        is_deleted=False,
         verification_status=VehicleInstallationPair.VerificationStatus.APPROVED
     ).exclude(today_q).count()
 
@@ -206,7 +209,7 @@ def api_pair_detail(request: HttpRequest, pair_id: int) -> JsonResponse:
 
     pair = VehicleInstallationPair.objects.select_related(
         "order", "front_image", "rear_image", "front_image__batch", "rear_image__batch"
-    ).filter(id=pair_id).first()
+    ).filter(id=pair_id, is_deleted=False).first()
     if not pair:
         return JsonResponse({"success": False, "error": f"Pair #{pair_id} not found."}, status=404)
 
@@ -296,7 +299,7 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
 
     pair = VehicleInstallationPair.objects.select_related(
         "order", "front_image", "rear_image"
-    ).filter(id=pair_id).first()
+    ).filter(id=pair_id, is_deleted=False).first()
     if not pair:
         return JsonResponse({"success": False, "error": f"Pair #{pair_id} not found."}, status=404)
 
@@ -600,6 +603,92 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
             "message": f"{'[DRY RUN] ' if is_dry_run else ''}Submitted successfully to ITMS." if outcome.success else f"Submission failed: {outcome.error}",
         })
 
+    elif action == "delete_pair":
+        purge_param = request.POST.get("purge_files") if request.POST.get("purge_files") is not None else body_data.get("purge_files", True)
+        if isinstance(purge_param, str):
+            purge_files = purge_param.lower().strip() in ("true", "1", "yes")
+        else:
+            purge_files = bool(purge_param)
+
+        res = pair.soft_delete(operator=request.user, purge_files=purge_files)
+        return JsonResponse({
+            "success": True,
+            "message": f"Pair {pair.registration_number_detected} deleted and files {'purged' if purge_files else 'retained'}.",
+            "purged_files": res.get("purged_files", []),
+        })
+
+    elif action == "replace_image":
+        side = (request.POST.get("side") or body_data.get("side") or "").lower().strip()
+        source = (request.POST.get("source") or body_data.get("source") or "upload").lower().strip()
+        purge_param = request.POST.get("purge_old") if request.POST.get("purge_old") is not None else body_data.get("purge_old", True)
+        if isinstance(purge_param, str):
+            purge_old = purge_param.lower().strip() in ("true", "1", "yes")
+        else:
+            purge_old = bool(purge_param)
+
+        if side not in ("front", "rear"):
+            return JsonResponse({"success": False, "error": "Invalid side. Must be 'front' or 'rear'."}, status=400)
+
+        new_image = None
+        from core.services import vault_service
+
+        if source == "upload":
+            photo_file = request.FILES.get("photo")
+            if not photo_file:
+                return JsonResponse({"success": False, "error": "No photo file provided for upload."}, status=400)
+
+            target_batch = (pair.front_image.batch if pair.front_image and pair.front_image.batch else None) or (
+                pair.rear_image.batch if pair.rear_image and pair.rear_image.batch else None
+            )
+            if not target_batch:
+                target_batch = IngestionBatch.objects.order_by("-created_at").first()
+            if not target_batch:
+                target_batch = vault_service.create_ingestion_batch(
+                    source_type=IngestionBatch.SourceType.WEB,
+                    source_label=f"Replace Photo Batch ({side.title()})",
+                    user=request.user,
+                )
+
+            new_image, _status = vault_service.ingest_uploaded_file(
+                uploaded_file=photo_file,
+                batch=target_batch,
+                orientation_override=side.upper(),
+            )
+            if not new_image:
+                return JsonResponse({"success": False, "error": "Failed to ingest uploaded replacement photo into vault."}, status=500)
+
+            vault_service.process_single_image_vision(new_image)
+
+        elif source == "batch":
+            image_id = request.POST.get("image_id") or body_data.get("image_id")
+            if not image_id:
+                return JsonResponse({"success": False, "error": "image_id is required when source is 'batch'."}, status=400)
+
+            new_image = EvidenceImage.objects.filter(id=image_id).first()
+            if not new_image:
+                return JsonResponse({"success": False, "error": f"Candidate image #{image_id} not found."}, status=404)
+        else:
+            return JsonResponse({"success": False, "error": f"Invalid source '{source}'. Must be 'upload' or 'batch'."}, status=400)
+
+        pair.replace_image(side=side, new_image=new_image, operator=request.user, purge_old=purge_old)
+
+        return JsonResponse({
+            "success": True,
+            "message": f"{side.title()} photo replaced successfully.",
+            "pair": {
+                "id": pair.id,
+                "registration_number_detected": pair.registration_number_detected,
+                "verification_status": pair.verification_status,
+                "is_complete": pair.is_complete,
+                "side_replaced": side,
+                "new_image_id": str(new_image.id),
+                "new_image_url": _clean_media_url(new_image.vault_file),
+                "new_image_thumb": _clean_media_url(new_image.thumbnail_file or new_image.vault_file),
+                "detected_plate": new_image.detected_plate,
+                "ocr_confidence": round(new_image.ocr_confidence * 100, 1) if new_image.ocr_confidence else None,
+            }
+        })
+
     return JsonResponse({"success": False, "error": f"Unknown action: {action}"}, status=400)
 
 
@@ -621,6 +710,7 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
     latest_batch = IngestionBatch.objects.order_by("-created_at").first()
 
     qs = VehicleInstallationPair.objects.filter(
+        is_deleted=False,
         verification_status=VehicleInstallationPair.VerificationStatus.APPROVED,
         order__isnull=False,
     ).select_related("order", "front_image", "rear_image")

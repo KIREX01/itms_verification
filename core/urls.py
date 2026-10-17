@@ -57,6 +57,8 @@ urlpatterns = [
     path("api/upload/", views.api_upload_photos, name="api_upload_photos"),
     path("api/batches/", views.api_batches_list, name="api_batches_list"),
     path("api/batches/<str:batch_id>/", views.api_batch_detail, name="api_batch_detail"),
+    path("api/batches/<str:batch_id>/candidates/", views.api_batch_candidates, name="api_batch_candidates"),
+    path("api/images/<str:image_id>/replace/", views.api_replace_batch_image, name="api_replace_batch_image"),
 
     # History & Audit Trail REST API
     path("api/history/", views.api_history_list, name="api_history_list"),

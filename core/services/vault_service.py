@@ -895,3 +895,93 @@ def link_or_create_conveyor_pair(
 
     pair.save()
     return pair, pair.is_complete
+
+
+def purge_evidence_file(image: EvidenceImage) -> bool:
+    """
+    Safely unlinks physical vault files (vault_file, thumbnail_file, preview_file)
+    from disk and updates the EvidenceImage record to PRUNED without deleting the database row.
+    """
+    for file_field in [image.vault_file, image.thumbnail_file, image.preview_file]:
+        if not file_field:
+            continue
+        try:
+            abs_p = resolve_vault_path(file_field)
+            if abs_p and abs_p.exists() and abs_p.is_file():
+                abs_p.unlink(missing_ok=True)
+                logger.info("Purged vault file from disk: %s", abs_p)
+        except Exception as exc:
+            logger.warning("Failed to unlink evidence file %s: %s", file_field, exc)
+
+    image.is_file_pruned = True
+    image.pruned_at = timezone.now()
+    image.status = EvidenceImage.Status.PRUNED
+    image.save(update_fields=["is_file_pruned", "pruned_at", "status"])
+    return True
+
+
+def process_single_image_vision(image: EvidenceImage, save_crops: bool = False) -> Dict[str, Any]:
+    """
+    Executes the vision pipeline on a single EvidenceImage (plate detection, OCR, normalization)
+    and updates the image record attributes in-place.
+    """
+    from core.vision import detector, normalizer, ocr_engine, preprocess
+
+    try:
+        abs_path = resolve_vault_path(image.vault_file)
+        if not abs_path or not abs_path.exists():
+            image.status = EvidenceImage.Status.FAILED
+            image.error_message = "Vault file missing on disk for vision processing."
+            image.save(update_fields=["status", "error_message"])
+            return {"success": False, "error": image.error_message}
+
+        raw_img = preprocess.load_image(str(abs_path))
+        pre = preprocess.preprocess_pipeline(raw_img)
+
+        det = detector.detect_plate(pre)
+        crop = detector.crop_raw_detection(raw_img, pre, det) if det else None
+
+        ocr_res = ocr_engine.read_plate_text(crop) if crop is not None else None
+        raw_plate = ocr_res.text if ocr_res else ""
+        conf = ocr_res.confidence if ocr_res else 0.0
+
+        min_conf = float(getattr(settings, "OCR_MIN_CONFIDENCE", 0.55))
+        norm = normalizer.normalize_plate(raw_plate) if raw_plate else {"canonical": "", "is_valid": False}
+
+        if det:
+            image.bbox = det.bbox
+            image.detector_confidence = det.confidence
+        image.detected_plate = norm["canonical"] or raw_plate[:32]
+        image.ocr_confidence = conf
+
+        if norm["is_valid"] and (conf is None or conf >= min_conf):
+            image.status = EvidenceImage.Status.PLATE_DETECTED
+            image.error_message = ""
+        else:
+            image.status = EvidenceImage.Status.NEEDS_REVIEW
+            if not raw_plate:
+                image.error_message = "Plate localized but OCR extracted no readable text."
+            elif not norm["is_valid"]:
+                image.error_message = f"Invalid plate syntax '{image.detected_plate}'"
+            else:
+                image.error_message = f"OCR confidence {conf:.2f} below threshold"
+
+        image.save(update_fields=[
+            "bbox", "detector_confidence", "detected_plate",
+            "ocr_confidence", "status", "error_message"
+        ])
+
+        return {
+            "success": True,
+            "detected_plate": image.detected_plate,
+            "ocr_confidence": image.ocr_confidence,
+            "detector_confidence": image.detector_confidence,
+            "status": image.status,
+            "error_message": image.error_message,
+        }
+    except Exception as exc:
+        logger.exception("Error processing single image vision for %s: %s", image.id, exc)
+        image.status = EvidenceImage.Status.FAILED
+        image.error_message = f"Vision error: {exc}"
+        image.save(update_fields=["status", "error_message"])
+        return {"success": False, "error": str(exc)}

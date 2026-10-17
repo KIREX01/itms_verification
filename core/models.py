@@ -12,12 +12,16 @@ Design notes
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any, Dict, List, Optional
 
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 
 class InstallationOrder(models.Model):
@@ -398,6 +402,16 @@ class VehicleInstallationPair(models.Model):
         db_index=True,
         help_text="Timestamp when this pair was successfully submitted to ITMS.",
     )
+    is_deleted = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="True if soft-deleted/hidden by operator.",
+    )
+    deleted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when pair was soft-deleted.",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True, db_index=True)
@@ -410,6 +424,7 @@ class VehicleInstallationPair(models.Model):
             models.Index(fields=["registration_number_detected", "verification_status"]),
             models.Index(fields=["operator", "verification_status"]),
             models.Index(fields=["facility_code", "verification_status"]),
+            models.Index(fields=["is_deleted", "verification_status"]),
             models.Index(fields=["-updated_at"]),
         ]
 
@@ -419,6 +434,110 @@ class VehicleInstallationPair(models.Model):
     def refresh_completeness(self):
         self.is_complete = bool(self.front_image_id and self.rear_image_id)
         return self.is_complete
+
+    def soft_delete(self, operator=None, purge_files: bool = True) -> Dict[str, Any]:
+        """
+        Soft-deletes the pair, releases any linked order back to PENDING,
+        and safely purges unreferenced vault files from disk.
+        """
+        self.is_deleted = True
+        self.deleted_at = timezone.now()
+
+        if self.order:
+            linked_order = self.order
+            if linked_order.status in (InstallationOrder.Status.MATCHED, InstallationOrder.Status.FAILED):
+                linked_order.status = InstallationOrder.Status.PENDING
+                linked_order.save(update_fields=["status"])
+            self.order = None
+
+        self.save(update_fields=["is_deleted", "deleted_at", "order", "updated_at"])
+
+        purged_ids: List[str] = []
+        if purge_files:
+            from core.services import vault_service
+            for img in [self.front_image, self.rear_image]:
+                if img:
+                    other_refs = VehicleInstallationPair.objects.filter(
+                        is_deleted=False
+                    ).exclude(id=self.id).filter(
+                        Q(front_image=img) | Q(rear_image=img)
+                    ).exists()
+                    if not other_refs:
+                        vault_service.purge_evidence_file(img)
+                        purged_ids.append(str(img.id))
+
+        op_user = operator if (operator and getattr(operator, "is_authenticated", False)) else None
+        op_name = (op_user.get_full_name().strip() or op_user.username) if op_user else "System"
+        op_email = op_user.email.strip() if (op_user and getattr(op_user, "email", None)) else ""
+
+        SubmissionAuditLog.objects.create(
+            pair=self,
+            operator=op_user,
+            operator_username=op_name,
+            operator_email=op_email,
+            action=SubmissionAuditLog.Action.PAIR_DELETED,
+            result=SubmissionAuditLog.ResultStatus.SUCCESS,
+            message=f"Operator soft-deleted pair #{self.id} ({self.registration_number_detected}). Files {'purged: ' + ', '.join(purged_ids) if purged_ids else 'retained'}.",
+        )
+        return {"success": True, "pair_id": self.id, "purged_files": purged_ids}
+
+    def replace_image(self, side: str, new_image: EvidenceImage, operator=None, purge_old: bool = False) -> Dict[str, Any]:
+        """
+        Replaces front or rear photo of the pair, refreshes completeness/joint consensus,
+        and optionally unlinks/purges the old photo file from disk.
+        """
+        side_clean = side.lower().strip()
+        old_image = None
+        if side_clean == "front":
+            old_image = self.front_image
+            self.front_image = new_image
+            new_image.orientation = EvidenceImage.Orientation.FRONT
+            new_image.save(update_fields=["orientation"])
+        elif side_clean == "rear":
+            old_image = self.rear_image
+            self.rear_image = new_image
+            new_image.orientation = EvidenceImage.Orientation.REAR
+            new_image.save(update_fields=["orientation"])
+        else:
+            raise ValueError(f"Invalid side '{side}'. Must be 'front' or 'rear'.")
+
+        self.refresh_completeness()
+        if self.is_complete:
+            try:
+                from core.vision.joint_pipeline import DualStreamVisionEngine
+                engine = DualStreamVisionEngine(save_crops=False)
+                res = engine.process_pair(self)
+                if res and res.plate_number:
+                    self.registration_number_detected = res.plate_number
+            except Exception as exc:
+                logger.warning("Joint vision processing failed on image replace for pair %s: %s", self.id, exc)
+
+        self.save()
+
+        if purge_old and old_image and old_image.id != new_image.id:
+            from core.services import vault_service
+            other_refs = VehicleInstallationPair.objects.filter(
+                is_deleted=False
+            ).exclude(id=self.id).filter(
+                Q(front_image=old_image) | Q(rear_image=old_image)
+            ).exists()
+            if not other_refs:
+                vault_service.purge_evidence_file(old_image)
+
+        op_user = operator if (operator and getattr(operator, "is_authenticated", False)) else None
+        op_name = (op_user.get_full_name().strip() or op_user.username) if op_user else "System"
+        op_email = op_user.email.strip() if (op_user and getattr(op_user, "email", None)) else ""
+
+        SubmissionAuditLog.objects.create(
+            pair=self,
+            operator=op_user,
+            operator_username=op_name,
+            operator_email=op_email,
+            action=SubmissionAuditLog.Action.IMAGE_REPLACED,
+            result=SubmissionAuditLog.ResultStatus.SUCCESS,
+            message=f"Operator replaced {side_clean.upper()} photo (new: {new_image.id}, old: {old_image.id if old_image else 'None'}). Purge old: {purge_old}.",
+        )
+        return {"success": True, "pair_id": self.id, "side": side_clean}
 
 
 class SubmissionAuditLog(models.Model):
@@ -443,6 +562,8 @@ class SubmissionAuditLog(models.Model):
         OUTBOX_QUEUE = "OUTBOX_QUEUE", "Offline Outbox Queued"
         OUTBOX_DRAIN = "OUTBOX_DRAIN", "Offline Outbox Auto-Synced"
         FALLBACK = "FALLBACK", "Manual Fallback Triggered"
+        PAIR_DELETED = "PAIR_DELETED", "Pair Deleted / Purged"
+        IMAGE_REPLACED = "IMAGE_REPLACED", "Evidence Image Replaced"
 
     class ResultStatus(models.TextChoices):
         SUCCESS = "SUCCESS", "Success"

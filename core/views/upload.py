@@ -11,9 +11,10 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_POST
 
 from core.models import (
+    EvidenceImage,
     IngestionBatch,
     VehicleInstallationPair,
 )
@@ -392,6 +393,137 @@ def api_batches_list(request: HttpRequest) -> JsonResponse:
         "total_batches": total_batches,
         "today_batches": today_batches_cnt,
         "carryover_batches": carryover_batches_cnt,
+    })
+
+
+@require_GET
+def api_batch_candidates(request: HttpRequest, batch_id: str) -> JsonResponse:
+    """Returns candidate photos from a batch for the replacement image picker modal."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
+    batch = IngestionBatch.objects.filter(batch_id=batch_id).first()
+    if not batch:
+        return JsonResponse({"success": False, "error": f"Batch '{batch_id}' not found."}, status=404)
+
+    orientation_filter = request.GET.get("orientation", "ALL").upper().strip()
+    unassigned_only = request.GET.get("unassigned_only", "false").lower().strip() in ("true", "1", "yes")
+
+    qs = batch.images.filter(is_file_pruned=False)
+    if orientation_filter in ("FRONT", "REAR"):
+        qs = qs.filter(orientation=orientation_filter)
+
+    # Active pairs in this batch
+    pairs = VehicleInstallationPair.objects.filter(
+        is_deleted=False
+    ).filter(
+        Q(front_image__batch=batch) | Q(rear_image__batch=batch)
+    )
+    pair_map = {}
+    for p in pairs:
+        if p.front_image_id:
+            pair_map[p.front_image_id] = p.id
+        if p.rear_image_id:
+            pair_map[p.rear_image_id] = p.id
+
+    candidates = []
+    for img in qs:
+        is_assigned = (img.id in pair_map)
+        if unassigned_only and is_assigned:
+            continue
+
+        vault_p = str(img.vault_file).replace("\\", "/").strip().lstrip("/")
+        img_url = f"/{vault_p}" if vault_p.startswith("media/") else f"/media/{vault_p}"
+        thumb_p = str(img.thumbnail_file or "").replace("\\", "/").strip().lstrip("/")
+        thumb_url = (f"/{thumb_p}" if thumb_p.startswith("media/") else f"/media/{thumb_p}") if thumb_p else img_url
+        preview_p = str(img.preview_file or "").replace("\\", "/").strip().lstrip("/")
+        preview_url = (f"/{preview_p}" if preview_p.startswith("media/") else f"/media/{preview_p}") if preview_p else img_url
+
+        candidates.append({
+            "id": str(img.id),
+            "url": img_url,
+            "thumb_url": thumb_url,
+            "preview_url": preview_url,
+            "orientation": img.orientation,
+            "detected_plate": img.detected_plate,
+            "ocr_confidence": round(img.ocr_confidence * 100, 1) if img.ocr_confidence is not None else None,
+            "captured_at": img.captured_at.strftime("%H:%M:%S") if img.captured_at else "",
+            "is_assigned": is_assigned,
+            "current_pair_id": pair_map.get(img.id),
+        })
+
+    return JsonResponse({
+        "success": True,
+        "batch_id": batch.batch_id,
+        "candidates": candidates,
+        "count": len(candidates),
+    })
+
+
+@require_POST
+def api_replace_batch_image(request: HttpRequest, image_id: str) -> JsonResponse:
+    """Replaces a photo directly in a batch and updates any referencing active pairs."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
+    image = EvidenceImage.objects.filter(id=image_id).select_related("batch").first()
+    if not image:
+        return JsonResponse({"success": False, "error": f"Image '{image_id}' not found."}, status=404)
+
+    photo_file = request.FILES.get("photo")
+    if not photo_file:
+        return JsonResponse({"success": False, "error": "No photo file provided."}, status=400)
+
+    purge_old = request.POST.get("purge_old", "true").lower().strip() in ("true", "1", "yes")
+
+    new_image, _status = vault_service.ingest_uploaded_file(
+        uploaded_file=photo_file,
+        batch=image.batch,
+        orientation_override=image.orientation,
+    )
+    if not new_image:
+        return JsonResponse({"success": False, "error": "Failed to ingest replacement photo."}, status=500)
+
+    # Run vision on the replacement image
+    vault_service.process_single_image_vision(new_image)
+
+    # Rebind any active pairs referencing this image
+    active_pairs = VehicleInstallationPair.objects.filter(
+        is_deleted=False
+    ).filter(
+        Q(front_image=image) | Q(rear_image=image)
+    )
+
+    affected_pair_ids = []
+    for pair in active_pairs:
+        if pair.front_image_id == image.id:
+            pair.front_image = new_image
+        if pair.rear_image_id == image.id:
+            pair.rear_image = new_image
+        pair.refresh_completeness()
+        pair.save()
+        affected_pair_ids.append(pair.id)
+
+    if purge_old:
+        vault_service.purge_evidence_file(image)
+
+    vault_p = str(new_image.vault_file).replace("\\", "/").strip().lstrip("/")
+    img_url = f"/{vault_p}" if vault_p.startswith("media/") else f"/media/{vault_p}"
+    thumb_p = str(new_image.thumbnail_file or "").replace("\\", "/").strip().lstrip("/")
+    thumb_url = (f"/{thumb_p}" if thumb_p.startswith("media/") else f"/media/{thumb_p}") if thumb_p else img_url
+
+    return JsonResponse({
+        "success": True,
+        "message": f"Photo replaced in batch {image.batch.batch_id}.",
+        "new_image": {
+            "id": str(new_image.id),
+            "url": img_url,
+            "thumb_url": thumb_url,
+            "orientation": new_image.orientation,
+            "detected_plate": new_image.detected_plate,
+            "ocr_confidence": round(new_image.ocr_confidence * 100, 1) if new_image.ocr_confidence is not None else None,
+        },
+        "affected_pair_ids": affected_pair_ids,
     })
 
 

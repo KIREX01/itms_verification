@@ -38,6 +38,8 @@ from .upload import (
     api_upload_photos,
     api_batch_detail,
     api_batches_list,
+    api_batch_candidates,
+    api_replace_batch_image,
 )
 
 from .orders import (

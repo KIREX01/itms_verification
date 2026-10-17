@@ -42,6 +42,10 @@ class TestMobileCompanion:
     def setup_method(self):
         self.client = Client()
         session_manager._sessions.clear()
+        from django.contrib.auth import get_user_model
+        user_model = get_user_model()
+        self.user, _ = user_model.objects.get_or_create(username="test_mobile_op")
+        self.client.force_login(self.user)
 
     def test_network_service_discovery(self):
         """Verifies local network interface discovery and mobile URL construction."""

@@ -1016,7 +1016,8 @@ function startStockScanLoop() {
 function showScanDetectionBanner(text, isError = false) {
     const viewport = document.getElementById("stock-camera-viewport");
     const liveBadge = document.getElementById("stock-scan-live-badge");
-    const detectedSpan = document.getElementById("stock-last-detected");
+    const detectedSpan = document.getElementById("stock-last-detected") || document.getElementById("stock-live-badge-plate");
+    const statusSpan = document.getElementById("stock-live-badge-status");
     if (viewport) {
         viewport.classList.remove("detected-error", "detected");
         viewport.classList.add(isError ? "detected-error" : "detected");
@@ -1024,10 +1025,15 @@ function showScanDetectionBanner(text, isError = false) {
             viewport.classList.remove("detected-error", "detected");
         }, 450);
     }
-    if (liveBadge && detectedSpan) {
-        detectedSpan.textContent = text;
-        liveBadge.style.background = isError ? "rgba(220, 38, 38, 0.95)" : "rgba(16, 185, 129, 0.95)";
-        liveBadge.style.borderColor = isError ? "#ef4444" : "#10b981";
+    if (liveBadge) {
+        if (detectedSpan) detectedSpan.textContent = text;
+        if (statusSpan && isError) {
+            statusSpan.textContent = "⚠️ NOTICE";
+            statusSpan.style.background = "#dc2626";
+            statusSpan.style.color = "#ffffff";
+        }
+        liveBadge.style.background = isError ? "rgba(220, 38, 38, 0.95)" : "rgba(15, 23, 42, 0.96)";
+        liveBadge.style.borderColor = isError ? "#ef4444" : "#0284c7";
         liveBadge.style.color = "#ffffff";
         liveBadge.style.display = "block";
         if (window._liveBadgeTimer) clearTimeout(window._liveBadgeTimer);
@@ -1044,9 +1050,9 @@ async function handleStockBarcodeDetected(rawCode) {
 
     const now = Date.now();
 
-    // 1. Per-Plate Debounce Cooldown: 2500ms
+    // 1. Per-Plate Debounce Cooldown: 1800ms
     const lastSeen = MobileState.stock.recentScansCooldown.get(cleanPlate) || 0;
-    if (now - lastSeen < 2500) {
+    if (now - lastSeen < 1800) {
         return;
     }
 
@@ -1077,7 +1083,10 @@ async function handleStockBarcodeDetected(rawCode) {
     playScanBeep(true);
     if (navigator.vibrate) navigator.vibrate(60);
 
-    // Instant local stock inspection (<30ms)
+    // Instant Visual Feedback on reticle right away!
+    updateMobileStockStatusBadge(cleanPlate, { badge: "⏳ CHECKING...", desc: "Verifying warehouse stock profile...", code: "CHECKING" }, MobileState.stock.category, false);
+
+    // Instant local stock inspection
     const suffix = MobileState.stock.shiftSuffix || "";
     try {
         const inspectRes = await fetch(`/api/stock/inspect/?plate=${encodeURIComponent(cleanPlate)}&date_suffix=${encodeURIComponent(suffix)}`);
@@ -1116,7 +1125,7 @@ async function handleStockBarcodeDetected(rawCode) {
             if (MobileState.stock.autoSync) {
                 setTimeout(() => {
                     void syncStockScansToServer();
-                }, 100);
+                }, 80);
             }
             return;
         }
@@ -1125,13 +1134,13 @@ async function handleStockBarcodeDetected(rawCode) {
     }
 
     // Fallback if inspect fails
-    showScanDetectionBanner(`✓ SCANNED: ${cleanPlate}`, false);
+    updateMobileStockStatusBadge(cleanPlate, { badge: "🟢 ADDED", desc: "Added to queue", code: "ON_STOCK" }, MobileState.stock.category, false);
     addPlateToStockQueue(cleanPlate);
 
     if (MobileState.stock.autoSync) {
         setTimeout(() => {
             void syncStockScansToServer();
-        }, 100);
+        }, 80);
     }
 }
 

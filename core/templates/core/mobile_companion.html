@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>ITMS Mobile Capture - Verification Copilot</title>
 
-    <link rel="stylesheet" href="{% static 'core/css/mobile_companion.css' %}?v=15">
+    <link rel="stylesheet" href="{% static 'core/css/mobile_companion.css' %}?v=16">
 </head>
 <body>
     <!-- Top National Flag Ribbon -->
@@ -119,6 +119,224 @@
                 </div>
 
                 <!-- 2-Step Progress Indicator -->
+                <div class="step-progress-row">
+                    <div class="step-pill active" id="pill-step-front">
+                        <span class="step-num">1</span>
+                        <span class="step-name">Front Angle</span>
+                        <span class="step-check" id="check-step-front">⭕</span>
+                    </div>
+                    <div class="step-arrow">➔</div>
+                    <div class="step-pill" id="pill-step-rear">
+                        <span class="step-num">2</span>
+                        <span class="step-name">Rear Angle</span>
+                        <span class="step-check" id="check-step-rear">⭕</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Single Dynamic Primary Shutter Hero -->
+            <div class="smart-shutter-container">
+                <button class="smart-shutter-btn shutter-step-front" id="btn-conveyor-smart" onclick="handleConveyorSmartShutter()">
+                    <span class="smart-shutter-icon" id="conveyor-smart-icon">📸</span>
+                    <span class="smart-shutter-title" id="conveyor-smart-title">Take FRONT Photo</span>
+                    <span class="smart-shutter-subtitle" id="conveyor-smart-sub">Step 1: Headlamp &amp; Front Plate</span>
+                </button>
+            </div>
+
+            <!-- Live Side-by-Side Previews -->
+            <div class="conveyor-previews-row">
+                <!-- Front Thumbnail Card -->
+                <div class="preview-mini-card" id="card-front">
+                    <div class="mini-card-header">
+                        <span>1. FRONT</span>
+                        <div class="mini-card-actions">
+                            <span class="mini-status" id="status-tag-front">Empty</span>
+                            <button class="mini-btn-view" id="btn-view-front" style="display:none;" onclick="inspectConveyorPhoto(event, 'FRONT')">🔍 View</button>
+                        </div>
+                    </div>
+                    <div class="mini-preview-box" id="preview-box-front" onclick="handlePreviewCardClick('FRONT')">
+                        <span class="mini-placeholder" id="placeholder-front">🚘 Snap Front</span>
+                        <img id="img-preview-front" class="mini-image" style="display:none;" alt="Front Preview">
+                    </div>
+                </div>
+
+                <!-- Rear Thumbnail Card -->
+                <div class="preview-mini-card" id="card-rear">
+                    <div class="mini-card-header">
+                        <span>2. REAR</span>
+                        <div class="mini-card-actions">
+                            <span class="mini-status" id="status-tag-rear">Empty</span>
+                            <button class="mini-btn-view" id="btn-view-rear" style="display:none;" onclick="inspectConveyorPhoto(event, 'REAR')">🔍 View</button>
+                        </div>
+                    </div>
+                    <div class="mini-preview-box" id="preview-box-rear" onclick="handlePreviewCardClick('REAR')">
+                        <span class="mini-placeholder" id="placeholder-rear">🏍️ Snap Rear</span>
+                        <img id="img-preview-rear" class="mini-image" style="display:none;" alt="Rear Preview">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quality & Defocus Correction Card (Displayed when photo is blurry or dark) -->
+            <div class="quality-correction-card" id="quality-correction-card" style="display:none;">
+                <div class="quality-correction-header">
+                    <span class="quality-warn-icon">⚠️</span>
+                    <div class="quality-warn-title-group">
+                        <strong id="quality-warn-title">Photo Out of Focus / Blurry</strong>
+                        <span id="quality-warn-score" class="quality-score-pill">Sharpness: 34 / 100</span>
+                    </div>
+                </div>
+                <div class="quality-correction-body">
+                    <p id="quality-warn-desc">
+                        The camera was shaking or out of focus. Clear plate numbers are required for optical verification.
+                    </p>
+                    <div class="quality-tips-box">
+                        <span class="tip-title">💡 Correction Tips:</span>
+                        <ul class="tip-bullets">
+                            <li>Hold phone with two hands and tap plate on screen to autofocus.</li>
+                            <li>Stand 1.5 &ndash; 2 meters away from the motorcycle.</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="quality-correction-actions">
+                    <button class="btn-quality-retake" id="btn-quality-retake" onclick="handleQualityRetake()">
+                        📸 Retake Photo Now
+                    </button>
+                    <button class="btn-quality-keep" onclick="dismissQualityWarning()">
+                        Keep Photo Anyway ➔
+                    </button>
+                </div>
+            </div>
+
+            <!-- Advance to Next Bike Button -->
+            <div class="conveyor-footer-actions">
+                <button class="next-bike-btn" id="btn-next-bike" onclick="advanceToNextBike()" disabled>
+                    <span>✓ Pair Complete ➔ Advance to Next Bike</span>
+                    <span class="next-icon">➔</span>
+                </button>
+            </div>
+        </main>
+
+        <!-- ================================================================= -->
+        <!-- MODE 2: OFF-CONVEYOR WORKFLOW (U-Turn Yard Walk) -->
+        <!-- ================================================================= -->
+        <main class="mode-container" id="container-uturn">
+            <!-- Active Walk Session Batch Indicator -->
+            <div class="uturn-batch-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding:8px 12px; background:rgba(15,23,42,0.85); border:1px solid rgba(56,189,248,0.3); border-radius:10px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:1.1rem;">🚶</span>
+                    <div>
+                        <div id="uturn-batch-indicator" style="font-weight:700; font-size:0.88rem; color:#38bdf8; letter-spacing:0.5px;">ACTIVE WALK: BATCH #1</div>
+                        <div style="font-size:0.7rem; color:var(--ug-text-dim,#94a3b8);">Off-conveyor row walk (isolated batch)</div>
+                    </div>
+                </div>
+                <span id="uturn-pair-status-pill" style="font-size:0.72rem; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); padding:3px 10px; border-radius:12px; font-weight:700;">ACTIVE</span>
+            </div>
+
+            <!-- Visual U-Turn Progress Road -->
+            <div class="uturn-flow-road">
+                <div class="road-step road-step-rear active" id="road-step-rear" onclick="if(MobileState.uturn.phase==='FRONT') toggleUturnTurnaround();">
+                    <div class="road-step-top">
+                        <span class="step-num">1</span>
+                        <span class="road-badge" id="road-rear-badge">0 Rears</span>
+                    </div>
+                    <span class="road-title">Going Out: REARS</span>
+                </div>
+
+                <div class="road-arrow" id="road-arrow-indicator">➔</div>
+
+                <div class="road-step road-step-front" id="road-step-front" onclick="if(MobileState.uturn.phase==='REAR' && MobileState.uturn.rearCount > 0) toggleUturnTurnaround();">
+                    <div class="road-step-top">
+                        <span class="step-num">2</span>
+                        <span class="road-badge" id="road-front-badge">0 Fronts</span>
+                    </div>
+                    <span class="road-title">Walking Back: FRONTS</span>
+                </div>
+            </div>
+
+            <!-- Active Phase Guidance Bar -->
+            <div class="uturn-guidance-bar" id="uturn-guidance-bar">
+                <span class="guidance-icon" id="uturn-guidance-icon">🚶</span>
+                <span class="guidance-text" id="uturn-instruction-text">
+                    Walk down row snapping <strong>REAR</strong> plates. Tap turnaround when reaching the end.
+                </span>
+            </div>
+
+            <!-- Giant Primary Shutter Button -->
+            <div class="big-shutter-container">
+                <button class="big-shutter-btn shutter-rear" id="btn-big-shutter" onclick="triggerUturnCapture()">
+                    <span class="shutter-icon" id="shutter-icon">📸</span>
+                    <span class="shutter-main-text" id="shutter-main-text">Capture REAR</span>
+                    <span class="shutter-counter" id="shutter-counter">Bike #1</span>
+                </button>
+            </div>
+
+            <!-- Prominent Turnaround Callout Card (Visible when rears >= 1) -->
+            <div class="turnaround-callout-card" id="turnaround-callout" style="display:none;">
+                <div class="turnaround-callout-content">
+                    <span class="turnaround-callout-icon">🔄</span>
+                    <div class="turnaround-callout-text">
+                        <strong id="turnaround-callout-title">Reached the end of the row?</strong>
+                        <span id="turnaround-callout-sub">Turn around to photograph FRONT plates walking back.</span>
+                    </div>
+                </div>
+                <button class="btn-turnaround-action" id="btn-turnaround" onclick="toggleUturnTurnaround()">
+                    <span id="turnaround-btn-label">TURN AROUND ➔ SWITCH TO FRONTS</span>
+                    <span class="turnaround-arrow">↩️</span>
+                </button>
+            </div>
+
+            <!-- Return Leg Match Tracking Banner (Visible during Fronts) -->
+            <div class="return-match-banner" id="return-match-banner" style="display:none;">
+                <div class="match-info">
+                    <span id="return-match-text">Matching 0 of 0 bikes</span>
+                    <span class="match-percent" id="return-match-percent">0%</span>
+                </div>
+                <div class="match-progress-bar">
+                    <div class="match-progress-fill" id="match-progress-fill" style="width: 0%;"></div>
+                </div>
+                <button class="btn-switch-back" onclick="toggleUturnTurnaround()">
+                    ↩️ Switch back to Rears
+                </button>
+            </div>
+
+            <!-- Recent Stream Mini Strip -->
+            <div class="recent-stream-container">
+                <div class="recent-stream-header">
+                    <span>RECENT CAPTURES (<span id="uturn-total-count">0</span>)</span>
+                    <button class="btn-undo-snap" id="btn-undo-snap" onclick="undoLastUturnSnap()" style="display:none;">
+                        ↩️ Retake Last
+                    </button>
+                </div>
+                <div class="uturn-recent-strip" id="uturn-recent-strip">
+                    <div class="empty-strip-msg">Snapped photos will appear here</div>
+                </div>
+            </div>
+
+            <!-- Finish U-Turn Batch Button -->
+            <div class="uturn-footer-actions">
+                <button class="finish-batch-btn" id="btn-finish-uturn" onclick="finishUturnBatch()" disabled>
+                    <span>🏁 Complete U-Turn Batch</span>
+                </button>
+            </div>
+        </main>
+
+        <!-- ================================================================= -->
+        <!-- MODE 3: STOCK QR SCAN WORKFLOW (Dispatches, Deliveries, Transfers) -->
+        <!-- ================================================================= -->
+        <main class="mode-container" id="container-stock" style="display:none;">
+            <!-- Active Bike Number Badge & Stepper Card -->
+            <div class="bike-status-card">
+                <div class="bike-status-header">
+                    <div>
+                        <span class="card-eyebrow">ASSEMBLY CONVEYOR INSPECTION</span>
+                        <h2 class="bike-target-title" id="conveyor-bike-label">Motorcycle #1</h2>
+                    </div>
+                    <div class="bike-pair-state" id="conveyor-pair-badge">
+                        <span class="badge badge-yellow" id="badge-pair-progress">0 of 2 Captured</span>
+                    </div>
+                </div>
+
+                <!-- 2-Step Progress Indicator -->
                 <div class="step-progress-row" style="margin-top:8px; gap:6px; display:grid; grid-template-columns: repeat(4, 1fr);">
                     <button class="step-pill active" id="pill-stock-dispatch" onclick="setStockSubMode('DISPATCH')" style="color:#ffffff !important; font-weight:700; background:#0284c7; border:1px solid #38bdf8; padding:8px 2px; text-align:center;">
                         <span class="step-num" style="background:#ffffff; color:#0369a1; font-weight:800; display:block; margin:0 auto 3px auto; width:18px; height:18px; line-height:18px; font-size:0.7rem; border-radius:50%;">1</span>
@@ -189,6 +407,7 @@
                         <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
                             <span id="stock-live-badge-status" class="badge badge-green" style="font-weight:800; font-size:0.75rem; padding:2px 8px;">🟢 ON STOCK</span>
                             <span id="stock-live-badge-plate" style="font-weight:900; font-size:1.05rem; color:#ffffff; letter-spacing:0.5px;">...</span>
+                            <span id="stock-last-detected" style="display:none;">...</span>
                             <span id="stock-live-badge-cat" class="badge badge-muted" style="font-size:0.72rem; font-weight:800; padding:2px 6px;">PSV</span>
                         </div>
                         <div id="stock-live-badge-desc" style="font-size:0.7rem; color:#94a3b8; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Ready in warehouse stock</div>
@@ -365,6 +584,6 @@
     </div>
 
     <!-- Client-Side Engine -->
-    <script src="{% static 'core/js/mobile_companion.js' %}?v=15"></script>
+    <script src="{% static 'core/js/mobile_companion.js' %}?v=16"></script>
 </body>
 </html>

@@ -129,7 +129,7 @@ class SettingsPane(Vertical):
         itms_enabled = cfg.get("itms", {}).get("enabled", True)
         timeout = str(cfg.get("submission", {}).get("request_timeout_seconds", 15))
         circuit_breaker = str(cfg.get("submission", {}).get("circuit_breaker_threshold", 3))
-        compression_enabled = cfg.get("compression", {}).get("enabled", True)
+        compression_enabled = cfg.get("compression", {}).get("enabled", False)
         comp_max_dim = str(cfg.get("compression", {}).get("max_dimension", 1920))
         comp_quality = str(cfg.get("compression", {}).get("jpeg_quality", 88))
         outbox_enabled = cfg.get("outbox", {}).get("enabled", True)
@@ -1085,7 +1085,7 @@ class SettingsPane(Vertical):
                 self.query_one("#input-db-batch-size", Input).value = "200"
 
                 self.query_one("#input-uturn-threshold", Input).value = "1800"
-                self.query_one("#switch-compression-enabled", Switch).value = True
+                self.query_one("#switch-compression-enabled", Switch).value = False
                 self.query_one("#input-compression-dim", Input).value = "1920"
                 self.query_one("#input-compression-quality", Input).value = "88"
                 self.query_one("#switch-outbox-enabled", Switch).value = True

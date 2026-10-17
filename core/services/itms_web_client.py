@@ -144,7 +144,7 @@ def prepare_multipart_image_bytes(
     from core.services import config_service
 
     if enabled is None:
-        enabled = bool(config_service.get_setting("compression.enabled", True))
+        enabled = bool(config_service.get_setting("compression.enabled", False))
     if max_dimension is None:
         try:
             max_dimension = int(config_service.get_setting("compression.max_dimension", 1920))

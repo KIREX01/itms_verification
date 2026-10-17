@@ -100,7 +100,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "pool_maxsize": 20,                    # Maximum active connection pool size
     },
     "compression": {
-        "enabled": True,                       # Smart on-the-fly multipart photo compression
+        "enabled": False,                      # Smart on-the-fly multipart photo compression (disabled: photos pre-compressed on client)
         "max_dimension": 1920,                 # Max dimension in px (LANCZOS downsampling)
         "jpeg_quality": 88,                    # JPEG quality for multipart stream
     },
@@ -331,9 +331,9 @@ DEVELOPER_SETTINGS_SCHEMA: Dict[str, Dict[str, Any]] = {
     },
     "compression.enabled": {
         "label": "Multipart Compression",
-        "description": "Downscale photos in-memory during HTTP upload (master photos remain untouched).",
+        "description": "Downscale photos in-memory during HTTP upload (disabled by default; photos pre-compressed on mobile).",
         "type": "bool",
-        "default": True,
+        "default": False,
         "category": "Compression & Media",
     },
     "compression.max_dimension": {

@@ -565,3 +565,206 @@ function toggleActivityConsole() {
     const drawer = document.getElementById("activity-drawer");
     if (drawer) drawer.classList.toggle("collapsed");
 }
+
+
+// -----------------------------------------------------------------------------
+// Universal CSRF & Application-Wide Shift Date Controller
+// -----------------------------------------------------------------------------
+
+if (typeof window.getCsrfToken !== "function") {
+    window.getCsrfToken = function() {
+        const input = document.querySelector('[name=csrfmiddlewaretoken]');
+        if (input && input.value) return input.value;
+        const match = document.cookie.match(/(?:^|; )csrftoken=([^;]*)/);
+        return match ? decodeURIComponent(match[1]) : "";
+    };
+}
+
+window.activeShiftDateInfo = {
+    suffix: "",
+    formatted_date: "",
+    mode: "today",
+    is_today: true,
+    display: ""
+};
+
+window.cachedAvailableShiftDates = [];
+
+window.initGlobalShiftDate = async function() {
+    try {
+        const res = await fetch("/api/settings/shift-date/");
+        const data = await res.json();
+        if (data.success) {
+            if (data.active_shift) {
+                window.activeShiftDateInfo = data.active_shift;
+            }
+            if (data.available_dates) {
+                window.cachedAvailableShiftDates = data.available_dates;
+            }
+            populateAllShiftDropdowns(window.cachedAvailableShiftDates, window.activeShiftDateInfo);
+            syncAllDateSelectorsUI(window.activeShiftDateInfo);
+        }
+    } catch (err) {
+        console.warn("initGlobalShiftDate error:", err);
+    }
+};
+
+window.populateAllShiftDropdowns = function(dates, activeShift) {
+    if (!dates || dates.length === 0) return;
+    const activeSfx = activeShift ? activeShift.suffix : "";
+
+    // 1. Header Select
+    const headerSel = document.getElementById("global-shift-select");
+    if (headerSel) {
+        const currentSelected = headerSel.value || activeSfx;
+        headerSel.innerHTML = "";
+        dates.forEach(d => {
+            const opt = document.createElement("option");
+            opt.value = d.suffix;
+            const star = d.is_today ? " (Live Shift)" : "";
+            opt.textContent = `${d.formatted_date} [${d.suffix}]${star}`;
+            if (d.suffix === currentSelected || (!currentSelected && d.suffix === activeSfx)) {
+                opt.selected = true;
+            }
+            headerSel.appendChild(opt);
+        });
+    }
+
+    // 2. Stock Shift Select
+    const stockSel = document.getElementById("stock-shift-select");
+    if (stockSel) {
+        const currentSelected = stockSel.value || activeSfx;
+        stockSel.innerHTML = "";
+        dates.forEach(d => {
+            const opt = document.createElement("option");
+            opt.value = d.suffix;
+            opt.textContent = `${d.formatted_date} (${d.suffix})${d.is_today ? " • Today" : ""}`;
+            if (d.suffix === currentSelected || (!currentSelected && d.suffix === activeSfx)) {
+                opt.selected = true;
+            }
+            stockSel.appendChild(opt);
+        });
+    }
+
+    // 3. Reports Date Select
+    const repSel = document.getElementById("report-date-select");
+    if (repSel) {
+        const currentSelected = repSel.value || activeSfx;
+        repSel.innerHTML = `<option value="ALL">All Work Dates</option>`;
+        dates.forEach(d => {
+            const opt = document.createElement("option");
+            opt.value = d.suffix;
+            opt.textContent = `${d.formatted_date} (${d.suffix}) - ${d.order_count} orders${d.is_today ? " [Today]" : ""}`;
+            if (d.suffix === currentSelected || (!currentSelected && d.suffix === activeSfx)) {
+                opt.selected = true;
+            }
+            repSel.appendChild(opt);
+        });
+    }
+};
+
+window.setGlobalShiftDate = async function(targetVal) {
+    if (!targetVal) return;
+    try {
+        if (typeof showToast === "function") {
+            showToast(`📅 Synchronizing application to shift ${targetVal}...`, "info");
+        }
+        const csrf = typeof getCsrfToken === "function" ? getCsrfToken() : "";
+        const res = await fetch("/api/settings/shift-date/", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRFToken": csrf,
+            },
+            body: JSON.stringify({ target_date: targetVal })
+        });
+        const data = await res.json();
+        if (data.success && data.active_shift) {
+            window.activeShiftDateInfo = data.active_shift;
+            syncAllDateSelectorsUI(data.active_shift);
+            if (typeof showToast === "function") {
+                showToast(`✓ All features mounted to shift: ${data.active_shift.display}`, "success");
+            }
+
+            // Dispatch global event
+            window.dispatchEvent(new CustomEvent("shiftDateChanged", { detail: data.active_shift }));
+
+            // Update Reports Hub
+            if (typeof reportCurrentDate !== "undefined") {
+                reportCurrentDate = data.active_shift.suffix;
+            }
+            if (typeof fetchReportTotals === "function") {
+                void fetchReportTotals();
+            }
+
+            // Update Stock Hub
+            if (typeof currentStockDateSuffix !== "undefined") {
+                currentStockDateSuffix = data.active_shift.suffix;
+            }
+            if (typeof refreshStockLedger === "function") {
+                void refreshStockLedger();
+            }
+
+            // Update ITMS Orders Explorer
+            if (typeof loadItmsOrders === "function") {
+                void loadItmsOrders();
+            }
+        } else {
+            if (typeof showToast === "function") {
+                showToast(`Shift date update failed: ${data.error || "Unknown error"}`, "error");
+            }
+        }
+    } catch (err) {
+        console.error("Error setting global shift date:", err);
+    }
+};
+
+window.syncAllDateSelectorsUI = function(shiftInfo) {
+    if (!shiftInfo) return;
+    const sfx = shiftInfo.suffix;
+
+    // Header selector
+    const headerSel = document.getElementById("global-shift-select");
+    if (headerSel && sfx) {
+        headerSel.value = sfx;
+    }
+
+    // Reports Hub
+    const repSel = document.getElementById("report-date-select");
+    if (repSel && sfx && repSel.value !== "ALL") {
+        repSel.value = sfx;
+    }
+    const repBadge = document.getElementById("report-selected-date-badge");
+    if (repBadge) {
+        repBadge.textContent = `Focus: ${shiftInfo.formatted_date} (${sfx})`;
+    }
+
+    // Stock Management
+    const stockSel = document.getElementById("stock-shift-select");
+    if (stockSel && sfx) {
+        stockSel.value = sfx;
+    }
+    const stockDisplay = document.getElementById("stock-date-display");
+    if (stockDisplay) {
+        stockDisplay.innerText = `Shift: ${sfx}`;
+    }
+
+    // Settings Tab
+    const setMode = document.getElementById("settings-shift-mode-select");
+    if (setMode) {
+        setMode.value = shiftInfo.mode || "today";
+    }
+    const setManual = document.getElementById("settings-manual-date-input");
+    if (setManual && shiftInfo.manual_date) {
+        setManual.value = shiftInfo.manual_date;
+    }
+    const setBadge = document.getElementById("settings-active-shift-badge");
+    if (setBadge) {
+        setBadge.textContent = `Active: ${shiftInfo.display}`;
+        setBadge.className = shiftInfo.is_today ? "badge badge-green" : "badge badge-yellow";
+    }
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+    void initGlobalShiftDate();
+});

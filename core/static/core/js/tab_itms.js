@@ -569,13 +569,15 @@ async function syncItmsShiftOrders() {
 
     try {
         const csrf = getCsrfToken();
+        const targetDate = (window.activeShiftDateInfo && window.activeShiftDateInfo.suffix) ? window.activeShiftDateInfo.suffix : "";
+        const bodyPayload = `tab=shift&pages=25${targetDate ? '&target_date=' + encodeURIComponent(targetDate) : ''}`;
         const res = await fetch("/api/itms/orders/sync/now/", {
             method: "POST",
             headers: {
                 "Content-Type": "application/x-www-form-urlencoded",
                 "X-CSRFToken": csrf,
             },
-            body: "tab=shift&pages=25",
+            body: bodyPayload,
         });
         const data = await res.json();
         if (data.success) {

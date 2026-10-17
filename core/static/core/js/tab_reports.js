@@ -47,8 +47,21 @@ async function fetchReportTotals() {
 
 function onReportDateChanged(val) {
     reportCurrentDate = val;
-    fetchReportTotals();
+    if (val && val !== "ALL" && typeof setGlobalShiftDate === "function") {
+        void setGlobalShiftDate(val);
+    } else {
+        void fetchReportTotals();
+    }
 }
+
+// React immediately to global shift date changes
+window.addEventListener('shiftDateChanged', (e) => {
+    const detail = e.detail;
+    if (detail && detail.suffix && detail.suffix !== reportCurrentDate && reportCurrentDate !== "ALL") {
+        reportCurrentDate = detail.suffix;
+        void fetchReportTotals();
+    }
+});
 
 function toggleReportScope() {
     reportCurrentScope = (reportCurrentScope === "ALL") ? "TODAY" : "ALL";

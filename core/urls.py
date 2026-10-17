@@ -44,6 +44,7 @@ urlpatterns = [
     path("api/submissions/batch/", views.api_batch_submit, name="api_batch_submit"),
     path("api/export/report/", views.api_export_report, name="api_export_report"),
     path("api/settings/", views.api_settings, name="api_settings"),
+    path("api/settings/shift-date/", views.api_shift_date, name="api_shift_date"),
     path("api/settings/toggle-dry-run/", views.api_toggle_dry_run, name="api_toggle_dry_run"),
     path("api/settings/vault-folder/", views.api_vault_folder, name="api_vault_folder"),
     path("api/settings/browse-vault-folder/", views.api_browse_vault_folder, name="api_browse_vault_folder"),

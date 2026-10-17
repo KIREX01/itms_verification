@@ -91,13 +91,16 @@
 
             <div class="settings-row">
                 <div class="settings-label-group">
-                    <span class="settings-label-title">Shift Target Date Selection</span>
-                    <span class="settings-label-desc">Rule for reconciliation ledger date boundary: 'today', 'yesterday', or specific 'manual' date.</span>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span class="settings-label-title">Shift Target Date Selection</span>
+                        <span id="settings-active-shift-badge" class="badge badge-green" style="font-weight:700; font-family:var(--font-mono);">Active: Loading...</span>
+                    </div>
+                    <span class="settings-label-desc">Ground-truth operating shift date for Reports Hub, Stock Management dispatch/reconciliation, and ITMS Order sync (locked to East Africa Time Africa/Kampala).</span>
                 </div>
-                <div style="display:flex; gap:10px; align-items:center;">
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                     <select id="settings-shift-mode-select" 
                             style="padding: 6px 12px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                            onchange="updateSetting('sync.shift_target_date_mode', this.value)">
+                            onchange="onSettingsShiftModeChanged(this.value)">
                         <option value="today" {% if user_settings.sync_shift_target_date_mode.value == 'today' %}selected{% endif %}>Today (Live Shift)</option>
                         <option value="yesterday" {% if user_settings.sync_shift_target_date_mode.value == 'yesterday' %}selected{% endif %}>Yesterday</option>
                         <option value="manual" {% if user_settings.sync_shift_target_date_mode.value == 'manual' %}selected{% endif %}>Manual Calendar Date</option>
@@ -105,8 +108,13 @@
 
                     <input type="text" id="settings-manual-date-input" placeholder="e.g. 30.09.2026"
                            value="{{ user_settings.sync_manual_target_date.value|default:'' }}"
-                           style="width: 130px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateSetting('sync.manual_target_date', this.value.trim())">
+                           style="width: 120px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem; font-family:var(--font-mono);"
+                           onchange="onSettingsManualDateChanged(this.value.trim())">
+
+                    <input type="date" id="settings-manual-date-picker"
+                           title="Select Calendar Date"
+                           style="padding: 5px 8px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #38bdf8; border-radius: var(--radius-md); font-size: 0.85rem; cursor:pointer;"
+                           onchange="onSettingsDatePickerChanged(this.value)">
                 </div>
             </div>
 

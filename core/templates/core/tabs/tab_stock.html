@@ -4,11 +4,14 @@
         <div class="itms-table-panel" style="padding: 14px;">
             <div class="pane-header">
                 <h2>🏭 Bond Stock & Logistics</h2>
-                <div class="header-actions" style="display: flex; gap: 6px; align-items: center;">
+                <div class="header-actions" style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                     <button class="btn btn-secondary" onclick="stockPrevDay()" title="Previous Shift">◀</button>
                     <button class="btn btn-primary" onclick="stockToday()" title="Today's Shift">Today</button>
                     <button class="btn btn-secondary" onclick="stockNextDay()" title="Next Shift">▶</button>
-                    <span id="stock-date-display" class="badge badge-dark" style="margin-left: 6px; font-weight: 700;">Shift: Loading...</span>
+                    <select id="stock-shift-select" onchange="setGlobalShiftDate(this.value)" style="padding: 4px 8px; font-size: 0.82rem; border-radius: 4px; background: #0f172a; color: #38bdf8; border: 1px solid #334155; font-weight: 700; font-family: var(--font-mono); cursor: pointer;" title="Select Active Operating Shift">
+                        <option value="">Loading shifts...</option>
+                    </select>
+                    <span id="stock-date-display" class="badge badge-dark" style="margin-left: 4px; font-weight: 700;">Shift: Loading...</span>
                 </div>
             </div>
 

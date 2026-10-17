@@ -475,3 +475,39 @@ async function browseGenericPath(inputId, type, title, settingKey) {
         showToast("Failed to launch browser: " + err, "error");
     }
 }
+
+// -----------------------------------------------------------------------------
+// Operating Shift Target Date Handlers
+// -----------------------------------------------------------------------------
+
+function onSettingsShiftModeChanged(modeVal) {
+    if (typeof setGlobalShiftDate === "function") {
+        void setGlobalShiftDate(modeVal);
+    } else {
+        void updateSetting("sync.shift_target_date_mode", modeVal);
+    }
+}
+
+function onSettingsManualDateChanged(manualVal) {
+    if (!manualVal) return;
+    if (typeof setGlobalShiftDate === "function") {
+        void setGlobalShiftDate(manualVal);
+    } else {
+        void updateSetting("sync.manual_target_date", manualVal);
+    }
+}
+
+function onSettingsDatePickerChanged(isoVal) {
+    if (!isoVal) return;
+    const manualInput = document.getElementById("settings-manual-date-input");
+    if (manualInput) {
+        manualInput.value = isoVal;
+    }
+    const modeSel = document.getElementById("settings-shift-mode-select");
+    if (modeSel) {
+        modeSel.value = "manual";
+    }
+    if (typeof setGlobalShiftDate === "function") {
+        void setGlobalShiftDate(isoVal);
+    }
+}

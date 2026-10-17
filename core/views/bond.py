@@ -19,22 +19,16 @@ logger = logging.getLogger(__name__)
 @require_GET
 @require_itms_envelope
 def api_stock_shift_dates(request: HttpRequest) -> JsonResponse:
-    """Returns available shift date suffixes to enable correct Prev/Next navigation."""
-    from core.models import StockDispatchScan, StockDelivery, SafeAuditScan
-    
-    # Fast distinct list of suffixes from active models
-    suffixes = set(StockDispatchScan.objects.values_list('work_date_suffix', flat=True).distinct())
-    dels = set(StockDelivery.objects.values_list('target_date_suffix', flat=True).distinct())
-    audits = set(SafeAuditScan.objects.values_list('work_date_suffix', flat=True).distinct())
-    
-    all_suffixes = suffixes | dels | audits
-    if not all_suffixes:
-        from django.utils import timezone
-        all_suffixes = {timezone.localdate().strftime("%d%m%y")}
-        
-    # Sort by YYMMDD descending
-    sorted_suffixes = sorted(list(all_suffixes), key=lambda s: s[-2:] + s[2:4] + s[:2] if len(s)==6 else s, reverse=True)
-    return JsonResponse({"success": True, "dates": sorted_suffixes})
+    """Returns available shift date suffixes and detailed date metadata."""
+    from core.services import date_service
+    dates = date_service.get_available_shift_dates()
+    active_shift = date_service.get_active_shift_info()
+    return JsonResponse({
+        "success": True,
+        "dates": [d["suffix"] for d in dates],
+        "detailed_dates": dates,
+        "active_shift": active_shift,
+    })
 
 
 @require_GET

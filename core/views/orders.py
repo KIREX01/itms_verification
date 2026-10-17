@@ -502,6 +502,12 @@ def api_itms_orders_explorer(request: HttpRequest) -> JsonResponse:
 
     # Fallback to Local Database query
     qs = InstallationOrder.objects.filter(is_archived=is_archive)
+    target_date = request.GET.get("date") or request.GET.get("date_suffix") or request.GET.get("suffix")
+    if target_date and str(target_date).strip().upper() != "ALL":
+        from core.services import date_service
+        work_d, sfx = date_service.resolve_date_and_suffix(target_date)
+        if sfx and sfx != "ALL":
+            qs = qs.filter(Q(order_number__endswith=sfx) | Q(installation_date=work_d))
     if search:
         qs = qs.filter(
             Q(order_number__icontains=search) |

@@ -31,90 +31,24 @@ from core.vision import normalizer
 logger = logging.getLogger(__name__)
 
 
-def extract_order_date_suffix(order_number: str) -> Optional[str]:
-    """
-    Extracts the 6-digit DDMMYY date suffix from an order number string.
-    Example: 'PO-UMA667PU-260926' -> '260926'
-             '#PO-UMA667PU-260926' -> '260926'
-    """
-    if not order_number:
-        return None
-    cleaned = order_number.strip().lstrip("#")
-    m = re.search(r"-(\d{6})$", cleaned)
-    return m.group(1) if m else None
+from core.services import date_service
+from core.services.date_service import (
+    extract_order_date_suffix,
+    format_date_suffix,
+    format_date_suffix_readable,
+    format_iso_date,
+    format_itms_timestamp,
+    format_readable_date,
+    get_active_shift_date,
+    get_active_shift_info,
+    get_active_shift_suffix,
+    get_available_shift_dates,
+    parse_date_input,
+    parse_target_date_suffix,
+    resolve_date_and_suffix,
+)
 
-
-def format_date_suffix_readable(date_suffix: str) -> str:
-    """
-    Converts 6-digit DDMMYY string (e.g. '260926') into human-readable '26.09.2026'.
-    """
-    if not date_suffix or len(date_suffix) != 6 or not date_suffix.isdigit():
-        return date_suffix or ""
-    dd = date_suffix[:2]
-    mm = date_suffix[2:4]
-    yy = date_suffix[4:6]
-    return f"{dd}.{mm}.20{yy}"
-
-
-def parse_target_date_suffix(date_input: Optional[str]) -> Optional[str]:
-    """
-    Normalizes any date representation (e.g. '260926', '26.09.2026', '2026-09-26')
-    to 6-digit DDMMYY suffix format ('260926').
-    """
-    if not date_input or date_input.strip().upper() in ("ALL", "NONE", ""):
-        return None
-    val = date_input.strip().upper()
-    if val == "TODAY":
-        today = timezone.localdate()
-        return today.strftime("%d%m%y")
-    # If 6-digit already
-    if len(val) == 6 and val.isdigit():
-        return val
-    # If DD.MM.YYYY or DD/MM/YYYY or DD-MM-YYYY
-    m1 = re.match(r"^(\d{2})[./-](\d{2})[./-](?:20)?(\d{2})$", val)
-    if m1:
-        return f"{m1.group(1)}{m1.group(2)}{m1.group(3)}"
-    # If YYYY-MM-DD
-    m2 = re.match(r"^(?:20)?(\d{2})[./-](\d{2})[./-](\d{2})$", val)
-    if m2:
-        return f"{m2.group(3)}{m2.group(2)}{m2.group(1)}"
-    return val
-
-
-def get_available_order_dates() -> List[Dict[str, Any]]:
-    """
-    Scans all InstallationOrders in the local database and returns distinct work dates
-    ordered chronologically newest first.
-    """
-    suffix_counts: Dict[str, int] = {}
-    for num in InstallationOrder.objects.values_list("order_number", flat=True):
-        s = extract_order_date_suffix(num)
-        if s:
-            suffix_counts[s] = suffix_counts.get(s, 0) + 1
-
-    today_suffix = timezone.localdate().strftime("%d%m%y")
-    if today_suffix not in suffix_counts:
-        suffix_counts[today_suffix] = 0
-
-    def _sort_key(s: str):
-        if len(s) == 6 and s.isdigit():
-            dd, mm, yy = int(s[:2]), int(s[2:4]), int(s[4:6])
-            return (yy, mm, dd)
-        return (0, 0, 0)
-
-    results = []
-    for s in sorted(suffix_counts.keys(), key=_sort_key, reverse=True):
-        formatted = format_date_suffix_readable(s)
-        cnt = suffix_counts[s]
-        results.append({
-            "suffix": s,
-            "formatted_date": formatted,
-            "label": f"{formatted} ({s})",
-            "order_count": cnt,
-            "is_today": (s == today_suffix),
-        })
-
-    return results
+get_available_order_dates = get_available_shift_dates
 
 
 def get_date_driven_plate_totals(target_date: Optional[str] = None) -> Dict[str, Any]:
@@ -145,10 +79,10 @@ def get_date_driven_plate_totals(target_date: Optional[str] = None) -> Dict[str,
         formatted_date = format_date_suffix_readable(selected_suffix)
         orders_qs = InstallationOrder.objects.filter(order_number__endswith=selected_suffix)
     else:
-        # Default to latest date with orders if none selected
-        latest_with_orders = next((d["suffix"] for d in available_dates if d["order_count"] > 0), None)
-        selected_suffix = latest_with_orders or timezone.localdate().strftime("%d%m%y")
-        formatted_date = format_date_suffix_readable(selected_suffix)
+        # Default to active operating shift date configured in Settings
+        active_info = date_service.get_active_shift_info()
+        selected_suffix = active_info["suffix"]
+        formatted_date = active_info["formatted_date"]
         orders_qs = InstallationOrder.objects.filter(order_number__endswith=selected_suffix)
 
     # 1. Category 1: Installed / In Archive

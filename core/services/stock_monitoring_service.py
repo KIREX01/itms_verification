@@ -46,10 +46,20 @@ from core.models import (
 )
 from core.services import bond_service
 from core.services.plate_lifecycle_service import format_display_plate
-from core.services.report_service import (
+from core.services import date_service
+from core.services.date_service import (
     extract_order_date_suffix,
+    format_date_suffix,
     format_date_suffix_readable,
+    format_iso_date,
+    format_itms_timestamp,
+    format_readable_date,
+    get_active_shift_date,
+    get_active_shift_info,
+    get_active_shift_suffix,
+    parse_date_input,
     parse_target_date_suffix,
+    resolve_date_and_suffix,
 )
 from core.vision import normalizer
 
@@ -169,33 +179,7 @@ def parse_plate_input(raw_input: Any) -> List[str]:
     return unique_plates
 
 
-def resolve_date_and_suffix(target: Optional[Any] = None) -> Tuple[date, str]:
-    """
-    Normalizes a date object, string, or 6-digit suffix into a (date, suffix) tuple.
-    Example: '260926' -> (date(2026, 9, 26), '260926')
-             date(2026, 9, 26) -> (date(2026, 9, 26), '260926')
-    """
-    if isinstance(target, date):
-        suffix = target.strftime("%d%m%y")
-        return target, suffix
-
-    if isinstance(target, datetime):
-        d = target.date()
-        return d, d.strftime("%d%m%y")
-
-    parsed_suffix = parse_target_date_suffix(target)
-    if parsed_suffix and len(parsed_suffix) == 6 and parsed_suffix.isdigit():
-        dd = int(parsed_suffix[:2])
-        mm = int(parsed_suffix[2:4])
-        yy = int(parsed_suffix[4:6])
-        try:
-            d = date(2000 + yy, mm, dd)
-            return d, parsed_suffix
-        except ValueError:
-            pass
-
-    today = timezone.localdate()
-    return today, today.strftime("%d%m%y")
+# resolve_date_and_suffix is imported directly from date_service above
 
 
 def generate_delivery_note_reference(target_date: Optional[Any] = None) -> str:
@@ -1406,6 +1390,7 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         "work_date": work_d.isoformat(),
         "work_date_suffix": suffix,
         "formatted_date": formatted_date,
+        "active_shift": get_active_shift_info(),
         "warehouse_name": ledger.warehouse_name,
         "active_bond_code": active_bond_code,
         "closing_stock": total_closing,

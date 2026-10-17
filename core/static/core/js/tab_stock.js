@@ -1526,7 +1526,11 @@ async function navigateStockDay(direction) {
             else currentStockDateSuffix = '';
         }
     }
-    await refreshStockLedger();
+    if (typeof setGlobalShiftDate === 'function' && currentStockDateSuffix) {
+        void setGlobalShiftDate(currentStockDateSuffix);
+    } else {
+        await refreshStockLedger();
+    }
 }
 
 function stockPrevDay() {
@@ -1538,6 +1542,19 @@ function stockNextDay() {
 }
 
 function stockToday() {
-    currentStockDateSuffix = '';
-    void refreshStockLedger();
+    if (typeof setGlobalShiftDate === 'function') {
+        void setGlobalShiftDate('today');
+    } else {
+        currentStockDateSuffix = '';
+        void refreshStockLedger();
+    }
 }
+
+// React immediately to global shift date changes
+window.addEventListener('shiftDateChanged', (e) => {
+    const detail = e.detail;
+    if (detail && detail.suffix && detail.suffix !== currentStockDateSuffix) {
+        currentStockDateSuffix = detail.suffix;
+        void refreshStockLedger();
+    }
+});

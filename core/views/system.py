@@ -23,7 +23,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from core.models import EvidenceImage, VehicleInstallationPair
-from core.services import config_service, vault_service
+from core.services import config_service, date_service, vault_service
 from core.services.pipeline_runner import runner as pipeline_runner
 from core.services.update_service import update_service
 from core.version import __version__
@@ -144,11 +144,26 @@ def api_export_report(request: HttpRequest) -> HttpResponse:
     if not (request.user and getattr(request.user, "is_authenticated", False)):
         return HttpResponse("Unauthorized", status=401)
 
+    from django.db.models import Q
+    target_date = request.GET.get("date") or request.GET.get("date_suffix") or request.GET.get("suffix")
+
     pairs = (
         VehicleInstallationPair.objects.all()
         .select_related("order", "front_image", "rear_image")
         .order_by("-updated_at")
     )
+
+    is_all = (target_date or "").strip().upper() == "ALL"
+    if is_all:
+        selected_suffix = "ALL"
+    else:
+        work_d, selected_suffix = date_service.resolve_date_and_suffix(target_date)
+        pairs = pairs.filter(
+            Q(order__order_number__endswith=selected_suffix) |
+            Q(created_at__date=work_d) |
+            Q(front_image__ingested_at__date=work_d) |
+            Q(rear_image__ingested_at__date=work_d)
+        )
 
     out = io.StringIO()
     writer = csv.writer(out)
@@ -166,8 +181,8 @@ def api_export_report(request: HttpRequest) -> HttpResponse:
         "Front Photo",
         "Rear Photo",
         "Manual Override",
-        "Submitted At",
-        "Updated At",
+        "Submitted At (EAT)",
+        "Updated At (EAT)",
     ])
 
     for p in pairs:
@@ -185,14 +200,14 @@ def api_export_report(request: HttpRequest) -> HttpResponse:
             p.front_image.vault_file if p.front_image else "",
             p.rear_image.vault_file if p.rear_image else "",
             "YES" if p.is_manual_override else "NO",
-            p.submitted_at.strftime("%Y-%m-%d %H:%M:%S") if p.submitted_at else "",
-            p.updated_at.strftime("%Y-%m-%d %H:%M:%S") if p.updated_at else "",
+            date_service.format_itms_timestamp(p.submitted_at),
+            date_service.format_itms_timestamp(p.updated_at),
         ])
 
     exports_dir = Path(settings.BASE_DIR) / "exports"
     exports_dir.mkdir(parents=True, exist_ok=True)
-    date_str = datetime.now().strftime("%Y%m%d_%H%M")
-    filename = f"itms_shift_report_{date_str}.csv"
+    date_str = date_service.now_kampala().strftime("%Y%m%d_%H%M")
+    filename = f"itms_shift_report_{selected_suffix}_{date_str}.csv" if selected_suffix != "ALL" else f"itms_shift_report_all_{date_str}.csv"
     csv_data = out.getvalue()
     (exports_dir / filename).write_text(csv_data, encoding="utf-8-sig")
 
@@ -265,6 +280,7 @@ def api_settings(request: HttpRequest) -> JsonResponse:
             "developer_mode": config_service.is_developer_mode() if is_admin else False,
             "user_settings": config_service.get_user_settings(),
             "developer_settings": config_service.get_developer_settings() if is_admin else {},
+            "active_shift_date": date_service.get_active_shift_info(),
             "database": db_info.get("display", "SQLite") if is_admin else "Connected & Synchronized",
             "active_engine": db_info.get("vendor", "sqlite") if is_admin else "connected",
         })
@@ -279,6 +295,7 @@ def api_settings(request: HttpRequest) -> JsonResponse:
         "user_settings": config_service.get_user_settings(),
         "developer_settings": config_service.get_developer_settings() if is_admin else {},
         "active_bond": config_service.get_active_bond(),
+        "active_shift_date": date_service.get_active_shift_info(),
         "database": db_info.get("display", "SQLite") if is_admin else "Connected & Synchronized",
         "active_engine": db_info.get("vendor", "sqlite") if is_admin else "connected",
         "version": __version__,
@@ -712,3 +729,50 @@ if ($res -eq [System.Windows.Forms.DialogResult]::OK) {
             
     return JsonResponse({"success": False, "error": "Native browsing not supported on this OS"})
 
+
+@csrf_exempt
+def api_shift_date(request: HttpRequest) -> JsonResponse:
+    """
+    GET: Returns current active shift date and available shift dates.
+    POST: Sets the system-wide active operating shift date.
+    When updated, all features (Reports, Stock Management, Explorer) follow this date.
+    """
+    if request.method == "POST":
+        target = ""
+        if request.content_type == "application/json" and request.body:
+            try:
+                body = json.loads(request.body.decode("utf-8"))
+                target = body.get("target_date") or body.get("date") or body.get("suffix") or body.get("mode") or ""
+            except Exception:
+                pass
+        else:
+            target = request.POST.get("target_date") or request.POST.get("date") or request.POST.get("suffix") or request.POST.get("mode") or ""
+
+        target_str = str(target).strip()
+        if target_str.lower() in ("today", "live"):
+            config_service.set_setting("sync.shift_target_date_mode", "today")
+            config_service.set_setting("sync.manual_target_date", "")
+        elif target_str.lower() == "yesterday":
+            config_service.set_setting("sync.shift_target_date_mode", "yesterday")
+            config_service.set_setting("sync.manual_target_date", "")
+        else:
+            parsed_d = date_service.parse_date_input(target_str)
+            if parsed_d:
+                config_service.set_setting("sync.shift_target_date_mode", "manual")
+                config_service.set_setting("sync.manual_target_date", date_service.format_readable_date(parsed_d))
+            else:
+                return JsonResponse({"success": False, "error": f"Invalid date: '{target_str}'"}, status=400)
+
+        active_shift = date_service.get_active_shift_info()
+        return JsonResponse({
+            "success": True,
+            "message": f"Active operating shift date set to {active_shift['display']}",
+            "active_shift": active_shift,
+        })
+
+    # GET
+    return JsonResponse({
+        "success": True,
+        "active_shift": date_service.get_active_shift_info(),
+        "available_dates": date_service.get_available_shift_dates(),
+    })

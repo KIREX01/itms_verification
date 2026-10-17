@@ -1370,7 +1370,7 @@ class ITMSWebClient:
     def _sync_orders_to_local_db_atomic(self, orders: List[Dict[str, Any]]) -> Dict[str, Any]:
         from django.utils import timezone
         from django.db import models
-        from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
+        from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog, EvidenceImage
         from core.vision import normalizer
 
         created_count = 0
@@ -2786,7 +2786,7 @@ class ITMSWebClient:
         """
         from django.db import models
         from django.utils import timezone
-        from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
+        from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog, EvidenceImage
         from core.vision import normalizer
 
         order_num = order_info.get("order_number", "").strip()
@@ -3242,7 +3242,7 @@ class ITMSWebClient:
         if dry_run:
             simulated_redirect = f"{self.base_url}/installation-orders/approve?id={order_uuid}"
             try:
-                from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
+                from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog, EvidenceImage
                 order_obj = InstallationOrder.objects.filter(itms_order_uuid=order_uuid).first()
                 if order_obj:
                     pairs = VehicleInstallationPair.objects.filter(order=order_obj)
@@ -3299,7 +3299,7 @@ class ITMSWebClient:
 
                 # Audit log if pair exists
                 try:
-                    from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
+                    from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog, EvidenceImage
                     order_obj = InstallationOrder.objects.filter(itms_order_uuid=order_uuid).first()
                     if order_obj:
                         pairs = VehicleInstallationPair.objects.filter(order=order_obj)
@@ -3361,7 +3361,7 @@ class ITMSWebClient:
         """
         from django.db import models
         from django.utils import timezone
-        from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
+        from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog, EvidenceImage
         from core.vision import normalizer
 
         order_num = step1_data.get("order_number", "").strip()
@@ -3672,7 +3672,7 @@ class ITMSWebClient:
         if dry_run:
             simulated_redirect = f"{self.base_url}/installation-orders/confirmation?id={order_uuid}"
             try:
-                from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
+                from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog, EvidenceImage
                 order_obj = InstallationOrder.objects.filter(itms_order_uuid=order_uuid).first()
                 if order_obj:
                     pairs = VehicleInstallationPair.objects.filter(order=order_obj)
@@ -3745,7 +3745,7 @@ class ITMSWebClient:
 
                 # Audit log in database
                 try:
-                    from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
+                    from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog, EvidenceImage
                     order_obj = InstallationOrder.objects.filter(itms_order_uuid=order_uuid).first()
                     if order_obj:
                         order_obj.status = InstallationOrder.Status.SUBMITTED
@@ -4142,7 +4142,7 @@ class ITMSWebClient:
         if dry_run:
             replace_desc = f" with replacement photos ({', '.join(replaced_info)})" if replaced_info else ""
             try:
-                from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
+                from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog, EvidenceImage
                 order_obj = InstallationOrder.objects.filter(itms_order_uuid=order_uuid).first()
                 if order_obj:
                     pairs = VehicleInstallationPair.objects.filter(order=order_obj)
@@ -4232,7 +4232,7 @@ class ITMSWebClient:
                 is_index = "/installation-orders/index" in redirect_url
 
                 try:
-                    from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog, EvidenceImage
+                    from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog, EvidenceImage, EvidenceImage
                     from django.utils import timezone
                     order_obj = InstallationOrder.objects.filter(itms_order_uuid=order_uuid).first()
                     if order_obj:
@@ -4312,7 +4312,7 @@ class ITMSWebClient:
         """
         from django.db import models
         from django.utils import timezone
-        from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog
+        from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog, EvidenceImage
         from core.vision import normalizer
 
         order_num = step3_data.get("order_number", "").strip()

@@ -695,3 +695,8 @@ document.addEventListener("DOMContentLoaded", () => {
     loadOperatingBonds();
 });
 
+
+// Explicit window attachment to guarantee availability across subviews
+window.syncItmsShiftOrders = syncItmsShiftOrders;
+window.syncCurrentItmsPage = syncCurrentItmsPage;
+window.autoSyncAllItmsKits = autoSyncAllItmsKits;

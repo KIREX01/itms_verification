@@ -806,3 +806,6 @@ async function syncReportShiftOrders() {
         }
     }
 }
+
+// Explicit window attachment to guarantee availability across tab lifecycles
+window.syncReportShiftOrders = syncReportShiftOrders;

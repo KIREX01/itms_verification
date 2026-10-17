@@ -126,19 +126,43 @@ def enhance_whole_image(
     output_path: Optional[str] = None,
     saturation_factor: float = 1.15,
     sharpness_factor: float = 1.3,
+    max_dimension: Optional[int] = None,
+    jpeg_quality: Optional[int] = None,
 ) -> str:
-    """Enhance a photo dynamically on disk using Pillow.
+    """Enhance and standardize a photo dynamically on disk using Pillow.
+
+    Ingress Standard:
+    - Normalizes photo resolution upon server ingress: if dimensions exceed
+      max_dimension (e.g. raw 12-48MP photos from direct uploads or CLI),
+      downsamples to max 1920px (LANCZOS).
+    - Photos already <= 1920px (e.g. from Mobile Companion or Web UI) retain their dimensions.
+    - Applies contrast balancing, saturation boost, sharpness, and brightness normalization.
+    - Saves as optimized web-ready JPEG so ITMS submissions require zero in-memory re-compression.
 
     Args:
         image_path: Absolute path to the input image.
         output_path: Where to save the result. If None, overwrites in-place.
         saturation_factor: Color richness multiplier (1.0 = original).
         sharpness_factor: Detail crispness multiplier (1.0 = original).
+        max_dimension: Max width or height in px (default from config or 1920).
+        jpeg_quality: Quality factor for saved image (default from config or 88).
 
     Returns:
         The output path of the enhanced image.
     """
     from PIL import Image, ImageEnhance, ImageOps
+
+    try:
+        from core.services import config_service
+        if max_dimension is None:
+            max_dimension = int(config_service.get_setting("compression.max_dimension", 1920))
+        if jpeg_quality is None:
+            jpeg_quality = int(config_service.get_setting("compression.jpeg_quality", 88))
+    except Exception:
+        if max_dimension is None:
+            max_dimension = 1920
+        if jpeg_quality is None:
+            jpeg_quality = 88
 
     if output_path is None:
         output_path = image_path
@@ -154,6 +178,17 @@ def enhance_whole_image(
         return image_path  # return original path unchanged
 
     try:
+        # Standardize resolution upon server ingress:
+        # If photo exceeds max_dimension, downsample with high-fidelity LANCZOS filter.
+        orig_w, orig_h = img.size
+        if max_dimension and (orig_w > max_dimension or orig_h > max_dimension):
+            scale = min(max_dimension / float(orig_w), max_dimension / float(orig_h))
+            new_w = max(1, int(round(orig_w * scale)))
+            new_h = max(1, int(round(orig_h * scale)))
+            resample_filter = getattr(Image, "Resampling", Image).LANCZOS
+            img = img.resize((new_w, new_h), resample=resample_filter)
+            logger.info("Standardized ingress image %s: %dx%d -> %dx%d", image_path, orig_w, orig_h, new_w, new_h)
+
         # 1. Autocontrast
         img = ImageOps.autocontrast(img, cutoff=0.5)
 
@@ -192,7 +227,14 @@ def enhance_whole_image(
         if brightness_factor != 1.0:
             img = ImageEnhance.Brightness(img).enhance(brightness_factor)
 
-        img.save(output_path, quality=95)
+        out_lower = output_path.lower()
+        if out_lower.endswith((".jpg", ".jpeg")):
+            img.save(output_path, format="JPEG", quality=jpeg_quality, optimize=True)
+        elif out_lower.endswith(".webp"):
+            img.save(output_path, format="WEBP", quality=jpeg_quality)
+        else:
+            img.save(output_path, quality=jpeg_quality)
+
         logger.debug("Enhanced image saved to %s (contrast=%.2f, brightness=%.2f)",
                       output_path, contrast_factor, brightness_factor)
     except Exception as exc:

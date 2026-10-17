@@ -1263,11 +1263,13 @@ function renderStockQueueList() {
     const listElem = document.getElementById("stock-scanned-list");
     const countBadge = document.getElementById("stock-scanned-count-badge");
     const queueCount = document.getElementById("stock-queue-count");
+    const stagedBadge = document.getElementById("stock-staged-badge");
     if (!listElem) return;
 
     const q = MobileState.stock.queue;
     if (countBadge) countBadge.textContent = `${q.length} Scanned`;
     if (queueCount) queueCount.textContent = `${q.length}`;
+    if (stagedBadge) stagedBadge.textContent = `${q.length} Plate${q.length === 1 ? '' : 's'} Staged`;
 
     if (q.length === 0) {
         listElem.innerHTML = `<div style="color:#64748b; text-align:center; padding:12px;">No plates staged yet. Scan or paste above.</div>`;

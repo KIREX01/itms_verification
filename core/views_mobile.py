@@ -61,7 +61,7 @@ def mobile_companion_view(request: HttpRequest) -> HttpResponse:
     from core.services import date_service
     active_shift_d = date_service.get_active_shift_date()
     shift_suffix = date_service.format_date_suffix(active_shift_d)
-    shift_date_str = date_service.format_date_standard(active_shift_d)
+    shift_date_str = date_service.format_iso_date(active_shift_d)
 
     return render(request, "core/mobile_companion.html", {
         "version": __version__,

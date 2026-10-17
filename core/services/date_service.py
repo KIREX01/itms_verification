@@ -102,6 +102,10 @@ def format_iso_date(val: Any) -> str:
     return str(val)
 
 
+# Alias for standard date string
+format_date_standard = format_iso_date
+
+
 def format_itms_timestamp(val: Optional[Union[datetime, str]]) -> str:
     """
     Converts datetime (or parseable string) into Ugandan standard 'DD.MM.YYYY - HH:MM' in Kampala time.

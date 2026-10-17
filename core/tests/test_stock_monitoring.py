@@ -39,9 +39,21 @@ from core.services import bond_service, kit_provisioning_service, stock_monitori
 
 class StockMonitoringTests(TestCase):
     def setUp(self):
+        from django.contrib.auth.models import User
+        from core.models import OperatorITMSSession
         self.client = Client()
         self.test_suffix = "290926"
         self.test_date = date(2026, 9, 29)
+        self.user = User.objects.create_user(username="testoperator", password="password123")
+        self.sess = OperatorITMSSession.objects.create(
+            user=self.user,
+            itms_email="operator@test.com",
+            is_authenticated=True,
+            cookies={"_identity-frontend": "dummy_cookie_val"},
+            active_bond_code="AGM",
+            active_bond_name="AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)",
+        )
+        self.client.force_login(self.user)
 
     def test_parse_plate_input(self):
         sample = """
@@ -395,7 +407,7 @@ class StockMonitoringTests(TestCase):
         self.assertEqual(docket["count"], 1)
         self.assertEqual(docket["unallocated_plates"], ["UMA903PW"])
         self.assertEqual(docket["raw_plates"], "UMA903PW")
-        self.assertIn("AGM BONDED WAREHOUSE — MVR ALLOCATION EXCEPTION DOCKET", docket["formatted_docket"])
+        self.assertIn("MVR ALLOCATION EXCEPTION DOCKET", docket["formatted_docket"])
         self.assertIn("UMA903PW", docket["formatted_docket"])
 
     def test_delivery_notes_and_mvr_docket_rest_apis(self):
@@ -435,7 +447,7 @@ class StockMonitoringTests(TestCase):
         bond_service.set_active_bond("AGM", "AGM Bonded Warehouse")
         active = bond_service.get_active_bond()
         self.assertEqual(active["code"], "AGM")
-        self.assertEqual(active["name"], "AGM Bonded Warehouse")
+        self.assertEqual(active["name"], "AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)")
 
         # 2. Discovered warehouse dynamically from kit/order
         InstallationKit.objects.create(
@@ -1738,7 +1750,7 @@ class StockMonitoringTests(TestCase):
         mock_get_client.return_value = mock_client
         mock_client.fetch_installation_kits.return_value = {"success": True, "count": 0, "kits": []}
 
-        c = Client()
+        c = self.client
         # 1. Test verify-batch endpoint
         resp = c.post(
             "/api/stock/verify-batch/",

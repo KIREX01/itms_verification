@@ -41,7 +41,31 @@
                     </button>
                     <button class="btn btn-secondary" onclick="openStockPasteModal()" title="Paste registration numbers from Excel (V)">📋 Paste <span class="hotkey">V</span></button>
                     <button class="btn btn-primary" onclick="syncStock()" title="Unified sync with ITMS (S)">⟳ Sync <span class="hotkey">S</span></button>
-                    <button class="btn btn-secondary" onclick="exportStockCSV()" title="Export reconciliation CSV (E)">📥 Export <span class="hotkey">E</span></button>
+                    <div class="dropdown" style="position:relative; display:inline-block;">
+                        <button class="btn btn-secondary dropdown-toggle" onclick="toggleStockExportMenu(event)" title="Export Shift Stock CSVs (Hotkey: E)">
+                            📊 Export CSVs ▾ <span class="hotkey">E</span>
+                        </button>
+                        <div id="stock-export-dropdown" style="display:none; position:absolute; right:0; top:100%; margin-top:4px; background:#0f172a; border:1px solid #334155; border-radius:6px; box-shadow:0 8px 24px rgba(0,0,0,0.6); z-index:100; min-width:230px; overflow:hidden;">
+                            <a href="javascript:void(0)" onclick="exportDispatchCSV()" style="display:block; padding:8px 12px; color:#4ade80; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
+                                📦 Morning Dispatches CSV
+                            </a>
+                            <a href="javascript:void(0)" onclick="exportMovementsCSV()" style="display:block; padding:8px 12px; color:#60a5fa; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
+                                🚚 Inbound & Movements CSV
+                            </a>
+                            <a href="javascript:void(0)" onclick="exportAuditCSV()" style="display:block; padding:8px 12px; color:#e2e8f0; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
+                                🔍 Safe Audit Scans CSV
+                            </a>
+                            <a href="javascript:void(0)" onclick="exportUnregistered()" style="display:block; padding:8px 12px; color:#f87171; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
+                                ⚠️ Unregistered Safe Kits CSV
+                            </a>
+                            <a href="javascript:void(0)" onclick="exportStockCSV()" style="display:block; padding:8px 12px; color:#38bdf8; text-decoration:none; font-size:0.8rem; font-weight:700; border-bottom:1px solid #1e293b;">
+                                📊 Master Reconciliation CSV
+                            </a>
+                            <a href="javascript:void(0)" onclick="exportCategoryFromStock('unallocated')" style="display:block; padding:8px 12px; color:#fb923c; text-decoration:none; font-size:0.78rem;">
+                                ❌ Unallocated Plates CSV
+                            </a>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -58,7 +82,7 @@
 
             <!-- Instant Verification & Status Feedback Strip -->
             <div id="stock-feedback-alert" class="alert alert-success" style="margin-bottom: 12px; font-size: 0.95rem; font-weight: 700; padding: 10px 14px;">
-                ⚡ READY FOR SCANNING: Scan plate or click Paste to load from Excel.
+                🟢 READY FOR SCANNING: Scan plate or click Paste to load from Excel.
             </div>
 
             <!-- MODE 1: Dispatch -->
@@ -84,7 +108,12 @@
                 </div>
                 <div class="table-pagination-bar" style="margin-top: auto; display: flex; justify-content: space-between; align-items: center; padding: 10px 0 0 0;">
                     <span id="dispatch-summary" style="font-weight: 700; color: var(--ug-green); font-size: 0.9rem;">Dispatched Today: 0 kits</span>
-                    <button class="btn btn-danger" id="btn-clear-dispatches" onclick="clearDispatchesToday()" style="padding: 5px 12px; font-size: 0.8rem;">Clear Dispatches Today</button>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <button class="btn btn-success" id="btn-export-dispatches" onclick="exportDispatchCSV()" style="padding: 5px 14px; font-size: 0.82rem; font-weight: 700;" title="Export dispatched plates scanned today as CSV">
+                            📊 Export Dispatched CSV
+                        </button>
+                        <button class="btn btn-danger" id="btn-clear-dispatches" onclick="clearDispatchesToday()" style="padding: 5px 12px; font-size: 0.8rem;">Clear Dispatches Today</button>
+                    </div>
                 </div>
             </div>
 
@@ -121,6 +150,7 @@
                     <span id="lbl-movement-staged" class="badge badge-muted" style="font-size: 0.85rem; padding: 6px 10px;">Staged: 0 plates</span>
                     <button class="btn btn-success" onclick="commitMovement()" style="padding: 6px 14px; font-size: 0.85rem; font-weight: 700;">✓ Commit Movement</button>
                     <button class="btn btn-secondary" onclick="clearMovementStaged()" style="padding: 6px 12px; font-size: 0.85rem;">Clear Staged</button>
+                    <button class="btn btn-primary" id="btn-export-movements" onclick="exportMovementsCSV()" style="padding: 6px 12px; font-size: 0.85rem; font-weight: 600;" title="Export all inbound deliveries and bond transfers as CSV">📊 Export Movements CSV</button>
                 </div>
             </div>
 
@@ -148,6 +178,7 @@
                     <span id="audit-summary" style="font-weight: 700; flex: 1; font-size: 0.85rem; color: #fff;">Safe Audit Summary: Physical Audited: 0 │ Verified: 0 │ Unregistered: 0 │ Variance: 0</span>
                     <input type="number" id="audit-manual-count" class="form-control" placeholder="Manual Count" style="width: 130px; font-size: 0.85rem;" aria-label="Manual Physical Audit Count">
                     <button class="btn btn-primary" onclick="setManualAuditCount()" style="padding: 6px 12px; font-size: 0.85rem;">Set Count</button>
+                    <button class="btn btn-secondary" id="btn-export-audit" onclick="exportAuditCSV()" style="padding: 6px 12px; font-size: 0.85rem; font-weight: 600;" title="Export all physical count audit scans as CSV">📊 Export Audit Scans</button>
                     <button class="btn btn-danger" onclick="exportUnregistered()" style="padding: 6px 12px; font-size: 0.85rem;">Export Unregistered</button>
                 </div>
             </div>
@@ -173,6 +204,7 @@
                 <div class="table-pagination-bar" style="margin-top: auto; display: flex; gap: 10px; padding: 10px 0 0 0;">
                     <button class="btn btn-primary" onclick="openLedgerTargetModal()" style="font-size: 0.85rem;">✎ Edit Opening & Target <span class="hotkey">O</span></button>
                     <button class="btn btn-secondary" onclick="refreshStockLedger()" style="font-size: 0.85rem;">⟳ Refresh Ledger <span class="hotkey">R</span></button>
+                    <button class="btn btn-success" id="btn-export-ledger" onclick="exportStockCSV()" style="font-size: 0.85rem; font-weight: 700;" title="Export full daily reconciliation ledger as CSV">📊 Export Reconciliation CSV</button>
                 </div>
             </div>
 

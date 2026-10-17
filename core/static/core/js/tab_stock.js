@@ -95,7 +95,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 void syncStock();
             } else if (e.key === 'e' || e.key === 'E') {
                 e.preventDefault();
-                exportStockCSV();
+                if (currentStockMode === 'dispatch') {
+                    exportDispatchCSV();
+                } else if (currentStockMode === 'movements') {
+                    exportMovementsCSV();
+                } else if (currentStockMode === 'audit') {
+                    exportAuditCSV();
+                } else {
+                    exportStockCSV();
+                }
             } else if (e.key === 'o' || e.key === 'O') {
                 e.preventDefault();
                 openLedgerTargetModal();
@@ -1165,8 +1173,122 @@ async function syncStock() {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Stock Export Handlers (Direct Browser Download & Server Archival)
+// -----------------------------------------------------------------------------
+
+async function downloadCsvFile(url, fallbackFilename) {
+    try {
+        const resp = await fetch(url);
+        if (!resp.ok) {
+            let errorMsg = `HTTP ${resp.status}`;
+            try {
+                const json = await resp.json();
+                errorMsg = json.error || (json.errors && json.errors[0]?.message) || errorMsg;
+            } catch (_) {
+                const txt = await resp.text();
+                if (txt && txt.length < 120) errorMsg = txt;
+            }
+            if (typeof notify === 'function') {
+                notify(`Export failed: ${errorMsg}`, 'error');
+            } else {
+                alert(`Export failed: ${errorMsg}`);
+            }
+            return;
+        }
+
+        let filename = fallbackFilename || 'export.csv';
+        const disposition = resp.headers.get('Content-Disposition');
+        if (disposition && disposition.includes('filename=')) {
+            const matches = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/.exec(disposition);
+            if (matches && matches[1]) {
+                filename = matches[1].replace(/['"]/g, '').trim();
+            }
+        }
+
+        const blob = await resp.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = blobUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(blobUrl);
+        document.body.removeChild(a);
+
+        if (typeof notify === 'function') {
+            notify(`📥 Downloaded ${filename}`, 'success');
+        } else if (typeof showToast === 'function') {
+            showToast(`📥 Downloaded ${filename}`, 'success');
+        }
+    } catch (err) {
+        console.warn('Direct fetch download failed, falling back to direct navigation:', err);
+        window.location.href = url;
+    }
+}
+
+function toggleStockExportMenu(event) {
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+    const menu = document.getElementById('stock-export-dropdown');
+    if (!menu) return;
+    const isVisible = menu.style.display === 'block';
+    menu.style.display = isVisible ? 'none' : 'block';
+
+    if (!isVisible) {
+        const closeMenu = (e) => {
+            if (!menu.contains(e.target)) {
+                menu.style.display = 'none';
+                document.removeEventListener('click', closeMenu);
+            }
+        };
+        setTimeout(() => document.addEventListener('click', closeMenu), 10);
+    }
+}
+
+function exportDispatchCSV() {
+    const suf = currentStockDateSuffix || 'today';
+    const menu = document.getElementById('stock-export-dropdown');
+    if (menu) menu.style.display = 'none';
+    downloadCsvFile(`/api/stock/export/category/dispatched/?date=${encodeURIComponent(suf)}`, `shift_${suf}_dispatched.csv`);
+}
+
+function exportMovementsCSV() {
+    const suf = currentStockDateSuffix || 'today';
+    const menu = document.getElementById('stock-export-dropdown');
+    if (menu) menu.style.display = 'none';
+    downloadCsvFile(`/api/stock/export/category/movements/?date=${encodeURIComponent(suf)}`, `shift_${suf}_movements.csv`);
+}
+
+function exportAuditCSV() {
+    const suf = currentStockDateSuffix || 'today';
+    const menu = document.getElementById('stock-export-dropdown');
+    if (menu) menu.style.display = 'none';
+    downloadCsvFile(`/api/stock/export/category/audit/?date=${encodeURIComponent(suf)}`, `shift_${suf}_audit.csv`);
+}
+
+function exportUnregistered() {
+    const suf = currentStockDateSuffix || 'today';
+    const menu = document.getElementById('stock-export-dropdown');
+    if (menu) menu.style.display = 'none';
+    downloadCsvFile(`/api/stock/export/unregistered/?date_suffix=${encodeURIComponent(suf)}`, `unregistered_stocktake_${suf}.csv`);
+}
+
 function exportStockCSV() {
-    window.location.href = `/api/stock/export/csv/?date_suffix=${currentStockDateSuffix}`;
+    const suf = currentStockDateSuffix || 'today';
+    const menu = document.getElementById('stock-export-dropdown');
+    if (menu) menu.style.display = 'none';
+    downloadCsvFile(`/api/stock/export/csv/?date_suffix=${encodeURIComponent(suf)}`, `itms_stock_reconciliation_${suf}.csv`);
+}
+
+function exportCategoryFromStock(category) {
+    const suf = currentStockDateSuffix || 'today';
+    const menu = document.getElementById('stock-export-dropdown');
+    if (menu) menu.style.display = 'none';
+    downloadCsvFile(`/api/stock/export/category/${encodeURIComponent(category)}/?date=${encodeURIComponent(suf)}`, `shift_${suf}_${category}.csv`);
 }
 
 // -----------------------------------------------------------------------------

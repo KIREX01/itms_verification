@@ -2384,6 +2384,112 @@ def generate_category_csv_content(category: str, target_date_suffix: Optional[st
             ])
         return out.getvalue()
 
+    if cat_lower in ("movements", "movement", "deliveries", "transfers"):
+        writer.writerow([
+            "#",
+            "Movement Type",
+            "Timestamp",
+            "Plate Category",
+            "Source / Destination / Partner",
+            "Reference / Waybill",
+            "Quantity (Plates)",
+            "Sample Plates",
+            "Bond Facility",
+        ])
+        movements_list: List[Tuple[Any, str, str, str, str, str, int, str, str]] = []
+        dels = StockDelivery.objects.filter(target_date_suffix=suffix).order_by("-created_at")
+        for d in dels:
+            items = list(StockDeliveryItem.objects.filter(delivery=d).values_list("registration_number", flat=True)[:10])
+            sample = ", ".join(items)
+            if d.total_plates_count > len(items):
+                sample += f" (+{d.total_plates_count - len(items)} more)"
+            movements_list.append((
+                d.created_at,
+                "Inbound Delivery",
+                d.created_at.strftime("%Y-%m-%d %H:%M:%S") if d.created_at else "",
+                d.plate_category,
+                d.supplier or "Factory / Depot",
+                d.paper_note_reference or d.delivery_number,
+                d.total_plates_count,
+                sample or "-",
+                active_name,
+            ))
+        transfers = StockBondTransfer.objects.filter(target_date_suffix=suffix).order_by("-created_at")
+        for t in transfers:
+            movements_list.append((
+                t.created_at,
+                f"Bond Transfer ({t.transfer_type})",
+                t.created_at.strftime("%Y-%m-%d %H:%M:%S") if t.created_at else "",
+                t.plate_category,
+                t.other_bond_name or "External Bond",
+                t.transfer_number,
+                t.plates_count,
+                "-",
+                active_name,
+            ))
+        returns = StockReturnScan.objects.filter(work_date_suffix=suffix).order_by("-returned_at")
+        for r in returns:
+            movements_list.append((
+                r.returned_at,
+                "Line Return",
+                r.returned_at.strftime("%Y-%m-%d %H:%M:%S") if r.returned_at else "",
+                r.plate_category,
+                r.reason or "Returned uninstalled",
+                r.registration_number,
+                1,
+                r.registration_number,
+                active_name,
+            ))
+        movements_list.sort(key=lambda x: x[0] or timezone.now(), reverse=True)
+        for idx, row in enumerate(movements_list, start=1):
+            writer.writerow([idx, *row[1:]])
+        return out.getvalue()
+
+    if cat_lower in ("audit", "audits", "physical_count", "safe_audit"):
+        audits_qs = SafeAuditScan.objects.filter(work_date_suffix=suffix).order_by("scanned_at")
+        writer.writerow([
+            "#",
+            "Registration Number",
+            "Plate Category",
+            "Scanned At",
+            "Kit Code",
+            "GPS Tracker",
+            "Front BLE",
+            "Rear BLE",
+            "Operator",
+            "Status",
+            "Bond Facility",
+        ])
+        for idx, a in enumerate(audits_qs, start=1):
+            writer.writerow([
+                idx,
+                a.registration_number,
+                a.plate_category,
+                a.scanned_at.strftime("%Y-%m-%d %H:%M:%S") if a.scanned_at else "",
+                a.kit_code or f"IK-{a.registration_number}",
+                a.gps_tracker or "-",
+                a.ble_front or "-",
+                a.ble_rear or "-",
+                a.operator_name or "Operator",
+                a.status or "AUDITED",
+                a.bond_code or active_code,
+            ])
+        return out.getvalue()
+
+    if cat_lower in ("unregistered", "unregistered_kits"):
+        audits = list(SafeAuditScan.objects.filter(work_date_suffix=suffix).values_list("registration_number", flat=True))
+        target_codes = [f"IK-{p}" for p in audits]
+        known_kits = set(
+            InstallationKit.objects.filter(
+                Q(registration_number__in=audits) | Q(kit_code__in=target_codes)
+            ).values_list("registration_number", flat=True)
+        )
+        unregistered = [p for p in audits if p not in known_kits]
+        writer.writerow(["#", "Registration Plate", "Audit Shift Date", "Audit Status", "Operating Facility", "Action Required"])
+        for idx, plate in enumerate(unregistered, start=1):
+            writer.writerow([idx, plate, suffix, "UNREGISTERED_IN_SAFE_ROOM", active_name, "Manual Registration Required"])
+        return out.getvalue()
+
     # Fallback default: unallocated
     return generate_category_csv_content("unallocated", target_date_suffix)
 

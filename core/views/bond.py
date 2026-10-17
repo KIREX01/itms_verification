@@ -478,10 +478,15 @@ def api_stock_physical_count(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
-@require_itms_envelope
 def api_stock_export_csv(request: HttpRequest) -> HttpResponse:
     """Exports shift stock reconciliation and dispatched plates as a downloadable CSV."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return HttpResponse("Authentication required", status=401)
+
+    from pathlib import Path
+    from django.conf import settings
     from core.services import stock_monitoring_service
+
     date_suffix = (
         request.GET.get("date")
         or request.GET.get("date_suffix")
@@ -492,8 +497,14 @@ def api_stock_export_csv(request: HttpRequest) -> HttpResponse:
     recon = stock_monitoring_service.compute_daily_reconciliation(date_suffix)
     suf = recon.get("work_date_suffix", "shift")
 
-    response = HttpResponse(csv_content, content_type="text/csv")
-    response["Content-Disposition"] = f'attachment; filename="itms_stock_reconciliation_{suf}.csv"'
+    exports_dir = Path(settings.BASE_DIR) / "exports"
+    exports_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"itms_stock_reconciliation_{suf}.csv"
+    (exports_dir / filename).write_text(csv_content, encoding="utf-8-sig")
+
+    response = HttpResponse(csv_content.encode("utf-8-sig"), content_type="text/csv")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
 
@@ -747,7 +758,6 @@ def api_stock_shift_reconcile(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
-@require_itms_envelope
 def api_stock_export_category_csv(request: HttpRequest, category: str) -> HttpResponse:
     """
     Downloads standardized shift CSV for a given category:
@@ -757,8 +767,18 @@ def api_stock_export_category_csv(request: HttpRequest, category: str) -> HttpRe
     - 'dispatched'
     - 'returned'
     - 'master'
+    - 'movements'
+    - 'audit'
+    - 'unregistered'
+    - 'blocked'
     """
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return HttpResponse("Authentication required", status=401)
+
+    from pathlib import Path
+    from django.conf import settings
     from core.services import stock_monitoring_service
+
     date_suffix = (
         request.GET.get("date")
         or request.GET.get("date_suffix")
@@ -769,9 +789,14 @@ def api_stock_export_category_csv(request: HttpRequest, category: str) -> HttpRe
     cat_clean = str(category).strip().lower()
     csv_content = stock_monitoring_service.generate_category_csv_content(cat_clean, suffix)
 
+    exports_dir = Path(settings.BASE_DIR) / "exports"
+    exports_dir.mkdir(parents=True, exist_ok=True)
     filename = f"shift_{suffix}_{cat_clean}.csv"
-    response = HttpResponse(csv_content, content_type="text/csv")
+    (exports_dir / filename).write_text(csv_content, encoding="utf-8-sig")
+
+    response = HttpResponse(csv_content.encode("utf-8-sig"), content_type="text/csv")
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
 
@@ -1245,9 +1270,13 @@ def api_stock_previous_closing(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
-@require_itms_envelope
 def api_stock_export_unregistered_csv(request: HttpRequest) -> HttpResponse:
     """Exports safe room audit unregistered kits CSV."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return HttpResponse("Authentication required", status=401)
+
+    from pathlib import Path
+    from django.conf import settings
     from core.services import stock_monitoring_service
     from core.models import SafeAuditScan, InstallationKit
     from django.db.models import Q
@@ -1272,7 +1301,14 @@ def api_stock_export_unregistered_csv(request: HttpRequest) -> HttpResponse:
         writer.writerow([i, plate, suffix, "UNREGISTERED_IN_SAFE_ROOM", "Manual Registration Required"])
 
     csv_data = out.getvalue()
-    response = HttpResponse(csv_data, content_type="text/csv")
-    response["Content-Disposition"] = f'attachment; filename="unregistered_stocktake_{suffix}.csv"'
+
+    exports_dir = Path(settings.BASE_DIR) / "exports"
+    exports_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"unregistered_stocktake_{suffix}.csv"
+    (exports_dir / filename).write_text(csv_data, encoding="utf-8-sig")
+
+    response = HttpResponse(csv_data.encode("utf-8-sig"), content_type="text/csv")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 

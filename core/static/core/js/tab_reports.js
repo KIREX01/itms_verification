@@ -448,10 +448,80 @@ function toggleShiftCsvMenu(event) {
     }
 }
 
+if (typeof window.downloadCsvFile !== "function") {
+    window.downloadCsvFile = async function(url, fallbackFilename) {
+        try {
+            const resp = await fetch(url);
+            if (!resp.ok) {
+                let errorMsg = `HTTP ${resp.status}`;
+                try {
+                    const json = await resp.json();
+                    errorMsg = json.error || (json.errors && json.errors[0]?.message) || errorMsg;
+                } catch (_) {
+                    const txt = await resp.text();
+                    if (txt && txt.length < 120) errorMsg = txt;
+                }
+                if (typeof showToast === "function") {
+                    showToast(`Export failed: ${errorMsg}`, "error");
+                } else {
+                    alert(`Export failed: ${errorMsg}`);
+                }
+                return;
+            }
+
+            let filename = fallbackFilename || "export.csv";
+            const disposition = resp.headers.get("Content-Disposition");
+            if (disposition && disposition.includes("filename=")) {
+                const matches = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/.exec(disposition);
+                if (matches && matches[1]) {
+                    filename = matches[1].replace(/['"]/g, "").trim();
+                }
+            }
+
+            const blob = await resp.blob();
+            const blobUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.style.display = "none";
+            a.href = blobUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(blobUrl);
+            document.body.removeChild(a);
+
+            if (typeof showToast === "function") {
+                showToast(`📥 Downloaded ${filename}`, "success");
+            }
+        } catch (err) {
+            console.warn("Direct fetch download failed, falling back to direct navigation:", err);
+            window.location.href = url;
+        }
+    };
+}
+
 function downloadCategoryCsv(category) {
     const suf = reportCurrentDate || "today";
-    const url = `/api/stock/export/category/${encodeURIComponent(category)}/?date=${encodeURIComponent(suf)}`;
-    window.location.href = url;
+    const cat = encodeURIComponent(category);
+    const url = `/api/stock/export/category/${cat}/?date=${encodeURIComponent(suf)}`;
+    const menu = document.getElementById("shift-csv-dropdown");
+    if (menu) menu.style.display = "none";
+    if (typeof downloadCsvFile === "function") {
+        downloadCsvFile(url, `shift_${suf}_${category}.csv`);
+    } else {
+        window.location.href = url;
+    }
+}
+
+function downloadShiftPairsReport(event) {
+    if (event) event.preventDefault();
+    const menu = document.getElementById("shift-csv-dropdown");
+    if (menu) menu.style.display = "none";
+    const url = "/api/export/report/";
+    if (typeof downloadCsvFile === "function") {
+        downloadCsvFile(url, "itms_shift_report.csv");
+    } else {
+        window.location.href = url;
+    }
 }
 
 function openShiftReconcileModal() {
@@ -561,8 +631,13 @@ async function submitShiftReconciliation() {
 function downloadShiftCsvFromModal(category) {
     const suffixInput = document.getElementById("shift-reconcile-suffix");
     const suf = (suffixInput && suffixInput.value) ? suffixInput.value : (reportCurrentDate || "today");
-    const url = `/api/stock/export/category/${encodeURIComponent(category)}/?date=${encodeURIComponent(suf)}`;
-    window.location.href = url;
+    const cat = encodeURIComponent(category);
+    const url = `/api/stock/export/category/${cat}/?date=${encodeURIComponent(suf)}`;
+    if (typeof downloadCsvFile === "function") {
+        downloadCsvFile(url, `shift_${suf}_${category}.csv`);
+    } else {
+        window.location.href = url;
+    }
 }
 
 function openStockKitSyncModal() {

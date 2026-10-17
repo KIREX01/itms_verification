@@ -189,9 +189,16 @@ def api_export_report(request: HttpRequest) -> HttpResponse:
             p.updated_at.strftime("%Y-%m-%d %H:%M:%S") if p.updated_at else "",
         ])
 
-    response = HttpResponse(out.getvalue(), content_type="text/csv")
+    exports_dir = Path(settings.BASE_DIR) / "exports"
+    exports_dir.mkdir(parents=True, exist_ok=True)
     date_str = datetime.now().strftime("%Y%m%d_%H%M")
-    response["Content-Disposition"] = f'attachment; filename="itms_shift_report_{date_str}.csv"'
+    filename = f"itms_shift_report_{date_str}.csv"
+    csv_data = out.getvalue()
+    (exports_dir / filename).write_text(csv_data, encoding="utf-8-sig")
+
+    response = HttpResponse(csv_data.encode("utf-8-sig"), content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
 

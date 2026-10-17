@@ -128,7 +128,10 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Updated {logs_updated} SubmissionAuditLog records.")
 
-        # 5. Verify bond facilities in database and config
+        # 5. Verify and update bond facilities in config.json
+        config_service.set_setting("bond.available_bonds", config_service.DEFAULT_CONFIG["bond"]["available_bonds"])
+        config_service.set_setting("bond.active_bond_name", config_service.DEFAULT_CONFIG["bond"]["active_bond_name"])
+
         bonds = config_service.get_available_bonds()
         self.stdout.write(f"Configured available bonds: {len(bonds)} facilities.")
         for b in bonds:

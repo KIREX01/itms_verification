@@ -442,3 +442,108 @@ class SyncArchiveTodayTests(TestCase):
         self.assertEqual(res["officers"]["ENOCK MATOVU"], 20)
         self.assertEqual(res["officers"]["ROLLAND MUYIIRA"], 5)
 
+
+    def test_sync_archive_today_resilient_to_out_of_order_rows(self):
+        """
+        Verifies that sync_archive_today does NOT abort prematurely when encountering
+        a single out-of-order or backdated record from yesterday interspersed in today's rows.
+        """
+        mixed_orders = [
+            {
+                "order_number": "PO-PAGE1-01-300926",
+                "registration_number": "UMA101AA",
+                "installation_date": "30.09.2026 - 16:30",
+                "officer": "ENOCK MATOVU",
+                "order_status": "Installed",
+            },
+            {
+                "order_number": "PO-PAGE1-OUT-OF-ORDER-290926",
+                "registration_number": "UMA999ZZ",
+                "installation_date": "29.09.2026 - 17:00",
+                "officer": "ROLLAND MUYIIRA",
+                "order_status": "Installed",
+            },
+            {
+                "order_number": "PO-PAGE1-02-300926",
+                "registration_number": "UMA102AA",
+                "installation_date": "30.09.2026 - 16:25",
+                "officer": "ENOCK MATOVU",
+                "order_status": "Installed",
+            },
+        ]
+
+        self.mock_client.fetch_installation_orders.return_value = {
+            "success": True,
+            "orders": mixed_orders,
+            "has_next_page": False,
+        }
+        self.mock_client.sync_orders_to_local_db.return_value = {
+            "created": 2,
+            "updated": 0,
+            "installed_verified": 2,
+        }
+
+        from datetime import date
+        res = self.sync_svc.sync_archive_today(target_date=date(2026, 9, 30), force=True)
+
+        self.assertTrue(res["success"])
+        # Both today's orders (01 and 02) must be collected! Not stopped at out-of-order!
+        self.assertEqual(res["total_fetched"], 2)
+        synced_batch = self.mock_client.sync_orders_to_local_db.call_args[0][0]
+        self.assertEqual(len(synced_batch), 2)
+        order_numbers = [o["order_number"] for o in synced_batch]
+        self.assertIn("PO-PAGE1-01-300926", order_numbers)
+        self.assertIn("PO-PAGE1-02-300926", order_numbers)
+        self.assertNotIn("PO-PAGE1-OUT-OF-ORDER-290926", order_numbers)
+
+    def test_sync_shift_scoped_accepts_target_date_suffix(self):
+        """Verifies sync_shift_scoped accepts both target_date and target_date_suffix arguments without TypeError."""
+        self.mock_client.fetch_installation_orders.return_value = {
+            "success": True,
+            "orders": [],
+            "has_next_page": False,
+        }
+        self.mock_client.fetch_installation_kits.return_value = {
+            "success": True,
+            "kits": [],
+            "has_next_page": False,
+        }
+        self.mock_client.sync_orders_to_local_db.return_value = {"created": 0, "updated": 0}
+        self.mock_client.sync_kits_to_local_db.return_value = {"created": 0, "updated": 0}
+
+        # Call with target_date_suffix
+        res = self.sync_svc.sync_shift_scoped(target_date_suffix="300926", force=True)
+        self.assertTrue(res["success"])
+        self.assertIn("active", res)
+        self.assertIn("archive", res)
+        self.assertIn("kits", res)
+
+
+class ShiftOrderSyncDaemonTests(TestCase):
+    def test_daemon_interval_and_rate_limiting(self):
+        """Verifies ShiftOrderSyncDaemon singleton, default interval, and rate-limiting cooldown."""
+        from core.services.order_sync import ShiftOrderSyncDaemon
+        daemon = ShiftOrderSyncDaemon.get_instance(interval_seconds=600)
+        status = daemon.get_status()
+
+        self.assertEqual(status["interval_seconds"], 600)
+        self.assertEqual(status["interval_minutes"], 10.0)
+
+        # Mock OrderSyncService within daemon
+        with patch("core.services.order_sync.OrderSyncService") as MockSvc:
+            mock_inst = MagicMock()
+            mock_inst.sync_shift_scoped.return_value = {
+                "success": True,
+                "message": "Shift sync test complete.",
+            }
+            MockSvc.return_value = mock_inst
+
+            # First pass with force=True
+            res1 = daemon.trigger_sync(force=True)
+            self.assertTrue(res1["success"])
+            self.assertEqual(res1["message"], "Shift sync test complete.")
+
+            # Second pass without force should hit cooldown
+            res2 = daemon.trigger_sync(force=False)
+            self.assertEqual(res2.get("status"), "cooldown_active")
+            self.assertTrue(res2.get("cooldown_remaining_seconds", 0) > 0)

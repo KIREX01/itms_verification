@@ -546,7 +546,68 @@ async function selectItmsOrder(order) {
     }
 }
 
+function getCsrfToken() {
+    return document.querySelector('meta[name="csrf-token"]')?.content
+        || (document.cookie.split('; ').find(row => row.startsWith('csrftoken='))?.split('=')[1] || '')
+        || (document.querySelector('[name=csrfmiddlewaretoken]')?.value || '');
+}
+
+async function syncItmsShiftOrders() {
+    const btn = document.getElementById("btn-itms-sync-shift");
+    const origText = btn ? btn.innerHTML : "⚡ Sync Shift Orders";
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = "⏳ Syncing Shift...";
+    }
+
+    if (typeof appendConsoleLog === "function") {
+        appendConsoleLog("Starting comprehensive shift synchronization (active queue + completed archive)...", "info");
+    }
+    if (typeof showToast === "function") {
+        showToast("⏳ Synchronizing active orders and shift archive from ITMS...", "info");
+    }
+
+    try {
+        const csrf = getCsrfToken();
+        const res = await fetch("/api/itms/orders/sync/now/", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "X-CSRFToken": csrf,
+            },
+            body: "tab=shift&pages=25",
+        });
+        const data = await res.json();
+        if (data.success) {
+            const msg = `✓ ${data.message || "Shift sync completed successfully."}`;
+            if (typeof showToast === "function") showToast(msg, "success");
+            if (typeof appendConsoleLog === "function") appendConsoleLog(msg, "success");
+            fetchStats();
+            fetchItmsExplorerOrders();
+            if (typeof fetchReportTotals === "function") fetchReportTotals();
+        } else {
+            const err = data.error || data.message || "Shift sync failed";
+            if (typeof showToast === "function") showToast(err, "error");
+            if (typeof appendConsoleLog === "function") appendConsoleLog(`Shift sync error: ${err}`, "error");
+        }
+    } catch (err) {
+        if (typeof showToast === "function") showToast("Error during shift sync: " + err, "error");
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+        }
+    }
+}
+
 async function syncCurrentItmsPage() {
+    const btn = document.getElementById("btn-itms-sync-page");
+    const origText = btn ? btn.innerHTML : "📥 Sync Page to DB";
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = "⏳ Syncing...";
+    }
+
     let tabName = "active";
     if (itmsCurrentSubview === "KITS") {
         tabName = "kits";
@@ -555,12 +616,16 @@ async function syncCurrentItmsPage() {
     }
 
     const labelKind = (tabName === "kits") ? "installation kits" : `${tabName} orders`;
-    if (typeof appendConsoleLog === "function") appendConsoleLog(`Starting live synchronization of ${labelKind}...`, "info");
+    if (typeof appendConsoleLog === "function") appendConsoleLog(`Starting live synchronization of ${labelKind} (page ${itmsExplorerPage})...`, "info");
 
     try {
+        const csrf = getCsrfToken();
         const res = await fetch("/api/itms/orders/sync/now/", {
             method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "X-CSRFToken": csrf,
+            },
             body: `tab=${encodeURIComponent(tabName)}&pages=1`,
         });
         const data = await res.json();
@@ -575,6 +640,11 @@ async function syncCurrentItmsPage() {
         }
     } catch (err) {
         showToast("Sync error: " + err, "error");
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+        }
     }
 }
 
@@ -592,9 +662,13 @@ async function autoSyncAllItmsKits() {
     }
 
     try {
+        const csrf = getCsrfToken();
         const res = await fetch("/api/itms/orders/sync/now/", {
             method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "X-CSRFToken": csrf,
+            },
             body: "tab=kits&pages=30",
         });
         const data = await res.json();

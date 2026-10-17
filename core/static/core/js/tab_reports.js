@@ -754,3 +754,55 @@ async function submitStockKitSync() {
 
 
 
+
+/**
+ * Synchronizes active orders and completed archive orders for the selected shift work date.
+ * Enforces authenticated session envelope, provides live UI feedback, and immediately reloads totals.
+ */
+async function syncReportShiftOrders() {
+    const btn = document.getElementById("btn-sync-report-shift");
+    const dateSelect = document.getElementById("report-date-select");
+    const selectedDate = (dateSelect && dateSelect.value) ? dateSelect.value : (reportCurrentDate || "TODAY");
+
+    const origText = btn ? btn.innerHTML : "⚡ Sync Shift Orders";
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = "⏳ Syncing ITMS Shift...";
+    }
+
+    if (typeof showToast === "function") {
+        showToast(`⏳ Synchronizing ITMS active orders & shift archive for ${selectedDate}...`, "info");
+    }
+
+    try {
+        const csrf = (typeof getCsrfToken === "function" ? getCsrfToken() : "")
+            || document.querySelector('meta[name="csrf-token"]')?.content
+            || (document.cookie.split('; ').find(row => row.startsWith('csrftoken='))?.split('=')[1] || '')
+            || (document.querySelector('[name=csrfmiddlewaretoken]')?.value || '');
+
+        const res = await fetch("/api/itms/orders/sync/now/", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "X-CSRFToken": csrf,
+            },
+            body: `tab=shift&date=${encodeURIComponent(selectedDate)}&pages=25`,
+        });
+        const data = await res.json();
+        if (data.success) {
+            const msg = `✓ Shift Sync Complete: ${data.active_seen || 0} active, ${data.archive_seen || 0} archive (${data.target_date || selectedDate})`;
+            if (typeof showToast === "function") showToast(msg, "success");
+            await fetchReportTotals();
+        } else {
+            const err = data.error || data.message || "Shift sync failed";
+            if (typeof showToast === "function") showToast(err, "error");
+        }
+    } catch (err) {
+        if (typeof showToast === "function") showToast("Error syncing shift: " + err, "error");
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+        }
+    }
+}

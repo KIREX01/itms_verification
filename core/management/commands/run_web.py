@@ -215,6 +215,14 @@ class Command(BaseCommand):
             except Exception as d_err:
                 logger.debug("Could not start MorningKitSyncDaemon in Web: %s", d_err)
 
+            try:
+                from core.services.order_sync import ShiftOrderSyncDaemon
+                order_daemon = ShiftOrderSyncDaemon.get_instance()
+                order_daemon.start()
+                self.stdout.write(self.style.NOTICE("    [✓] Background Shift Order Sync Daemon active (10-minute cycle)"))
+            except Exception as o_err:
+                logger.debug("Could not start ShiftOrderSyncDaemon in Web: %s", o_err)
+
         # 6. Start Primary WSGI Server (Desktop & Mobile HTTPS)
         def _serve():
             if ssl_context:

@@ -736,9 +736,10 @@ def api_stock_shift_reconcile(request: HttpRequest) -> JsonResponse:
 
         if sync_itms:
             try:
+                from core.services.itms_web_client import get_web_client
                 from core.services.order_sync import OrderSyncService
-                sync_service = OrderSyncService()
-                sync_service.sync_shift_scoped(target_date_suffix=target_date)
+                sync_service = OrderSyncService(client=get_web_client(user=request.user))
+                sync_service.sync_shift_scoped(target_date_suffix=target_date, force=True)
             except Exception as sync_err:
                 logger.warning("Auto-sync prior to reconciliation encountered error: %s", sync_err)
 

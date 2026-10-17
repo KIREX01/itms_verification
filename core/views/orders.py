@@ -751,8 +751,15 @@ def api_itms_sync_now(request: HttpRequest) -> JsonResponse:
     """
     Directly triggers synchronization of active orders, archive orders, or
     installation kits from stock.itms.ug into the local database.
+    Supports shift-scoped date targeting (e.g. date=171026 or 17.10.2026).
     """
     tab = request.POST.get("tab", "active").strip().lower()
+    target_date = (
+        request.POST.get("target_date")
+        or request.POST.get("date")
+        or request.POST.get("suffix")
+        or request.POST.get("target_date_suffix")
+    )
     try:
         pages = max(1, min(50, int(request.POST.get("pages", 1))))
     except (ValueError, TypeError):
@@ -763,6 +770,7 @@ def api_itms_sync_now(request: HttpRequest) -> JsonResponse:
             body = json.loads(request.body.decode("utf-8"))
             tab = body.get("tab", tab)
             pages = max(1, min(50, int(body.get("pages", pages))))
+            target_date = body.get("target_date") or body.get("date") or body.get("suffix") or body.get("target_date_suffix") or target_date
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             logger.debug("JSON decode error in api_itms_sync_now: %s", exc)
 
@@ -773,8 +781,9 @@ def api_itms_sync_now(request: HttpRequest) -> JsonResponse:
             "error": "ITMS WebApp session is not connected or has expired. Please connect your ITMS account.",
         }, status=401)
 
-    from core.services.order_sync import OrderSyncService
+    from core.services.order_sync import OrderSyncService, ShiftOrderSyncDaemon
     sync_svc = OrderSyncService(client=client)
+    daemon_status = ShiftOrderSyncDaemon.get_instance().get_status()
 
     if tab in ("kits", "installation_kits"):
         pages_to_sync = max(1, min(50, pages if pages > 1 else int(request.POST.get("pages", 25))))
@@ -786,10 +795,12 @@ def api_itms_sync_now(request: HttpRequest) -> JsonResponse:
             "total_fetched": res.get("total_fetched", 0),
             "pages_fetched": res.get("pages_fetched", 0),
             "message": res.get("message", "Installation kits sync complete."),
+            "daemon_status": daemon_status,
         })
 
     if tab in ("shift", "both", "today", "all"):
-        res = sync_svc.sync_shift_scoped(force=True)
+        shift_pages = max(1, min(50, pages if pages > 1 else 25))
+        res = sync_svc.sync_shift_scoped(target_date=target_date, force=True, max_pages=shift_pages)
         act = res.get("active", {})
         arc = res.get("archive", {})
         total_created = act.get("created", 0) + arc.get("created", 0)
@@ -804,11 +815,14 @@ def api_itms_sync_now(request: HttpRequest) -> JsonResponse:
             "total_fetched": total_fetched,
             "active_seen": act.get("total_active_seen", 0),
             "archive_seen": arc.get("total_fetched", 0),
+            "target_date": res.get("target_date", "today"),
             "message": res.get("message", "Shift sync complete."),
+            "daemon_status": daemon_status,
         })
 
     if tab == "archive":
-        res = sync_svc.sync_archive_today(force=True)
+        arc_pages = max(1, min(50, pages if pages > 1 else 25))
+        res = sync_svc.sync_archive_today(target_date=target_date, max_pages=arc_pages, force=True)
         return JsonResponse({
             "success": True,
             "created": res.get("created", 0),
@@ -816,17 +830,20 @@ def api_itms_sync_now(request: HttpRequest) -> JsonResponse:
             "installed_verified": res.get("installed_verified", 0),
             "total_fetched": res.get("total_fetched", 0),
             "pages_fetched": res.get("pages_fetched", 0),
+            "target_date": res.get("target_date", "today"),
             "message": res.get("message", "Archive sync complete."),
+            "daemon_status": daemon_status,
         })
 
     # Default: active orders
-    res = sync_svc.sync_active_orders(force=True, max_pages=25)
+    res = sync_svc.sync_active_orders(force=True, max_pages=pages if pages > 1 else 25)
     return JsonResponse({
         "success": True,
         "created": res.get("created", 0),
         "updated": res.get("updated", 0),
         "total_fetched": res.get("total_active_seen", 0),
         "disappeared": res.get("disappeared_from_active", 0),
+        "daemon_status": daemon_status,
         "message": res.get("message", "Active orders sync complete."),
     })
 

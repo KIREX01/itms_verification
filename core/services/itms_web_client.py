@@ -1203,6 +1203,8 @@ class ITMSWebClient:
                 search_params = {"registration_number": po_m.group(1)}
             elif re.search(r"PO-[A-Z0-9]+", raw_str, re.IGNORECASE) or (len(raw_str) == 6 and raw_str.isdigit()):
                 search_params = {"order_number": raw_str.lstrip("#")}
+            elif re.match(r"^(\d{2})[./-](\d{2})[./-](?:20)?(\d{2})$", raw_str) or re.match(r"^\d{4}-\d{2}-\d{2}$", raw_str) or raw_str.upper() in ("TODAY", "ALL", "NONE"):
+                search_params = None
             else:
                 search_params = {"registration_number": raw_str}
 

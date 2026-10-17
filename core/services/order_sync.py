@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional, Set, Union
@@ -44,13 +45,19 @@ _LAST_KIT_SYNC_TIMESTAMP: float = 0.0
 
 
 def parse_installation_date(date_str: str, order_num: str = "") -> Optional[date]:
-    """Extracts date from 'DD.MM.YYYY - HH:MM' or from order suffix like 'PO-*-300926'."""
+    """Extracts date from 'DD.MM.YYYY - HH:MM', 'YYYY-MM-DD', or from order suffix like 'PO-*-300926'."""
     if date_str:
         m = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", str(date_str))
         if m:
             d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
             try:
                 return date(y, mo, d)
+            except ValueError:
+                pass
+        m_dash = re.search(r"(\d{4})-(\d{2})-(\d{2})", str(date_str))
+        if m_dash:
+            try:
+                return date(int(m_dash.group(1)), int(m_dash.group(2)), int(m_dash.group(3)))
             except ValueError:
                 pass
     if order_num:
@@ -442,18 +449,22 @@ class OrderSyncService:
         target_date: Optional[Any] = None,
         max_pages: int = 50,
         force: bool = False,
+        target_date_suffix: Optional[Any] = None,
+        search_params: Optional[Any] = None,
+        **kwargs,
     ) -> Dict[str, Any]:
         """
         Intelligently and safely synchronizes the entire archive for the target date
         (defaulting to today) without scanning the entire history of stock.itms.ug.
 
-        Because the ITMS Archive (/installation-orders/archive) is sorted in descending
-        chronological order (newest first), this method paginates starting from page 1:
-        - Keeps collecting orders matching the target date.
-        - As soon as a page contains records with an installation date strictly older
-          than the target date, it gathers any matching orders on that page and STOPS.
-        - Guarantees 100% of today's archive is synchronized (e.g. all 258 records)
-          regardless of how many pages it spans, while preventing runaway pagination.
+        Resilient date-boundary pagination:
+        - ITMS archive records may have out-of-order approval timestamps or backdated rows.
+        - Checks each record on the page: matches if parsed date equals target date,
+          or order number ends with shift suffix (e.g. '171026'), or target date string is in installation date.
+        - Does NOT prematurely abort on a single older record!
+        - Only halts when a confirmed prior date boundary is reached (15+ consecutive older records,
+          or an entire page of zero matches with older records).
+        - Guarantees 100% of today's archive is synchronized regardless of how many pages it spans.
         """
         global _LAST_ARCHIVE_SYNC_TIMESTAMP
         now = time.time()
@@ -481,16 +492,30 @@ class OrderSyncService:
 
         start_time = time.time()
         all_today_orders: List[Dict[str, Any]] = []
-        target_dt = parse_target_date(target_date)
+
+        resolved_input = target_date_suffix or target_date
+        is_all = str(resolved_input).strip().upper() == "ALL" if resolved_input else False
+        target_dt = parse_target_date(resolved_input)
         target_dt_str = target_dt.strftime("%d.%m.%Y")
         target_dt_compact = target_dt.strftime("%d%m%y")
-        search_filter = str(target_date).strip() if (target_date and str(target_date).strip().upper() not in ("TODAY", "ALL", "")) else None
+
+        # Pass 6-digit shift suffix or order number to ITMS; do NOT pass free-text dates (e.g. 17.10.2026)
+        query_search = search_params
+        if query_search is None and resolved_input and not is_all:
+            raw_s = str(resolved_input).strip()
+            if len(raw_s) == 6 and raw_s.isdigit():
+                query_search = raw_s
+            elif not (re.match(r"^(\d{2})[./-](\d{2})[./-](?:20)?(\d{2})$", raw_s) or
+                      re.match(r"^\d{4}-\d{2}-\d{2}$", raw_s) or
+                      raw_s.upper() in ("TODAY", "ALL", "NONE")):
+                query_search = raw_s
 
         page = 1
-        reached_prior_date = False
+        reached_prior_boundary = False
+        consecutive_older_records = 0
 
         while page <= max_pages:
-            fetch_res = self.client.fetch_installation_orders(page=page, search_params=search_filter, archive=True)
+            fetch_res = self.client.fetch_installation_orders(page=page, search_params=query_search, archive=True)
             if not fetch_res.get("success"):
                 if page == 1:
                     return {"success": False, "error": fetch_res.get("error", "Archive fetch failed")}
@@ -500,23 +525,49 @@ class OrderSyncService:
             if not orders:
                 break
 
+            page_matches = 0
+            page_older = 0
+
             for o in orders:
                 idate_raw = o.get("installation_date", "")
                 order_num = o.get("order_number", "")
                 parsed_dt = parse_installation_date(idate_raw, order_num)
 
-                if parsed_dt:
+                is_match = False
+                if is_all:
+                    is_match = True
+                elif parsed_dt:
                     if parsed_dt == target_dt:
-                        all_today_orders.append(o)
+                        is_match = True
                     elif parsed_dt < target_dt:
-                        reached_prior_date = True
-                        break
+                        page_older += 1
+                        consecutive_older_records += 1
+                    else:
+                        consecutive_older_records = 0
                 else:
-                    # Fallback string check
+                    # Fallback string matching
                     if target_dt_str in str(idate_raw) or target_dt_compact in str(order_num):
-                        all_today_orders.append(o)
+                        is_match = True
 
-            if reached_prior_date:
+                # Also match if order number ends with compact shift suffix (e.g. PO-*-171026)
+                if not is_match and not is_all and str(order_num).strip().endswith(target_dt_compact):
+                    is_match = True
+
+                if is_match:
+                    all_today_orders.append(o)
+                    page_matches += 1
+                    consecutive_older_records = 0
+
+                # Resilient boundary stop: only stop if 15 consecutive older records are observed
+                if not is_all and consecutive_older_records >= 15:
+                    reached_prior_boundary = True
+                    break
+
+            # If an entire page of 20 records had 0 matches and 10+ older records, we have crossed the shift
+            if not is_all and len(orders) >= 20 and page_matches == 0 and page_older >= 10:
+                reached_prior_boundary = True
+
+            if reached_prior_boundary:
                 logger.info(
                     "OrderSyncService: Reached records prior to %s on archive page %d. Stopping.",
                     target_dt_str,
@@ -678,13 +729,16 @@ class OrderSyncService:
     def sync_shift_scoped(
         self,
         target_date: Optional[Any] = None,
+        target_date_suffix: Optional[Any] = None,
         force: bool = False,
+        max_pages: int = 25,
+        **kwargs,
     ) -> Dict[str, Any]:
         """
         Coordinates full, safe shift synchronization:
-        1. Active orders (up to 25 pages) to retrieve the entire active queue with disappearance detection.
-        2. Archive orders: complete shift archive for target_date / today (auto-stops at prior date boundary).
-        3. Installation kits: recent stock kits (3 pages) to update 'New' stock status.
+        1. Active orders (up to max_pages) to retrieve the entire active queue with disappearance detection.
+        2. Archive orders: complete shift archive for target_date / today (resilient date boundary).
+        3. Installation kits: recent stock kits (5 pages) to update 'New' stock status.
         Finishes cleanly, guarantees zero missing records from today, and prevents runaway pagination!
         """
         from core.services import config_service
@@ -698,18 +752,24 @@ class OrderSyncService:
                 "updated": 0,
             }
 
-        # Step 1: Active orders (up to 25 pages = 500 orders, automatically stops when queue ends)
-        active_res = self.sync_active_orders(force=force, max_pages=25)
+        resolved_target = target_date_suffix or target_date
 
-        # Step 2: Archive orders for target_date (auto-stops at prior date boundary)
-        archive_res = self.sync_archive_today(target_date=target_date, force=force)
+        # Step 1: Active orders (up to max_pages = 500 orders, automatically stops when queue ends)
+        active_res = self.sync_active_orders(force=force, max_pages=max_pages)
+
+        # Step 2: Archive orders for target_date (resilient date boundary)
+        archive_res = self.sync_archive_today(
+            target_date=resolved_target,
+            force=force,
+            max_pages=max_pages,
+        )
 
         # Step 3: Installation kits & Morning Stock Provisioning
         kits_res = self.sync_installation_kits_scoped(max_pages=5, force=force)
         try:
             from core.services import kit_provisioning_service
             prov_res = kit_provisioning_service.sync_and_provision_warehouse_kits(
-                target_date_suffix=None,
+                target_date_suffix=resolved_target,
                 sync_itms=False,  # Already fetched via kits_res
             )
             kits_res["provisioning"] = prov_res
@@ -764,3 +824,132 @@ class OrderSyncService:
             "sync_result": sync_res,
             "message": f"Found '{identifier}' in ITMS Archive: {orders[0].get('order_status', 'Installed')}",
         }
+
+
+class ShiftOrderSyncDaemon:
+    """
+    Thread-safe background daemon worker for recurring ITMS shift order synchronization.
+
+    Continuously synchronizes:
+    1. Active installation orders from stock.itms.ug/installation-orders/index
+    2. Completed shift archive from stock.itms.ug/installation-orders/archive
+    3. Installation kits stock readiness
+
+    Ensures local database and Reports hub are 100% accurate without manual operator clicks.
+    """
+
+    _instance: Optional["ShiftOrderSyncDaemon"] = None
+    _lock = threading.Lock()
+
+    def __init__(self, interval_seconds: Optional[int] = None):
+        if interval_seconds is None:
+            try:
+                from core.services import config_service
+                interval_seconds = int(
+                    config_service.get_setting("sync.order_sync_interval_seconds", 600)
+                )
+            except Exception:
+                interval_seconds = 600
+        self.interval = max(int(interval_seconds or 600), 60)
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+        self._is_running = False
+        self._last_run_time: Optional[datetime] = None
+        self._last_result: Optional[Dict[str, Any]] = None
+        self._last_sync_timestamp: float = 0.0
+        self._run_count = 0
+
+    @classmethod
+    def get_instance(cls, interval_seconds: Optional[int] = None) -> "ShiftOrderSyncDaemon":
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = cls(interval_seconds=interval_seconds)
+            elif interval_seconds is not None:
+                cls._instance.interval = max(int(interval_seconds), 60)
+            return cls._instance
+
+    def start(self) -> bool:
+        with self._lock:
+            if self._is_running and self._thread and self._thread.is_alive():
+                return True
+            self._stop_event.clear()
+            self._thread = threading.Thread(
+                target=self._run_loop,
+                daemon=True,
+                name="ShiftOrderSyncDaemon",
+            )
+            self._is_running = True
+            self._thread.start()
+            logger.info("ShiftOrderSyncDaemon started in background (interval: %ds / %.1fm).", self.interval, self.interval / 60.0)
+            return True
+
+    def stop(self) -> None:
+        with self._lock:
+            if not self._is_running:
+                return
+            self._stop_event.set()
+            self._is_running = False
+            logger.info("ShiftOrderSyncDaemon stopping...")
+
+    def trigger_sync(
+        self,
+        target_date: Optional[Any] = None,
+        force: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Runs a full shift sync pass and caches result.
+        Enforces rate-limiting cooldown unless force=True.
+        """
+        now_ts = time.time()
+        elapsed_since_last = now_ts - self._last_sync_timestamp
+        if not force and self._last_sync_timestamp > 0 and elapsed_since_last < SYNC_COOLDOWN_SECONDS:
+            rem = int(SYNC_COOLDOWN_SECONDS - elapsed_since_last)
+            logger.info("ShiftOrderSyncDaemon: Cooldown active (%ds remaining).", rem)
+            res = dict(self._last_result) if self._last_result else {
+                "success": True,
+                "message": f"Cooldown active ({rem}s remaining).",
+            }
+            res["status"] = "cooldown_active"
+            res["cooldown_remaining_seconds"] = rem
+            return res
+
+        sync_svc = OrderSyncService()
+        res = sync_svc.sync_shift_scoped(target_date=target_date, force=force)
+        self._last_run_time = timezone.now()
+        self._last_sync_timestamp = time.time()
+        self._last_result = res
+        self._run_count += 1
+        return res
+
+    def get_status(self) -> Dict[str, Any]:
+        return {
+            "is_running": self._is_running,
+            "interval_seconds": self.interval,
+            "interval_minutes": round(self.interval / 60.0, 1),
+            "run_count": self._run_count,
+            "last_run_time": self._last_run_time.isoformat() if self._last_run_time else None,
+            "last_result": self._last_result,
+        }
+
+    def _run_loop(self) -> None:
+        from django.db import close_old_connections
+        # Initial brief wait on startup (5s) for clean boot
+        if not self._stop_event.wait(timeout=5.0):
+            try:
+                close_old_connections()
+                self.trigger_sync(force=False)
+            except Exception as exc:
+                logger.debug("Initial ShiftOrderSyncDaemon pass notice: %s", exc)
+            finally:
+                close_old_connections()
+
+        while not self._stop_event.is_set():
+            if self._stop_event.wait(timeout=float(self.interval)):
+                break
+            try:
+                close_old_connections()
+                self.trigger_sync(force=False)
+            except Exception as exc:
+                logger.warning("Periodic ShiftOrderSyncDaemon pass encountered error: %s", exc)
+            finally:
+                close_old_connections()

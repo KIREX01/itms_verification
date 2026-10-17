@@ -273,6 +273,13 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
             except Exception as d_err:
                 logger.debug("Could not start MorningKitSyncDaemon in TUI: %s", d_err)
 
+            try:
+                from core.services.order_sync import ShiftOrderSyncDaemon
+                order_daemon = ShiftOrderSyncDaemon.get_instance()
+                order_daemon.start()
+            except Exception as o_err:
+                logger.debug("Could not start ShiftOrderSyncDaemon in TUI: %s", o_err)
+
         # Periodically refresh dashboard and outbox monitor every 15s
         self.set_interval(15.0, self._auto_refresh_dashboard_and_outbox)
 

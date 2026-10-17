@@ -21,6 +21,23 @@ from core.services.plate_lifecycle_service import (
 class ReportsAndLifecycleTests(TestCase):
     def setUp(self):
         self.client = Client()
+        from django.contrib.auth import get_user_model
+        from datetime import timedelta
+        from core.models import OperatorITMSSession
+        User = get_user_model()
+        self.user = User.objects.create_user(username="test_report_op", password="TestPassword123!")
+        self.client.force_login(self.user)
+        OperatorITMSSession.objects.create(
+            user=self.user,
+            itms_email="test.operator@itms-ug.com",
+            itms_user_uuid="usr-uuid-test-123",
+            cookies={"_identity-frontend": "valid-cookie-token"},
+            csrf_token="csrf-token-abc",
+            is_authenticated=True,
+            expires_at=timezone.now() + timedelta(days=7),
+            active_bond_code="AGM",
+            active_bond_name="AGM Bonded Warehouse",
+        )
         self.today = timezone.localdate()
 
         # Create batch

@@ -26,6 +26,9 @@
                 <button class="btn btn-secondary" onclick="fetchReportTotals()" title="Refresh totals from database (Hotkey: R)">
                     🔄 Refresh [R]
                 </button>
+                <button class="btn btn-primary" id="btn-sync-report-shift" onclick="syncReportShiftOrders()" title="Synchronize active and completed archive orders from ITMS for the selected shift date" style="font-weight:700; background:#2563eb; border-color:#1d4ed8; color:#ffffff;">
+                    ⚡ Sync Shift Orders
+                </button>
                 <button class="btn btn-warning" onclick="openShiftReconcileModal()" title="Run Daily Shift Ingestion, Reconciliation & Update Inventory (Hotkey: S)" style="font-weight:700; background:#f59e0b; border-color:#d97706; color:#0f172a;">
                     🌅 Shift Reconciliation [S]
                 </button>

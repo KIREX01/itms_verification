@@ -78,9 +78,9 @@ class Command(BaseCommand):
             try:
                 from core.services.order_sync import OrderSyncService
                 sync_service = OrderSyncService()
-                sync_res = sync_service.sync_shift_scoped(target_date_suffix=suffix)
-                act_cnt = sync_res.get("active_orders", {}).get("total_synced", 0)
-                arch_cnt = sync_res.get("archive_orders", {}).get("total_synced", 0)
+                sync_res = sync_service.sync_shift_scoped(target_date_suffix=suffix, force=True)
+                act_cnt = sync_res.get("active", {}).get("total_active_seen", sync_res.get("active_orders", {}).get("total_synced", 0))
+                arch_cnt = sync_res.get("archive", {}).get("total_fetched", sync_res.get("archive_orders", {}).get("total_synced", 0))
                 self.stdout.write(self.style.SUCCESS(f"  ✓ Synced {act_cnt} active orders and {arch_cnt} archived orders from ITMS."))
             except Exception as sync_err:
                 self.stdout.write(self.style.WARNING(f"  ⚠️ Warning during ITMS sync: {sync_err}"))

@@ -24,10 +24,13 @@
                     <button class="btn btn-secondary active" id="itms-src-live-btn" onclick="setItmsExplorerSource('live')" style="padding:4px 10px; font-size:0.75rem; border-radius:0; border:none;">⚡ Live ITMS</button>
                     <button class="btn btn-secondary" id="itms-src-local-btn" onclick="setItmsExplorerSource('local')" style="padding:4px 10px; font-size:0.75rem; border-radius:0; border:none;">💾 Local DB</button>
                 </div>
+                <button class="btn btn-warning" id="btn-itms-sync-shift" onclick="syncItmsShiftOrders()" style="padding:5px 12px; font-size:0.78rem; font-weight:700; background:#f59e0b; border-color:#d97706; color:#0f172a;" title="Synchronize all active orders and completed archive orders for the current work shift">
+                    ⚡ Sync Shift Orders
+                </button>
                 <button class="btn btn-warning" id="btn-itms-auto-sync-kits" onclick="autoSyncAllItmsKits()" style="display:none; padding:5px 12px; font-size:0.78rem; font-weight:700; background:#f59e0b; border-color:#d97706; color:#0f172a;" title="Auto-sync all 20+ pages of installation kits from ITMS into local database">
                     ⚡ Auto-Sync Kits (All Pages)
                 </button>
-                <button class="btn btn-primary" onclick="syncCurrentItmsPage()" style="padding:5px 12px; font-size:0.78rem;" title="Sync current page into local database">
+                <button class="btn btn-primary" id="btn-itms-sync-page" onclick="syncCurrentItmsPage()" style="padding:5px 12px; font-size:0.78rem;" title="Sync current page into local database">
                     📥 Sync Page to DB
                 </button>
                 <button class="btn btn-secondary" onclick="fetchItmsExplorerOrders()" style="padding:5px 12px; font-size:0.78rem;" title="Refresh registry records">

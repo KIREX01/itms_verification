@@ -234,3 +234,62 @@
         display: none; /* Hide table headers */
     }
 }
+
+/* ============================================================================
+   REPLACE IMAGE & DELETE PAIR MODAL ENHANCEMENTS
+   ============================================================================ */
+.replace-dropzone {
+    border: 2px dashed #475569;
+    border-radius: var(--radius-md);
+    padding: 24px 16px;
+    text-align: center;
+    background: rgba(255, 255, 255, 0.02);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.replace-dropzone:hover,
+.replace-dropzone.dragover {
+    border-color: var(--ug-yellow) !important;
+    background: rgba(234, 179, 8, 0.06) !important;
+}
+
+.candidate-tile {
+    cursor: pointer;
+    border: 2px solid var(--ug-border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--ug-black-card);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    transition: all 0.15s ease;
+}
+
+.candidate-tile:hover {
+    border-color: rgba(234, 179, 8, 0.6) !important;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+}
+
+.candidate-tile.selected {
+    border-color: var(--ug-yellow) !important;
+    box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.45);
+}
+
+.btn-replace-photo {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--ug-border);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--ug-text-muted);
+    transition: all 0.15s ease;
+}
+
+.btn-replace-photo:hover {
+    background: var(--ug-yellow);
+    color: #000000;
+    border-color: var(--ug-yellow);
+}

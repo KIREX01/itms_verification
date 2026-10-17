@@ -1621,3 +1621,366 @@ body {
     border: 1px solid #475569;
 }
 
+/* ==========================================================================
+   Stock QR & Barcode Scanner Design System Classes (Replacing Inline Styles)
+   ========================================================================== */
+
+.stock-submode-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.stock-submode-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 4px;
+    border-radius: var(--radius-md, 8px);
+    background: var(--ug-black-surface-elevated, #212631);
+    border: 1px solid var(--ug-border, #2d3748);
+    color: var(--ug-text-primary, #f8fafc) !important;
+    font-weight: 700;
+    cursor: pointer;
+    text-align: center;
+    min-height: 52px;
+    transition: all 0.2s ease;
+}
+
+.stock-submode-btn .step-num {
+    background: rgba(255, 255, 255, 0.15);
+    color: #ffffff;
+    font-weight: 800;
+    width: 20px;
+    height: 20px;
+    line-height: 20px;
+    font-size: 0.7rem;
+    border-radius: 50%;
+    margin-bottom: 3px;
+}
+
+.stock-submode-btn .step-text {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #ffffff !important;
+    white-space: nowrap;
+}
+
+.stock-submode-btn.submode-dispatch.active {
+    background: var(--ug-blue, #0284c7) !important;
+    border-color: var(--ug-cyan, #38bdf8) !important;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
+}
+
+.stock-submode-btn.submode-delivery.active {
+    background: #16a34a !important;
+    border-color: #4ade80 !important;
+    box-shadow: 0 0 10px rgba(74, 222, 128, 0.35);
+}
+
+.stock-submode-btn.submode-return.active {
+    background: #d97706 !important;
+    border-color: #f59e0b !important;
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.35);
+}
+
+.stock-submode-btn.submode-audit.active {
+    background: #7c3aed !important;
+    border-color: #a78bfa !important;
+    box-shadow: 0 0 10px rgba(167, 139, 250, 0.35);
+}
+
+.stock-category-selector {
+    display: flex;
+    gap: 8px;
+    margin: 10px 0;
+}
+
+.stock-cat-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 8px;
+    border-radius: 8px;
+    font-weight: 800;
+    font-size: 0.8rem;
+    cursor: pointer;
+    min-height: 44px;
+    border: 2px solid transparent;
+    transition: all 0.2s ease;
+}
+
+.stock-cat-btn.cat-psv {
+    background: rgba(2, 132, 199, 0.2);
+    border-color: #0284c7;
+    color: #ffffff !important;
+}
+
+.stock-cat-btn.cat-psv.active {
+    background: #0284c7;
+    border-color: #38bdf8;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+}
+
+.stock-cat-btn.cat-pmo {
+    background: rgba(245, 158, 11, 0.15);
+    border-color: #78350f;
+    color: #fde047 !important;
+}
+
+.stock-cat-btn.cat-pmo.active {
+    background: #854d0e;
+    border-color: #f59e0b;
+    color: #ffffff !important;
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);
+}
+
+/* Manual Barcode Input Card */
+.stock-manual-input-box {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.stock-barcode-input {
+    flex: 1;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: var(--ug-black, #0d0f12);
+    color: #ffffff;
+    border: 1px solid var(--ug-border, #2d3748);
+    font-size: 1.05rem;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.stock-barcode-input:focus {
+    border-color: var(--ug-yellow, #f59e0b);
+    outline: none;
+    box-shadow: 0 0 8px var(--ug-yellow-glow);
+}
+
+.stock-add-btn {
+    min-width: 72px;
+    min-height: 44px;
+    padding: 0 14px;
+    background: linear-gradient(135deg, #0284c7, #0369a1);
+    color: #ffffff;
+    font-weight: 800;
+    font-size: 0.9rem;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    transition: transform 0.08s ease;
+}
+
+.stock-add-btn:active {
+    transform: scale(0.96);
+}
+
+/* Blocked Tray Card */
+.stock-blocked-card {
+    margin-top: 10px;
+    padding: 12px 14px;
+    background: rgba(220, 53, 69, 0.15);
+    border: 1px solid var(--ug-red, #ef4444);
+    border-radius: 10px;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.25);
+}
+
+.stock-blocked-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.stock-blocked-title {
+    color: #ff6b6b;
+    font-size: 0.85rem;
+    font-weight: 900;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-whatsapp-transfer {
+    background: #25D366;
+    color: #000000;
+    font-weight: 800;
+    padding: 6px 12px;
+    font-size: 0.75rem;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: transform 0.08s ease;
+}
+
+.btn-whatsapp-transfer:active {
+    transform: scale(0.96);
+}
+
+.stock-blocked-list-box {
+    margin-top: 6px;
+    font-size: 0.8rem;
+    color: #fca5a5;
+    font-family: var(--font-mono);
+    max-height: 90px;
+    overflow-y: auto;
+    line-height: 1.4;
+    padding: 6px 8px;
+    background: rgba(0, 0, 0, 0.4);
+    border-radius: 6px;
+}
+
+/* Scanned Stock Queue Tray */
+.stock-queue-tray {
+    margin-top: 12px;
+    background: var(--ug-black-surface, #161a22);
+    border: 1px solid var(--ug-border, #2d3748);
+    border-radius: 10px;
+    padding: 12px;
+}
+
+.stock-queue-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.stock-queue-title {
+    font-size: 0.82rem;
+    font-weight: 800;
+    color: var(--ug-yellow, #f59e0b);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.stock-scanned-items-scroll {
+    max-height: 180px;
+    overflow-y: auto;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: #cbd5e1;
+    background: var(--ug-black, #0d0f12);
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--ug-border, #2d3748);
+}
+
+/* ==========================================================================
+   Responsive Breakpoints & Safe-Area Insets (Field Ergonomics)
+   ========================================================================== */
+
+/* Modern Handheld Safe Areas (iPhone notch & home bar, Android gesture nav) */
+@supports (padding: max(0px)) {
+    body {
+        padding-bottom: max(76px, calc(64px + env(safe-area-inset-bottom)));
+    }
+    .outbox-tray {
+        padding-bottom: max(8px, env(safe-area-inset-bottom));
+    }
+    .mobile-header {
+        padding-top: max(12px, env(safe-area-inset-top));
+    }
+}
+
+/* Small Handheld Screen (< 420px: iPhone SE, compact Android devices) */
+@media screen and (max-width: 420px) {
+    .mobile-header {
+        padding: 10px 12px;
+    }
+    .brand-symbol {
+        font-size: 1.3rem;
+    }
+    .brand-title {
+        font-size: 0.82rem;
+    }
+    .brand-subtitle {
+        font-size: 0.58rem;
+    }
+    .header-actions {
+        gap: 4px;
+    }
+    .btn-switch-supervisor,
+    .btn-disconnect-session {
+        font-size: 0.62rem;
+        padding: 3px 6px;
+    }
+    .signal-pill {
+        padding: 3px 6px;
+        font-size: 0.65rem;
+    }
+    .mode-btn {
+        padding: 8px 4px;
+        font-size: 0.74rem;
+        gap: 4px;
+    }
+    .mode-btn .mode-icon {
+        font-size: 0.95rem;
+    }
+    .smart-shutter-btn {
+        min-height: 74px;
+    }
+    .smart-shutter-title {
+        font-size: 1.05rem;
+    }
+    .smart-shutter-subtitle {
+        font-size: 0.68rem;
+    }
+    .stock-submode-btn {
+        min-height: 48px;
+        padding: 6px 2px;
+    }
+    .stock-submode-btn .step-text {
+        font-size: 0.65rem;
+    }
+    .stock-cat-btn {
+        font-size: 0.74rem;
+        padding: 8px 4px;
+    }
+}
+
+/* Micro Handheld Screens (< 360px) */
+@media screen and (max-width: 360px) {
+    .mobile-app-wrapper {
+        padding: 0 4px;
+    }
+    .mode-selector-bar {
+        padding: 6px 8px;
+    }
+    .conveyor-previews-row {
+        gap: 6px;
+    }
+    .preview-mini-card {
+        padding: 6px 6px;
+    }
+    .mini-preview-box {
+        height: 90px;
+    }
+}
+
+/* Tablet & Widescreen Floor Companion (>= 640px) */
+@media screen and (min-width: 640px) {
+    .mobile-app-wrapper {
+        border-left: 1px solid var(--ug-border);
+        border-right: 1px solid var(--ug-border);
+        box-shadow: 0 0 40px rgba(0, 0, 0, 0.7);
+    }
+    .mode-container {
+        padding: 0 20px 20px;
+    }
+}
+
+

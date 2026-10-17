@@ -8,7 +8,7 @@
     
     <!-- Dedicated Modular Stylesheets (Uganda National Flag Design System) -->
     <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}?v=12">
-    <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}?v=12">
+    <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}?v=13">
     <link rel="stylesheet" href="{% static 'core/css/tab_dashboard.css' %}?v=12">
     <link rel="stylesheet" href="{% static 'core/css/tab_itms.css' %}?v=8">
     <link rel="stylesheet" href="{% static 'core/css/tab_batches.css' %}?v=12">
@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="{% static 'core/css/tab_settings.css' %}?v=12">
     <link rel="stylesheet" href="{% static 'core/css/tab_reports.css' %}?v=12">
     <link rel="stylesheet" href="{% static 'core/css/tab_stock.css' %}?v=9">
-    <link rel="stylesheet" href="{% static 'core/css/modals.css' %}?v=12">
+    <link rel="stylesheet" href="{% static 'core/css/modals.css' %}?v=13">
     <meta name="csrf-token" content="{{ csrf_token }}">
     {% block extra_css %}{% endblock %}
     <script>
@@ -124,41 +124,77 @@
             </div>
         </div>
 
-        <!-- Primary Navigation Tabs -->
-        <nav class="main-nav-tabs" id="mobile-nav-menu">
-            <button class="nav-tab-item active" id="nav-tab-1" onclick="switchNavTab(1)" title="Executive Dashboard">
-                <span>📊 Dashboard</span>
-                <span class="hotkey">1</span>
-            </button>
-            <button class="nav-tab-item" id="nav-tab-2" onclick="switchNavTab(2)" title="ITMS WebApp Connect & Orders">
-                <span>🌐 ITMS</span>
-                <span class="hotkey">2</span>
-            </button>
-            <button class="nav-tab-item" id="nav-tab-3" onclick="switchNavTab(3)" title="Ingestion & Photo Batches">
-                <span>📦 Batches</span>
-                <span class="hotkey">3</span>
-            </button>
-            <button class="nav-tab-item" id="nav-tab-4" onclick="switchNavTab(4)" title="Review Queue & Action Studio">
-                <span>🔍 Queue</span>
-                <span class="tab-badge" id="badge-nav-queue">0</span>
-                <span class="hotkey">4</span>
-            </button>
-            <button class="nav-tab-item" id="nav-tab-5" onclick="switchNavTab(5)" title="History & Verification Audit Logs">
-                <span>📜 History</span>
-                <span class="hotkey">5</span>
-            </button>
-            <button class="nav-tab-item" id="nav-tab-6" onclick="switchNavTab(6)" title="Settings & Safety Config">
-                <span>⚙️ Settings</span>
-                <span class="hotkey">6</span>
-            </button>
-            <button class="nav-tab-item" id="nav-tab-7" onclick="switchNavTab(7)" title="Reports & System Totals">
-                <span>📑 Reports</span>
-                <span class="hotkey">7</span>
-            </button>
-            <button class="nav-tab-item" id="nav-tab-8" onclick="switchNavTab(8)" title="Stock & Bond Logistics">
-                <span>🏭 Stock</span>
-                <span class="hotkey">8</span>
-            </button>
+        <!-- Mobile Navigation Backdrop Overlay -->
+        <div class="mobile-nav-backdrop" id="mobile-nav-backdrop" onclick="closeMobileMenu()"></div>
+
+        <!-- Primary Navigation Tabs (Desktop Header / Mobile Off-Canvas Drawer) -->
+        <nav class="main-nav-tabs" id="mobile-nav-menu" aria-label="Main Navigation">
+            <!-- Mobile Off-Canvas Drawer Header -->
+            <div class="mobile-nav-drawer-header">
+                <div class="drawer-branding">
+                    <span class="drawer-icon">🇺🇬</span>
+                    <div class="drawer-titles">
+                        <span class="drawer-app-name">ITMS COPILOT</span>
+                        <span class="drawer-sub">Verification System</span>
+                    </div>
+                </div>
+                <button type="button" class="btn-close-mobile-nav" onclick="closeMobileMenu()" aria-label="Close Navigation" title="Close Menu">
+                    &times;
+                </button>
+            </div>
+
+            <!-- Navigation Tab Items (Strict Order: 1:Dashboard, 2:ITMS, 3:Batch, 4:Queue, 5:Stock, 6:Reports, 7:Settings, 8:History) -->
+            <div class="nav-tab-list">
+                <button class="nav-tab-item active" id="nav-tab-1" onclick="switchNavTab(1)" title="Executive Dashboard">
+                    <span>📊 Dashboard</span>
+                    <span class="hotkey">1</span>
+                </button>
+                <button class="nav-tab-item" id="nav-tab-2" onclick="switchNavTab(2)" title="ITMS WebApp Connect & Orders">
+                    <span>🌐 ITMS</span>
+                    <span class="hotkey">2</span>
+                </button>
+                <button class="nav-tab-item" id="nav-tab-3" onclick="switchNavTab(3)" title="Ingestion & Photo Batches">
+                    <span>📦 Batches</span>
+                    <span class="hotkey">3</span>
+                </button>
+                <button class="nav-tab-item" id="nav-tab-4" onclick="switchNavTab(4)" title="Review Queue & Action Studio">
+                    <span>🔍 Queue</span>
+                    <span class="tab-badge" id="badge-nav-queue">0</span>
+                    <span class="hotkey">4</span>
+                </button>
+                <button class="nav-tab-item" id="nav-tab-5" onclick="switchNavTab(5)" title="Stock & Bond Logistics">
+                    <span>🏭 Stock</span>
+                    <span class="hotkey">5</span>
+                </button>
+                <button class="nav-tab-item" id="nav-tab-6" onclick="switchNavTab(6)" title="Reports & System Totals">
+                    <span>📑 Reports</span>
+                    <span class="hotkey">6</span>
+                </button>
+                <button class="nav-tab-item" id="nav-tab-7" onclick="switchNavTab(7)" title="Settings & Safety Config">
+                    <span>⚙️ Settings</span>
+                    <span class="hotkey">7</span>
+                </button>
+                <button class="nav-tab-item" id="nav-tab-8" onclick="switchNavTab(8)" title="History & Verification Audit Logs">
+                    <span>📜 History</span>
+                    <span class="hotkey">8</span>
+                </button>
+            </div>
+
+            <!-- Mobile Off-Canvas Drawer Footer -->
+            <div class="mobile-nav-drawer-footer">
+                <div class="drawer-user-info">
+                    <span class="drawer-user-label">Logged In</span>
+                    <span class="drawer-user-name">👤 {{ current_user.username|default:"Operator" }}</span>
+                </div>
+                <div class="drawer-quick-links">
+                    <a href="{% url 'core:mobile_companion' %}?view=mobile" class="drawer-station-btn">
+                        📱 Open Mobile Capture Station
+                    </a>
+                    <a href="{% url 'core:logout' %}" class="drawer-logout-btn">
+                        Sign Out
+                    </a>
+                </div>
+            </div>
         </nav>
 
     </header>
@@ -171,7 +207,7 @@
     <!-- Keyboard Shortcuts Footer Bar -->
     <footer class="app-footer">
         <div class="footer-hotkeys">
-            <span class="footer-hotkey-item"><span class="footer-key">1-7</span> Switch Tabs</span>
+            <span class="footer-hotkey-item"><span class="footer-key">1-8</span> Switch Tabs</span>
             <span class="footer-hotkey-item"><span class="footer-key">D</span> Date Scope</span>
             <span class="footer-hotkey-item"><span class="footer-key">P</span> Run Vision</span>
             <span class="footer-hotkey-item"><span class="footer-key">M</span> Match Pairs</span>
@@ -194,32 +230,18 @@
     <script src="{% static 'core/js/vendor/qrcode.min.js' %}?v=12"></script>
     <script src="{% static 'core/js/state.js' %}?v=12"></script>
     <script src="{% static 'core/js/utils.js' %}?v=12"></script>
-    <script src="{% static 'core/js/navigation.js' %}?v=12"></script>
+    <script src="{% static 'core/js/navigation.js' %}?v=13"></script>
     <script src="{% static 'core/js/tab_dashboard.js' %}?v=12"></script>
     <script src="{% static 'core/js/tab_itms.js' %}?v=12"></script>
-    <script src="{% static 'core/js/tab_batches.js' %}?v=8"></script>
-    <script src="{% static 'core/js/tab_queue.js' %}?v=9"></script>
+    <script src="{% static 'core/js/tab_batches.js' %}?v=9"></script>
+    <script src="{% static 'core/js/tab_queue.js' %}?v=10"></script>
     <script src="{% static 'core/js/tab_history.js' %}?v=9"></script>
     <script src="{% static 'core/js/tab_settings.js' %}?v=12"></script>
     <script src="{% static 'core/js/tab_reports.js' %}?v=12"></script>
     <script src="{% static 'core/js/tab_stock.js' %}?v=13"></script>
     <script src="{% static 'core/js/pipeline.js' %}?v=12"></script>
     <script src="{% static 'core/js/app.js' %}?v=12"></script>
-    <script>
-        function toggleMobileMenu() {
-            const nav = document.getElementById('mobile-nav-menu');
-            nav.classList.toggle('show-mobile');
-        }
-        
-        // Hide mobile menu on tab click
-        const tabBtns = document.querySelectorAll('.nav-tab-item');
-        tabBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const nav = document.getElementById('mobile-nav-menu');
-                nav.classList.remove('show-mobile');
-            });
-        });
-    </script>
+
     {% block extra_js %}{% endblock %}
 </body>
 </html>

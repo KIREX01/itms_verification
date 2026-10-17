@@ -698,6 +698,8 @@ function setStockCategory(cat) {
     MobileState.stock.category = cat;
     const btnPsv = document.getElementById("btn-cat-psv");
     const btnPmo = document.getElementById("btn-cat-pmo");
+    if (btnPsv) btnPsv.classList.toggle("active", cat === "PSV");
+    if (btnPmo) btnPmo.classList.toggle("active", cat === "PMO");
     if (cat === "PSV") {
         if (btnPsv) {
             btnPsv.style.background = "#0284c7";
@@ -705,20 +707,20 @@ function setStockCategory(cat) {
             btnPsv.style.borderColor = "#38bdf8";
         }
         if (btnPmo) {
-            btnPmo.style.background = "#334155";
-            btnPmo.style.color = "#ffffff";
-            btnPmo.style.borderColor = "#475569";
+            btnPmo.style.background = "";
+            btnPmo.style.color = "";
+            btnPmo.style.borderColor = "";
         }
     } else {
         if (btnPmo) {
-            btnPmo.style.background = "#b45309";
+            btnPmo.style.background = "#854d0e";
             btnPmo.style.color = "#ffffff";
-            btnPmo.style.borderColor = "#fbbf24";
+            btnPmo.style.borderColor = "#f59e0b";
         }
         if (btnPsv) {
-            btnPsv.style.background = "#334155";
-            btnPsv.style.color = "#ffffff";
-            btnPsv.style.borderColor = "#475569";
+            btnPsv.style.background = "";
+            btnPsv.style.color = "";
+            btnPsv.style.borderColor = "";
         }
     }
 }

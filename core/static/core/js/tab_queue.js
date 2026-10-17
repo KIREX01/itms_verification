@@ -756,3 +756,431 @@ function exportQueueCSV() {
     const scope = currentQueueDateScope || "ALL";
     window.location.href = `/api/pairs/export/csv/?scope=${encodeURIComponent(scope)}`;
 }
+
+/**
+ * ============================================================================
+ * DELETE PAIR CONTROLLER (Queue Interface)
+ * Safe soft-delete with immediate vault file purge option.
+ * ============================================================================
+ */
+function openDeletePairModal() {
+    if (!selectedPairId) {
+        showToast("Please select a pair to delete", "warning");
+        return;
+    }
+    const plate = (selectedPairDetail ? selectedPairDetail.registration_number_detected : "") || "Unassigned Pair";
+    setText("delete-pair-plate-label", plate);
+    setText("delete-pair-id-label", selectedPairId);
+    const purgeChk = document.getElementById("delete-pair-purge-files");
+    if (purgeChk) purgeChk.checked = true;
+    openModal("modal-delete-pair");
+}
+
+async function confirmDeletePair() {
+    if (!selectedPairId) return;
+    const pairIdToDelete = selectedPairId;
+    const purgeFiles = document.getElementById("delete-pair-purge-files")?.checked !== false;
+    const btn = document.getElementById("btn-confirm-delete-pair");
+    const origText = btn ? btn.innerHTML : "Delete";
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span>⏳ Deleting...</span>`;
+    }
+
+    try {
+        const res = await fetch(`/api/pairs/${pairIdToDelete}/action/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: `action=delete_pair&purge_files=${purgeFiles ? "true" : "false"}`,
+        });
+        const data = await res.json();
+        if (data.success) {
+            closeModal("modal-delete-pair");
+            showToast(data.message || "Pair deleted successfully", "success");
+
+            // Optimistically remove pair from local pairsData array
+            const removedIndex = pairsData.findIndex(p => p.id === pairIdToDelete);
+            if (removedIndex !== -1) {
+                pairsData.splice(removedIndex, 1);
+            }
+
+            renderQueueList();
+            if (typeof fetchStats === "function") fetchStats();
+
+            // Select adjacent pair in queue or clear inspector
+            if (pairsData.length > 0) {
+                const nextIndex = Math.min(removedIndex, pairsData.length - 1);
+                selectPair(pairsData[nextIndex].id);
+            } else {
+                selectedPairId = null;
+                selectedPairDetail = null;
+                const emptyMsg = document.getElementById("queue-empty-selection");
+                const inspector = document.getElementById("queue-pair-inspector");
+                if (emptyMsg) emptyMsg.style.display = "flex";
+                if (inspector) inspector.style.display = "none";
+            }
+        } else {
+            showToast(data.error || "Failed to delete pair", "error");
+        }
+    } catch (err) {
+        showToast("Error deleting pair: " + err, "error");
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+        }
+    }
+}
+
+/**
+ * ============================================================================
+ * REPLACE EVIDENCE IMAGE CONTROLLER (Queue & Batch Interfaces)
+ * ============================================================================
+ */
+let activeReplaceContext = {
+    mode: "pair", // "pair" or "image"
+    pairId: null,
+    side: "front", // "front" or "rear"
+    imageId: null,
+    batchId: null,
+    selectedFile: null,
+    selectedCandidateId: null,
+    activeTab: "upload", // "upload" or "batch"
+};
+
+function openReplaceImageModal(side) {
+    if (!selectedPairId || !selectedPairDetail) {
+        showToast("Please select a pair first", "warning");
+        return;
+    }
+    const sideLower = (side || "front").toLowerCase();
+    const batchId = selectedPairDetail.batch_id || (pairsData.find(p => p.id === selectedPairId)?.batch_id) || "";
+
+    activeReplaceContext = {
+        mode: "pair",
+        pairId: selectedPairId,
+        side: sideLower,
+        imageId: null,
+        batchId: batchId,
+        selectedFile: null,
+        selectedCandidateId: null,
+        activeTab: "upload",
+    };
+
+    const targetDesc = `${sideLower.toUpperCase()} Photo • Pair #${selectedPairId} (${selectedPairDetail.registration_number_detected || "No Plate"})`;
+    setText("replace-target-desc", targetDesc);
+    setText("replace-image-modal-title", `Replace ${sideLower.toUpperCase()} Evidence Photo`);
+    const batchBadge = document.getElementById("replace-target-batch-badge");
+    if (batchBadge) {
+        batchBadge.innerText = batchId ? `Batch: ${batchId}` : "No Batch Scope";
+    }
+
+    const batchTabBtn = document.getElementById("tab-btn-replace-batch");
+    if (batchTabBtn) {
+        batchTabBtn.style.display = batchId ? "block" : "none";
+    }
+
+    clearReplaceFileSelection();
+    activeReplaceContext.selectedCandidateId = null;
+
+    const orientSelect = document.getElementById("replace-batch-filter-orient");
+    if (orientSelect) {
+        orientSelect.value = sideLower === "rear" ? "REAR" : "FRONT";
+    }
+
+    switchReplaceModalTab("upload");
+    openModal("modal-replace-image");
+}
+
+function openReplaceBatchImageModal(imageId, batchId, orientation, fileName) {
+    activeReplaceContext = {
+        mode: "image",
+        pairId: null,
+        side: (orientation || "front").toLowerCase(),
+        imageId: imageId,
+        batchId: batchId || "",
+        selectedFile: null,
+        selectedCandidateId: null,
+        activeTab: "upload",
+    };
+
+    const targetDesc = `Batch Photo: ${fileName || String(imageId).slice(0, 8)} (${orientation || 'Evidence'})`;
+    setText("replace-target-desc", targetDesc);
+    setText("replace-image-modal-title", "Replace Batch Evidence Photo");
+    const batchBadge = document.getElementById("replace-target-batch-badge");
+    if (batchBadge) {
+        batchBadge.innerText = batchId ? `Batch: ${batchId}` : "Batch View";
+    }
+
+    const batchTabBtn = document.getElementById("tab-btn-replace-batch");
+    if (batchTabBtn) {
+        batchTabBtn.style.display = "none";
+    }
+
+    clearReplaceFileSelection();
+    switchReplaceModalTab("upload");
+    openModal("modal-replace-image");
+}
+
+function switchReplaceModalTab(tabName) {
+    activeReplaceContext.activeTab = tabName;
+    const isUpload = tabName === "upload";
+
+    const uploadBtn = document.getElementById("tab-btn-replace-upload");
+    const batchBtn = document.getElementById("tab-btn-replace-batch");
+    const uploadPane = document.getElementById("replace-pane-upload");
+    const batchPane = document.getElementById("replace-pane-batch");
+
+    if (uploadBtn) {
+        uploadBtn.classList.toggle("active", isUpload);
+        uploadBtn.style.borderBottomColor = isUpload ? "var(--ug-yellow)" : "transparent";
+        uploadBtn.style.color = isUpload ? "var(--ug-yellow)" : "var(--ug-text-muted)";
+    }
+    if (batchBtn) {
+        batchBtn.classList.toggle("active", !isUpload);
+        batchBtn.style.borderBottomColor = !isUpload ? "var(--ug-yellow)" : "transparent";
+        batchBtn.style.color = !isUpload ? "var(--ug-yellow)" : "var(--ug-text-muted)";
+    }
+    if (uploadPane) uploadPane.style.display = isUpload ? "flex" : "none";
+    if (batchPane) batchPane.style.display = !isUpload ? "flex" : "none";
+
+    if (!isUpload && activeReplaceContext.batchId) {
+        loadBatchCandidates();
+    }
+    updateReplaceSubmitButtonState();
+}
+
+function handleReplaceFileSelected(file) {
+    if (!file) return;
+    activeReplaceContext.selectedFile = file;
+
+    const previewWrap = document.getElementById("replace-file-preview-wrap");
+    const promptWrap = document.getElementById("replace-dropzone-prompt");
+    const imgPreview = document.getElementById("replace-file-preview");
+    const infoLabel = document.getElementById("replace-file-info");
+
+    if (promptWrap) promptWrap.style.display = "none";
+    if (previewWrap) previewWrap.style.display = "flex";
+
+    const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
+    if (infoLabel) infoLabel.innerText = `${file.name} (${sizeMB} MB)`;
+
+    if (imgPreview) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            imgPreview.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    }
+    updateReplaceSubmitButtonState();
+}
+
+function clearReplaceFileSelection() {
+    activeReplaceContext.selectedFile = null;
+    const input = document.getElementById("replace-file-input");
+    if (input) input.value = "";
+    const previewWrap = document.getElementById("replace-file-preview-wrap");
+    const promptWrap = document.getElementById("replace-dropzone-prompt");
+    const imgPreview = document.getElementById("replace-file-preview");
+
+    if (previewWrap) previewWrap.style.display = "none";
+    if (promptWrap) promptWrap.style.display = "block";
+    if (imgPreview) imgPreview.src = "";
+    updateReplaceSubmitButtonState();
+}
+
+async function loadBatchCandidates() {
+    if (!activeReplaceContext.batchId) return;
+    const orient = document.getElementById("replace-batch-filter-orient")?.value || "ALL";
+    const unassignedOnly = document.getElementById("replace-batch-filter-unassigned")?.checked ? "true" : "false";
+
+    const grid = document.getElementById("replace-candidates-grid");
+    const loading = document.getElementById("replace-candidates-loading");
+    const empty = document.getElementById("replace-candidates-empty");
+
+    if (grid) grid.innerHTML = "";
+    if (loading) loading.style.display = "block";
+    if (empty) empty.style.display = "none";
+
+    try {
+        const url = `/api/batches/${encodeURIComponent(activeReplaceContext.batchId)}/candidates/?orientation=${encodeURIComponent(orient)}&unassigned_only=${unassignedOnly}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (loading) loading.style.display = "none";
+
+        if (data.success && data.candidates && data.candidates.length > 0) {
+            if (empty) empty.style.display = "none";
+            grid.innerHTML = data.candidates.map(c => {
+                const isSelected = activeReplaceContext.selectedCandidateId === c.id;
+                return `
+                    <div class="candidate-tile ${isSelected ? 'selected' : ''}" onclick="selectBatchCandidate('${escapeHtml(c.id)}')" id="cand-tile-${escapeHtml(c.id)}">
+                        <div style="height:85px; background:#000; display:flex; align-items:center; justify-content:center; overflow:hidden;">
+                            <img src="${escapeHtml(c.thumb_url || c.url)}" alt="Candidate" style="width:100%; height:100%; object-fit:cover;">
+                        </div>
+                        <div style="padding:4px 6px; font-size:0.7rem; display:flex; flex-direction:column; gap:2px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span class="badge ${c.orientation === 'REAR' ? 'badge-yellow' : 'badge-green'}" style="font-size:0.62rem; padding:1px 4px;">${escapeHtml(c.orientation)}</span>
+                                <span style="color:var(--ug-text-dim); font-size:0.65rem;">${escapeHtml(c.captured_at || '')}</span>
+                            </div>
+                            <div style="font-weight:700; color:#f1f5f9; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                                ${escapeHtml(c.detected_plate || 'Unread')}
+                            </div>
+                            <div style="font-size:0.65rem; color:${c.is_assigned ? '#f59e0b' : '#10b981'};">
+                                ${c.is_assigned ? `Pair #${c.current_pair_id || 'Assigned'}` : '● Unassigned'}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join("");
+        } else {
+            if (empty) {
+                empty.innerText = "No eligible candidate photos found in this batch.";
+                empty.style.display = "block";
+            }
+        }
+    } catch (err) {
+        if (loading) loading.style.display = "none";
+        if (empty) {
+            empty.innerText = "Error loading candidate photos: " + err;
+            empty.style.display = "block";
+        }
+    }
+}
+
+function selectBatchCandidate(candidateId) {
+    activeReplaceContext.selectedCandidateId = candidateId;
+    document.querySelectorAll(".candidate-tile").forEach(el => {
+        el.style.borderColor = "var(--ug-border)";
+        el.classList.remove("selected");
+    });
+    const selectedEl = document.getElementById(`cand-tile-${candidateId}`);
+    if (selectedEl) {
+        selectedEl.style.borderColor = "var(--ug-yellow)";
+        selectedEl.classList.add("selected");
+    }
+    updateReplaceSubmitButtonState();
+}
+
+function updateReplaceSubmitButtonState() {
+    const btn = document.getElementById("btn-submit-replace-image");
+    const hint = document.getElementById("replace-status-hint");
+    if (!btn) return;
+
+    let canSubmit = false;
+    let hintText = "Select a file or candidate image";
+
+    if (activeReplaceContext.activeTab === "upload") {
+        if (activeReplaceContext.selectedFile) {
+            canSubmit = true;
+            hintText = `Ready to upload ${activeReplaceContext.selectedFile.name}`;
+        } else {
+            hintText = "Please select or drop a replacement photo";
+        }
+    } else {
+        if (activeReplaceContext.selectedCandidateId) {
+            canSubmit = true;
+            hintText = "Candidate photo selected from batch";
+        } else {
+            hintText = "Click a photo from the grid to select as replacement";
+        }
+    }
+
+    btn.disabled = !canSubmit;
+    if (hint) hint.innerText = hintText;
+}
+
+async function submitReplaceImage() {
+    const btn = document.getElementById("btn-submit-replace-image");
+    const origText = btn ? btn.innerHTML : "Replace Photo";
+    const purgeOld = document.getElementById("replace-purge-old-chk")?.checked !== false;
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = "⏳ Replacing...";
+    }
+
+    try {
+        if (activeReplaceContext.mode === "pair") {
+            const formData = new FormData();
+            formData.append("action", "replace_image");
+            formData.append("side", activeReplaceContext.side);
+            formData.append("purge_old", purgeOld ? "true" : "false");
+
+            if (activeReplaceContext.activeTab === "upload") {
+                if (!activeReplaceContext.selectedFile) {
+                    showToast("Please choose a file to upload", "warning");
+                    return;
+                }
+                formData.append("source", "upload");
+                formData.append("photo", activeReplaceContext.selectedFile);
+            } else {
+                if (!activeReplaceContext.selectedCandidateId) {
+                    showToast("Please select a candidate photo from the batch", "warning");
+                    return;
+                }
+                formData.append("source", "batch");
+                formData.append("image_id", activeReplaceContext.selectedCandidateId);
+            }
+
+            const res = await fetch(`/api/pairs/${activeReplaceContext.pairId}/action/`, {
+                method: "POST",
+                body: formData,
+            });
+            const data = await res.json();
+            if (data.success) {
+                closeModal("modal-replace-image");
+                showToast(data.message || "Photo replaced successfully", "success");
+
+                if (typeof selectPair === "function" && selectedPairId === activeReplaceContext.pairId) {
+                    await selectPair(activeReplaceContext.pairId);
+                }
+                if (typeof fetchPairs === "function") {
+                    fetchPairs();
+                }
+                if (typeof fetchStats === "function") {
+                    fetchStats();
+                }
+            } else {
+                showToast(data.error || "Failed to replace image", "error");
+            }
+        } else if (activeReplaceContext.mode === "image") {
+            if (!activeReplaceContext.selectedFile) {
+                showToast("Please choose a file to upload", "warning");
+                return;
+            }
+            const formData = new FormData();
+            formData.append("photo", activeReplaceContext.selectedFile);
+            formData.append("purge_old", purgeOld ? "true" : "false");
+
+            const res = await fetch(`/api/images/${encodeURIComponent(activeReplaceContext.imageId)}/replace/`, {
+                method: "POST",
+                body: formData,
+            });
+            const data = await res.json();
+            if (data.success) {
+                closeModal("modal-replace-image");
+                showToast(data.message || "Batch photo replaced successfully", "success");
+
+                if (typeof batchDetailsCache !== "undefined" && activeReplaceContext.batchId) {
+                    delete batchDetailsCache[activeReplaceContext.batchId];
+                }
+                if (typeof fetchBatchPhotos === "function" && activeReplaceContext.batchId) {
+                    fetchBatchPhotos(activeReplaceContext.batchId);
+                }
+                if (typeof fetchBatchesList === "function") {
+                    fetchBatchesList();
+                }
+            } else {
+                showToast(data.error || "Failed to replace photo", "error");
+            }
+        }
+    } catch (err) {
+        showToast("Error replacing image: " + err, "error");
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+            updateReplaceSubmitButtonState();
+        }
+    }
+}

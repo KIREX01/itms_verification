@@ -348,6 +348,12 @@ function renderFullScaleBatchPhotos(batchId, images) {
                                 <span>${img.file_size_kb} KB • ${escapeHtml(img.captured_at || 'No timestamp')}</span>
                             </div>
                             ${pairHtml}
+                            <div class="batch-photo-actions-row" style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,255,255,0.06);">
+                                <span style="font-size:0.7rem; color:var(--ug-text-dim);">ID: ${escapeHtml(img.id ? String(img.id).slice(0, 8) : '')}</span>
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="openReplaceBatchImageModal('${escapeHtml(img.id)}', '${escapeHtml(batchId)}', '${escapeHtml(img.orientation || 'FRONT')}', '${escapeHtml(img.file_name)}')" style="padding:2px 8px; font-size:0.72rem; border-color:var(--ug-border); color:#f1f5f9;">
+                                    🔁 Replace Photo
+                                </button>
+                            </div>
                         </div>
                     </div>
                 `;

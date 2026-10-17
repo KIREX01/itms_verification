@@ -113,7 +113,12 @@
                     <div class="evidence-box">
                         <div class="evidence-box-header">
                             <span class="evidence-box-title">🚘 Front Angle Photo</span>
-                            <span id="qfront-timestamp" style="color:var(--ug-text-dim); font-size:0.75rem;">--:--:--</span>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span id="qfront-timestamp" style="color:var(--ug-text-dim); font-size:0.75rem;">--:--:--</span>
+                                <button type="button" class="btn btn-secondary btn-sm btn-replace-photo" onclick="openReplaceImageModal('front')" title="Replace front photo">
+                                    🔁 Replace
+                                </button>
+                            </div>
                         </div>
                         <div class="evidence-viewport">
                             <button type="button" class="evidence-viewport-btn" onclick="openLightbox(document.getElementById('qimg-front').dataset.fullUrl || document.getElementById('qimg-front').src)" aria-label="Enlarge front vehicle photo" style="background:none; border:none; padding:0; cursor:pointer; width:100%; height:100%; display:flex; align-items:center; justify-content:center;">
@@ -132,7 +137,12 @@
                     <div class="evidence-box">
                         <div class="evidence-box-header">
                             <span class="evidence-box-title">🏍️ Rear Angle Photo</span>
-                            <span id="qrear-timestamp" style="color:var(--ug-text-dim); font-size:0.75rem;">--:--:--</span>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span id="qrear-timestamp" style="color:var(--ug-text-dim); font-size:0.75rem;">--:--:--</span>
+                                <button type="button" class="btn btn-secondary btn-sm btn-replace-photo" onclick="openReplaceImageModal('rear')" title="Replace rear photo">
+                                    🔁 Replace
+                                </button>
+                            </div>
                         </div>
                         <div class="evidence-viewport">
                             <button type="button" class="evidence-viewport-btn" onclick="openLightbox(document.getElementById('qimg-rear').dataset.fullUrl || document.getElementById('qimg-rear').src)" aria-label="Enlarge rear vehicle photo" style="background:none; border:none; padding:0; cursor:pointer; width:100%; height:100%; display:flex; align-items:center; justify-content:center;">
@@ -194,6 +204,9 @@
                     </button>
                     <button class="btn-decision btn-secondary" onclick="openEditPlateModal()" title="Edit plate, change verification status, or link ITMS order (Hotkeys: E or L)">
                         ✏️ Edit Plate <span class="hotkey hide-mobile">E / L</span>
+                    </button>
+                    <button class="btn-decision btn-danger" id="btn-action-delete" onclick="openDeletePairModal()" title="Delete pair and purge evidence files">
+                        🗑️ Delete Pair
                     </button>
                     <button class="btn-decision btn-primary" id="btn-submit-action" onclick="executePairAction('submit')" title="Submit verified motorcycle pair to ITMS (Hotkey: Enter)">
                         🚀 Submit <span class="hotkey hide-mobile">Enter</span>

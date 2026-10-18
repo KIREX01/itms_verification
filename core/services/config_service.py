@@ -172,10 +172,10 @@ USER_SETTINGS_SCHEMA: Dict[str, Dict[str, Any]] = {
     },
     "sync.shift_target_date_mode": {
         "label": "Shift Date Selection Mode",
-        "description": "Target date rule for reconciliation ledgers: 'today', 'yesterday', or 'manual'.",
+        "description": "Target date rule for reconciliation ledgers: 'today', 'yesterday', 'manual', or 'all'.",
         "type": "select",
         "default": "today",
-        "options": ["today", "yesterday", "manual"],
+        "options": ["today", "yesterday", "manual", "all"],
         "category": "Shift & Synchronization",
     },
     "sync.manual_target_date": {
@@ -535,6 +535,8 @@ def get_user_settings(base_dir: Optional[Path] = None) -> Dict[str, Any]:
         item = copy.deepcopy(meta)
         item["value"] = val
         result[key] = item
+        # Provide underscore alias for seamless Django template variable resolution (e.g. user_settings.sync_auto_sync_enabled.value)
+        result[key.replace(".", "_")] = item
     return result
 
 
@@ -546,6 +548,7 @@ def get_developer_settings(base_dir: Optional[Path] = None) -> Dict[str, Any]:
         item = copy.deepcopy(meta)
         item["value"] = val
         result[key] = item
+        result[key.replace(".", "_")] = item
     return result
 
 

@@ -113,7 +113,7 @@ class SettingsPane(Vertical):
         # Developer settings: Crawl Bounds
         crawl_active = str(cfg.get("crawl", {}).get("max_active_pages", 25))
         crawl_archive = str(cfg.get("crawl", {}).get("max_archive_pages", 50))
-        crawl_kits = str(cfg.get("crawl", {}).get("max_kit_pages", 25))
+        crawl_kits = str(cfg.get("crawl", {}).get("max_kit_pages", 100))
 
         # Developer settings: Concurrency & Database
         sqlite_timeout = str(cfg.get("database", {}).get("sqlite_busy_timeout_ms", 30000))
@@ -205,7 +205,7 @@ class SettingsPane(Vertical):
                         yield Input(value=sync_interval, id="input-sync-interval", classes="settings-input")
 
                     with Horizontal(classes="settings-row"):
-                        yield Static("[b]Shift Target Date Mode[/b]\n[dim]Reconciliation target date: 'today', 'yesterday', or 'manual'[/dim]", classes="settings-label")
+                        yield Static("[b]Shift Target Date Mode[/b]\n[dim]Reconciliation target date: 'today', 'yesterday', 'manual', or 'all'[/dim]", classes="settings-label")
                         yield Input(value=shift_mode, id="input-shift-mode", classes="settings-input")
 
                     with Horizontal(classes="settings-row"):
@@ -878,6 +878,14 @@ class SettingsPane(Vertical):
                 cfg.setdefault("bond", {})
                 cfg["bond"]["active_bond_code"] = b_code
                 cfg["bond"]["strict_bond_scoping"] = b_strict
+                b_name = ""
+                for ab in cfg.get("bond", {}).get("available_bonds", []):
+                    if ab.get("code") == b_code:
+                        b_name = ab.get("name", "")
+                        break
+                if not b_name:
+                    b_name = f"{b_code} Bonded Warehouse"
+                cfg["bond"]["active_bond_name"] = b_name
             except Exception:
                 pass
 
@@ -887,7 +895,10 @@ class SettingsPane(Vertical):
                 s_int = int(self.query_one("#input-sync-interval", Input).value.strip() or 60)
                 s_mode = self.query_one("#input-shift-mode", Input).value.strip().lower() or "today"
                 m_date = self.query_one("#input-manual-shift-date", Input).value.strip()
-                e_dir = self.query_one("#input-export-dir", Input).value.strip() or "exports"
+                try:
+                    e_dir = self.query_one("#input-export-dir", Input).value.strip() or "exports"
+                except Exception:
+                    e_dir = str(config_service.get_setting("sync.default_export_directory", "exports"))
                 cfg.setdefault("sync", {})
                 cfg["sync"]["auto_sync_enabled"] = a_sync
                 cfg["sync"]["auto_sync_interval_seconds"] = max(10, s_int)
@@ -1076,11 +1087,14 @@ class SettingsPane(Vertical):
                 self.query_one("#input-sync-interval", Input).value = "60"
                 self.query_one("#input-shift-mode", Input).value = "today"
                 self.query_one("#input-manual-shift-date", Input).value = ""
-                self.query_one("#input-export-dir", Input).value = "exports"
+                try:
+                    self.query_one("#input-export-dir", Input).value = "exports"
+                except Exception:
+                    pass
 
                 self.query_one("#input-crawl-active", Input).value = "25"
                 self.query_one("#input-crawl-archive", Input).value = "50"
-                self.query_one("#input-crawl-kits", Input).value = "25"
+                self.query_one("#input-crawl-kits", Input).value = "100"
                 self.query_one("#input-sqlite-timeout", Input).value = "30000"
                 self.query_one("#input-db-batch-size", Input).value = "200"
 

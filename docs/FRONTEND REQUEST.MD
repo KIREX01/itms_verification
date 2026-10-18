@@ -323,3 +323,30 @@ All local shift selectors on Stock and Reports tabs have been dismantled and mig
    - Added `updateReportActiveShiftDisplay(activeShift)` and bound window `shiftDateChanged` listener to re-fetch report totals and category breakdowns.
 4. **Cache Busting (`core/templates/core/base.html`)**:
    - Bumped version parameters: `pipeline.js?v=13`, `tab_stock.js?v=17`, `tab_reports.js?v=15`, `tab_stock.css?v=13`, `tab_reports.css?v=15`.
+
+
+## 6. History Page Audit Enhancements for Email & Ledger Events
+
+### 6.1 Backend Enhancements
+- Email dispatches (`STOCK_REPORT_EMAILED`) and ledger updates (`STOCK_LEDGER_UPDATED`) now write complete `SubmissionAuditLog` records with explicit `ResultStatus.SUCCESS` or `ResultStatus.FAILURE`.
+- When an email dispatch succeeds:
+  - `result`: `"SUCCESS"` (badge green).
+  - `plate`: `"SHIFT_<work_suffix>"` (e.g. `SHIFT_181026`).
+  - `order_number`: `"EMAIL_DISPATCH"`.
+  - `message`: Lists recipients and delivery confirmation message.
+- When an email dispatch fails:
+  - `result`: `"FAILURE"` (badge red).
+  - `plate`: `"SHIFT_<work_suffix>"`.
+  - `order_number`: `"EMAIL_DISPATCH"`.
+  - `message`: Specific error diagnosis (e.g. `FAILED emailing stock report for shift 181026 to ...: Resend API error: Rate limit exceeded`).
+- `GET /api/history/?filter=FAILED` now captures both failed pair submissions and failed email dispatches.
+- `GET /api/history/?filter=EMAIL` filters directly to email dispatches.
+
+### 6.2 UI/UX & Frontend Developer Specifications
+1. **Filter Chips in `core/templates/core/tabs/tab_history.html`**:
+   - Add an optional filter chip for email dispatches:
+     ```html
+     <button class="history-chip" data-hfilter="EMAIL" onclick="setHistoryFilter('EMAIL')">Emails</button>
+     ```
+2. **Detail Modal in `core/templates/core/modals.html` (`#modal-history-detail`)**:
+   - When inspecting an email dispatch log, the modal cleanly displays the shift suffix in the plate field, the action as `STOCK_REPORT_EMAILED`, the result as `SUCCESS` or `FAILURE`, and the full recipient and error information in the execution trace box.

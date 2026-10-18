@@ -235,3 +235,26 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
       - `POST {"target_date": "today"}` -> 200 OK, mode="today"
       - `POST {"target_date": "ALL"}` -> 200 OK, mode="all", suffix="ALL", formatted_date="All Dates".
     - Full test suite passed in 1.86s.
+
+
+## 7. Feature: Comprehensive Email Dispatch & Audit Trail Success/Failure Telemetry - [COMPLETED]
+- **Core Requirements Implemented**:
+  1. **Explicit Success/Failure Audit Logging for Email Dispatch**:
+     - Updated `api_stock_report_email` in `core/views/bond.py`:
+       - On success: Creates `SubmissionAuditLog` with `action=STOCK_REPORT_EMAILED`, `result=ResultStatus.SUCCESS`, `simulated_token=work_suffix`, and operator context.
+       - On failure / API rejection: Creates `SubmissionAuditLog` with `action=STOCK_REPORT_EMAILED`, `result=ResultStatus.FAILURE`, detailed failure message, and operator context.
+       - On exception / timeout: Creates `SubmissionAuditLog` with `action=STOCK_REPORT_EMAILED`, `result=ResultStatus.FAILURE`, exception trace, and operator context.
+       - On empty recipient list: Creates `SubmissionAuditLog` with `action=STOCK_REPORT_EMAILED`, `result=ResultStatus.FAILURE`.
+  2. **Audit Logging for Stock Ledger Overrides**:
+     - Updated `update_ledger_entry` in `core/services/stock_monitoring_service.py` to record `result=ResultStatus.SUCCESS` and `simulated_token=suffix`.
+  3. **History API & TUI Formatting Enhancements**:
+     - Updated `api_history_list` in `core/views/dashboard.py`:
+       - Supports `?filter=EMAIL` to isolate email dispatches.
+       - Maps unlinked pair logs (`STOCK_REPORT_EMAILED`, `STOCK_LEDGER_UPDATED`) to informative plate/order tokens (`SHIFT_<suffix>` and `EMAIL_DISPATCH` / `LEDGER_OVERRIDE`) instead of generic `"N/A"`.
+       - Formats `result` cleanly so frontend renders green `badge-green` for `SUCCESS` and red `badge-red` for `FAILURE`.
+     - Updated `_reload_history_table` in `core/tui/tables.py` to preserve unlinked audit logs when filtering by active account.
+- **Automated Verification**:
+  - `core.tests.test_stock_monitoring.StockMonitoringTests`:
+    - `test_stock_report_email_dispatch`: Verifies `SUCCESS` audit logging.
+    - `test_stock_report_email_dispatch_failure_and_history_api`: Verifies `FAILURE` audit logging and History API payload.
+    - Full suite passing.

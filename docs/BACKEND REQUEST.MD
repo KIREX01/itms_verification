@@ -130,3 +130,19 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
 - `test_replace_image_via_batch_picker`
 - `test_api_batch_candidates`
 - `test_replace_batch_image`
+
+
+## 3. Off-Conveyor (U-Turn Walk) Trajectory Alignment Fix - [COMPLETED]
+- **Commit Reference**: `f589e2d`
+- **Issue Resolved**:
+  - In a 4-photo U-turn batch of 2 motorcycles (Bike A: Rear 1, Front 4; Bike B: Rear 2, Front 3):
+    - Mobile Companion generated filenames: `uturn_rear_1.jpg`, `uturn_rear_2.jpg`, `uturn_front_1.jpg`, `uturn_front_2.jpg`.
+    - Tier 1B camera shutter sequence index matching prematurely matched `uturn_front_1.jpg` (sequence 1) with `uturn_rear_1.jpg` (sequence 1), mistakenly pairing Front 3 with Rear 1 and Front 4 with Rear 2.
+    - In addition, incremental upload association during active mobile photo uploads caused premature pairing before the full return walk was completed.
+- **Backend Fix**:
+  1. **Tier 1B Bypass**: Skip shutter sequence index matching whenever a batch or image is identified as U-Turn (`is_uturn_context`).
+  2. **Turnaround Trajectory Anchoring**: In Tier 3, turnaround alignment always anchors from the physical turnaround point backwards ($R_{N-1-k} \leftrightarrow F_k$).
+  3. **Natural Row Ordering**: Resolved pairs are emitted in natural row order (Row Position #1 = Bike A, Row Position #2 = Bike B).
+  4. **Upload Association Throttling**: In `api_mobile_upload`, auto-association only runs when photo counts are balanced (`fronts == rears > 0`), and final sealing runs cleanly in `api_mobile_uturn_finish`.
+- **Automated Verification**:
+  - `TestMobileCompanion.test_uturn_pairing_aligns_turnaround_without_shutter_index_confusion` in `core/tests/test_mobile_companion.py` (100% pass).

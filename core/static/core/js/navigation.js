@@ -39,7 +39,7 @@ const NAV_NAME_TO_INDEX = {
     "history": 8,
 };
 
-function switchNavTab(target) {
+function switchNavTab(target, updateUrl = true) {
     let tabIndex = 1;
     if (typeof target === "number") {
         tabIndex = target;
@@ -53,6 +53,22 @@ function switchNavTab(target) {
     }
 
     activeNavTab = tabIndex;
+
+    // Persist active tab in localStorage so refresh/reload never resets to Dashboard
+    try {
+        localStorage.setItem("itms_active_nav_tab", String(tabIndex));
+    } catch (e) {
+        console.warn("Could not save active tab to localStorage:", e);
+    }
+
+    // Update URL hash without polluting browser history if updateUrl is true
+    if (updateUrl && window.history && window.history.replaceState) {
+        const slug = NAV_TAB_NAMES[tabIndex];
+        const newHash = `#${slug}`;
+        if (window.location.hash !== newHash) {
+            window.history.replaceState(null, "", newHash);
+        }
+    }
 
     // Toggle active state on tab buttons and workspace panes
     for (let i = 1; i <= 8; i++) {
@@ -140,3 +156,54 @@ document.addEventListener("keydown", (e) => {
         closeMobileMenu();
     }
 });
+
+/**
+ * Tab Persistence and Deep-Linking Controllers
+ * Restores active tab on page refresh / reload and supports hash navigation.
+ */
+function getPersistedNavTab() {
+    // 1. Check URL hash first (e.g. #stock, #reports, #history, #queue, #itms, #batches, #settings, #dashboard)
+    const hash = (window.location.hash || "").replace("#", "").toLowerCase().trim();
+    if (hash && NAV_NAME_TO_INDEX[hash]) {
+        return NAV_NAME_TO_INDEX[hash];
+    }
+    // 2. Check localStorage
+    try {
+        const stored = localStorage.getItem("itms_active_nav_tab");
+        if (stored) {
+            const idx = parseInt(stored, 10);
+            if (idx >= 1 && idx <= 8) return idx;
+        }
+    } catch (e) {}
+    // Default to Dashboard (1)
+    return 1;
+}
+
+function initNavTabPersistence() {
+    const initialTab = getPersistedNavTab();
+    if (initialTab !== 1 || (window.location.hash && window.location.hash !== "#dashboard")) {
+        switchNavTab(initialTab, false);
+    } else {
+        // Ensure localStorage is set
+        try {
+            if (!localStorage.getItem("itms_active_nav_tab")) {
+                localStorage.setItem("itms_active_nav_tab", "1");
+            }
+        } catch (e) {}
+    }
+}
+
+// React to browser back/forward or manual hash change
+window.addEventListener("hashchange", () => {
+    const tab = getPersistedNavTab();
+    if (tab !== activeNavTab) {
+        switchNavTab(tab, false);
+    }
+});
+
+// Auto-run persistence restoration
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initNavTabPersistence);
+} else {
+    initNavTabPersistence();
+}

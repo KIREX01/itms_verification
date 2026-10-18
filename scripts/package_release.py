@@ -74,6 +74,17 @@ LINUX_ONLY_FILES = {
     "scripts/setup_vps.sh",
 }
 
+# Executable scripts given 0o755 permissions in Linux tarball
+EXECUTABLE_SCRIPTS = {
+    "itms",
+    "install.sh",
+    "uninstall.sh",
+    "deploy_user_data.sh",
+    "setup_vps.sh",
+    "bootstrap.py",
+    "manage.py",
+}
+
 
 def should_exclude(rel_path_str: str, target: str) -> bool:
     """Returns True if the given relative path should be excluded from the archive."""

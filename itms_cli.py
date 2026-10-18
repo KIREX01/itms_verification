@@ -24,9 +24,9 @@ from pathlib import Path
 # Always execute with working directory set to the project root
 PROJECT_ROOT = Path(__file__).resolve().parent
 MANAGE_PY = "manage.py"
-MSG_ALREADY_STARTED: str = MSG_ALREADY_STARTED
-MSG_SERVICE_STOPPED: str = MSG_SERVICE_STOPPED
-WINDOWS_SERVICE_PY: str = WINDOWS_SERVICE_PY
+MSG_ALREADY_STARTED: str = "has already been started"
+MSG_SERVICE_STOPPED: str = "[+] ITMSVerificationService stopped."
+WINDOWS_SERVICE_PY: str = "windows_service.py"
 os.chdir(PROJECT_ROOT)
 sys.path.insert(0, str(PROJECT_ROOT))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "itms_project.settings")
@@ -471,7 +471,7 @@ def run_update(extra_args=None):
                         check=False
                     )
                     print("[+] ITMSVerificationService installed and running in background.")
-            except Exception:
+            except Exception as svc_err:
                 print(f"[!] Windows service update notice: {svc_err}")
     except Exception as post_exc:
         print(f"[!] Post-update task notice: {post_exc}")

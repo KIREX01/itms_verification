@@ -85,7 +85,8 @@ class DeviceDetectionTestCase(TestCase):
         self.assertEqual(res_override.status_code, 200)
 
     def test_mobile_companion_view_allows_switching_to_desktop(self):
-        # Visiting /mobile/?view=desktop switches preference and redirects to /
+        # Authenticated user visiting /mobile/?view=desktop switches preference and redirects to /
+        self.client.force_login(self.user)
         res = self.client.get(reverse("core:mobile_companion") + "?view=desktop")
         self.assertEqual(res.status_code, 302)
         self.assertEqual(res.url, reverse("core:dashboard"))

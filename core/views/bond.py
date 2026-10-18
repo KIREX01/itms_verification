@@ -1480,11 +1480,18 @@ def api_stock_report_email(request: HttpRequest) -> JsonResponse:
         from core.services import stock_monitoring_service, email_service
         recon = stock_monitoring_service.compute_daily_reconciliation(target_date)
         work_suffix = str(recon.get("work_date_suffix") or target_date or "")
+        try:
+            from django.templatetags.static import static
+            logo_url = request.build_absolute_uri(static("core/logos/android-chrome-192x192.png"))
+        except Exception:
+            logo_url = ""
+
         success, msg, sent_to = email_service.send_stock_reconciliation_report_email(
             recon_data=recon,
             recipient_emails=valid_recipients,
             operator_name=operator_name,
             notes=notes,
+            logo_url=logo_url,
         )
 
         if success:

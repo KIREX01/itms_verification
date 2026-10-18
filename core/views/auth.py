@@ -10,6 +10,8 @@ from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.templatetags.static import static
+from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from core.services import auth_service, device_service, email_service
@@ -128,7 +130,9 @@ def signup_view(request: HttpRequest) -> HttpResponse:
             }
             request.session.modified = True
 
-            ok, msg = email_service.send_2fa_verification_code(email, code, username=username)
+            logo_url = request.build_absolute_uri(static("core/logos/android-chrome-192x192.png"))
+            verify_url = request.build_absolute_uri(reverse("core:signup_verify")) + f"?code={code}"
+            ok, msg = email_service.send_2fa_verification_code(email, code, username=username, verify_url=verify_url, logo_url=logo_url)
             if not ok:
                 logger.warning("Failed to send 2FA email on signup: %s", msg)
                 messages.warning(request, f"Email delivery notice: {msg}")
@@ -173,7 +177,9 @@ def _process_signup_resend(request: HttpRequest, pending: dict, email: str, user
     request.session["pending_signup"] = pending
     request.session.modified = True
 
-    ok, msg = email_service.send_2fa_verification_code(email, new_code, username=username)
+    logo_url = request.build_absolute_uri(static("core/logos/android-chrome-192x192.png"))
+    verify_url = request.build_absolute_uri(reverse("core:signup_verify")) + f"?code={new_code}"
+    ok, msg = email_service.send_2fa_verification_code(email, new_code, username=username, verify_url=verify_url, logo_url=logo_url)
     return render(request, SIGNUP_VERIFY_TEMPLATE, {
         "email": email,
         "message": "A new 6-digit security code has been sent to your email.",
@@ -242,8 +248,10 @@ def signup_verify_view(request: HttpRequest) -> HttpResponse:
         messages.success(request, "Email verified successfully! Welcome to ITMS Verification Copilot.")
         return _redirect_after_auth(request)
 
+    initial_code = request.GET.get("code", "").strip()
     return render(request, SIGNUP_VERIFY_TEMPLATE, {
         "email": email,
+        "initial_code": initial_code,
     })
 
 

@@ -12,6 +12,21 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>ITMS Mobile Capture - Verification Copilot</title>
 
+    <!-- Favicon & Touch Icons -->
+    <link rel="shortcut icon" href="{% static 'core/logos/favicon.ico' %}">
+    <link rel="icon" type="image/x-icon" href="{% static 'core/logos/favicon.ico' %}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{% static 'core/logos/favicon-32x32.png' %}">
+    <link rel="icon" type="image/png" sizes="16x16" href="{% static 'core/logos/favicon-16x16.png' %}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{% static 'core/logos/apple-touch-icon.png' %}">
+    <link rel="manifest" href="{% static 'core/logos/site.webmanifest' %}">
+
+    <!-- Open Graph Metadata -->
+    <meta property="og:site_name" content="ITMS Mobile Capture">
+    <meta property="og:title" content="ITMS Mobile Companion - Rapid Photo Evidence Capture">
+    <meta property="og:description" content="Official Ugandan vehicle fitment evidence capture and inspection companion.">
+    <meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'core/logos/android-chrome-512x512.png' %}">
+    <meta property="og:type" content="website">
+
     <link rel="stylesheet" href="{% static 'core/css/mobile_companion.css' %}?v=17">
 </head>
 <body>
@@ -22,7 +37,7 @@
         <!-- App Header Bar -->
         <header class="mobile-header">
             <div class="header-branding">
-                <span class="brand-symbol">🏍️</span>
+                <img src="{% static 'core/logos/favicon-32x32.png' %}" alt="Logo" style="width:28px; height:28px; border-radius:6px; object-fit:contain; margin-right:8px; display:inline-block; vertical-align:middle;">
                 <div>
                     <h1 class="brand-title">ITMS MOBILE CAPTURE</h1>
                     <div class="brand-subtitle">

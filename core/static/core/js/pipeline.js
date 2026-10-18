@@ -610,14 +610,27 @@ window.initGlobalShiftDate = async function() {
 };
 
 window.populateAllShiftDropdowns = function(dates, activeShift) {
+    if (activeShift) {
+        window.activeShiftDateInfo = activeShift;
+    }
     if (!dates || dates.length === 0) return;
     const activeSfx = activeShift ? activeShift.suffix : "";
 
-    // 1. Header Select
+    // 1. Top Centralized Header Select (#global-shift-select)
     const headerSel = document.getElementById("global-shift-select");
     if (headerSel) {
         const currentSelected = headerSel.value || activeSfx;
         headerSel.innerHTML = "";
+
+        // Standard All Dates (Aggregate) option
+        const optAll = document.createElement("option");
+        optAll.value = "ALL";
+        optAll.textContent = "All Dates (Aggregate)";
+        if (currentSelected === "ALL" || (!currentSelected && activeSfx === "ALL")) {
+            optAll.selected = true;
+        }
+        headerSel.appendChild(optAll);
+
         dates.forEach(d => {
             const opt = document.createElement("option");
             opt.value = d.suffix;
@@ -627,38 +640,6 @@ window.populateAllShiftDropdowns = function(dates, activeShift) {
                 opt.selected = true;
             }
             headerSel.appendChild(opt);
-        });
-    }
-
-    // 2. Stock Shift Select
-    const stockSel = document.getElementById("stock-shift-select");
-    if (stockSel) {
-        const currentSelected = stockSel.value || activeSfx;
-        stockSel.innerHTML = "";
-        dates.forEach(d => {
-            const opt = document.createElement("option");
-            opt.value = d.suffix;
-            opt.textContent = `${d.formatted_date} (${d.suffix})${d.is_today ? " • Today" : ""}`;
-            if (d.suffix === currentSelected || (!currentSelected && d.suffix === activeSfx)) {
-                opt.selected = true;
-            }
-            stockSel.appendChild(opt);
-        });
-    }
-
-    // 3. Reports Date Select
-    const repSel = document.getElementById("report-date-select");
-    if (repSel) {
-        const currentSelected = repSel.value || activeSfx;
-        repSel.innerHTML = `<option value="ALL">All Work Dates</option>`;
-        dates.forEach(d => {
-            const opt = document.createElement("option");
-            opt.value = d.suffix;
-            opt.textContent = `${d.formatted_date} (${d.suffix}) - ${d.order_count} orders${d.is_today ? " [Today]" : ""}`;
-            if (d.suffix === currentSelected || (!currentSelected && d.suffix === activeSfx)) {
-                opt.selected = true;
-            }
-            repSel.appendChild(opt);
         });
     }
 };
@@ -721,7 +702,9 @@ window.setGlobalShiftDate = async function(targetVal) {
 
 window.syncAllDateSelectorsUI = function(shiftInfo) {
     if (!shiftInfo) return;
+    window.activeShiftDateInfo = shiftInfo;
     const sfx = shiftInfo.suffix;
+    const shiftLabel = shiftInfo.formatted_date ? `${shiftInfo.formatted_date} (${sfx})` : (shiftInfo.display || sfx || "Live Shift");
 
     // Header selector
     const headerSel = document.getElementById("global-shift-select");
@@ -729,20 +712,20 @@ window.syncAllDateSelectorsUI = function(shiftInfo) {
         headerSel.value = sfx;
     }
 
-    // Reports Hub
-    const repSel = document.getElementById("report-date-select");
-    if (repSel && sfx && repSel.value !== "ALL") {
-        repSel.value = sfx;
-    }
-    const repBadge = document.getElementById("report-selected-date-badge");
+    // Reports Hub - Read-only active shift badge & focus indicator
+    const repBadge = document.getElementById("report-active-shift-badge");
     if (repBadge) {
-        repBadge.textContent = `Focus: ${shiftInfo.formatted_date} (${sfx})`;
+        repBadge.textContent = shiftLabel;
+    }
+    const repFocusBadge = document.getElementById("report-selected-date-badge");
+    if (repFocusBadge) {
+        repFocusBadge.textContent = `Focus: ${shiftLabel}`;
     }
 
-    // Stock Management
-    const stockSel = document.getElementById("stock-shift-select");
-    if (stockSel && sfx) {
-        stockSel.value = sfx;
+    // Stock Management - Read-only active shift badge
+    const stockBadge = document.getElementById("stock-active-shift-badge");
+    if (stockBadge) {
+        stockBadge.textContent = shiftLabel;
     }
     const stockDisplay = document.getElementById("stock-date-display");
     if (stockDisplay) {

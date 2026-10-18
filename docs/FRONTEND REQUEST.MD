@@ -175,7 +175,7 @@ The frontend UI templates, modals, CSS styling, and client-side JavaScript contr
   }
   ```
 
-## 4. Standardized CSV Export Categories & Spiked Kit Audit UI
+## 4. Standardized CSV Export Categories & Spiked Kit Audit UI - [COMPLETED]
 
 The backend now provides standardized, distinct CSV exports and explicit spiked / undispatched kit detection.
 
@@ -222,13 +222,23 @@ The backend now provides standardized, distinct CSV exports and explicit spiked 
   }
   ```
 
+### 4.4 Implemented Components & Verification
+- **Stock Tab Export Dropdown (`core/templates/core/tabs/tab_stock.html`)**:
+  - Added `⚠️ Spiked Undispatched Kits CSV` calling `exportCategoryFromStock('spiked')`.
+- **Stock Dashboard Audit Alert (`core/static/core/js/tab_stock.js`)**:
+  - Updated `updateDashboard(recon)` to evaluate `recon.floor_operations.spiked_undispatched_count`. When > 0, renders a warning badge (`⚠️ Spiked Undispatched: N`) with click-to-download integration.
+- **Reports Tab Category 3 Audit Alert (`core/static/core/js/tab_reports.js`)**:
+  - Updated `renderDateDrivenSection(dd)` to detect `dd.spiked_undispatched`. When count > 0, updates `#report-cat3-badge` to `⚠️ N Spiked Undispatched` with amber alert styling and click-to-download action.
+- **Reports Shift Dropdown (`core/templates/core/tabs/tab_reports.html`)**:
+  - Added `⚠️ Spiked Undispatched Kits CSV` option invoking `downloadCategoryCsv('spiked')` with active shift suffix fallback.
+
 ### 4.3 High-Performance Shift Verification Export (`GET /api/export/report/?date=<suffix>`)
 - Now streams directly as `text/csv; charset=utf-8` using HTTP chunked transfer encoding.
 - Includes UTF-8 BOM (`\xef\xbb\xbf`) and sequential `Row` numbers (1..N).
 - Zero blank spacer rows between records for seamless Excel and spreadsheet processing.
 
 
-## 5. Centralized Shift Date & Shift Selector Migration (Tab Cleanup)
+## 5. Centralized Shift Date & Shift Selector Migration (Tab Cleanup) - [COMPLETED]
 
 ### 5.1 Architecture & Objectives
 To streamline operator workflows and eliminate state desynchronization across the platform, all local shift/date selectors in individual tabs (such as the Stock Tab and Reports Tab) are being migrated to the **top centralized header selector** (`#global-shift-select` in `core/templates/core/base.html`). Individual tabs must no longer maintain independent date dropdowns. Instead, they will:
@@ -299,3 +309,17 @@ To streamline operator workflows and eliminate state desynchronization across th
   - Ensure the options include an "All Dates (Aggregate)" option (`<option value="ALL">All Dates (Aggregate)</option>`) alongside available shift dates.
   - Remove DOM population logic for removed IDs (`stock-shift-select`, `report-date-select`).
   - Cache active shift details on `window.activeShiftDateInfo = activeShift;`.
+
+### 5.3 Implementation Status & Component References - [COMPLETED]
+All local shift selectors on Stock and Reports tabs have been dismantled and migrated to the centralized header selector:
+1. **Global Pipeline Controller (`core/static/core/js/pipeline.js`)**:
+   - `populateAllShiftDropdowns(dates, activeShift)`: Exclusively populates `#global-shift-select` in the header bar with `ALL` (Aggregate) and daily shift options. Removed obsolete DOM population for removed local dropdowns.
+   - `syncAllDateSelectorsUI(shiftInfo)`: Synchronizes header selector, updates read-only badges (`#stock-active-shift-badge` and `#report-active-shift-badge`), and caches active shift data in `window.activeShiftDateInfo`.
+2. **Stock Tab (`core/templates/core/tabs/tab_stock.html` & `core/static/core/js/tab_stock.js`)**:
+   - Replaced interactive `<select id="stock-shift-select">` with read-only badge container `#stock-active-shift-badge`.
+   - Added `updateStockActiveShiftDisplay(activeShift)` and bound window `shiftDateChanged` listener to trigger auto-reload of stock reconciliation ledger.
+3. **Reports Tab (`core/templates/core/tabs/tab_reports.html` & `core/static/core/js/tab_reports.js`)**:
+   - Replaced interactive `<select id="report-date-select">` with read-only badge container `#report-active-shift-badge`.
+   - Added `updateReportActiveShiftDisplay(activeShift)` and bound window `shiftDateChanged` listener to re-fetch report totals and category breakdowns.
+4. **Cache Busting (`core/templates/core/base.html`)**:
+   - Bumped version parameters: `pipeline.js?v=13`, `tab_stock.js?v=17`, `tab_reports.js?v=15`, `tab_stock.css?v=13`, `tab_reports.css?v=15`.

@@ -54,12 +54,27 @@ function onReportDateChanged(val) {
     }
 }
 
+function updateReportActiveShiftDisplay(activeShift) {
+    if (!activeShift) return;
+    const badge = document.getElementById("report-active-shift-badge");
+    if (badge) {
+        badge.textContent = activeShift.formatted_date ? `${activeShift.formatted_date} (${activeShift.suffix})` : (activeShift.display || activeShift.suffix || "All Dates");
+    }
+    const focusBadge = document.getElementById("report-selected-date-badge");
+    if (focusBadge) {
+        focusBadge.textContent = `Focus: ${activeShift.formatted_date || activeShift.suffix || "Active"}`;
+    }
+}
+
 // React immediately to global shift date changes
 window.addEventListener('shiftDateChanged', (e) => {
     const detail = e.detail;
-    if (detail && detail.suffix && detail.suffix !== reportCurrentDate && reportCurrentDate !== "ALL") {
-        reportCurrentDate = detail.suffix;
-        void fetchReportTotals();
+    if (detail) {
+        updateReportActiveShiftDisplay(detail);
+        if (detail.suffix && detail.suffix !== reportCurrentDate && reportCurrentDate !== "ALL") {
+            reportCurrentDate = detail.suffix;
+            void fetchReportTotals();
+        }
     }
 });
 
@@ -226,12 +241,16 @@ function renderDateDrivenSection(dd) {
         select.value = currVal;
     }
 
-    // 2. Selected Date Badge
+    // 2. Selected Date & Active Shift Badges
     const elDateBadge = document.getElementById("report-selected-date-badge");
+    const elActiveShiftBadge = document.getElementById("report-active-shift-badge");
+    const suf = dd.selected_date_suffix || "ALL";
+    const fmt = dd.selected_date_formatted || "All Dates";
     if (elDateBadge) {
-        const suf = dd.selected_date_suffix || "ALL";
-        const fmt = dd.selected_date_formatted || "All Dates";
         elDateBadge.textContent = `Focus: ${fmt} (${suf})`;
+    }
+    if (elActiveShiftBadge) {
+        elActiveShiftBadge.textContent = `${fmt} (${suf})`;
     }
 
     // 3. Category 1: Installed
@@ -284,6 +303,24 @@ function renderDateDrivenSection(dd) {
             elCat3Breakdown.textContent = `Elimination: ${disp} Out − ${inst.count ?? 0} Arch − ${pend.count ?? 0} Pend = ${unalloc.total_count ?? 0} Unallocated`;
         } else {
             elCat3Breakdown.textContent = `${unalloc.total_count ?? 0} floor unallocated discrepancy`;
+        }
+    }
+
+    // Spiked Undispatched Plates Detection & Alert Badge
+    const spiked = dd.spiked_undispatched || {};
+    const spikedCount = spiked.total_count !== undefined ? spiked.total_count : (spiked.items || []).length;
+    const cat3Badge = document.getElementById("report-cat3-badge");
+    if (cat3Badge) {
+        if (spikedCount > 0) {
+            cat3Badge.textContent = `⚠️ ${spikedCount} Spiked Undispatched`;
+            cat3Badge.className = "badge badge-warning";
+            cat3Badge.style.cursor = "pointer";
+            cat3Badge.onclick = () => downloadCategoryCsv('spiked');
+            cat3Badge.title = "Click to download Spiked Undispatched Kits CSV";
+        } else {
+            cat3Badge.textContent = "Missing from Orders";
+            cat3Badge.className = "badge badge-red";
+            cat3Badge.onclick = null;
         }
     }
 
@@ -513,7 +550,7 @@ if (typeof window.downloadCsvFile !== "function") {
 }
 
 function downloadCategoryCsv(category) {
-    const suf = reportCurrentDate || "today";
+    const suf = (window.activeShiftDateInfo && window.activeShiftDateInfo.suffix) ? window.activeShiftDateInfo.suffix : (reportCurrentDate || "today");
     const cat = encodeURIComponent(category);
     const url = `/api/stock/export/category/${cat}/?date=${encodeURIComponent(suf)}`;
     const menu = document.getElementById("shift-csv-dropdown");

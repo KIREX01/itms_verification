@@ -1390,8 +1390,13 @@ function updateDashboard(recon) {
         setTextSafe('kpi-sub-installed', `PMO: ${instRow.pmo} | PSV: ${instRow.psv}`);
     }
 
-    // 2. Mirrored Legacy Strip for backward compatibility
-    const stripHtml = `
+    // 2. Mirrored Legacy Strip & Spiked Undispatched Indicator
+    const floorOps = recon.floor_operations || {};
+    const spikedCount = floorOps.spiked_undispatched_count !== undefined 
+        ? floorOps.spiked_undispatched_count 
+        : (floorOps.spiked_undispatched || []).length;
+
+    let stripHtml = `
         <span class="badge badge-muted">Opening: ${tot.opening || 0}</span>
         <span class="badge badge-muted">Received: ${tot.received || 0}</span>
         <span class="badge badge-muted">Dispatched: ${tot.dispatched || 0}</span>
@@ -1400,6 +1405,9 @@ function updateDashboard(recon) {
         <span class="badge badge-yellow">Physical: ${physCount} (${varText})</span>
         <span class="badge ${unallocCount > 0 ? 'badge-red' : 'badge-green'}">Unallocated: ${unallocCount}</span>
     `;
+    if (spikedCount > 0) {
+        stripHtml += `<span class="badge badge-warning" style="cursor:pointer;" onclick="exportCategoryFromStock('spiked')" title="Click to export spiked undispatched plates CSV">⚠️ Spiked Undispatched: ${spikedCount}</span>`;
+    }
 
     const stripEl = document.getElementById('stock-status-strip');
     if (stripEl) {
@@ -1599,12 +1607,27 @@ function stockToday() {
     }
 }
 
+function updateStockActiveShiftDisplay(activeShift) {
+    if (!activeShift) return;
+    const badge = document.getElementById('stock-active-shift-badge');
+    if (badge) {
+        badge.textContent = activeShift.formatted_date ? `${activeShift.formatted_date} (${activeShift.suffix})` : (activeShift.display || activeShift.suffix || 'Live Shift');
+    }
+    const dateDisplay = document.getElementById('stock-date-display');
+    if (dateDisplay) {
+        dateDisplay.innerText = `Shift: ${activeShift.suffix || ''}`;
+    }
+}
+
 // React immediately to global shift date changes
 window.addEventListener('shiftDateChanged', (e) => {
     const detail = e.detail;
-    if (detail && detail.suffix && detail.suffix !== currentStockDateSuffix) {
-        currentStockDateSuffix = detail.suffix;
-        void refreshStockLedger();
+    if (detail) {
+        updateStockActiveShiftDisplay(detail);
+        if (detail.suffix && detail.suffix !== currentStockDateSuffix) {
+            currentStockDateSuffix = detail.suffix;
+            void refreshStockLedger();
+        }
     }
 });
 

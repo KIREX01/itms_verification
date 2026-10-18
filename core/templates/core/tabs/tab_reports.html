@@ -78,11 +78,11 @@
                 </div>
             </div>
             <div class="reports-header-actions">
-                <div style="display:flex; align-items:center; gap:6px;">
-                    <label for="report-date-select" style="font-size:0.8rem; color:rgba(255, 255, 255, 0.75); font-weight:600;">Work Date:</label>
-                    <select id="report-date-select" onchange="onReportDateChanged(this.value)" style="background:#0c1017; color:#38bdf8; border:1px solid #334155; padding:5px 8px; border-radius:4px; font-size:0.82rem; font-weight:700; font-family:var(--font-mono); cursor:pointer;" title="Select specific shift date to analyze">
-                        <option value="ALL">All Work Dates</option>
-                    </select>
+                <div class="report-shift-pill-container" style="display:inline-flex; align-items:center; gap:6px;">
+                    <span class="badge badge-dark" style="display:inline-flex; align-items:center; gap:6px; padding:5px 10px; font-size:0.82rem; font-weight:700; background:#0c1017; border:1px solid #334155; border-radius:4px;">
+                        <span style="color:#ffffff !important;">Active Shift:</span>
+                        <strong id="report-active-shift-badge" style="color:#38bdf8; font-family:var(--font-mono);">Loading...</strong>
+                    </span>
                 </div>
                 <button class="btn btn-secondary" onclick="toggleReportScope()" id="btn-toggle-report-scope" title="Switch between All-Time and Today's Shift (Hotkey: D)" style="background-color:#1e293b !important; border:1px solid rgba(255,255,255,0.2) !important; color:#ffffff !important; font-weight:700;">
                     📅 Scope [D]
@@ -106,6 +106,9 @@
                     <div id="shift-csv-dropdown" style="display:none; position:absolute; right:0; top:100%; margin-top:4px; background:#0c1017; border:1px solid #334155; border-radius:6px; box-shadow:0 8px 24px rgba(0,0,0,0.7); z-index:100; min-width:230px; overflow:hidden;">
                         <a href="javascript:void(0)" onclick="downloadCategoryCsv('unallocated')">
                             🔴 Unallocated Kits CSV
+                        </a>
+                        <a href="javascript:void(0)" onclick="downloadCategoryCsv('spiked')" style="color:#f59e0b !important; font-weight:700; border-bottom:1px solid rgba(255,255,255,0.08);">
+                            ⚠️ Spiked Undispatched Kits CSV
                         </a>
                         <a href="javascript:void(0)" onclick="downloadCategoryCsv('archived')">
                             🔵 Completed Archive CSV

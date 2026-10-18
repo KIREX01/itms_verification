@@ -1815,7 +1815,9 @@ def update_ledger_entry(
         # Audit log entry
         SubmissionAuditLog.objects.create(
             action=SubmissionAuditLog.Action.STOCK_LEDGER_UPDATED,
+            result=SubmissionAuditLog.ResultStatus.SUCCESS,
             operator_username=operator_name or "Operator",
+            simulated_token=str(suffix or ""),
             message=(
                 f"Stock ledger entry updated for {suffix}: "
                 f"Open PSV={ledger.opening_balance_psv}, PMO={ledger.opening_balance_pmo}; "

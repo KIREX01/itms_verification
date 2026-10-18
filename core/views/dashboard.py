@@ -196,12 +196,23 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
         logs_qs = logs_qs.filter(action=SubmissionAuditLog.Action.SUBMIT)
     elif flt in ("FAILED", "ISSUES"):
         logs_qs = logs_qs.filter(Q(result=SubmissionAuditLog.ResultStatus.FAILURE) | Q(result="FAILED"))
+    elif flt in ("EMAIL", "EMAILS"):
+        logs_qs = logs_qs.filter(action=SubmissionAuditLog.Action.STOCK_REPORT_EMAILED)
 
     for l in logs_qs[:150]:
         pair = l.pair
-        plate = pair.registration_number_detected if pair else "N/A"
-        order_no = pair.order.order_number if (pair and pair.order) else "N/A"
-        order_plate = pair.order.registration_number if (pair and pair.order) else ""
+        if l.action == SubmissionAuditLog.Action.STOCK_REPORT_EMAILED:
+            plate = f"SHIFT_{l.simulated_token}" if l.simulated_token else "STOCK_REPORT"
+            order_no = "EMAIL_DISPATCH"
+            order_plate = ""
+        elif l.action == SubmissionAuditLog.Action.STOCK_LEDGER_UPDATED:
+            plate = f"SHIFT_{l.simulated_token}" if l.simulated_token else "STOCK_LEDGER"
+            order_no = "LEDGER_OVERRIDE"
+            order_plate = ""
+        else:
+            plate = pair.registration_number_detected if pair else "N/A"
+            order_no = pair.order.order_number if (pair and pair.order) else "N/A"
+            order_plate = pair.order.registration_number if (pair and pair.order) else ""
 
         front_file = str(pair.front_image.vault_file).replace("\\", "/") if (pair and pair.front_image) else None
         front_url = (f"/{front_file}" if front_file.startswith("media/") else f"/media/{front_file}") if front_file else None
@@ -219,6 +230,7 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
         op_email = (getattr(l, "operator_email", "") or (op_obj.email if op_obj else "") or (pair.account_email if pair else "")).strip()
         op_display = f"{op_name} ({op_email})" if (op_email and op_email not in op_name) else op_name
 
+        res_status_log = l.result if l.result in ("SUCCESS", "FAILURE", "INFO") else ("SUCCESS" if "emailed" in (l.message or "").lower() else "INFO")
         history_items.append({
             "id": f"log_{l.id}",
             "timestamp": l.timestamp.strftime("%Y-%m-%d %H:%M:%S") if l.timestamp else "",
@@ -227,7 +239,7 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
             "order_number": order_no,
             "order_plate": order_plate,
             "action": l.action,
-            "result": l.result,
+            "result": res_status_log,
             "message": l.message,
             "operator": op_display,
             "operator_name": op_name,

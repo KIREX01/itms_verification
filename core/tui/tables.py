@@ -261,13 +261,15 @@ class TableLoaderMixin:
             if active_acc:
                 logs = logs.filter(
                     Q(pair__order__account_email__iexact=active_acc) |
-                    Q(pair__account_email__iexact=active_acc)
+                    Q(pair__account_email__iexact=active_acc) |
+                    Q(operator_email__iexact=active_acc) |
+                    Q(pair__isnull=True)
                 )
             if cur_date_scope == "TODAY":
                 logs = logs.filter(timestamp__date=today)
 
             for log in logs[:100]:
-                plate = escape(log.pair.registration_number_detected) if log.pair else "—"
+                plate = escape(log.pair.registration_number_detected) if log.pair else (f"SHIFT_{log.simulated_token}" if log.simulated_token else "—")
                 res_color = "green" if log.result == "SUCCESS" else "red" if log.result == "FAILURE" else "yellow"
                 table.add_row(
                     log.timestamp.strftime("%Y-%m-%d %H:%M:%S"),

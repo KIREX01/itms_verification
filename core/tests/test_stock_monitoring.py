@@ -32,6 +32,7 @@ from core.models import (
     StockDeliveryItem,
     StockDispatchScan,
     StockReturnScan,
+    SubmissionAuditLog,
     VehicleInstallationPair,
 )
 from core.services import bond_service, kit_provisioning_service, stock_monitoring_service
@@ -1929,4 +1930,54 @@ class StockMonitoringTests(TestCase):
         self.assertTrue(data["success"])
         self.assertIn("supervisor@example.com", data["recipients"])
         mock_send_email.assert_called_once()
+
+        # Verify SUCCESS audit log was created
+        log = SubmissionAuditLog.objects.filter(action=SubmissionAuditLog.Action.STOCK_REPORT_EMAILED, simulated_token=suffix).first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.result, SubmissionAuditLog.ResultStatus.SUCCESS)
+        self.assertEqual(log.simulated_token, suffix)
+        self.assertIn("supervisor@example.com", log.message)
+
+    @patch("core.services.email_service.send_stock_reconciliation_report_email")
+    def test_stock_report_email_dispatch_failure_and_history_api(self, mock_send_email):
+        """Verifies report email dispatch failure creates a FAILURE audit log and appears in History API."""
+        mock_send_email.return_value = (False, "Resend API error: Rate limit exceeded", ["bad_email@example.com"])
+        suffix = "191026"
+
+        resp = self.client.post(
+            "/api/stock/report/email/",
+            data=json.dumps({
+                "target_date_suffix": suffix,
+                "recipients": ["bad_email@example.com"],
+                "notes": "Shift report failure test",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 500)
+        data = resp.json()
+        self.assertFalse(data["success"])
+
+        # Verify FAILURE audit log was created
+        fail_log = SubmissionAuditLog.objects.filter(
+            action=SubmissionAuditLog.Action.STOCK_REPORT_EMAILED,
+            result=SubmissionAuditLog.ResultStatus.FAILURE,
+            simulated_token=suffix,
+        ).first()
+        self.assertIsNotNone(fail_log)
+        self.assertEqual(fail_log.result, SubmissionAuditLog.ResultStatus.FAILURE)
+        self.assertIn("FAILED", fail_log.message)
+        self.assertIn("Rate limit exceeded", fail_log.message)
+
+        # Verify History API reflects the failure and proper formatting
+        hist_resp = self.client.get("/api/history/?filter=FAILED&date_scope=ALL")
+        self.assertEqual(hist_resp.status_code, 200)
+        hist_data = hist_resp.json()
+        self.assertTrue(hist_data["success"])
+        items = [i for i in hist_data["items"] if i.get("action") == "STOCK_REPORT_EMAILED"]
+        self.assertTrue(len(items) >= 1)
+        item = items[0]
+        self.assertEqual(item["plate"], f"SHIFT_{suffix}")
+        self.assertEqual(item["order_number"], "EMAIL_DISPATCH")
+        self.assertEqual(item["result"], "FAILURE")
+        self.assertIn("Rate limit exceeded", item["message"])
 

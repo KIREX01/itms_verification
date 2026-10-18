@@ -1458,7 +1458,19 @@ def api_stock_report_email(request: HttpRequest) -> JsonResponse:
 
     # Validate and filter
     valid_recipients = [r for r in set(recipients) if "@" in r]
+    op_email = (request.user.email if (request.user and request.user.is_authenticated) else "") or ""
+    op_user = request.user if (request.user and request.user.is_authenticated) else None
+
     if not valid_recipients:
+        SubmissionAuditLog.objects.create(
+            action=SubmissionAuditLog.Action.STOCK_REPORT_EMAILED,
+            result=SubmissionAuditLog.ResultStatus.FAILURE,
+            operator=op_user,
+            operator_username=operator_name,
+            operator_email=op_email,
+            simulated_token=str(target_date or "CURRENT"),
+            message="FAILED: No valid recipient email addresses specified for stock report dispatch.",
+        )
         return JsonResponse({
             "success": False,
             "error": "No valid recipient email addresses found. Please specify recipient emails or ensure an ITMS / operator email is configured.",
@@ -1467,6 +1479,7 @@ def api_stock_report_email(request: HttpRequest) -> JsonResponse:
     try:
         from core.services import stock_monitoring_service, email_service
         recon = stock_monitoring_service.compute_daily_reconciliation(target_date)
+        work_suffix = str(recon.get("work_date_suffix") or target_date or "")
         success, msg, sent_to = email_service.send_stock_reconciliation_report_email(
             recon_data=recon,
             recipient_emails=valid_recipients,
@@ -1477,16 +1490,29 @@ def api_stock_report_email(request: HttpRequest) -> JsonResponse:
         if success:
             SubmissionAuditLog.objects.create(
                 action=SubmissionAuditLog.Action.STOCK_REPORT_EMAILED,
+                result=SubmissionAuditLog.ResultStatus.SUCCESS,
+                operator=op_user,
                 operator_username=operator_name,
-                message=f"Stock reconciliation report for {recon.get('work_date_suffix')} emailed to: {', '.join(sent_to)}",
+                operator_email=op_email,
+                simulated_token=work_suffix,
+                message=f"Stock reconciliation report for {work_suffix} emailed successfully to: {', '.join(sent_to)}",
             )
             return JsonResponse({
                 "success": True,
                 "message": msg,
                 "recipients": sent_to,
-                "work_date_suffix": recon.get("work_date_suffix"),
+                "work_date_suffix": work_suffix,
             })
         else:
+            SubmissionAuditLog.objects.create(
+                action=SubmissionAuditLog.Action.STOCK_REPORT_EMAILED,
+                result=SubmissionAuditLog.ResultStatus.FAILURE,
+                operator=op_user,
+                operator_username=operator_name,
+                operator_email=op_email,
+                simulated_token=work_suffix,
+                message=f"FAILED emailing stock report for shift {work_suffix} to {', '.join(valid_recipients)}: {msg}",
+            )
             return JsonResponse({
                 "success": False,
                 "error": msg,
@@ -1494,5 +1520,14 @@ def api_stock_report_email(request: HttpRequest) -> JsonResponse:
             }, status=500)
     except Exception as exc:
         logger.exception("Failed to dispatch stock report email: %s", exc)
+        SubmissionAuditLog.objects.create(
+            action=SubmissionAuditLog.Action.STOCK_REPORT_EMAILED,
+            result=SubmissionAuditLog.ResultStatus.FAILURE,
+            operator=op_user,
+            operator_username=operator_name,
+            operator_email=op_email,
+            simulated_token=str(target_date or "CURRENT"),
+            message=f"ERROR dispatching stock report email for shift {target_date or 'current'}: {exc}",
+        )
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 

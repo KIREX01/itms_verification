@@ -56,8 +56,11 @@ jobs:
           python manage.py makemigrations --check --dry-run
 
       - name: Run Core Test Suites
+        env:
+          DJANGO_DEBUG: "True"
+          SECURE_SSL_REDIRECT: "False"
         run: |
-          python manage.py test core.tests.test_device_detection core.tests.test_date_service core.tests.test_reports_and_lifecycle core.tests.test_improvements core.tests.test_installation_kits core.tests.test_signup_2fa core.tests.test_stock_monitoring core.tests.test_api_auth core.tests.test_api_envelope core.tests.test_platform_service core.tests.test_ssl_service
+          python manage.py test core.tests.test_device_detection core.tests.test_date_service core.tests.test_reports_and_lifecycle core.tests.test_improvements core.tests.test_installation_kits core.tests.test_signup_2fa core.tests.test_stock_monitoring core.tests.test_api_auth core.tests.test_api_envelope core.tests.test_platform_service core.tests.test_ssl_service core.tests.test_direct_order_install
 
       - name: Verify CLI Launcher and Command Help
         run: |

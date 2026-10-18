@@ -115,6 +115,10 @@
                 <span class="mode-icon">📦</span>
                 <span class="mode-label">Stock Scan</span>
             </button>
+            <button class="mode-btn" id="btn-mode-order" onclick="switchMobileMode('order')">
+                <span class="mode-icon">⚡</span>
+                <span class="mode-label">Quick Install</span>
+            </button>
         </div>
 
         <!-- ================================================================= -->
@@ -499,6 +503,125 @@
                 </div>
                 <div id="stock-scanned-list" class="stock-scanned-items-scroll">
                     <div style="color:var(--ug-text-dim); text-align:center; padding:12px;">No plates staged yet. Scan or paste above.</div>
+                </div>
+            </div>
+        </main>
+
+        <!-- ================================================================= -->
+        <!-- MODE 4: QUICK WALK-IN ORDER INSTALLATION (Direct Single-Order Flow) -->
+        <!-- ================================================================= -->
+        <main class="mode-container" id="container-order" style="display:none;">
+            <!-- Lookup Card -->
+            <div class="bike-status-card">
+                <div class="bike-status-header">
+                    <div>
+                        <span class="card-eyebrow">WALK-IN QUICK INSTALLATION</span>
+                        <h2 class="bike-target-title" style="font-size:1.1rem; color:#ffffff;">Order Lookup &amp; Verify</h2>
+                    </div>
+                    <span class="badge badge-yellow" id="m-order-stage-badge">Enter Order</span>
+                </div>
+
+                <div style="margin-top:10px; display:flex; gap:6px;">
+                    <input type="text" id="m-order-search-input" class="form-control" placeholder="Scan or type Order # / Plate..." style="flex:1; background:#0c1017; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-weight:700; padding:10px 12px; border-radius:6px; font-size:0.9rem;" onkeydown="if(event.key==='Enter') lookupMobileOrder()">
+                    <button type="button" class="btn btn-primary" onclick="lookupMobileOrder()" id="btn-m-order-lookup" style="padding:0 14px; font-weight:800; font-size:0.85rem; background:#2563eb; border:1px solid #3b82f6; border-radius:6px; color:#ffffff; display:flex; align-items:center; gap:4px;">
+                        <span>🔍</span> Find
+                    </button>
+                </div>
+            </div>
+
+            <!-- Active Order Information & Hardware Card (Initially Hidden) -->
+            <div id="m-order-profile-card" style="display:none; background:#111622; border:1px solid rgba(255,255,255,0.12); border-radius:10px; padding:14px; flex-direction:column; gap:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                    <div>
+                        <div style="font-size:0.68rem; text-transform:uppercase; color:rgba(255,255,255,0.6); font-weight:700;">Registration Plate</div>
+                        <div style="font-family:var(--font-mono); font-size:1.45rem; font-weight:900; color:#ffffff !important; letter-spacing:0.02em;" id="m-order-plate">
+                            ---
+                        </div>
+                        <div style="font-family:var(--font-mono); font-size:0.78rem; color:#38bdf8; margin-top:2px;" id="m-order-num-label">
+                            Order #---
+                        </div>
+                    </div>
+                    <div style="text-align:right;">
+                        <span class="badge badge-secondary" id="m-order-warehouse-badge" style="font-size:0.7rem; color:#ffffff;">AGM Bond</span>
+                        <div style="font-size:0.7rem; color:rgba(255,255,255,0.6); margin-top:4px;" id="m-order-vin-label">VIN: ---</div>
+                    </div>
+                </div>
+
+                <!-- Step 1 Hardware Serials Box -->
+                <div style="background:#0c1017; border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;">
+                    <div style="font-size:0.74rem; font-weight:800; text-transform:uppercase; color:#ffffff; display:flex; justify-content:space-between;">
+                        <span>🛰️ Hardware Fitment Serials</span>
+                        <button type="button" class="btn btn-xs btn-secondary" onclick="saveMobileStep1()" id="btn-m-save-step1" style="font-size:0.7rem; padding:2px 8px; color:#ffffff;">
+                            💾 Save Step 1
+                        </button>
+                    </div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                        <div>
+                            <label style="font-size:0.68rem; color:rgba(255,255,255,0.6); display:block;">Front Plate ID</label>
+                            <input type="text" id="m-order-front-serial" style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
+                        </div>
+                        <div>
+                            <label style="font-size:0.68rem; color:rgba(255,255,255,0.6); display:block;">Rear Plate ID</label>
+                            <input type="text" id="m-order-rear-serial" style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
+                        </div>
+                    </div>
+                    <div>
+                        <label style="font-size:0.68rem; color:rgba(255,255,255,0.6); display:block;">GPS Tracker ID</label>
+                        <input type="text" id="m-order-gps-id" style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
+                    </div>
+                </div>
+
+                <!-- Step 2 Dual Photo Previews -->
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <!-- Front Angle Box -->
+                    <div style="background:#0c1017; border:1px dashed #334155; border-radius:6px; padding:8px; display:flex; flex-direction:column; align-items:center; gap:6px;">
+                        <div style="width:100%; display:flex; justify-content:space-between; align-items:center;">
+                            <span style="font-size:0.74rem; font-weight:800; color:#ffffff;">1. FRONT</span>
+                            <span class="badge badge-dark" id="m-front-status" style="font-size:0.65rem;">Empty</span>
+                        </div>
+                        <div id="m-front-preview-box" onclick="triggerMobileOrderPhoto('front')" style="width:100%; height:110px; background:#141722; border-radius:4px; display:flex; align-items:center; justify-content:center; cursor:pointer; overflow:hidden; position:relative;">
+                            <span id="m-front-placeholder" style="font-size:0.74rem; color:rgba(255,255,255,0.7); text-align:center;">
+                                📸<br>Front Photo
+                            </span>
+                            <img id="m-front-img" style="display:none; width:100%; height:100%; object-fit:cover;" alt="Front Preview">
+                        </div>
+                        <input type="file" id="m-front-file-input" accept="image/*" capture="environment" onchange="onMobileOrderPhotoPicked('front', this)" style="display:none;">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="triggerMobileOrderPhoto('front')" style="width:100%; padding:5px 0; font-size:0.72rem; justify-content:center; color:#ffffff;">
+                            📷 Capture Front
+                        </button>
+                    </div>
+
+                    <!-- Rear Angle Box -->
+                    <div style="background:#0c1017; border:1px dashed #334155; border-radius:6px; padding:8px; display:flex; flex-direction:column; align-items:center; gap:6px;">
+                        <div style="width:100%; display:flex; justify-content:space-between; align-items:center;">
+                            <span style="font-size:0.74rem; font-weight:800; color:#ffffff;">2. REAR</span>
+                            <span class="badge badge-dark" id="m-rear-status" style="font-size:0.65rem;">Empty</span>
+                        </div>
+                        <div id="m-rear-preview-box" onclick="triggerMobileOrderPhoto('rear')" style="width:100%; height:110px; background:#141722; border-radius:4px; display:flex; align-items:center; justify-content:center; cursor:pointer; overflow:hidden; position:relative;">
+                            <span id="m-rear-placeholder" style="font-size:0.74rem; color:rgba(255,255,255,0.7); text-align:center;">
+                                📸<br>Rear Photo
+                            </span>
+                            <img id="m-rear-img" style="display:none; width:100%; height:100%; object-fit:cover;" alt="Rear Preview">
+                        </div>
+                        <input type="file" id="m-rear-file-input" accept="image/*" capture="environment" onchange="onMobileOrderPhotoPicked('rear', this)" style="display:none;">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="triggerMobileOrderPhoto('rear')" style="width:100%; padding:5px 0; font-size:0.72rem; justify-content:center; color:#ffffff;">
+                            📷 Capture Rear
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Submission Controls -->
+                <div style="margin-top:6px; display:flex; flex-direction:column; gap:8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 2px;">
+                        <label style="display:inline-flex; align-items:center; gap:6px; font-size:0.75rem; color:#ffffff; font-weight:700;">
+                            <input type="checkbox" id="m-order-dry-run-chk" checked style="accent-color:var(--ug-yellow);">
+                            <span>Dry Run Mode</span>
+                        </label>
+                    </div>
+
+                    <button type="button" class="btn btn-primary" id="btn-m-order-submit" onclick="submitMobileOrderInstall()" style="width:100%; min-height:44px; font-size:0.9rem; font-weight:800; justify-content:center; background:#2563eb; border:1px solid #3b82f6; color:#ffffff; border-radius:8px; display:flex; align-items:center; gap:8px; box-shadow:0 0 12px rgba(37,99,235,0.4);">
+                        <span>🚀 1-Tap Finalize &amp; Submit</span>
+                    </button>
                 </div>
             </div>
         </main>

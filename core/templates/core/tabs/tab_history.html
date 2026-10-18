@@ -241,21 +241,49 @@
         <!-- Secondary Filter Controls & Live Search Bar -->
         <div class="history-toolbar-card" style="padding:8px 14px; background-color:#0f131c; border-color:rgba(255,255,255,0.08);">
             <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; width:100%; justify-content:space-between;">
-                <!-- Filter Chips -->
-                <div class="history-filter-chips">
-                    <button class="history-chip active" data-hfilter="ALL" onclick="window.setHistoryFilter('ALL')">All</button>
-                    <button class="history-chip" data-hfilter="SUBMITTED" onclick="window.setHistoryFilter('SUBMITTED')">Submitted</button>
-                    <button class="history-chip" data-hfilter="FAILED" onclick="window.setHistoryFilter('FAILED')">Failed</button>
-                    <button class="history-chip" data-hfilter="ISSUES" onclick="window.setHistoryFilter('ISSUES')">Issues / Conflicts</button>
-                    <button class="history-chip" data-hfilter="STOCK" onclick="window.setHistoryFilter('STOCK')">Stock &amp; Ledger</button>
-                    <button class="history-chip" data-hfilter="EMAIL" onclick="window.setHistoryFilter('EMAIL')">Emails</button>
+                <!-- Filter Chips & Funnel Button Strip -->
+                <div class="history-subnav-strip" style="display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%;">
+                    <!-- Filter Chips (Visible Subnavigation) -->
+                    <div class="history-filter-chips" style="flex:1; display:flex; gap:6px; overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:2px;">
+                        <button class="history-chip active" data-hfilter="ALL" onclick="window.setHistoryFilter('ALL')">All</button>
+                        <button class="history-chip" data-hfilter="SUBMITTED" onclick="window.setHistoryFilter('SUBMITTED')">Submitted</button>
+                        <button class="history-chip" data-hfilter="FAILED" onclick="window.setHistoryFilter('FAILED')">Failed</button>
+                        <button class="history-chip" data-hfilter="ISSUES" onclick="window.setHistoryFilter('ISSUES')">Issues / Conflicts</button>
+                        <button class="history-chip" data-hfilter="STOCK" onclick="window.setHistoryFilter('STOCK')">Stock &amp; Ledger</button>
+                        <button class="history-chip" data-hfilter="EMAIL" onclick="window.setHistoryFilter('EMAIL')">Emails</button>
+                    </div>
+
+                    <!-- Funnel Icon Trigger -->
+                    <button type="button" class="mobile-filter-funnel-btn" id="btn-history-filter-funnel" onclick="toggleMobileFilterPanel('history-filter-drawer', this)" title="Filter by search, scope, or exports" aria-label="Toggle Filters">
+                        <svg class="funnel-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+                        <span>Filters</span>
+                    </button>
                 </div>
 
-                <!-- Live Search Box -->
-                <div class="history-search-box">
-                    <i class="fas fa-search history-search-icon"></i>
-                    <input type="text" id="history-search-input" placeholder="Search plate, order #, operator..." oninput="onHistorySearchInput(this.value)" autocomplete="off">
-                    <button type="button" class="history-search-clear" id="btn-clear-history-search" onclick="clearHistorySearch()" style="display:none;" title="Clear search">&times;</button>
+                <!-- Collapsible Filter Drawer (Search & Scope Controls) -->
+                <div class="collapsible-filter-drawer" id="history-filter-drawer" style="width:100%;">
+                    <!-- Live Search Box -->
+                    <div class="history-search-box" style="flex:1;">
+                        <i class="fas fa-search history-search-icon"></i>
+                        <input type="text" id="history-search-input" placeholder="Search plate, order #, operator..." oninput="onHistorySearchInput(this.value)" autocomplete="off">
+                        <button type="button" class="history-search-clear" id="btn-clear-history-search" onclick="clearHistorySearch()" style="display:none;" title="Clear search">&times;</button>
+                    </div>
+
+                    <!-- Scope Pills Group (Mobile Mirror) -->
+                    <div class="scope-pills-group hide-desktop" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; width:100%;">
+                        <button class="scope-pill-btn active" id="btn-hscope-today-m" onclick="window.setHistoryDateScope('TODAY')" style="flex:1; text-align:center;">
+                            <i class="fas fa-calendar-day"></i> <span>Today</span>
+                        </button>
+                        <button class="scope-pill-btn" id="btn-hscope-all-m" onclick="window.setHistoryDateScope('ALL')" style="flex:1; text-align:center;">
+                            <i class="fas fa-globe"></i> <span>All Dates</span>
+                        </button>
+                        <button class="scope-pill-btn" onclick="window.fetchHistoryEvents()" style="flex:1; text-align:center;">
+                            <i class="fas fa-sync-alt"></i> <span>Refresh</span>
+                        </button>
+                        <a href="{% url 'core:api_export_history_csv' %}" class="scope-pill-btn" style="flex:1; text-align:center; text-decoration:none;">
+                            <i class="fas fa-file-csv"></i> <span>CSV</span>
+                        </a>
+                    </div>
                 </div>
 
                 <!-- Total Count Badge -->

@@ -562,35 +562,72 @@ This transition aligns with our domain `close.kirex.online`, insulates operation
 
 
 ## 10. Feature Specification: Direct Single-Order Installation & 1-Click Submission UI
+- **Status**: Completed & Verified
 - **Target Surfaces**:
-  - Orders Tab: `core/templates/core/tabs/tab_orders.html` & `core/static/core/js/tab_orders.js`
-  - Mobile Companion: `core/templates/core/mobile_companion.html` & `core/static/core/js/mobile_companion.js`
+  - Orders UI & Modal: `core/templates/core/tabs/tab_orders.html`, `core/templates/core/modals.html`, `core/templates/core/tabs/tab_itms.html`
+  - Controllers: `core/static/core/js/tab_orders.js`, `core/static/core/js/tab_itms.js`
+  - Mobile Companion: `core/templates/core/mobile_companion.html`, `core/static/core/js/mobile_companion.js`
 - **Background & Workflow Objectives**:
   - For operators handling individual walk-in bikes or single orders, enable a direct "search -> save & proceed -> capture/attach photos -> 1-click submit" workflow without needing the bulk batch photo ingestion pipeline or leaving the dashboard.
-- **UI/UX Component Requirements**:
+- **Implemented Components**:
   1. **Order Row "⚡ Quick Install" Action**:
-     - In the active orders table (`tab_orders.html`), introduce a button:
-       ```html
-       <button class="btn btn-xs btn-primary gap-1" onclick="openOrderInstallModal('{{ order.order_number }}')">
-         <i class="bi bi-lightning-charge"></i> Quick Install
-       </button>
-       ```
-  2. **Inspector Modal / Slide-over (`#order-install-modal`)**:
-     - When opened, triggers `GET /api/itms/orders/<order_ident>/install/` to load live order metadata, ITMS stage (`STAGE_1_INSTALLATION`, `STAGE_2_EVIDENCE`, etc.), and existing photos.
-     - **Stage 1 (Hardware Fitment)**:
-       - Input fields prepopulated from order details:
-         - Front Plate Serial / ID
-         - Rear Plate Serial / ID
-         - GPS Tracker ID
-       - Action: **"Save & Proceed to Photos"** (`POST` with `action=save_step1`).
-     - **Stage 2 (Evidence Photo Dropzone & Camera)**:
-       - Two dual dropzones/camera buttons:
-         - Front Plate Photo: `<input type="file" accept="image/*" capture="environment">`
-         - Rear Plate Photo: `<input type="file" accept="image/*" capture="environment">`
-       - Instant image preview and plate OCR preview badge.
-     - **Stage 3 (Finalize & 1-Click Submission)**:
-       - Prominent primary action button: **"🚀 Finalize & Submit Installation"** (`POST` with `action=submit`).
-       - Dry run toggle switch (`dry_run=true` or `false`).
-       - Active loading state displaying sub-progress (`Submitting Hardware...`, `Uploading Evidence...`, `Finalizing Order...`).
-       - Success state with green checkmark badge, submission token, and updated order status.
+     - Added an Action column with `⚡ Quick Install` button to active orders table rows (`tab_itms.html` & `tab_itms.js`).
+     - Added a prominent `⚡ Quick Install Order` button to the Live Inspector panel when selecting an order.
+  2. **Stage-Aware Inspector Modal (`#order-install-modal`)**:
+     - Created `core/templates/core/tabs/tab_orders.html` included in `modals.html`.
+     - Displays live stage detection badge (`STAGE_1_INSTALLATION`, `STAGE_2_EVIDENCE`, `STAGE_3_CONFIRMATION`, `STAGE_ARCHIVED`).
+     - Prepopulated hardware fitment inputs with Step 1 save action (`POST action=save_step1`).
+     - Dual photo dropzones with camera capture (`<input type="file" accept="image/*" capture="environment">`), instant thumbnails, and OCR detection badges.
+     - 1-Click final submission button (`POST action=submit`) with dry-run toggle, step-by-step progress feedback, toast dispatch, and real-time row status badge update to `INSTALLED`.
+  3. **Mobile Companion Mode 4: Quick Walk-in Scanner**:
+     - Added `⚡ Quick Install` mode switch in `mobile_companion.html`.
+     - Built dedicated container (`#container-order`) with order lookup, stage badge, hardware serials, dual camera capture, and 1-tap final submission.
+     - Handled in `mobile_companion.js` with `lookupMobileOrder()`, `saveMobileStep1()`, `triggerMobileOrderPhoto()`, and `submitMobileOrderInstall()`.
+
+
+## 11. Mobile Responsiveness & Filter Funnel Architecture (Universal Implementation)
+- **Status**: Completed & Verified
+- **Target Surfaces**:
+  - Global Shell & Header: `core/templates/core/base.html`, `core/static/core/css/app_layout.css`
+  - JavaScript Controllers: `core/static/core/js/navigation.js`, `core/static/core/js/pipeline.js`
+  - Tab Interfaces:
+    - Queue Tab: `core/templates/core/tabs/tab_queue.html`
+    - History Tab: `core/templates/core/tabs/tab_history.html`
+    - ITMS Tab: `core/templates/core/tabs/tab_itms.html`
+    - Stock Tab: `core/templates/core/tabs/tab_stock.html`
+    - Batches Tab: `core/templates/core/tabs/tab_batches.html`
+    - Reports Tab: `core/templates/core/tabs/tab_reports.html`
+
+### 11.1 Problem Statement & Objectives
+1. **Missing Shift Date Tool on Mobile**:
+   - The desktop shift selector was hidden on mobile devices because `.desktop-badges` was hidden (`display: none !important`), leaving operators on phones unable to view or switch operating shifts from the persistent layout.
+2. **Filter & Action Ribbon Screen Congestion**:
+   - Complex tabs (Queue, History, ITMS, Stock, Batches, Reports) contained heavy search bars, multi-select dropdowns, bulk utility buttons, and export menus that stacked vertically on small viewports ($\le 768\text{px}$), pushing actionable records off-screen.
+3. **Core Requirement**:
+   - Provide a persistent, dedicated mobile shift date selector tool matching desktop capabilities.
+   - Introduce a tactile mobile filter funnel toggle (`.mobile-filter-funnel-btn`) that collapses dense filters and utility ribbons into a smooth animated drawer (`.collapsible-filter-drawer`).
+   - Keep primary subnavigations (status pills, source toggles, operational modes, and scope selectors) 100% visible for immediate 1-tap switching without requiring drawer interaction.
+   - Maintain 100% visual and functional parity on desktop viewports ($> 768\text{px}$) with zero regressions.
+
+### 11.2 Architecture & Implementation Details
+1. **Mobile Operating Shift Date Selector Tool**:
+   - Added `.mobile-shift-strip#mobile-shift-strip` pinned directly under `.header-main-row` in `core/templates/core/base.html` featuring `<select id="mobile-global-shift-select">` and a "Today" reset button.
+   - Added duplicate `<select id="drawer-global-shift-select">` in the off-canvas hamburger navigation drawer for quick drawer access.
+   - Extended `populateAllShiftDropdowns` and `syncAllDateSelectorsUI` in `core/static/core/js/pipeline.js` to synchronously bind and dispatch `shiftDateChanged` events across all 4 selectors (`#global-shift-select`, `#mobile-global-shift-select`, `#drawer-global-shift-select`, and `select.header-shift-select`).
+2. **Universal Filter Funnel & Collapsible Drawer Engine**:
+   - **Global Controller** (`navigation.js`):
+     ```javascript
+     window.toggleMobileFilterPanel = function(drawerId, btnElem) { ... }
+     ```
+     Toggles the `.is-open` CSS class, manages `aria-expanded="true/false"`, and updates active button state styles.
+   - **CSS System** (`app_layout.css`):
+     - **Desktop ($> 768\text{px}$)**: `.mobile-filter-funnel-btn` has `display: none !important;`. `.collapsible-filter-drawer` has `display: flex;` with zero extra background or border, preserving original desktop inline ribbon layouts.
+     - **Mobile ($\le 768\text{px}$)**: `.mobile-filter-funnel-btn` displays as a 32px tactile pill button (`background: #141722`, border, icon, label). `.collapsible-filter-drawer` collapses by default (`display: none !important;`) and slides down smoothly (`@keyframes mobileFilterSlideDown`) when toggled open.
+3. **Tab Migrations**:
+   - **Queue (`tab_queue.html`)**: Filter pills (`All`, `Review`, `Approved`, `Issues`, `Done`) remain horizontally visible; search input, ingestion batch dropdown, and scope pills collapse into `#queue-filter-drawer`.
+   - **History (`tab_history.html`)**: Filter chips (`All`, `Submitted`, `Failed`, `Issues`, `Stock`, `Emails`) remain visible as a horizontal scroll strip; live search and scope actions collapse into `#history-filter-drawer`.
+   - **ITMS (`tab_itms.html`)**: Subview tabs (`Connect`, `Orders`, `Archive`, `Kits`) and live/local source toggle stay visible; sync actions collapse into `#itms-filter-drawer`.
+   - **Stock (`tab_stock.html`)**: 4-mode operational buttons (`1. Dispatch`, `2. Movements`, `3. Safe Audit`, `4. Ledger`) remain horizontally scrollable; category select, universal barcode/plate scanner, quick delivery, paste, sync, and export CSVs collapse into `#stock-filter-drawer`.
+   - **Batches (`tab_batches.html`)**: Batch scope pills (`Today's Batches`, `Active Batch`, `Prior Carryover`, `All Batches`) remain visible; search field, density switcher, expand/collapse utilities, and upload/camera buttons collapse into `#batches-filter-drawer`.
+   - **Reports (`tab_reports.html`)**: Active shift badge and Scope toggle (`📅 Scope [D]`) remain visible; Refresh, Sync Shift Orders, Shift Reconciliation, Stock Kit Sync, and categorized CSV exports collapse into `#reports-filter-drawer`.
 

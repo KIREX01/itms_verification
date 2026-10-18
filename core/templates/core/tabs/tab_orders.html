@@ -1,0 +1,180 @@
+<!-- Modal / Slide-over: Single-Order Quick Install & 1-Click Submission -->
+<div class="modal-overlay" id="order-install-modal" style="display:none; z-index: 10000;">
+    <div class="modal-box" style="width: 820px; max-width: 96vw; max-height: 92vh; display: flex; flex-direction: column;">
+        
+        <!-- Modal Header -->
+        <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-bottom: 1px solid var(--ug-border, #1e293b); background: var(--ug-black-card, #0f172a);">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span class="modal-title" style="font-size: 1.05rem; font-weight: 800; color: #ffffff; display: flex; align-items: center; gap: 8px;">
+                    <span>⚡</span> Single-Order Quick Install &amp; Submission
+                </span>
+                <span class="badge badge-yellow" id="order-install-stage-badge" style="font-weight: 800; text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.5px;">
+                    Detecting Stage...
+                </span>
+            </div>
+            <button type="button" class="modal-close" onclick="closeOrderInstallModal()" aria-label="Close modal" style="background: transparent; border: none; font-size: 1.5rem; color: #ffffff; cursor: pointer; line-height: 1;">&times;</button>
+        </div>
+
+        <!-- Modal Body (Scrollable) -->
+        <div class="modal-body" style="padding: 16px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; background: #0c1017;">
+            
+            <!-- Hero Order Details Banner -->
+            <div style="background: #111622; border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius-md, 6px); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <div>
+                    <div style="font-size: 0.72rem; text-transform: uppercase; color: rgba(255,255,255,0.7); font-weight: 700; letter-spacing: 0.5px;">Registration Number</div>
+                    <div style="font-family: var(--font-mono, monospace); font-size: 1.6rem; font-weight: 900; color: #ffffff !important; letter-spacing: 0.03em;" id="order-install-plate">
+                        ---
+                    </div>
+                    <div style="font-family: var(--font-mono, monospace); font-size: 0.82rem; color: #38bdf8; margin-top: 2px;" id="order-install-number">
+                        Order #---
+                    </div>
+                </div>
+                <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <span style="font-size: 0.75rem; color: rgba(255,255,255,0.7);">VIN:</span>
+                        <span style="font-family: var(--font-mono, monospace); font-size: 0.82rem; color: #ffffff; font-weight: 700;" id="order-install-vin">---</span>
+                    </div>
+                    <span class="badge badge-secondary" id="order-install-warehouse" style="color: #ffffff; font-weight: 700;">
+                        AGM Bonded Warehouse
+                    </span>
+                    <span id="order-install-officer-date" style="font-size: 0.72rem; color: rgba(255,255,255,0.7);">---</span>
+                </div>
+            </div>
+
+            <!-- Workflow Stepper Indicator -->
+            <div style="display: flex; align-items: center; justify-content: space-between; background: #141a26; padding: 10px 14px; border-radius: var(--radius-md, 6px); border: 1px solid rgba(255,255,255,0.08); gap: 6px;">
+                <div class="install-step-pill active" id="step-pill-1" style="flex: 1; text-align: center; font-size: 0.76rem; font-weight: 800; color: #ffffff; padding: 6px 4px; border-radius: 4px; background: rgba(59, 130, 246, 0.25); border: 1px solid #3b82f6;">
+                    1. Hardware Fitment
+                </div>
+                <div style="color: rgba(255,255,255,0.4); font-size: 0.8rem;">➔</div>
+                <div class="install-step-pill" id="step-pill-2" style="flex: 1; text-align: center; font-size: 0.76rem; font-weight: 700; color: rgba(255,255,255,0.7); padding: 6px 4px; border-radius: 4px; background: transparent; border: 1px solid transparent;">
+                    2. Dual Evidence Photos
+                </div>
+                <div style="color: rgba(255,255,255,0.4); font-size: 0.8rem;">➔</div>
+                <div class="install-step-pill" id="step-pill-3" style="flex: 1; text-align: center; font-size: 0.76rem; font-weight: 700; color: rgba(255,255,255,0.7); padding: 6px 4px; border-radius: 4px; background: transparent; border: 1px solid transparent;">
+                    3. 1-Click ITMS Finalize
+                </div>
+            </div>
+
+            <!-- STEP 1: Hardware Fitment Form -->
+            <div class="order-step-section" id="section-step-1" style="background: #111622; border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius-md, 6px); padding: 14px;">
+                <div style="font-size: 0.82rem; font-weight: 800; text-transform: uppercase; color: #ffffff; letter-spacing: 0.5px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="display: flex; align-items: center; gap: 6px;">
+                        <span>🛰️</span> Step 1: Physical Hardware Fitment Serials
+                    </span>
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="saveOrderStep1()" id="btn-save-step1" style="padding: 4px 12px; font-size: 0.76rem; font-weight: 700; color: #ffffff;">
+                        💾 Save &amp; Advance to Step 2 ➔
+                    </button>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;" id="order-hardware-grid">
+                    <div>
+                        <label style="display: block; font-size: 0.74rem; font-weight: 700; color: rgba(255,255,255,0.8); margin-bottom: 4px;">Front Plate Serial</label>
+                        <input type="text" id="order-install-front-serial" class="form-control" placeholder="e.g. FP-1001" style="width: 100%; box-sizing: border-box; background: #0c1017; border: 1px solid #334155; color: #ffffff; font-family: var(--font-mono, monospace); padding: 8px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 700;">
+                    </div>
+                    <div>
+                        <label style="display: block; font-size: 0.74rem; font-weight: 700; color: rgba(255,255,255,0.8); margin-bottom: 4px;">Rear Plate Serial</label>
+                        <input type="text" id="order-install-rear-serial" class="form-control" placeholder="e.g. RP-1001" style="width: 100%; box-sizing: border-box; background: #0c1017; border: 1px solid #334155; color: #ffffff; font-family: var(--font-mono, monospace); padding: 8px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 700;">
+                    </div>
+                    <div>
+                        <label style="display: block; font-size: 0.74rem; font-weight: 700; color: rgba(255,255,255,0.8); margin-bottom: 4px;">GPS Tracker ID</label>
+                        <input type="text" id="order-install-gps-id" class="form-control" placeholder="e.g. GPS-5544" style="width: 100%; box-sizing: border-box; background: #0c1017; border: 1px solid #334155; color: #ffffff; font-family: var(--font-mono, monospace); padding: 8px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 700;">
+                    </div>
+                </div>
+            </div>
+
+            <!-- STEP 2: Dual Photo Dropzones (Front & Rear) -->
+            <div class="order-step-section" id="section-step-2" style="background: #111622; border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius-md, 6px); padding: 14px;">
+                <div style="font-size: 0.82rem; font-weight: 800; text-transform: uppercase; color: #ffffff; letter-spacing: 0.5px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="display: flex; align-items: center; gap: 6px;">
+                        <span>📷</span> Step 2: Evidence Photos (Camera &amp; Dropzones)
+                    </span>
+                    <span style="font-size: 0.72rem; color: rgba(255,255,255,0.7);">Both Front &amp; Rear Required</span>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+                    <!-- Front Angle Box -->
+                    <div style="background: #0c1017; border: 1px dashed #334155; border-radius: 6px; padding: 12px; display: flex; flex-direction: column; align-items: center; gap: 8px; position: relative;">
+                        <div style="width: 100%; display: flex; justify-content: space-between; align-items: center;">
+                            <strong style="color: #ffffff; font-size: 0.8rem;">1. FRONT ANGLE</strong>
+                            <span class="badge badge-dark" id="order-front-status-badge" style="font-size: 0.7rem;">Empty</span>
+                        </div>
+                        
+                        <div id="order-front-preview-box" onclick="triggerOrderPhotoUpload('front')" style="width: 100%; height: 160px; background: #141722; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; overflow: hidden; position: relative; border: 1px solid rgba(255,255,255,0.06);">
+                            <div id="order-front-placeholder" style="text-align: center; color: rgba(255,255,255,0.7); padding: 10px;">
+                                <div style="font-size: 1.8rem; margin-bottom: 4px;">📸</div>
+                                <span style="font-size: 0.78rem; font-weight: 700; color: #ffffff;">Snap / Upload Front</span>
+                                <div style="font-size: 0.7rem; color: rgba(255,255,255,0.5); margin-top: 2px;">Tap camera or drag photo</div>
+                            </div>
+                            <img id="order-front-img" style="display: none; width: 100%; height: 100%; object-fit: cover;" alt="Front Evidence Preview">
+                        </div>
+                        
+                        <input type="file" id="order-front-photo-input" accept="image/*" capture="environment" onchange="onOrderPhotoSelected('front', this)" style="display: none;">
+                        
+                        <div style="width: 100%; display: flex; justify-content: space-between; align-items: center;">
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="triggerOrderPhotoUpload('front')" style="padding: 4px 10px; font-size: 0.75rem; color: #ffffff;">
+                                📷 Front Camera
+                            </button>
+                            <span id="order-front-ocr-pill" class="badge badge-dark" style="font-size: 0.7rem; font-family: var(--font-mono, monospace);">OCR: ---</span>
+                        </div>
+                    </div>
+
+                    <!-- Rear Angle Box -->
+                    <div style="background: #0c1017; border: 1px dashed #334155; border-radius: 6px; padding: 12px; display: flex; flex-direction: column; align-items: center; gap: 8px; position: relative;">
+                        <div style="width: 100%; display: flex; justify-content: space-between; align-items: center;">
+                            <strong style="color: #ffffff; font-size: 0.8rem;">2. REAR ANGLE</strong>
+                            <span class="badge badge-dark" id="order-rear-status-badge" style="font-size: 0.7rem;">Empty</span>
+                        </div>
+                        
+                        <div id="order-rear-preview-box" onclick="triggerOrderPhotoUpload('rear')" style="width: 100%; height: 160px; background: #141722; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; overflow: hidden; position: relative; border: 1px solid rgba(255,255,255,0.06);">
+                            <div id="order-rear-placeholder" style="text-align: center; color: rgba(255,255,255,0.7); padding: 10px;">
+                                <div style="font-size: 1.8rem; margin-bottom: 4px;">📸</div>
+                                <span style="font-size: 0.78rem; font-weight: 700; color: #ffffff;">Snap / Upload Rear</span>
+                                <div style="font-size: 0.7rem; color: rgba(255,255,255,0.5); margin-top: 2px;">Tap camera or drag photo</div>
+                            </div>
+                            <img id="order-rear-img" style="display: none; width: 100%; height: 100%; object-fit: cover;" alt="Rear Evidence Preview">
+                        </div>
+                        
+                        <input type="file" id="order-rear-photo-input" accept="image/*" capture="environment" onchange="onOrderPhotoSelected('rear', this)" style="display: none;">
+                        
+                        <div style="width: 100%; display: flex; justify-content: space-between; align-items: center;">
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="triggerOrderPhotoUpload('rear')" style="padding: 4px 10px; font-size: 0.75rem; color: #ffffff;">
+                                📷 Rear Camera
+                            </button>
+                            <span id="order-rear-ocr-pill" class="badge badge-dark" style="font-size: 0.7rem; font-family: var(--font-mono, monospace);">OCR: ---</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Progress / Feedback Banner -->
+            <div id="order-install-progress-banner" style="display: none; background: rgba(30, 58, 138, 0.3); border: 1px solid #3b82f6; border-radius: 6px; padding: 10px 14px; align-items: center; gap: 10px;">
+                <div class="spinner-border spinner-border-sm text-primary" role="status" style="width: 18px; height: 18px; border-width: 2px;"></div>
+                <div style="flex: 1;">
+                    <div style="font-size: 0.82rem; font-weight: 700; color: #ffffff;" id="order-install-progress-title">Submitting Order to ITMS...</div>
+                    <div style="font-size: 0.74rem; color: #93c5fd;" id="order-install-progress-desc">Uploading evidence photos and recording hardware fitment...</div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Modal Footer Actions -->
+        <div class="modal-footer" style="padding: 12px 18px; border-top: 1px solid var(--ug-border, #1e293b); background: var(--ug-black-card, #0f172a); display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; margin: 0; font-size: 0.8rem; color: #ffffff; font-weight: 600;">
+                    <input type="checkbox" id="order-install-dry-run-chk" checked style="accent-color: var(--ug-yellow, #fcdc04); cursor: pointer;">
+                    <span>Dry Run (Simulation Safe)</span>
+                </label>
+            </div>
+            
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <button type="button" class="btn btn-secondary" onclick="closeOrderInstallModal()" style="padding: 8px 16px; font-size: 0.84rem; font-weight: 700; color: #ffffff;">
+                    Cancel
+                </button>
+                <button type="button" class="btn btn-primary" id="btn-submit-order-install" onclick="submitOrderDirect()" style="padding: 8px 20px; font-size: 0.86rem; font-weight: 800; background: #2563eb; border: 1px solid #3b82f6; color: #ffffff; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 0 12px rgba(37, 99, 235, 0.4);">
+                    <span>🚀 Finalize &amp; Submit to ITMS</span>
+                </button>
+            </div>
+        </div>
+
+    </div>
+</div>

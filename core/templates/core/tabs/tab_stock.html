@@ -112,62 +112,70 @@
                 </div>
             </div>
 
-            <!-- Stock 4-Mode Nav -->
-            <div class="stock-mode-nav">
-                <button class="btn btn-primary stock-mode-btn active" id="btn-mode-dispatch" onclick="setStockMode('dispatch')">
-                    1. Dispatch <span class="hotkey">1</span>
-                </button>
-                <button class="btn btn-secondary stock-mode-btn" id="btn-mode-movements" onclick="setStockMode('movements')">
-                    2. Movements <span class="hotkey">2</span>
-                </button>
-                <button class="btn btn-secondary stock-mode-btn" id="btn-mode-audit" onclick="setStockMode('audit')">
-                    3. Safe Audit <span class="hotkey">3</span>
-                </button>
-                <button class="btn btn-secondary stock-mode-btn" id="btn-mode-ledger" onclick="setStockMode('ledger')">
-                    4. Ledger <span class="hotkey">4</span>
+            <!-- Stock Subnav & Filter Funnel Strip -->
+            <div class="stock-subnav-strip" style="display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; margin-bottom:12px;">
+                <div class="stock-mode-nav" style="flex:1; margin-bottom:0;">
+                    <button class="btn btn-primary stock-mode-btn active" id="btn-mode-dispatch" onclick="setStockMode('dispatch')">
+                        1. Dispatch <span class="hotkey">1</span>
+                    </button>
+                    <button class="btn btn-secondary stock-mode-btn" id="btn-mode-movements" onclick="setStockMode('movements')">
+                        2. Movements <span class="hotkey">2</span>
+                    </button>
+                    <button class="btn btn-secondary stock-mode-btn" id="btn-mode-audit" onclick="setStockMode('audit')">
+                        3. Safe Audit <span class="hotkey">3</span>
+                    </button>
+                    <button class="btn btn-secondary stock-mode-btn" id="btn-mode-ledger" onclick="setStockMode('ledger')">
+                        4. Ledger <span class="hotkey">4</span>
+                    </button>
+                </div>
+                <button type="button" class="mobile-filter-funnel-btn" id="btn-stock-filter-funnel" onclick="toggleMobileFilterPanel('stock-filter-drawer', this)" title="Filter Stock, Barcode Scan, or Actions" aria-label="Toggle Filters">
+                    <svg class="funnel-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+                    <span>Filters</span>
                 </button>
             </div>
 
-            <!-- Universal Command Bar -->
-            <div class="stock-command-bar">
-                <select id="stock-category-select" class="form-control" style="width: 130px; font-weight: 600;" aria-label="Stock Category">
-                    <option value="PSV">PSV White</option>
-                    <option value="PMO">PMO Yellow</option>
-                </select>
-                <input type="text" id="stock-universal-scan" class="form-control" style="flex: 1;" placeholder="Scan barcode or type plate... (Press / to focus)" autocomplete="off" aria-label="Universal barcode scan or registration plate input">
-                <div class="stock-command-bar-actions">
-                    <button class="btn btn-warning" id="btn-view-blocked-stock" onclick="openNotOnStockModal()" style="display: none; font-size: 0.85rem; font-weight: 700; align-items: center; gap: 4px;" title="View plates not on stock needing ITMS transfer">
-                        ⚠️ Not On Stock (<span id="lbl-blocked-stock-count">0</span>)
-                    </button>
-                    <button class="btn btn-secondary" onclick="openStockPasteModal()" title="Paste registration numbers from Excel (V)">📋 Paste <span class="hotkey">V</span></button>
-                    <button class="btn btn-secondary" id="btn-quick-delivery-top" onclick="openQuickDeliveryModal()" title="Quick Count Inbound Delivery (Bulk intake by quantity)">📦 Quick Delivery</button>
-                    <button class="btn btn-primary" onclick="syncStock()" title="Unified sync with ITMS (S)">⟳ Sync <span class="hotkey">S</span></button>
-                    <div class="dropdown" style="position:relative; display:inline-block;">
-                        <button class="btn btn-secondary dropdown-toggle" onclick="toggleStockExportMenu(event)" title="Export Shift Stock CSVs (Hotkey: E)">
-                            📊 Export CSVs ▾ <span class="hotkey">E</span>
+            <!-- Universal Command Bar (Collapsible Filter Drawer on Mobile) -->
+            <div class="collapsible-filter-drawer" id="stock-filter-drawer" style="width:100%;">
+                <div class="stock-command-bar" style="width:100%; margin-bottom:0;">
+                    <select id="stock-category-select" class="form-control" style="width: 130px; font-weight: 600;" aria-label="Stock Category">
+                        <option value="PSV">PSV White</option>
+                        <option value="PMO">PMO Yellow</option>
+                    </select>
+                    <input type="text" id="stock-universal-scan" class="form-control" style="flex: 1;" placeholder="Scan barcode or type plate... (Press / to focus)" autocomplete="off" aria-label="Universal barcode scan or registration plate input">
+                    <div class="stock-command-bar-actions">
+                        <button class="btn btn-warning" id="btn-view-blocked-stock" onclick="openNotOnStockModal()" style="display: none; font-size: 0.85rem; font-weight: 700; align-items: center; gap: 4px;" title="View plates not on stock needing ITMS transfer">
+                            ⚠️ Not On Stock (<span id="lbl-blocked-stock-count">0</span>)
                         </button>
-                        <div id="stock-export-dropdown" style="display:none; position:absolute; right:0; top:100%; margin-top:4px; background:#0f172a; border:1px solid #334155; border-radius:6px; box-shadow:0 8px 24px rgba(0,0,0,0.6); z-index:100; min-width:230px; overflow:hidden;">
-                            <a href="javascript:void(0)" onclick="exportDispatchCSV()" style="display:block; padding:8px 12px; color:#4ade80; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
-                                📦 Morning Dispatches CSV
-                            </a>
-                            <a href="javascript:void(0)" onclick="exportMovementsCSV()" style="display:block; padding:8px 12px; color:#60a5fa; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
-                                🚚 Inbound & Movements CSV
-                            </a>
-                            <a href="javascript:void(0)" onclick="exportAuditCSV()" style="display:block; padding:8px 12px; color:#e2e8f0; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
-                                🔍 Safe Audit Scans CSV
-                            </a>
-                            <a href="javascript:void(0)" onclick="exportUnregistered()" style="display:block; padding:8px 12px; color:#f87171; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
-                                ⚠️ Unregistered Safe Kits CSV
-                            </a>
-                            <a href="javascript:void(0)" onclick="exportStockCSV()" style="display:block; padding:8px 12px; color:#38bdf8; text-decoration:none; font-size:0.8rem; font-weight:700; border-bottom:1px solid #1e293b;">
-                                📊 Master Reconciliation CSV
-                            </a>
-                                                        <a href="javascript:void(0)" onclick="exportCategoryFromStock('spiked')" style="display:block; padding:8px 12px; color:#f59e0b; text-decoration:none; font-size:0.8rem; font-weight:700; border-bottom:1px solid #1e293b;">
-                                ⚠️ Spiked Undispatched Kits CSV
-                            </a>
-                            <a href="javascript:void(0)" onclick="exportCategoryFromStock('unallocated')" style="display:block; padding:8px 12px; color:#fb923c; text-decoration:none; font-size:0.78rem;">
-                                ❌ Unallocated Plates CSV
-                            </a>
+                        <button class="btn btn-secondary" onclick="openStockPasteModal()" title="Paste registration numbers from Excel (V)">📋 Paste <span class="hotkey">V</span></button>
+                        <button class="btn btn-secondary" id="btn-quick-delivery-top" onclick="openQuickDeliveryModal()" title="Quick Count Inbound Delivery (Bulk intake by quantity)">📦 Quick Delivery</button>
+                        <button class="btn btn-primary" onclick="syncStock()" title="Unified sync with ITMS (S)">⟳ Sync <span class="hotkey">S</span></button>
+                        <div class="dropdown" style="position:relative; display:inline-block;">
+                            <button class="btn btn-secondary dropdown-toggle" onclick="toggleStockExportMenu(event)" title="Export Shift Stock CSVs (Hotkey: E)">
+                                📊 Export CSVs ▾ <span class="hotkey">E</span>
+                            </button>
+                            <div id="stock-export-dropdown" style="display:none; position:absolute; right:0; top:100%; margin-top:4px; background:#0f172a; border:1px solid #334155; border-radius:6px; box-shadow:0 8px 24px rgba(0,0,0,0.6); z-index:100; min-width:230px; overflow:hidden;">
+                                <a href="javascript:void(0)" onclick="exportDispatchCSV()" style="display:block; padding:8px 12px; color:#4ade80; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
+                                    📦 Morning Dispatches CSV
+                                </a>
+                                <a href="javascript:void(0)" onclick="exportMovementsCSV()" style="display:block; padding:8px 12px; color:#60a5fa; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
+                                    🚚 Inbound & Movements CSV
+                                </a>
+                                <a href="javascript:void(0)" onclick="exportAuditCSV()" style="display:block; padding:8px 12px; color:#e2e8f0; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
+                                    🔍 Safe Audit Scans CSV
+                                </a>
+                                <a href="javascript:void(0)" onclick="exportUnregistered()" style="display:block; padding:8px 12px; color:#f87171; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
+                                    ⚠️ Unregistered Safe Kits CSV
+                                </a>
+                                <a href="javascript:void(0)" onclick="exportStockCSV()" style="display:block; padding:8px 12px; color:#38bdf8; text-decoration:none; font-size:0.8rem; font-weight:700; border-bottom:1px solid #1e293b;">
+                                    📊 Master Reconciliation CSV
+                                </a>
+                                <a href="javascript:void(0)" onclick="exportCategoryFromStock('spiked')" style="display:block; padding:8px 12px; color:#f59e0b; text-decoration:none; font-size:0.8rem; font-weight:700; border-bottom:1px solid #1e293b;">
+                                    ⚠️ Spiked Undispatched Kits CSV
+                                </a>
+                                <a href="javascript:void(0)" onclick="exportCategoryFromStock('unallocated')" style="display:block; padding:8px 12px; color:#fb923c; text-decoration:none; font-size:0.78rem;">
+                                    ❌ Unallocated Plates CSV
+                                </a>
+                            </div>
                         </div>
                     </div>
                 </div>

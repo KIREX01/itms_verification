@@ -555,6 +555,15 @@ function switchMobileMode(mode) {
             cont.style.display = "block";
         }
         renderStockQueueList();
+    } else if (mode === "order") {
+        if (capBar) capBar.style.display = "none";
+        const btn = document.getElementById("btn-mode-order");
+        if (btn) btn.classList.add("active");
+        const cont = document.getElementById("container-order");
+        if (cont) {
+            cont.classList.add("active");
+            cont.style.display = "flex";
+        }
     }
 }
 
@@ -2357,6 +2366,278 @@ function initMobileCompanion() {
         console.error("Error in startHeartbeat:", e);
     }
 }
+
+// ============================================================================
+// MODE 4: Quick Walk-in Order Installation Handlers
+// ============================================================================
+window.MobileOrderState = {
+    currentOrder: null,
+    frontPhotoFile: null,
+    rearPhotoFile: null,
+    isSubmitting: false,
+};
+
+async function lookupMobileOrder() {
+    const input = document.getElementById("m-order-search-input");
+    const query = (input ? input.value : "").trim();
+    if (!query) {
+        showToastNotification("Enter an order number or plate to lookup.", "error");
+        return;
+    }
+
+    const btn = document.getElementById("btn-m-order-lookup");
+    const origText = btn ? btn.innerHTML : "";
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span class="spinner-border spinner-border-sm"></span> Finding...`;
+    }
+
+    try {
+        const url = `/api/itms/orders/${encodeURIComponent(query)}/install/`;
+        const resp = await fetch(url, { headers: { Accept: "application/json" } });
+        const data = await resp.json();
+
+        if (!data.success) {
+            showToastNotification(data.error || "Order not found.", "error");
+            return;
+        }
+
+        window.MobileOrderState.currentOrder = data.order || {};
+        window.MobileOrderState.frontPhotoFile = null;
+        window.MobileOrderState.rearPhotoFile = null;
+
+        const o = data.order || {};
+        const profileCard = document.getElementById("m-order-profile-card");
+        if (profileCard) profileCard.style.display = "flex";
+
+        const plateEl = document.getElementById("m-order-plate");
+        const numLabel = document.getElementById("m-order-num-label");
+        const vinLabel = document.getElementById("m-order-vin-label");
+        const whBadge = document.getElementById("m-order-warehouse-badge");
+        const stageBadge = document.getElementById("m-order-stage-badge");
+
+        if (plateEl) plateEl.innerText = o.registration_number || "NO PLATE";
+        if (numLabel) numLabel.innerText = `Order #${o.order_number || query}`;
+        if (vinLabel) vinLabel.innerText = `VIN: ${o.vin || "---"}`;
+        if (whBadge) whBadge.innerText = o.warehouse_name || "AGM Bond";
+
+        if (stageBadge) {
+            stageBadge.className = "badge badge-green";
+            stageBadge.innerText = data.stage || "Ready";
+        }
+
+        // Prepopulate hardware inputs
+        const fInput = document.getElementById("m-order-front-serial");
+        const rInput = document.getElementById("m-order-rear-serial");
+        const gInput = document.getElementById("m-order-gps-id");
+
+        if (fInput) fInput.value = o.front_plate_serial || "";
+        if (rInput) rInput.value = o.rear_plate_serial || "";
+        if (gInput) gInput.value = o.gps_tracker_id || "";
+
+        // Reset previews
+        resetMobileOrderPhotoDropzone("front");
+        resetMobileOrderPhotoDropzone("rear");
+
+        if (data.existing_pair) {
+            if (data.existing_pair.front_image_url) {
+                setMobilePhotoPreview("front", data.existing_pair.front_image_url);
+            }
+            if (data.existing_pair.rear_image_url) {
+                setMobilePhotoPreview("rear", data.existing_pair.rear_image_url);
+            }
+        }
+
+        showToastNotification(`Order #${o.order_number} loaded successfully!`, "success");
+    } catch (err) {
+        console.error("[MobileOrder] Lookup error:", err);
+        showToastNotification("Network error querying order.", "error");
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+        }
+    }
+}
+
+async function saveMobileStep1() {
+    const o = window.MobileOrderState.currentOrder;
+    if (!o || !o.order_number) {
+        showToastNotification("No active order loaded.", "error");
+        return;
+    }
+
+    const btn = document.getElementById("btn-m-save-step1");
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = "Saving...";
+    }
+
+    const fSerial = (document.getElementById("m-order-front-serial")?.value || "").trim();
+    const rSerial = (document.getElementById("m-order-rear-serial")?.value || "").trim();
+    const gId = (document.getElementById("m-order-gps-id")?.value || "").trim();
+    const isDryRun = document.getElementById("m-order-dry-run-chk")?.checked ?? true;
+
+    const fd = new FormData();
+    fd.append("action", "save_step1");
+    fd.append("front_plate_id", fSerial);
+    fd.append("rear_plate_id", rSerial);
+    fd.append("tracker_id", gId);
+    fd.append("dry_run", isDryRun ? "true" : "false");
+
+    try {
+        const resp = await fetch(`/api/itms/orders/${encodeURIComponent(o.order_number)}/install/`, {
+            method: "POST",
+            headers: { "X-CSRFToken": getCsrfToken() },
+            body: fd,
+        });
+        const res = await resp.json();
+        if (res.success) {
+            showToastNotification("Step 1 Hardware Serials saved!", "success");
+            const stageBadge = document.getElementById("m-order-stage-badge");
+            if (stageBadge) {
+                stageBadge.className = "badge badge-blue";
+                stageBadge.innerText = res.stage || "STAGE_2_EVIDENCE";
+            }
+        } else {
+            showToastNotification(res.error || "Failed to save Step 1.", "error");
+        }
+    } catch (err) {
+        showToastNotification("Network error saving Step 1.", "error");
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = "💾 Save Step 1";
+        }
+    }
+}
+
+function triggerMobileOrderPhoto(angle) {
+    const input = document.getElementById(`m-${angle}-file-input`);
+    if (input) input.click();
+}
+
+function onMobileOrderPhotoPicked(angle, input) {
+    if (!input || !input.files || input.files.length === 0) return;
+    const file = input.files[0];
+
+    if (angle === "front") {
+        window.MobileOrderState.frontPhotoFile = file;
+    } else {
+        window.MobileOrderState.rearPhotoFile = file;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function (e) {
+        setMobilePhotoPreview(angle, e.target.result);
+    };
+    reader.readAsDataURL(file);
+}
+
+function setMobilePhotoPreview(angle, url) {
+    const placeholder = document.getElementById(`m-${angle}-placeholder`);
+    const img = document.getElementById(`m-${angle}-img`);
+    const status = document.getElementById(`m-${angle}-status`);
+
+    if (placeholder) placeholder.style.display = "none";
+    if (img) {
+        img.src = url;
+        img.style.display = "block";
+    }
+    if (status) {
+        status.className = "badge badge-green";
+        status.innerText = "✓ Ready";
+    }
+}
+
+function resetMobileOrderPhotoDropzone(angle) {
+    const placeholder = document.getElementById(`m-${angle}-placeholder`);
+    const img = document.getElementById(`m-${angle}-img`);
+    const status = document.getElementById(`m-${angle}-status`);
+    const input = document.getElementById(`m-${angle}-file-input`);
+
+    if (placeholder) placeholder.style.display = "block";
+    if (img) {
+        img.src = "";
+        img.style.display = "none";
+    }
+    if (status) {
+        status.className = "badge badge-dark";
+        status.innerText = "Empty";
+    }
+    if (input) input.value = "";
+}
+
+async function submitMobileOrderInstall() {
+    const o = window.MobileOrderState.currentOrder;
+    if (!o || !o.order_number) {
+        showToastNotification("Please find an order first.", "error");
+        return;
+    }
+
+    const sess = window.MobileOrderState;
+    if (sess.isSubmitting) return;
+
+    const btn = document.getElementById("btn-m-order-submit");
+    const isDryRun = document.getElementById("m-order-dry-run-chk")?.checked ?? true;
+    const fSerial = (document.getElementById("m-order-front-serial")?.value || "").trim();
+    const rSerial = (document.getElementById("m-order-rear-serial")?.value || "").trim();
+    const gId = (document.getElementById("m-order-gps-id")?.value || "").trim();
+
+    const fd = new FormData();
+    fd.append("action", "submit");
+    fd.append("dry_run", isDryRun ? "true" : "false");
+    fd.append("front_plate_id", fSerial);
+    fd.append("rear_plate_id", rSerial);
+    fd.append("tracker_id", gId);
+
+    if (sess.frontPhotoFile) fd.append("front_photo", sess.frontPhotoFile);
+    if (sess.rearPhotoFile) fd.append("rear_photo", sess.rearPhotoFile);
+
+    sess.isSubmitting = true;
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span class="spinner-border spinner-border-sm"></span> Submitting to ITMS...`;
+    }
+
+    try {
+        const resp = await fetch(`/api/itms/orders/${encodeURIComponent(o.order_number)}/install/`, {
+            method: "POST",
+            headers: { "X-CSRFToken": getCsrfToken() },
+            body: fd,
+        });
+        const res = await resp.json();
+
+        if (!res.success) {
+            showToastNotification(res.error || "Submission failed.", "error");
+            return;
+        }
+
+        const simMsg = res.dry_run ? " [Simulation Mode]" : "";
+        showToastNotification(`🎉 Order #${res.order_number || o.order_number} submitted to ITMS!${simMsg}`, "success");
+
+        const stageBadge = document.getElementById("m-order-stage-badge");
+        if (stageBadge) {
+            stageBadge.className = "badge badge-green";
+            stageBadge.innerText = "INSTALLED";
+        }
+    } catch (err) {
+        console.error("[MobileOrder] Submission error:", err);
+        showToastNotification("Network error submitting installation.", "error");
+    } finally {
+        sess.isSubmitting = false;
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<span>🚀 1-Tap Finalize &amp; Submit</span>`;
+        }
+    }
+}
+
+window.lookupMobileOrder = lookupMobileOrder;
+window.saveMobileStep1 = saveMobileStep1;
+window.triggerMobileOrderPhoto = triggerMobileOrderPhoto;
+window.onMobileOrderPhotoPicked = onMobileOrderPhotoPicked;
+window.submitMobileOrderInstall = submitMobileOrderInstall;
 
 if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", initMobileCompanion);

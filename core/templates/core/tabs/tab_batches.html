@@ -3,46 +3,54 @@
     <div class="batches-pane-container">
         <!-- Top Toolbar -->
         <div class="batches-header-bar">
-            <div class="batches-header-title-block">
-                <h3 style="font-size:1.05rem; font-weight:800; color:#ffffff !important; display:flex; align-items:center; gap:8px;">
-                    <span>📷 Ingestion Batches &amp; Evidence Stream</span>
-                    <span class="badge badge-secondary" id="batches-count-badge" style="color:#ffffff !important; font-weight:800; border:1px solid rgba(255,255,255,0.2);">0 Batches</span>
-                </h3>
-                <p class="desktop-only-text" style="font-size:0.75rem; color:rgba(255,255,255,0.85); margin-top:3px;">
-                    Inspect evidence photos directly at native high-resolution scale without requiring lightbox zoom. Expand or collapse batch sessions freely.
-                </p>
+            <div class="batches-header-title-block" style="display:flex; align-items:center; justify-content:space-between; width:100%; gap:8px;">
+                <div>
+                    <h3 style="font-size:1.05rem; font-weight:800; color:#ffffff !important; display:flex; align-items:center; gap:8px; margin:0;">
+                        <span>📷 Ingestion Batches &amp; Evidence Stream</span>
+                        <span class="badge badge-secondary" id="batches-count-badge" style="color:#ffffff !important; font-weight:800; border:1px solid rgba(255,255,255,0.2);">0 Batches</span>
+                    </h3>
+                    <p class="desktop-only-text" style="font-size:0.75rem; color:rgba(255,255,255,0.85); margin-top:3px; margin-bottom:0;">
+                        Inspect evidence photos directly at native high-resolution scale without requiring lightbox zoom. Expand or collapse batch sessions freely.
+                    </p>
+                </div>
+                <button type="button" class="mobile-filter-funnel-btn" id="btn-batches-filter-funnel" onclick="toggleMobileFilterPanel('batches-filter-drawer', this)" title="Filter batches by search, density, or upload" aria-label="Toggle Filters">
+                    <svg class="funnel-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+                    <span>Filters</span>
+                </button>
             </div>
-            <div class="batches-toolbar-controls">
-                <!-- Search Filter -->
-                <div class="batch-search-wrap">
-                    <input type="text" id="batch-search-input" class="batch-search-field" placeholder="🔍 Search batches by ID or label..." oninput="filterBatchesStream()">
-                </div>
-                
-                <!-- Stream View Mode Density Switcher -->
-                <div class="batch-density-toggle-group" id="batch-density-toggle-group" title="Switch photo display mode">
-                    <button type="button" class="density-toggle-btn active" id="btn-density-large" onclick="setBatchViewMode('large')" title="Standard Inspection Grid (Laptop: 3 / Tablet: 2 / Phone: 1)">
-                        ⊞ Standard
-                    </button>
-                    <button type="button" class="density-toggle-btn" id="btn-density-grid" onclick="setBatchViewMode('grid')" title="Compact multi-column overview grid">
-                        ▦ Compact Grid
-                    </button>
-                </div>
+            <div class="collapsible-filter-drawer" id="batches-filter-drawer" style="width:100%;">
+                <div class="batches-toolbar-controls">
+                    <!-- Search Filter -->
+                    <div class="batch-search-wrap">
+                        <input type="text" id="batch-search-input" class="batch-search-field" placeholder="🔍 Search batches by ID or label..." oninput="filterBatchesStream()">
+                    </div>
+                    
+                    <!-- Stream View Mode Density Switcher -->
+                    <div class="batch-density-toggle-group" id="batch-density-toggle-group" title="Switch photo display mode">
+                        <button type="button" class="density-toggle-btn active" id="btn-density-large" onclick="setBatchViewMode('large')" title="Standard Inspection Grid (Laptop: 3 / Tablet: 2 / Phone: 1)">
+                            ⊞ Standard
+                        </button>
+                        <button type="button" class="density-toggle-btn" id="btn-density-grid" onclick="setBatchViewMode('grid')" title="Compact multi-column overview grid">
+                            ▦ Compact Grid
+                        </button>
+                    </div>
 
-                <!-- Utilities -->
-                <div class="batch-util-actions">
-                    <button class="btn btn-secondary batch-btn-action" onclick="expandAllBatches()" title="Expand all batches">▾ Expand All</button>
-                    <button class="btn btn-secondary batch-btn-action" onclick="collapseAllBatches()" title="Collapse all batches">▸ Collapse All</button>
-                    <button class="btn btn-secondary batch-btn-action" onclick="fetchBatchesList()" title="Refresh stream">🔄 Refresh</button>
-                </div>
+                    <!-- Utilities -->
+                    <div class="batch-util-actions">
+                        <button class="btn btn-secondary batch-btn-action" onclick="expandAllBatches()" title="Expand all batches">▾ Expand All</button>
+                        <button class="btn btn-secondary batch-btn-action" onclick="collapseAllBatches()" title="Collapse all batches">▸ Collapse All</button>
+                        <button class="btn btn-secondary batch-btn-action" onclick="fetchBatchesList()" title="Refresh stream">🔄 Refresh</button>
+                    </div>
 
-                <!-- Primary Action Buttons -->
-                <div class="batch-primary-actions">
-                    <button class="btn btn-secondary batch-btn-action" onclick="openMobileConnectModal()" id="btn-open-mobile-modal" title="Connect phone camera" style="border-color:rgba(255,255,255,0.25); color:#ffffff !important;">
-                        📱 Phone Camera
-                    </button>
-                    <button class="btn btn-primary batch-btn-action" onclick="openBatchUploadModal()" id="btn-open-upload-modal" style="font-weight:800;">
-                        📷 + Upload Batch
-                    </button>
+                    <!-- Primary Action Buttons -->
+                    <div class="batch-primary-actions">
+                        <button class="btn btn-secondary batch-btn-action" onclick="openMobileConnectModal()" id="btn-open-mobile-modal" title="Connect phone camera" style="border-color:rgba(255,255,255,0.25); color:#ffffff !important;">
+                            📱 Phone Camera
+                        </button>
+                        <button class="btn btn-primary batch-btn-action" onclick="openBatchUploadModal()" id="btn-open-upload-modal" style="font-weight:800;">
+                            📷 + Upload Batch
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

@@ -616,11 +616,11 @@ window.populateAllShiftDropdowns = function(dates, activeShift) {
     if (!dates || dates.length === 0) return;
     const activeSfx = activeShift ? activeShift.suffix : "";
 
-    // 1. Top Centralized Header Select (#global-shift-select)
-    const headerSel = document.getElementById("global-shift-select");
-    if (headerSel) {
-        const currentSelected = headerSel.value || activeSfx;
-        headerSel.innerHTML = "";
+    // Top Centralized Header & Mobile Selectors
+    const shiftSelects = document.querySelectorAll("select.header-shift-select, #global-shift-select, #mobile-global-shift-select, #drawer-global-shift-select");
+    shiftSelects.forEach(sel => {
+        const currentSelected = sel.value || activeSfx;
+        sel.innerHTML = "";
 
         // Standard All Dates (Aggregate) option
         const optAll = document.createElement("option");
@@ -629,7 +629,7 @@ window.populateAllShiftDropdowns = function(dates, activeShift) {
         if (currentSelected === "ALL" || (!currentSelected && activeSfx === "ALL")) {
             optAll.selected = true;
         }
-        headerSel.appendChild(optAll);
+        sel.appendChild(optAll);
 
         dates.forEach(d => {
             const opt = document.createElement("option");
@@ -639,9 +639,9 @@ window.populateAllShiftDropdowns = function(dates, activeShift) {
             if (d.suffix === currentSelected || (!currentSelected && d.suffix === activeSfx)) {
                 opt.selected = true;
             }
-            headerSel.appendChild(opt);
+            sel.appendChild(opt);
         });
-    }
+    });
 };
 
 window.setGlobalShiftDate = async function(targetVal) {
@@ -706,11 +706,13 @@ window.syncAllDateSelectorsUI = function(shiftInfo) {
     const sfx = shiftInfo.suffix;
     const shiftLabel = shiftInfo.formatted_date ? `${shiftInfo.formatted_date} (${sfx})` : (shiftInfo.display || sfx || "Live Shift");
 
-    // Header selector
-    const headerSel = document.getElementById("global-shift-select");
-    if (headerSel && sfx) {
-        headerSel.value = sfx;
-    }
+    // Synchronize all shift selectors across desktop and mobile header/drawer
+    const shiftSelects = document.querySelectorAll("select.header-shift-select, #global-shift-select, #mobile-global-shift-select, #drawer-global-shift-select");
+    shiftSelects.forEach(sel => {
+        if (sfx) {
+            sel.value = sfx;
+        }
+    });
 
     // Reports Hub - Read-only active shift badge & focus indicator
     const repBadge = document.getElementById("report-active-shift-badge");

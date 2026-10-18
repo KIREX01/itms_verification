@@ -207,3 +207,17 @@ if (document.readyState === "loading") {
 } else {
     initNavTabPersistence();
 }
+
+/**
+ * Universal Mobile Filter Collapsible Controller
+ * Toggles visibility of secondary filter dropdowns on mobile viewports while keeping subnavigations visible.
+ */
+window.toggleMobileFilterPanel = function(drawerId, btnElem) {
+    const drawer = document.getElementById(drawerId);
+    if (!drawer) return;
+    const isOpen = drawer.classList.toggle("is-open");
+    if (btnElem) {
+        btnElem.classList.toggle("active", isOpen);
+        btnElem.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    }
+};

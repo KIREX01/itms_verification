@@ -47,21 +47,37 @@
         <!-- Left Column: Work Queue Pane -->
         <div class="queue-column-pane">
             <div class="queue-controls-top">
-                <!-- Row 1: Search and Batch Selector -->
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <div style="position:relative; flex:1;">
-                        <span style="position:absolute; left:10px; top:50%; transform:translateY(-50%); font-size:0.8rem; color:var(--ug-text-dim);">🔍</span>
-                        <input type="text" class="queue-search-input" id="queue-search-input" placeholder="Search Plate, Order, VIN... (Esc)" oninput="filterWorkQueue()">
+                <!-- Status Filter Pills (Subnavigation for Quick Access) -->
+                <div class="queue-subnav-strip" style="display:flex; align-items:center; justify-content:space-between; gap:6px; width:100%;">
+                    <div class="queue-filter-pills" style="flex:1; display:flex; gap:4px; background-color:#0c1017; padding:4px; border-radius:6px; border:1px solid rgba(255,255,255,0.08); overflow-x:auto;">
+                        <button type="button" class="queue-filter-pill active" data-filter="ALL" onclick="setWorkQueueFilter('ALL')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:800; color:#ffffff !important; background-color:#1e293b !important; border:1px solid #fcdc04 !important; border-radius:4px; cursor:pointer; min-height:32px;">All</button>
+                        <button type="button" class="queue-filter-pill" data-filter="PENDING" onclick="setWorkQueueFilter('PENDING')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; color:rgba(255,255,255,0.75) !important; background-color:transparent; border:1px solid transparent; border-radius:4px; cursor:pointer; min-height:32px;">Review</button>
+                        <button type="button" class="queue-filter-pill" data-filter="APPROVED" onclick="setWorkQueueFilter('APPROVED')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; color:rgba(255,255,255,0.75) !important; background-color:transparent; border:1px solid transparent; border-radius:4px; cursor:pointer; min-height:32px;">Approved</button>
+                        <button type="button" class="queue-filter-pill" data-filter="ISSUES" onclick="setWorkQueueFilter('ISSUES')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; color:rgba(255,255,255,0.75) !important; background-color:transparent; border:1px solid transparent; border-radius:4px; cursor:pointer; min-height:32px;">Issues</button>
+                        <button type="button" class="queue-filter-pill" data-filter="SUBMITTED" onclick="setWorkQueueFilter('SUBMITTED')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; color:rgba(255,255,255,0.75) !important; background-color:transparent; border:1px solid transparent; border-radius:4px; cursor:pointer; min-height:32px;">Done</button>
                     </div>
-                    <select id="queue-batch-select" onchange="setQueueBatchFilter(this.value)" style="background:var(--ug-black-card); border:1px solid var(--ug-border); color:#ffffff; font-size:0.75rem; padding:6px 10px; border-radius:var(--radius-md); outline:none; cursor:pointer; max-width:160px;" title="Filter work queue by ingestion batch">
-                        <option value="ALL">📦 All Batches</option>
-                        <option value="LATEST">🔥 Latest Batch</option>
-                        <option value="CARRYOVER">⏳ Carryover</option>
-                    </select>
+                    <button type="button" class="mobile-filter-funnel-btn" id="btn-queue-filter-funnel" onclick="toggleMobileFilterPanel('queue-filter-drawer', this)" title="Filter Queue by batch, search, or scope" aria-label="Toggle Filters">
+                        <svg class="funnel-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+                        <span>Filters</span>
+                    </button>
                 </div>
 
-                <!-- Row 2: Scope and Status Filters -->
-                <div style="display:flex; flex-direction:column; gap:6px;">
+                <!-- Collapsible Filter Drawer (Search, Batch & Scope Controls) -->
+                <div class="collapsible-filter-drawer" id="queue-filter-drawer">
+                    <!-- Row 1: Search and Batch Selector -->
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <div style="position:relative; flex:1;">
+                            <span style="position:absolute; left:10px; top:50%; transform:translateY(-50%); font-size:0.8rem; color:var(--ug-text-dim);">🔍</span>
+                            <input type="text" class="queue-search-input" id="queue-search-input" placeholder="Search Plate, Order, VIN... (Esc)" oninput="filterWorkQueue()">
+                        </div>
+                        <select id="queue-batch-select" onchange="setQueueBatchFilter(this.value)" style="background:var(--ug-black-card); border:1px solid var(--ug-border); color:#ffffff; font-size:0.75rem; padding:6px 10px; border-radius:var(--radius-md); outline:none; cursor:pointer; max-width:160px;" title="Filter work queue by ingestion batch">
+                            <option value="ALL">📦 All Batches</option>
+                            <option value="LATEST">⚡ Latest Batch</option>
+                            <option value="CARRYOVER">⏳ Carryover</option>
+                        </select>
+                    </div>
+
+                    <!-- Row 2: Scope Pills Group -->
                     <div class="scope-pills-group" style="display:flex; flex-wrap:wrap; gap:4px; padding:4px; justify-content:space-between; background:var(--ug-black-card); border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.06);">
                         <button class="scope-pill-btn active" id="btn-qscope-today" onclick="setQueueDateScope('TODAY')" title="Focus on today's active shift (Hotkey: D)" style="flex:1; text-align:center; padding:3px 6px; font-size:0.72rem;">
                             🔥 Today
@@ -76,20 +92,11 @@
                             🌐 All
                         </button>
                         <button class="scope-pill-btn" onclick="fetchPairs()" title="Refresh Queue" style="flex:1; text-align:center; padding:3px 6px; font-size:0.72rem; color: var(--ug-cyan);">
-                            ⟳ Refresh
+                            🔄 Refresh
                         </button>
                         <button class="scope-pill-btn" onclick="exportQueueCSV()" title="Export Queue to CSV" style="flex:1; text-align:center; padding:3px 6px; font-size:0.72rem; color: var(--ug-green);">
                             📥 CSV
                         </button>
-                    </div>
-
-                    <!-- Status Filter Pills -->
-                    <div class="queue-filter-pills" style="display:flex; gap:4px; background-color:#0c1017; padding:4px; border-radius:6px; border:1px solid rgba(255,255,255,0.08);">
-                        <button type="button" class="queue-filter-pill active" data-filter="ALL" onclick="setWorkQueueFilter('ALL')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:800; color:#ffffff !important; background-color:#1e293b !important; border:1px solid #fcdc04 !important; border-radius:4px; cursor:pointer; min-height:32px;">All</button>
-                        <button type="button" class="queue-filter-pill" data-filter="PENDING" onclick="setWorkQueueFilter('PENDING')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; color:rgba(255,255,255,0.75) !important; background-color:transparent; border:1px solid transparent; border-radius:4px; cursor:pointer; min-height:32px;">Review</button>
-                        <button type="button" class="queue-filter-pill" data-filter="APPROVED" onclick="setWorkQueueFilter('APPROVED')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; color:rgba(255,255,255,0.75) !important; background-color:transparent; border:1px solid transparent; border-radius:4px; cursor:pointer; min-height:32px;">Approved</button>
-                        <button type="button" class="queue-filter-pill" data-filter="ISSUES" onclick="setWorkQueueFilter('ISSUES')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; color:rgba(255,255,255,0.75) !important; background-color:transparent; border:1px solid transparent; border-radius:4px; cursor:pointer; min-height:32px;">Issues</button>
-                        <button type="button" class="queue-filter-pill" data-filter="SUBMITTED" onclick="setWorkQueueFilter('SUBMITTED')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; color:rgba(255,255,255,0.75) !important; background-color:transparent; border:1px solid transparent; border-radius:4px; cursor:pointer; min-height:32px;">Done</button>
                     </div>
                 </div>
 

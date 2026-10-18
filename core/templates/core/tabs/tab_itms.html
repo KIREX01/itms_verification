@@ -123,24 +123,32 @@
 
         <!-- Action Controls & Synchronization Bar (Shown in ORDERS, ARCHIVE, KITS) -->
         <div class="itms-action-controls-bar" id="itms-subview-controls" style="display:none;">
-            <div class="itms-source-toggle">
-                <button type="button" class="itms-source-btn active" id="itms-src-live-btn" onclick="setItmsExplorerSource('live')">⚡ Live ITMS</button>
-                <button type="button" class="itms-source-btn" id="itms-src-local-btn" onclick="setItmsExplorerSource('local')">💾 Local DB</button>
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%;">
+                <div class="itms-source-toggle">
+                    <button type="button" class="itms-source-btn active" id="itms-src-live-btn" onclick="setItmsExplorerSource('live')">⚡ Live ITMS</button>
+                    <button type="button" class="itms-source-btn" id="itms-src-local-btn" onclick="setItmsExplorerSource('local')">💾 Local DB</button>
+                </div>
+                <button type="button" class="mobile-filter-funnel-btn" id="btn-itms-filter-funnel" onclick="toggleMobileFilterPanel('itms-filter-drawer', this)" title="Open search and synchronization actions" aria-label="Toggle Filters">
+                    <svg class="funnel-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+                    <span>Sync Actions</span>
+                </button>
             </div>
 
-            <div class="itms-sync-actions-group">
-                <button type="button" class="btn btn-warning itms-action-btn" id="btn-itms-sync-shift" onclick="syncItmsShiftOrders()" title="Synchronize all active orders and completed archive orders for current work shift">
-                    <span>⚡</span> <span>Sync Shift Orders</span>
-                </button>
-                <button type="button" class="btn btn-warning itms-action-btn" id="btn-itms-auto-sync-kits" onclick="autoSyncAllItmsKits()" style="display:none;" title="Auto-sync all 20+ pages of installation kits from ITMS into local database">
-                    <span>⚡</span> <span>Auto-Sync Kits</span>
-                </button>
-                <button type="button" class="btn btn-primary itms-action-btn" id="btn-itms-sync-page" onclick="syncCurrentItmsPage()" title="Sync current page into local database">
-                    <span>⬇️</span> <span>Sync Page</span>
-                </button>
-                <button type="button" class="btn btn-secondary itms-action-btn" id="btn-itms-refresh" onclick="fetchItmsExplorerOrders()" title="Refresh registry records">
-                    <span>🔄</span> <span>Refresh</span>
-                </button>
+            <div class="collapsible-filter-drawer" id="itms-filter-drawer">
+                <div class="itms-sync-actions-group">
+                    <button type="button" class="btn btn-warning itms-action-btn" id="btn-itms-sync-shift" onclick="syncItmsShiftOrders()" title="Synchronize all active orders and completed archive orders for current work shift">
+                        <span>⚡</span> <span>Sync Shift Orders</span>
+                    </button>
+                    <button type="button" class="btn btn-warning itms-action-btn" id="btn-itms-auto-sync-kits" onclick="autoSyncAllItmsKits()" style="display:none;" title="Auto-sync all 20+ pages of installation kits from ITMS into local database">
+                        <span>⚡</span> <span>Auto-Sync Kits</span>
+                    </button>
+                    <button type="button" class="btn btn-primary itms-action-btn" id="btn-itms-sync-page" onclick="syncCurrentItmsPage()" title="Sync current page into local database">
+                        <span>⬇️</span> <span>Sync Page</span>
+                    </button>
+                    <button type="button" class="btn btn-secondary itms-action-btn" id="btn-itms-refresh" onclick="fetchItmsExplorerOrders()" title="Refresh registry records">
+                        <span>🔄</span> <span>Refresh</span>
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -244,6 +252,7 @@
                                 <th class="hide-mobile" style="width:140px;">Warehouse</th>
                                 <th class="hide-mobile" style="width:130px;">Officer</th>
                                 <th class="hide-mobile" style="width:130px;">Date</th>
+                                <th style="width:110px; text-align:center;">Action</th>
                             </tr>
                         </thead>
                         <tbody id="itms-explorer-tbody">
@@ -283,6 +292,9 @@
                         </button>
                     </div>
                     <div class="inspector-order-num" id="itms-insp-order">Click an order on the left to inspect telematics &amp; photo links</div>
+                    <button type="button" class="btn btn-primary" id="btn-itms-insp-quick-install" onclick="openCurrentOrderInInstallModal()" style="display:none; width:100%; margin-top:8px; font-weight:800; font-size:0.82rem; justify-content:center; gap:6px; background:#2563eb; border:1px solid #3b82f6;">
+                        ⚡ Quick Install Order
+                    </button>
                 </div>
 
                 <!-- Hardware & Telematics Inventory -->

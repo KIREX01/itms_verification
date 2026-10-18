@@ -149,6 +149,17 @@
             </div>
         </div>
 
+        <!-- Mobile Operating Shift Date Tool Strip (Always visible on mobile viewports) -->
+        <div class="mobile-shift-strip" id="mobile-shift-strip">
+            <div class="mobile-shift-inner">
+                <span class="mobile-shift-label">📅 SHIFT:</span>
+                <select id="mobile-global-shift-select" class="form-select header-shift-select" onchange="setGlobalShiftDate(this.value)" aria-label="Active Operating Shift Date">
+                    <option value="">Loading shift...</option>
+                </select>
+                <button type="button" class="btn btn-secondary btn-sm mobile-shift-today-btn" onclick="setGlobalShiftDate('today')" title="Reset to Live Shift (Today)">Today</button>
+            </div>
+        </div>
+
         <!-- Mobile Navigation Backdrop Overlay -->
         <div class="mobile-nav-backdrop" id="mobile-nav-backdrop" onclick="closeMobileMenu()"></div>
 
@@ -166,6 +177,17 @@
                 <button type="button" class="btn-close-mobile-nav" onclick="closeMobileMenu()" aria-label="Close Navigation" title="Close Menu">
                     &times;
                 </button>
+            </div>
+
+            <!-- Mobile Off-Canvas Drawer Operating Shift Selector -->
+            <div class="drawer-shift-box" style="padding:10px 16px; background:rgba(15,23,42,0.95); border-bottom:1px solid var(--ug-border);">
+                <div style="font-size:0.72rem; color:var(--ug-yellow); font-weight:800; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:4px;">Active Operating Shift:</div>
+                <div style="display:flex; gap:6px; align-items:center;">
+                    <select id="drawer-global-shift-select" class="form-select header-shift-select" onchange="setGlobalShiftDate(this.value); closeMobileMenu();" style="flex:1; min-height:34px; background:#0c1017; color:#fff; font-size:0.8rem; font-weight:700; border:1px solid #334155; border-radius:4px;">
+                        <option value="">Loading shift...</option>
+                    </select>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="setGlobalShiftDate('today'); closeMobileMenu();" style="min-height:34px; color:#fff; font-weight:700;">Today</button>
+                </div>
             </div>
 
             <!-- Navigation Tab Items (Strict Order: 1:Dashboard, 2:ITMS, 3:Batch, 4:Queue, 5:Stock, 6:Reports, 7:Settings, 8:History) -->
@@ -258,6 +280,7 @@
     <script src="{% static 'core/js/navigation.js' %}?v=14"></script>
     <script src="{% static 'core/js/tab_dashboard.js' %}?v=12"></script>
     <script src="{% static 'core/js/tab_itms.js' %}?v=13"></script>
+    <script src="{% static 'core/js/tab_orders.js' %}?v=1"></script>
     <script src="{% static 'core/js/tab_batches.js' %}?v=11"></script>
     <script src="{% static 'core/js/tab_queue.js' %}?v=12"></script>
     <script src="{% static 'core/js/tab_history.js' %}?v=13"></script>

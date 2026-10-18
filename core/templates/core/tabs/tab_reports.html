@@ -1,61 +1,125 @@
 <!-- TAB 7: REPORTS & SYSTEM TOTALS -->
 <div class="tab-pane" id="pane-reports">
+    <!-- Embedded High-Contrast Overrides for Reports Workspace -->
+    <style>
+        #pane-reports .reports-category-card {
+            background: #111622 !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            border-radius: var(--radius-md, 6px) !important;
+            padding: 14px 16px !important;
+            display: flex !important;
+            flex-direction: column !important;
+            gap: 8px !important;
+            min-width: 0 !important;
+            transition: transform 0.15s ease, border-color 0.15s ease !important;
+        }
+        #pane-reports .reports-category-card:hover {
+            transform: translateY(-2px) !important;
+            border-color: rgba(255, 255, 255, 0.25) !important;
+        }
+        #pane-reports .reports-category-card.cat-archived {
+            border-top: 3px solid #3b82f6 !important;
+            background: linear-gradient(180deg, rgba(59, 130, 246, 0.08) 0%, #111622 100%) !important;
+        }
+        #pane-reports .reports-category-card.cat-pending {
+            border-top: 3px solid #f59e0b !important;
+            background: linear-gradient(180deg, rgba(245, 158, 11, 0.08) 0%, #111622 100%) !important;
+        }
+        #pane-reports .reports-category-card.cat-unallocated {
+            border-top: 3px solid #ef4444 !important;
+            background: linear-gradient(180deg, rgba(239, 68, 68, 0.08) 0%, #111622 100%) !important;
+        }
+        #pane-reports .reports-cat-val {
+            font-size: 2rem !important;
+            font-weight: 800 !important;
+            font-family: var(--font-mono, monospace) !important;
+            color: #ffffff !important;
+            line-height: 1.1 !important;
+            margin: 4px 0 !important;
+        }
+        #pane-reports .reports-total-val {
+            font-size: 1.5rem !important;
+            font-weight: 800 !important;
+            font-family: var(--font-mono, monospace) !important;
+            color: #ffffff !important;
+            line-height: 1.1 !important;
+            margin: 2px 0 !important;
+        }
+        #pane-reports .reports-stat-val {
+            color: #ffffff !important;
+            font-family: var(--font-mono, monospace) !important;
+            font-weight: 700 !important;
+        }
+        #pane-reports .reports-kit-summary-val {
+            font-size: 1.35rem !important;
+            font-weight: 800 !important;
+            font-family: var(--font-mono, monospace) !important;
+            color: #ffffff !important;
+        }
+        #shift-csv-dropdown a {
+            color: #ffffff !important;
+        }
+        #shift-csv-dropdown a:hover {
+            color: var(--ug-yellow, #fcdc04) !important;
+        }
+    </style>
+
     <div class="settings-scroll-container" style="padding: 15px 20px;">
         
         <!-- Header & Action Ribbon -->
         <div class="reports-header-card">
             <div>
-                <h2 style="font-size:1.15rem; font-weight:700; margin:0; display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
-                    <span>📑 System & Shift Totals Report</span>
-                    <span class="badge badge-green" id="report-scope-badge">All-Time</span>
+                <h2 style="font-size:1.15rem; font-weight:700; margin:0; display:flex; align-items:center; flex-wrap:wrap; gap:8px; color:#ffffff !important;">
+                    <span>📑 System &amp; Shift Totals Report</span>
+                    <span class="badge badge-green" id="report-scope-badge" style="color:#ffffff !important; font-weight:700;">All-Time</span>
                 </h2>
-                <div style="font-size:0.8rem; color:var(--ug-text-muted); margin-top:3px;" id="report-generated-timestamp">
+                <div style="font-size:0.8rem; color:rgba(255, 255, 255, 0.7); margin-top:3px;" id="report-generated-timestamp">
                     Loading live totals from database...
                 </div>
             </div>
             <div class="reports-header-actions">
                 <div style="display:flex; align-items:center; gap:6px;">
-                    <label for="report-date-select" style="font-size:0.8rem; color:var(--ug-text-muted); font-weight:600;">Work Date:</label>
-                    <select id="report-date-select" onchange="onReportDateChanged(this.value)" style="background:#0f172a; color:#f8fafc; border:1px solid #334155; padding:5px 8px; border-radius:4px; font-size:0.82rem; font-weight:600; cursor:pointer;">
+                    <label for="report-date-select" style="font-size:0.8rem; color:rgba(255, 255, 255, 0.75); font-weight:600;">Work Date:</label>
+                    <select id="report-date-select" onchange="onReportDateChanged(this.value)" style="background:#0c1017; color:#38bdf8; border:1px solid #334155; padding:5px 8px; border-radius:4px; font-size:0.82rem; font-weight:700; font-family:var(--font-mono); cursor:pointer;" title="Select specific shift date to analyze">
                         <option value="ALL">All Work Dates</option>
                     </select>
                 </div>
-                <button class="btn btn-secondary" onclick="toggleReportScope()" id="btn-toggle-report-scope" title="Switch between All-Time and Today's Shift (Hotkey: D)">
+                <button class="btn btn-secondary" onclick="toggleReportScope()" id="btn-toggle-report-scope" title="Switch between All-Time and Today's Shift (Hotkey: D)" style="background-color:#1e293b !important; border:1px solid rgba(255,255,255,0.2) !important; color:#ffffff !important; font-weight:700;">
                     📅 Scope [D]
                 </button>
-                <button class="btn btn-secondary" onclick="fetchReportTotals()" title="Refresh totals from database (Hotkey: R)">
+                <button class="btn btn-secondary reports-btn-refresh" onclick="fetchReportTotals()" title="Refresh totals from database (Hotkey: R)" style="background-color:#1e293b !important; border:1px solid rgba(255,255,255,0.2) !important; color:#ffffff !important; font-weight:700;">
                     🔄 Refresh [R]
                 </button>
-                <button class="btn btn-primary" id="btn-sync-report-shift" onclick="syncReportShiftOrders()" title="Synchronize active and completed archive orders from ITMS for the selected shift date" style="font-weight:700; background:#2563eb; border-color:#1d4ed8; color:#ffffff;">
+                <button class="btn btn-primary" id="btn-sync-report-shift" onclick="syncReportShiftOrders()" title="Synchronize active and completed archive orders from ITMS for the selected shift date" style="background-color:#1e3a8a !important; border:1px solid #3b82f6 !important; color:#ffffff !important; font-weight:700;">
                     ⚡ Sync Shift Orders
                 </button>
-                <button class="btn btn-warning" onclick="openShiftReconcileModal()" title="Run Daily Shift Ingestion, Reconciliation & Update Inventory (Hotkey: S)" style="font-weight:700; background:#f59e0b; border-color:#d97706; color:#0f172a;">
+                <button class="btn btn-warning reports-btn-reconcile" onclick="openShiftReconcileModal()" title="Run Daily Shift Ingestion, Reconciliation &amp; Update Inventory (Hotkey: S)" style="background-color:#9a3412 !important; border:1px solid #ea580c !important; color:#ffffff !important; font-weight:700;">
                     🌅 Shift Reconciliation [S]
                 </button>
-                <button class="btn btn-info" onclick="openStockKitSyncModal()" title="Sync & Pre-Provision Installation Kits in Warehouse Stock (Hotkey: K)" style="font-weight:700; background:#0284c7; border-color:#0369a1; color:#ffffff;">
+                <button class="btn btn-info reports-btn-kitsync" onclick="openStockKitSyncModal()" title="Sync &amp; Pre-Provision Installation Kits in Warehouse Stock (Hotkey: K)" style="background-color:#0e7490 !important; border:1px solid #06b6d4 !important; color:#ffffff !important; font-weight:700;">
                     📦 Sync Stock Kits [K]
                 </button>
                 <div class="dropdown" style="position:relative; display:inline-block;">
-                    <button class="btn btn-primary dropdown-toggle" onclick="toggleShiftCsvMenu(event)" title="Export categorized Shift CSV spreadsheets">
+                    <button class="btn btn-primary dropdown-toggle reports-btn-export" onclick="toggleShiftCsvMenu(event)" title="Export categorized Shift CSV spreadsheets" style="background-color:#d97706 !important; border:1px solid #f59e0b !important; color:#ffffff !important; font-weight:700;">
                         📑 Export CSVs ▾
                     </button>
-                    <div id="shift-csv-dropdown" style="display:none; position:absolute; right:0; top:100%; margin-top:4px; background:#0f172a; border:1px solid #334155; border-radius:6px; box-shadow:0 8px 24px rgba(0,0,0,0.6); z-index:100; min-width:210px; overflow:hidden;">
-                        <a href="javascript:void(0)" onclick="downloadCategoryCsv('unallocated')" style="display:block; padding:8px 12px; color:#f87171; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
+                    <div id="shift-csv-dropdown" style="display:none; position:absolute; right:0; top:100%; margin-top:4px; background:#0c1017; border:1px solid #334155; border-radius:6px; box-shadow:0 8px 24px rgba(0,0,0,0.7); z-index:100; min-width:230px; overflow:hidden;">
+                        <a href="javascript:void(0)" onclick="downloadCategoryCsv('unallocated')">
                             🔴 Unallocated Kits CSV
                         </a>
-                        <a href="javascript:void(0)" onclick="downloadCategoryCsv('archived')" style="display:block; padding:8px 12px; color:#60a5fa; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
+                        <a href="javascript:void(0)" onclick="downloadCategoryCsv('archived')">
                             🔵 Completed Archive CSV
                         </a>
-                        <a href="javascript:void(0)" onclick="downloadCategoryCsv('pending')" style="display:block; padding:8px 12px; color:#facc15; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
+                        <a href="javascript:void(0)" onclick="downloadCategoryCsv('pending')">
                             🟡 Active Pending Orders CSV
                         </a>
-                        <a href="javascript:void(0)" onclick="downloadCategoryCsv('dispatched')" style="display:block; padding:8px 12px; color:#e2e8f0; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
+                        <a href="javascript:void(0)" onclick="downloadCategoryCsv('dispatched')">
                             ⚪ Morning Dispatched CSV
                         </a>
-                        <a href="javascript:void(0)" onclick="downloadCategoryCsv('master')" style="display:block; padding:8px 12px; color:#34d399; text-decoration:none; font-size:0.8rem; font-weight:700; border-bottom:1px solid #1e293b;">
+                        <a href="javascript:void(0)" onclick="downloadCategoryCsv('master')" style="color:var(--ug-yellow, #fcdc04) !important; font-weight:700;">
                             📊 Master Shift Reconciliation
                         </a>
-                        <a href="javascript:void(0)" onclick="downloadShiftPairsReport(event)" style="display:block; padding:8px 12px; color:#94a3b8; text-decoration:none; font-size:0.78rem;">
+                        <a href="javascript:void(0)" onclick="downloadShiftPairsReport(event)">
                             📑 Shift Pairs Verification Report
                         </a>
                     </div>
@@ -64,13 +128,13 @@
         </div>
 
         <!-- Section: Date-Driven ITMS Order Breakdown & Plate Lifecycle Audit (PO Suffix Analysis) -->
-        <div class="settings-card" style="margin-bottom:15px; border-color: #3b82f6;">
+        <div class="settings-card" style="margin-bottom:15px; border-color: rgba(59, 130, 246, 0.4);">
             <div class="settings-card-header" style="background: rgba(30, 58, 138, 0.25);">
                 <div class="settings-card-title">
-                    <span>🗓️ Date-Driven ITMS Order Breakdown & Plate Lifecycle Audit</span>
-                    <span class="badge badge-yellow" id="report-selected-date-badge" style="margin-left:8px;">Focus: Loading...</span>
+                    <span>🗓️ Date-Driven ITMS Order Breakdown &amp; Plate Lifecycle Audit</span>
+                    <span class="badge badge-yellow" id="report-selected-date-badge" style="margin-left:8px; color:#ffffff !important; font-weight:700;">Focus: Loading...</span>
                 </div>
-                <span class="badge badge-blue">PO Suffix Date Verification</span>
+                <span class="badge badge-blue" style="color:#ffffff !important; font-weight:700;">PO Suffix Date Verification</span>
             </div>
 
             <div style="padding:12px 0;">
@@ -78,52 +142,52 @@
                 <div class="reports-kpi-grid">
                     
                     <!-- Category 1: Installed / In Archive -->
-                    <div style="background:#091326; border:1px solid #1e3a8a; border-radius:6px; padding:12px 16px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <div style="font-size:0.8rem; color:#93c5fd; text-transform:uppercase; font-weight:700;">
+                    <div class="reports-category-card cat-archived">
+                        <div class="reports-cat-header">
+                            <div class="reports-cat-title">
                                 🔵 Category 1: Installed / In Archive
                             </div>
-                            <span class="badge badge-blue" id="report-cat1-pct">0%</span>
+                            <span class="badge badge-blue" id="report-cat1-pct" style="color:#ffffff !important; font-weight:700;">0%</span>
                         </div>
-                        <div style="font-size:1.8rem; font-weight:800; color:#60a5fa; margin:6px 0;" id="report-cat1-count">0</div>
-                        <div style="font-size:0.75rem; color:#94a3b8;">
+                        <div class="reports-cat-val" id="report-cat1-count">0</div>
+                        <div class="reports-cat-desc">
                             Completed fitment orders officially verified and archived on ITMS.
                         </div>
-                        <div style="font-size:0.75rem; color:#bfdbfe; margin-top:8px; border-top:1px solid #1e3a8a; padding-top:6px;" id="report-cat1-officers">
+                        <div class="reports-cat-footer" id="report-cat1-officers">
                             Officers: None
                         </div>
                     </div>
 
                     <!-- Category 2: Pending to be Installed -->
-                    <div style="background:#1c1907; border:1px solid #854d0e; border-radius:6px; padding:12px 16px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <div style="font-size:0.8rem; color:#fde047; text-transform:uppercase; font-weight:700;">
+                    <div class="reports-category-card cat-pending">
+                        <div class="reports-cat-header">
+                            <div class="reports-cat-title">
                                 🟡 Category 2: Pending Installation
                             </div>
-                            <span class="badge badge-yellow" id="report-cat2-pct">0%</span>
+                            <span class="badge badge-yellow" id="report-cat2-pct" style="color:#ffffff !important; font-weight:700;">0%</span>
                         </div>
-                        <div style="font-size:1.8rem; font-weight:800; color:#facc15; margin:6px 0;" id="report-cat2-count">0</div>
-                        <div style="font-size:0.75rem; color:#94a3b8;">
+                        <div class="reports-cat-val" id="report-cat2-count">0</div>
+                        <div class="reports-cat-desc">
                             Active installation orders scheduled or currently under fitment.
                         </div>
-                        <div style="font-size:0.75rem; color:#fef08a; margin-top:8px; border-top:1px solid #854d0e; padding-top:6px;" id="report-cat2-stages">
+                        <div class="reports-cat-footer" id="report-cat2-stages">
                             Stages: None
                         </div>
                     </div>
 
                     <!-- Category 3: Unallocated Plates -->
-                    <div style="background:#1f0e13; border:1px solid #991b1b; border-radius:6px; padding:12px 16px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <div style="font-size:0.8rem; color:#fca5a5; text-transform:uppercase; font-weight:700;">
+                    <div class="reports-category-card cat-unallocated">
+                        <div class="reports-cat-header">
+                            <div class="reports-cat-title">
                                 🔴 Category 3: Unallocated Plates
                             </div>
-                            <span class="badge badge-red" id="report-cat3-badge">Missing from Orders</span>
+                            <span class="badge badge-red" id="report-cat3-badge" style="color:#ffffff !important; font-weight:700;">Missing from Orders</span>
                         </div>
-                        <div style="font-size:1.8rem; font-weight:800; color:#f87171; margin:6px 0;" id="report-cat3-count">0</div>
-                        <div style="font-size:0.75rem; color:#94a3b8;">
+                        <div class="reports-cat-val" id="report-cat3-count">0</div>
+                        <div class="reports-cat-desc">
                             Plates dispatched to installation line with NO active order and NO archive record in ITMS.
                         </div>
-                        <div style="font-size:0.75rem; color:#fecaca; margin-top:8px; border-top:1px solid #991b1b; padding-top:6px;" id="report-cat3-breakdown">
+                        <div class="reports-cat-footer" id="report-cat3-breakdown">
                             Shift floor discrepancy audit via elimination
                         </div>
                     </div>
@@ -133,36 +197,36 @@
                 <!-- Unallocated Plates Audit Table -->
                 <div style="margin-top:10px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
-                        <div style="font-weight:600; font-size:0.85rem; color:#e2e8f0;">
+                        <div style="font-weight:700; font-size:0.85rem; color:#ffffff !important;">
                             Unallocated Plates Audit Table (Neither in Active Orders nor Archive):
                         </div>
                         <div class="unallocated-toolbar-actions">
-                            <button type="button" class="btn btn-secondary" onclick="copyUnallocatedRawPlates()" title="Copy raw plate numbers to clipboard for MVR officers (one per line)" style="padding:4px 10px; font-size:0.8rem;">
+                            <button type="button" class="btn btn-secondary" onclick="copyUnallocatedRawPlates()" title="Copy raw plate numbers to clipboard for MVR officers (one per line)" style="background-color:#1e293b !important; border:1px solid rgba(255,255,255,0.2) !important; color:#ffffff !important; font-weight:700;">
                                 📋 Copy Raw Plates
                             </button>
-                            <button type="button" class="btn btn-primary" onclick="copyMvrDocket()" title="Copy formatted MVR Shift Docket to clipboard" style="padding:4px 10px; font-size:0.8rem;">
+                            <button type="button" class="btn btn-secondary" onclick="copyMvrDocket()" title="Copy formatted MVR Shift Docket to clipboard" style="background-color:#1e293b !important; border:1px solid rgba(255,255,255,0.2) !important; color:#ffffff !important; font-weight:700;">
                                 📑 Copy MVR Docket
                             </button>
-                            <button type="button" class="btn btn-danger" onclick="downloadCategoryCsv('unallocated')" title="Download Unallocated Plates CSV" style="padding:4px 10px; font-size:0.8rem; background:#dc2626; border-color:#b91c1c;">
+                            <button type="button" class="btn btn-danger" onclick="downloadCategoryCsv('unallocated')" title="Download Unallocated Plates CSV" style="background-color:#991b1b !important; border:1px solid #dc2626 !important; color:#ffffff !important; font-weight:700;">
                                 📥 Download CSV
                             </button>
-                            <input type="text" id="report-unallocated-search" class="unallocated-search-input" placeholder="Filter plate or source..." oninput="filterUnallocatedTable(this.value)">
+                            <input type="text" id="report-unallocated-search" class="unallocated-search-input" placeholder="Filter plate or source..." oninput="filterUnallocatedTable(this.value)" aria-label="Filter unallocated plates">
                         </div>
                     </div>
-                    <div class="table-responsive" style="max-height:240px; overflow-y:auto; border:1px solid var(--ug-border); border-radius:4px;">
-                        <table class="data-table" style="width:100%; border-collapse:collapse; font-size:0.82rem;">
+                    <div class="reports-table-container">
+                        <table>
                             <thead>
-                                <tr style="background:#111827; position:sticky; top:0;">
-                                    <th style="padding:6px 10px; text-align:left;">Registration Plate</th>
-                                    <th style="padding:6px 10px; text-align:left;">Source Record</th>
-                                    <th style="padding:6px 10px; text-align:left;">Audit Reason / Classification</th>
-                                    <th style="padding:6px 10px; text-align:left;">Warehouse / State</th>
-                                    <th style="padding:6px 10px; text-align:left;">Ingested / Created</th>
+                                <tr>
+                                    <th style="padding:8px 12px; text-align:left;">Registration Plate</th>
+                                    <th style="padding:8px 12px; text-align:left;">Source Record</th>
+                                    <th style="padding:8px 12px; text-align:left;">Audit Reason / Classification</th>
+                                    <th style="padding:8px 12px; text-align:left;">Warehouse / State</th>
+                                    <th style="padding:8px 12px; text-align:left;">Ingested / Created</th>
                                 </tr>
                             </thead>
                             <tbody id="report-unallocated-tbody">
                                 <tr>
-                                    <td colspan="5" style="text-align:center; padding:12px; color:#64748b;">Loading unallocated plates...</td>
+                                    <td colspan="5" style="text-align:center; padding:16px; color:rgba(255,255,255,0.6);">Loading unallocated plates...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -171,44 +235,43 @@
             </div>
         </div>
 
-
         <!-- Section 1: Executive Grand Totals / KPI Grid -->
         <div class="settings-card" style="margin-bottom:15px;">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <span>📊 Executive Grand Totals & High-Level KPIs</span>
+                    <span>📊 Executive Grand Totals &amp; High-Level KPIs</span>
                 </div>
-                <span class="badge badge-blue">Real-Time Telemetry</span>
+                <span class="badge badge-blue" style="color:#ffffff !important; font-weight:700;">Real-Time Telemetry</span>
             </div>
             <div class="reports-totals-grid">
-                <div style="background:#090d16; border:1px solid #1e293b; border-radius:6px; padding:10px 14px;">
-                    <div style="font-size:0.75rem; color:var(--ug-text-muted); text-transform:uppercase; font-weight:600;">Evidence Photos</div>
-                    <div style="font-size:1.5rem; font-weight:800; color:#38bdf8;" id="report-val-photos-total">0</div>
-                    <div style="font-size:0.75rem; color:#94a3b8;" id="report-val-photos-breakdown">Front: 0 │ Rear: 0</div>
+                <div class="reports-total-card">
+                    <div class="reports-total-label">Evidence Photos</div>
+                    <div class="reports-total-val" id="report-val-photos-total">0</div>
+                    <div class="reports-total-sub" id="report-val-photos-breakdown">Front: 0 • Rear: 0</div>
                 </div>
 
-                <div style="background:#090d16; border:1px solid #1e293b; border-radius:6px; padding:10px 14px;">
-                    <div style="font-size:0.75rem; color:var(--ug-text-muted); text-transform:uppercase; font-weight:600;">Ingestion Batches</div>
-                    <div style="font-size:1.5rem; font-weight:800; color:#a855f7;" id="report-val-batches-total">0</div>
-                    <div style="font-size:0.75rem; color:#94a3b8;" id="report-val-batches-today">Today: 0 batches</div>
+                <div class="reports-total-card">
+                    <div class="reports-total-label">Ingestion Batches</div>
+                    <div class="reports-total-val" id="report-val-batches-total">0</div>
+                    <div class="reports-total-sub" id="report-val-batches-today">Today: 0 batches</div>
                 </div>
 
-                <div style="background:#090d16; border:1px solid #1e293b; border-radius:6px; padding:10px 14px;">
-                    <div style="font-size:0.75rem; color:var(--ug-text-muted); text-transform:uppercase; font-weight:600;">Vehicle Pairs</div>
-                    <div style="font-size:1.5rem; font-weight:800; color:#4ade80;" id="report-val-pairs-total">0</div>
-                    <div style="font-size:0.75rem; color:#94a3b8;" id="report-val-pairs-approved">Approved: 0 │ Submitted: 0</div>
+                <div class="reports-total-card">
+                    <div class="reports-total-label">Vehicle Pairs</div>
+                    <div class="reports-total-val" id="report-val-pairs-total">0</div>
+                    <div class="reports-total-sub" id="report-val-pairs-approved">Approved: 0 • Submitted: 0</div>
                 </div>
 
-                <div style="background:#090d16; border:1px solid #1e293b; border-radius:6px; padding:10px 14px;">
-                    <div style="font-size:0.75rem; color:var(--ug-text-muted); text-transform:uppercase; font-weight:600;">ITMS Orders</div>
-                    <div style="font-size:1.5rem; font-weight:800; color:#facc15;" id="report-val-orders-total">0</div>
-                    <div style="font-size:0.75rem; color:#94a3b8;" id="report-val-orders-active">Active: 0 │ Archive: 0</div>
+                <div class="reports-total-card">
+                    <div class="reports-total-label">ITMS Orders</div>
+                    <div class="reports-total-val" id="report-val-orders-total">0</div>
+                    <div class="reports-total-sub" id="report-val-orders-active">Active: 0 • Archive: 0</div>
                 </div>
 
-                <div style="background:#090d16; border:1px solid #1e293b; border-radius:6px; padding:10px 14px;">
-                    <div style="font-size:0.75rem; color:var(--ug-text-muted); text-transform:uppercase; font-weight:600;">Installation Kits</div>
-                    <div style="font-size:1.5rem; font-weight:800; color:#34d399;" id="report-val-kits-total">0</div>
-                    <div style="font-size:0.75rem; color:#94a3b8;" id="report-val-kits-unallocated">New: 0 (0%)</div>
+                <div class="reports-total-card">
+                    <div class="reports-total-label">Installation Kits</div>
+                    <div class="reports-total-val" id="report-val-kits-total">0</div>
+                    <div class="reports-total-sub" id="report-val-kits-unallocated">New: 0 (0%)</div>
                 </div>
             </div>
         </div>
@@ -217,53 +280,65 @@
         <div class="settings-card" style="margin-bottom:15px;">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <span>📦 ITMS Installation Kits & Plate Lifecycle Allocation</span>
+                    <span>📦 ITMS Installation Kits &amp; Plate Lifecycle Allocation</span>
                 </div>
-                <span class="badge badge-green" id="report-kits-badge">Stock Health</span>
+                <span class="badge badge-green" id="report-kits-badge" style="color:#ffffff !important; font-weight:700;">Stock Health</span>
             </div>
             
             <div style="padding:10px 0;">
-                <div style="display:flex; gap:15px; margin-bottom:12px; flex-wrap:wrap;">
-                    <div style="flex:1; min-width:200px; background:#0f172a; padding:10px 14px; border:1px solid #1e293b; border-radius:6px;">
-                        <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#22c55e; margin-right:6px;"></span>
-                        <strong style="color:#22c55e;">New (Unallocated):</strong>
-                        <span style="font-size:1.1rem; font-weight:700; margin-left:6px;" id="report-kits-new-count">0</span>
-                        <span style="font-size:0.8rem; color:#94a3b8;" id="report-kits-new-pct">(0%)</span>
-                        <div style="font-size:0.75rem; color:#94a3b8; margin-top:2px;">Plates in ITMS stock not yet allocated to an order.</div>
+                <div class="reports-kits-summary-grid">
+                    <div class="reports-kit-summary-card" style="border-top:3px solid #10b981;">
+                        <div class="reports-kit-summary-header">
+                            <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#10b981;"></span>
+                            <span style="color:#ffffff !important;">New (Unallocated)</span>
+                        </div>
+                        <div class="reports-kit-summary-val">
+                            <span id="report-kits-new-count">0</span>
+                            <span style="font-size:0.8rem; color:rgba(255,255,255,0.6);" id="report-kits-new-pct">(0%)</span>
+                        </div>
+                        <div class="reports-kit-summary-sub">Plates in ITMS stock not yet allocated to an order.</div>
                     </div>
 
-                    <div style="flex:1; min-width:200px; background:#0f172a; padding:10px 14px; border:1px solid #1e293b; border-radius:6px;">
-                        <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#eab308; margin-right:6px;"></span>
-                        <strong style="color:#eab308;">Allocated to Orders:</strong>
-                        <span style="font-size:1.1rem; font-weight:700; margin-left:6px;" id="report-kits-alloc-count">0</span>
-                        <div style="font-size:0.75rem; color:#94a3b8; margin-top:2px;">Active installations currently in progress.</div>
+                    <div class="reports-kit-summary-card" style="border-top:3px solid #f59e0b;">
+                        <div class="reports-kit-summary-header">
+                            <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#f59e0b;"></span>
+                            <span style="color:#ffffff !important;">Allocated to Orders</span>
+                        </div>
+                        <div class="reports-kit-summary-val">
+                            <span id="report-kits-alloc-count">0</span>
+                        </div>
+                        <div class="reports-kit-summary-sub">Active installations currently in progress.</div>
                     </div>
 
-                    <div style="flex:1; min-width:200px; background:#0f172a; padding:10px 14px; border:1px solid #1e293b; border-radius:6px;">
-                        <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#3b82f6; margin-right:6px;"></span>
-                        <strong style="color:#3b82f6;">Installed (Archive):</strong>
-                        <span style="font-size:1.1rem; font-weight:700; margin-left:6px;" id="report-kits-inst-count">0</span>
-                        <div style="font-size:0.75rem; color:#94a3b8; margin-top:2px;">Completed orders approved and archived on ITMS.</div>
+                    <div class="reports-kit-summary-card" style="border-top:3px solid #3b82f6;">
+                        <div class="reports-kit-summary-header">
+                            <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#3b82f6;"></span>
+                            <span style="color:#ffffff !important;">Installed (Archive)</span>
+                        </div>
+                        <div class="reports-kit-summary-val">
+                            <span id="report-kits-inst-count">0</span>
+                        </div>
+                        <div class="reports-kit-summary-sub">Completed orders approved and archived on ITMS.</div>
                     </div>
                 </div>
 
                 <!-- Warehouse Table Breakdown -->
                 <div style="margin-top:15px;">
-                    <div style="font-weight:600; font-size:0.85rem; color:#e2e8f0; margin-bottom:8px;">Warehouse Inventory Allocation Breakdown:</div>
-                    <div class="table-responsive" style="max-height:220px; overflow-y:auto; border:1px solid var(--ug-border); border-radius:4px;">
-                        <table class="data-table" style="width:100%; border-collapse:collapse; font-size:0.82rem;">
+                    <div style="font-weight:700; font-size:0.85rem; color:#ffffff !important; margin-bottom:8px;">Warehouse Inventory Allocation Breakdown:</div>
+                    <div class="reports-table-container">
+                        <table>
                             <thead>
-                                <tr style="background:#111827; position:sticky; top:0;">
-                                    <th style="padding:6px 10px; text-align:left;">Warehouse Location</th>
-                                    <th style="padding:6px 10px; text-align:center;">Total Kits</th>
-                                    <th style="padding:6px 10px; text-align:center;">New (Unallocated)</th>
-                                    <th style="padding:6px 10px; text-align:center;">Allocated</th>
-                                    <th style="padding:6px 10px; text-align:center;">Installed</th>
+                                <tr>
+                                    <th style="padding:8px 12px; text-align:left;">Warehouse Location</th>
+                                    <th style="padding:8px 12px; text-align:center;">Total Kits</th>
+                                    <th style="padding:8px 12px; text-align:center;">New (Unallocated)</th>
+                                    <th style="padding:8px 12px; text-align:center;">Allocated</th>
+                                    <th style="padding:8px 12px; text-align:center;">Installed</th>
                                 </tr>
                             </thead>
                             <tbody id="report-warehouses-tbody">
                                 <tr>
-                                    <td colspan="5" style="text-align:center; padding:12px; color:#64748b;">Loading warehouse allocations...</td>
+                                    <td colspan="5" style="text-align:center; padding:16px; color:rgba(255,255,255,0.6);">Loading warehouse allocations...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -279,38 +354,38 @@
             <div class="settings-card">
                 <div class="settings-card-header">
                     <div class="settings-card-title">
-                        <span>📋 Verification Queue Status</span>
+                        <span>🚦 Verification Queue Status</span>
                     </div>
-                    <span class="badge badge-green" id="report-queue-success-rate">100% Success</span>
+                    <span class="badge badge-green" id="report-queue-success-rate" style="color:#ffffff !important; font-weight:700;">100% Success</span>
                 </div>
-                <div style="padding:10px 0; font-size:0.85rem;">
-                    <div style="display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #1e293b;">
-                        <span>Approved (Ready for Submission):</span>
-                        <strong style="color:#22c55e;" id="report-queue-approved">0</strong>
+                <div style="padding:8px 0; font-size:0.85rem;">
+                    <div class="reports-stat-row">
+                        <span class="reports-stat-label">Approved (Ready for Submission):</span>
+                        <span class="reports-stat-val" id="report-queue-approved" style="color:#10b981 !important;">0</span>
                     </div>
-                    <div style="display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #1e293b;">
-                        <span>Submitted to ITMS:</span>
-                        <strong style="color:#38bdf8;" id="report-queue-submitted">0</strong>
+                    <div class="reports-stat-row">
+                        <span class="reports-stat-label">Submitted to ITMS:</span>
+                        <span class="reports-stat-val" id="report-queue-submitted" style="color:#38bdf8 !important;">0</span>
                     </div>
-                    <div style="display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #1e293b;">
-                        <span>Pending Operator Review:</span>
-                        <strong style="color:#facc15;" id="report-queue-pending">0</strong>
+                    <div class="reports-stat-row">
+                        <span class="reports-stat-label">Pending Operator Review:</span>
+                        <span class="reports-stat-val" id="report-queue-pending" style="color:#facc15 !important;">0</span>
                     </div>
-                    <div style="display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #1e293b;">
-                        <span>Incomplete (Missing Front/Rear):</span>
-                        <strong style="color:#fb923c;" id="report-queue-incomplete">0</strong>
+                    <div class="reports-stat-row">
+                        <span class="reports-stat-label">Incomplete (Missing Front/Rear):</span>
+                        <span class="reports-stat-val" id="report-queue-incomplete" style="color:#fb923c !important;">0</span>
                     </div>
-                    <div style="display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #1e293b;">
-                        <span>Color / Plate Conflicts:</span>
-                        <strong style="color:#ef4444;" id="report-queue-conflicts">0</strong>
+                    <div class="reports-stat-row">
+                        <span class="reports-stat-label">Color / Plate Conflicts:</span>
+                        <span class="reports-stat-val" id="report-queue-conflicts" style="color:#ef4444 !important;">0</span>
                     </div>
-                    <div style="display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #1e293b;">
-                        <span>Submission Failures:</span>
-                        <strong style="color:#ef4444;" id="report-queue-failed">0</strong>
+                    <div class="reports-stat-row">
+                        <span class="reports-stat-label">Submission Failures:</span>
+                        <span class="reports-stat-val" id="report-queue-failed" style="color:#ef4444 !important;">0</span>
                     </div>
-                    <div style="display:flex; justify-content:space-between; padding:5px 0;">
-                        <span>Manual Operator Overrides:</span>
-                        <strong style="color:#38bdf8;" id="report-queue-manual">0</strong>
+                    <div class="reports-stat-row">
+                        <span class="reports-stat-label">Manual Operator Overrides:</span>
+                        <span class="reports-stat-val" id="report-queue-manual" style="color:#38bdf8 !important;">0</span>
                     </div>
                 </div>
             </div>
@@ -319,34 +394,34 @@
             <div class="settings-card">
                 <div class="settings-card-header">
                     <div class="settings-card-title">
-                        <span>⏱️ Today's Shift & Hardware Inventory</span>
+                        <span>⚡ Today's Shift &amp; Hardware Inventory</span>
                     </div>
-                    <span class="badge badge-yellow">Shift Metrics</span>
+                    <span class="badge badge-yellow" style="color:#ffffff !important; font-weight:700;">Shift Metrics</span>
                 </div>
-                <div style="padding:10px 0; font-size:0.85rem;">
-                    <div style="display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #1e293b;">
-                        <span>Photos Ingested Today:</span>
-                        <strong style="color:#4ade80;" id="report-shift-photos">0</strong>
+                <div style="padding:8px 0; font-size:0.85rem;">
+                    <div class="reports-stat-row">
+                        <span class="reports-stat-label">Photos Ingested Today:</span>
+                        <span class="reports-stat-val" id="report-shift-photos" style="color:#10b981 !important;">0</span>
                     </div>
-                    <div style="display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #1e293b;">
-                        <span>Pairs Formed Today:</span>
-                        <strong style="color:#38bdf8;" id="report-shift-pairs">0</strong>
+                    <div class="reports-stat-row">
+                        <span class="reports-stat-label">Pairs Formed Today:</span>
+                        <span class="reports-stat-val" id="report-shift-pairs" style="color:#38bdf8 !important;">0</span>
                     </div>
-                    <div style="display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #1e293b;">
-                        <span>Pairs Approved Today:</span>
-                        <strong style="color:#22c55e;" id="report-shift-approved">0</strong>
+                    <div class="reports-stat-row">
+                        <span class="reports-stat-label">Pairs Approved Today:</span>
+                        <span class="reports-stat-val" id="report-shift-approved" style="color:#10b981 !important;">0</span>
                     </div>
-                    <div style="display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #1e293b;">
-                        <span>Submissions Completed Today:</span>
-                        <strong style="color:#38bdf8;" id="report-shift-submitted">0</strong>
+                    <div class="reports-stat-row">
+                        <span class="reports-stat-label">Submissions Completed Today:</span>
+                        <span class="reports-stat-val" id="report-shift-submitted" style="color:#38bdf8 !important;">0</span>
                     </div>
-                    <div style="display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #1e293b;">
-                        <span>Front & Rear Plates Tracked:</span>
-                        <strong style="color:#e2e8f0;" id="report-hw-plates">0 / 0</strong>
+                    <div class="reports-stat-row">
+                        <span class="reports-stat-label">Front &amp; Rear Plates Tracked:</span>
+                        <span class="reports-stat-val" id="report-hw-plates" style="color:#ffffff !important;">0 / 0</span>
                     </div>
-                    <div style="display:flex; justify-content:space-between; padding:5px 0;">
-                        <span>GPS Trackers & BLE Beacons:</span>
-                        <strong style="color:#e2e8f0;" id="report-hw-trackers">0 / 0</strong>
+                    <div class="reports-stat-row">
+                        <span class="reports-stat-label">GPS Trackers &amp; BLE Beacons:</span>
+                        <span class="reports-stat-val" id="report-hw-trackers" style="color:#ffffff !important;">0 / 0</span>
                     </div>
                 </div>
             </div>

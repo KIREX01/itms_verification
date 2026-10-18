@@ -5,15 +5,15 @@
  * Centralized Shift Synchronization, Responsive Pagination.
  */
 
-let currentHistoryFilter = "ALL";
-let currentHistoryDateScope = "TODAY";
-let historySearchQuery = "";
-let historyCurrentPage = 1;
-let historyPageSize = 25;
-let allHistoryEvents = [];
-let filteredHistoryEvents = [];
-let historyItemsMap = {};
-let activeHistoryLog = null;
+var currentHistoryFilter = "ALL";
+var currentHistoryDateScope = "TODAY";
+var historySearchQuery = "";
+var historyCurrentPage = 1;
+var historyPageSize = 25;
+var allHistoryEvents = [];
+var filteredHistoryEvents = [];
+var historyItemsMap = (typeof historyItemsMap !== "undefined") ? historyItemsMap : {};
+var activeHistoryLog = (typeof activeHistoryLog !== "undefined") ? activeHistoryLog : null;
 
 // Pickup any filter or date scope set before this script was loaded
 if (typeof window !== "undefined") {

@@ -1,5 +1,48 @@
 <!-- TAB 4: REVIEW QUEUE & OPERATOR DECISION STUDIO -->
 <div class="tab-pane" id="pane-queue">
+    <!-- High-Contrast Queue Filter Overrides -->
+    <style>
+        .queue-filter-pills {
+            display: flex !important;
+            gap: 4px !important;
+            background-color: var(--ug-black-card, #0c1017) !important;
+            padding: 4px !important;
+            border-radius: var(--radius-md, 6px) !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        }
+        .queue-filter-pill {
+            flex: 1 !important;
+            text-align: center !important;
+            padding: 6px 4px !important;
+            font-size: 0.75rem !important;
+            font-weight: 700 !important;
+            color: rgba(255, 255, 255, 0.75) !important;
+            background: transparent !important;
+            background-color: transparent !important;
+            border: 1px solid transparent !important;
+            border-radius: var(--radius-sm, 4px) !important;
+            cursor: pointer !important;
+            min-height: 32px !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            transition: all 0.15s ease !important;
+            text-decoration: none !important;
+        }
+        .queue-filter-pill:hover {
+            color: #ffffff !important;
+            background-color: rgba(255, 255, 255, 0.1) !important;
+            border-color: rgba(255, 255, 255, 0.18) !important;
+        }
+        .queue-filter-pill.active {
+            background-color: #1e293b !important;
+            border: 1px solid var(--ug-yellow, #fcdc04) !important;
+            color: #ffffff !important;
+            font-weight: 800 !important;
+            box-shadow: 0 0 8px rgba(252, 220, 4, 0.25) !important;
+        }
+    </style>
+
     <div class="queue-workspace-split">
         <!-- Left Column: Work Queue Pane -->
         <div class="queue-column-pane">
@@ -41,12 +84,12 @@
                     </div>
 
                     <!-- Status Filter Pills -->
-                    <div class="queue-filter-pills">
-                        <button type="button" class="queue-filter-pill active" data-filter="ALL" onclick="setWorkQueueFilter('ALL')">All</button>
-                        <button type="button" class="queue-filter-pill" data-filter="PENDING" onclick="setWorkQueueFilter('PENDING')">Review</button>
-                        <button type="button" class="queue-filter-pill" data-filter="APPROVED" onclick="setWorkQueueFilter('APPROVED')">Approved</button>
-                        <button type="button" class="queue-filter-pill" data-filter="ISSUES" onclick="setWorkQueueFilter('ISSUES')">Issues</button>
-                        <button type="button" class="queue-filter-pill" data-filter="SUBMITTED" onclick="setWorkQueueFilter('SUBMITTED')">Done</button>
+                    <div class="queue-filter-pills" style="display:flex; gap:4px; background-color:#0c1017; padding:4px; border-radius:6px; border:1px solid rgba(255,255,255,0.08);">
+                        <button type="button" class="queue-filter-pill active" data-filter="ALL" onclick="setWorkQueueFilter('ALL')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:800; color:#ffffff !important; background-color:#1e293b !important; border:1px solid #fcdc04 !important; border-radius:4px; cursor:pointer; min-height:32px;">All</button>
+                        <button type="button" class="queue-filter-pill" data-filter="PENDING" onclick="setWorkQueueFilter('PENDING')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; color:rgba(255,255,255,0.75) !important; background-color:transparent; border:1px solid transparent; border-radius:4px; cursor:pointer; min-height:32px;">Review</button>
+                        <button type="button" class="queue-filter-pill" data-filter="APPROVED" onclick="setWorkQueueFilter('APPROVED')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; color:rgba(255,255,255,0.75) !important; background-color:transparent; border:1px solid transparent; border-radius:4px; cursor:pointer; min-height:32px;">Approved</button>
+                        <button type="button" class="queue-filter-pill" data-filter="ISSUES" onclick="setWorkQueueFilter('ISSUES')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; color:rgba(255,255,255,0.75) !important; background-color:transparent; border:1px solid transparent; border-radius:4px; cursor:pointer; min-height:32px;">Issues</button>
+                        <button type="button" class="queue-filter-pill" data-filter="SUBMITTED" onclick="setWorkQueueFilter('SUBMITTED')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; color:rgba(255,255,255,0.75) !important; background-color:transparent; border:1px solid transparent; border-radius:4px; cursor:pointer; min-height:32px;">Done</button>
                     </div>
                 </div>
 

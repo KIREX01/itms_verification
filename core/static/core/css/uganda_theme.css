@@ -77,8 +77,18 @@ body {
     background: var(--ug-gold);
 }
 
+/* Base Button Reset to eliminate default browser white buttonface */
+button, input[type="button"], input[type="submit"], input[type="reset"] {
+    font-family: inherit;
+    color: var(--ug-text-main);
+    background-color: var(--ug-black-card);
+    border: 1px solid var(--ug-border);
+}
+
 /* Buttons */
 .btn {
+    background-color: var(--ug-black-card);
+    color: var(--ug-text-main);
     display: inline-flex;
     align-items: center;
     gap: 6px;

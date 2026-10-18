@@ -1,4 +1,98 @@
 <div class="tab-pane" id="pane-stock">
+    <!-- Embedded High-Performance Grid & KPI Layout Guarantees -->
+    <style>
+        .stock-kpi-grid {
+            display: grid !important;
+            grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+            gap: 8px !important;
+            margin-bottom: 12px !important;
+            width: 100% !important;
+            box-sizing: border-box !important;
+        }
+        .stock-kpi-card {
+            background: #111622 !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            border-radius: var(--radius-md, 6px) !important;
+            padding: 8px 10px !important;
+            display: flex !important;
+            flex-direction: column !important;
+            gap: 3px !important;
+            min-width: 0 !important;
+            width: 100% !important;
+            box-sizing: border-box !important;
+            transition: transform 0.15s ease, border-color 0.15s ease !important;
+        }
+        .stock-kpi-card:hover {
+            transform: translateY(-2px) !important;
+            border-color: rgba(255, 255, 255, 0.25) !important;
+        }
+        .stock-kpi-header {
+            display: flex !important;
+            align-items: center !important;
+            gap: 5px !important;
+            margin-bottom: 2px !important;
+            min-width: 0 !important;
+        }
+        .stock-kpi-icon {
+            font-size: 0.85rem !important;
+            line-height: 1 !important;
+            flex-shrink: 0 !important;
+        }
+        .stock-kpi-label {
+            font-size: 0.68rem !important;
+            font-weight: 700 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.5px !important;
+            color: rgba(255, 255, 255, 0.75) !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+        }
+        .stock-kpi-val {
+            font-size: 1.3rem !important;
+            font-weight: 800 !important;
+            font-family: var(--font-mono, monospace) !important;
+            color: #ffffff !important;
+            line-height: 1.1 !important;
+        }
+        .stock-kpi-sub {
+            font-size: 0.65rem !important;
+            color: rgba(255, 255, 255, 0.6) !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+        }
+        .stock-kpi-card.highlight-closing {
+            border-top: 3px solid #38bdf8 !important;
+            background: linear-gradient(180deg, rgba(56, 189, 248, 0.08) 0%, #111622 100%) !important;
+        }
+        .stock-kpi-card.highlight-physical {
+            border-top: 3px solid #f59e0b !important;
+            background: linear-gradient(180deg, rgba(245, 158, 11, 0.08) 0%, #111622 100%) !important;
+        }
+        .stock-kpi-card.highlight-unallocated {
+            border-top: 3px solid #10b981 !important;
+            background: linear-gradient(180deg, rgba(16, 185, 129, 0.08) 0%, #111622 100%) !important;
+        }
+        @media (max-width: 1200px) {
+            .stock-kpi-grid {
+                grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+            }
+        }
+        @media (max-width: 768px) {
+            .stock-kpi-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+                gap: 6px !important;
+            }
+        }
+        @media (max-width: 420px) {
+            .stock-kpi-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+                gap: 4px !important;
+            }
+        }
+    </style>
+
     <div class="itms-split-view active">
         <!-- LEFT PANE: Main Operations (65%) -->
         <div class="itms-table-panel" style="padding: 14px;">
@@ -74,7 +168,7 @@
             </div>
 
             <!-- Executive Stock KPI Metric Counter Cards -->
-            <div class="stock-kpi-grid" id="stock-kpi-grid">
+            <div class="stock-kpi-grid" id="stock-kpi-grid" style="display: grid !important; grid-template-columns: repeat(7, minmax(0, 1fr)) !important; gap: 8px !important; margin-bottom: 12px !important; width: 100% !important; box-sizing: border-box !important;">
                 <div class="stock-kpi-card" id="kpi-card-opening" title="Opening physical safe room count at shift start">
                     <div class="stock-kpi-header">
                         <span class="stock-kpi-icon">🌅</span>

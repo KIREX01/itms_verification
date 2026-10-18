@@ -192,52 +192,76 @@ def _align_and_pair_candidates(
     unpaired_rears = list(rears)
     resolved_pairs = []
 
+    # Detect if this candidate set belongs to an Off-Conveyor U-Turn walk
+    batch_label = (batch.source_label or "") if batch else ""
+    is_uturn_context = (
+        "u-turn" in batch_label.lower()
+        or "uturn" in batch_label.lower()
+        or any(
+            ("uturn" in (img.original_source_path or img.vault_file or "").lower() or
+             "u-turn" in (img.original_source_path or img.vault_file or "").lower())
+            for img in (fronts + rears)
+        )
+    )
+
+    def _is_image_uturn(img: EvidenceImage) -> bool:
+        if not img:
+            return False
+        p = (img.original_source_path or img.vault_file or "").lower()
+        return "uturn" in p or "u-turn" in p
+
     # --- Tier 1: Filename Synergy (Matching Stems & Shutter Indices) ---
     # 1A: Exact stem match (e.g. front/01.jpg <-> rear/01.jpg or front/bike1.jpg <-> rear/bike1.jpg)
     matched_f_ids = set()
     matched_r_ids = set()
-    for f_img in unpaired_fronts:
-        f_clean = _clean_stem_name(f_img.original_source_path or f_img.vault_file)
-        if not f_clean or f_clean in ("front", "rear"):
-            continue
-        for r_img in unpaired_rears:
-            if r_img.id in matched_r_ids:
+    if not is_uturn_context:
+        for f_img in unpaired_fronts:
+            if _is_image_uturn(f_img):
                 continue
-            r_clean = _clean_stem_name(r_img.original_source_path or r_img.vault_file)
-            if r_clean == f_clean:
-                matched_f_ids.add(f_img.id)
-                matched_r_ids.add(r_img.id)
-                canonical_plate = r_img.detected_plate or f_img.detected_plate or f"PAIR-{f_clean.upper()}"
-                f_name = os.path.basename(f_img.original_source_path or f_img.vault_file)
-                r_name = os.path.basename(r_img.original_source_path or r_img.vault_file)
-                note = f"Auto-paired via Filename Stem Alignment ('{f_name}' <-> '{r_name}') | Identical stem '{f_clean}'"
-                resolved_pairs.append((f_img, r_img, canonical_plate, note))
-                break
+            f_clean = _clean_stem_name(f_img.original_source_path or f_img.vault_file)
+            if not f_clean or f_clean in ("front", "rear"):
+                continue
+            for r_img in unpaired_rears:
+                if r_img.id in matched_r_ids or _is_image_uturn(r_img):
+                    continue
+                r_clean = _clean_stem_name(r_img.original_source_path or r_img.vault_file)
+                if r_clean == f_clean:
+                    matched_f_ids.add(f_img.id)
+                    matched_r_ids.add(r_img.id)
+                    canonical_plate = r_img.detected_plate or f_img.detected_plate or f"PAIR-{f_clean.upper()}"
+                    f_name = os.path.basename(f_img.original_source_path or f_img.vault_file)
+                    r_name = os.path.basename(r_img.original_source_path or r_img.vault_file)
+                    note = f"Auto-paired via Filename Stem Alignment ('{f_name}' <-> '{r_name}') | Identical stem '{f_clean}'"
+                    resolved_pairs.append((f_img, r_img, canonical_plate, note))
+                    break
 
-    unpaired_fronts = [f for f in unpaired_fronts if f.id not in matched_f_ids]
-    unpaired_rears = [r for r in unpaired_rears if r.id not in matched_r_ids]
+        unpaired_fronts = [f for f in unpaired_fronts if f.id not in matched_f_ids]
+        unpaired_rears = [r for r in unpaired_rears if r.id not in matched_r_ids]
 
     # 1B: Exact shutter sequence index match (e.g. CAM01_0005 vs CAM02_0005)
     matched_f_ids = set()
     matched_r_ids = set()
-    for f_img in unpaired_fronts:
-        f_sig = parse_camera_filename(f_img.original_source_path or f_img.vault_file)
-        if f_sig.sequence_number is None:
-            continue
-        for r_img in unpaired_rears:
-            if r_img.id in matched_r_ids:
+    if not is_uturn_context:
+        for f_img in unpaired_fronts:
+            if _is_image_uturn(f_img):
                 continue
-            r_sig = parse_camera_filename(r_img.original_source_path or r_img.vault_file)
-            if r_sig.sequence_number == f_sig.sequence_number:
-                matched_f_ids.add(f_img.id)
-                matched_r_ids.add(r_img.id)
-                canonical_plate = r_img.detected_plate or f_img.detected_plate or f"PAIR-SEQ{f_sig.sequence_number:02d}"
-                note = f"Auto-paired via Camera Shutter Index (#{f_sig.sequence_number} <-> #{r_sig.sequence_number}) | {f_sig.vendor_convention}"
-                resolved_pairs.append((f_img, r_img, canonical_plate, note))
-                break
+            f_sig = parse_camera_filename(f_img.original_source_path or f_img.vault_file)
+            if f_sig.sequence_number is None:
+                continue
+            for r_img in unpaired_rears:
+                if r_img.id in matched_r_ids or _is_image_uturn(r_img):
+                    continue
+                r_sig = parse_camera_filename(r_img.original_source_path or r_img.vault_file)
+                if r_sig.sequence_number == f_sig.sequence_number:
+                    matched_f_ids.add(f_img.id)
+                    matched_r_ids.add(r_img.id)
+                    canonical_plate = r_img.detected_plate or f_img.detected_plate or f"PAIR-SEQ{f_sig.sequence_number:02d}"
+                    note = f"Auto-paired via Camera Shutter Index (#{f_sig.sequence_number} <-> #{r_sig.sequence_number}) | {f_sig.vendor_convention}"
+                    resolved_pairs.append((f_img, r_img, canonical_plate, note))
+                    break
 
-    unpaired_fronts = [f for f in unpaired_fronts if f.id not in matched_f_ids]
-    unpaired_rears = [r for r in unpaired_rears if r.id not in matched_r_ids]
+        unpaired_fronts = [f for f in unpaired_fronts if f.id not in matched_f_ids]
+        unpaired_rears = [r for r in unpaired_rears if r.id not in matched_r_ids]
 
     # --- Tier 2: Plate OCR Direct Match (High-Confidence Anchors) ---
     matched_f_ids = set()
@@ -283,7 +307,7 @@ def _align_and_pair_candidates(
         return (img.captured_at or img.ingested_at).timestamp() + estimated_skew
 
     # --- Tier 3: Temporal Trajectory Alignment (U-Turn Walk Detection) ---
-    if unpaired_fronts and unpaired_rears and len(unpaired_fronts) > 1 and len(unpaired_rears) > 1:
+    if unpaired_fronts and unpaired_rears:
         from core.services import config_service
         uturn_threshold = int(config_service.get_setting("matcher.uturn_threshold_seconds", 1800))
 
@@ -297,33 +321,55 @@ def _align_and_pair_candidates(
 
         gap_uturn = min(abs(f_first_time - r_last_time), abs(r_first_time - f_last_time))
         gap_parallel = abs(f_first_time - r_first_time)
-        is_uturn = (gap_uturn <= gap_parallel) and (gap_uturn <= uturn_threshold)
+        is_uturn = is_uturn_context or (
+            (len(unpaired_fronts) > 1 or len(unpaired_rears) > 1)
+            and (gap_uturn <= gap_parallel)
+            and (gap_uturn <= uturn_threshold)
+        )
 
         if is_uturn:
-            if f_first_time >= r_first_time:
-                aligned_rears = list(unpaired_rears)
-                aligned_fronts = list(reversed(unpaired_fronts))
-            else:
-                aligned_rears = list(reversed(unpaired_rears))
-                aligned_fronts = list(unpaired_fronts)
-
             skew_desc = f" [Clock Skew Calibrated: Δt={int(estimated_skew)}s]" if abs(estimated_skew) >= 1.0 else ""
             walk_desc = f"Temporal Trajectory (U-Turn Walk, Δt turnaround = {int(gap_uturn)}s{skew_desc})"
 
-            t_pair_count = min(len(aligned_rears), len(aligned_fronts))
-            for i in range(t_pair_count):
-                r_img = aligned_rears[i]
-                f_img = aligned_fronts[i]
-                canonical_plate = r_img.detected_plate or f_img.detected_plate
-                if not canonical_plate:
-                    batch_tag = batch.batch_id.split("-")[-1] if batch else "SEQ"
-                    pair_num = summary.complete_pairs + len(resolved_pairs) + 1
-                    canonical_plate = f"PAIR-{batch_tag.upper()}-{pair_num:02d}"
-                note = f"Auto-paired via {walk_desc} | Walk Step #{i+1}"
-                resolved_pairs.append((f_img, r_img, canonical_plate, note))
+            t_pair_count = min(len(unpaired_rears), len(unpaired_fronts))
 
-            unpaired_fronts = aligned_fronts[t_pair_count:]
-            unpaired_rears = aligned_rears[t_pair_count:]
+            if f_first_time >= r_first_time:
+                # Rears captured outbound (R_0 .. R_{N-1}), turnaround, Fronts captured return (F_0 .. F_{M-1})
+                # Turnaround anchor is between R_{N-1} and F_0:
+                # Step k from turnaround: R_{N-1-k} <-> F_k
+                for step_idx, k in enumerate(range(t_pair_count - 1, -1, -1), 1):
+                    r_img = unpaired_rears[len(unpaired_rears) - 1 - k]
+                    f_img = unpaired_fronts[k]
+                    canonical_plate = r_img.detected_plate or f_img.detected_plate
+                    if not canonical_plate:
+                        batch_tag = batch.batch_id.split("-")[-1] if batch else "SEQ"
+                        pair_num = summary.complete_pairs + len(resolved_pairs) + 1
+                        canonical_plate = f"PAIR-{batch_tag.upper()}-{pair_num:02d}"
+                    note = f"Auto-paired via {walk_desc} | Row Position #{step_idx}"
+                    resolved_pairs.append((f_img, r_img, canonical_plate, note))
+
+                surplus_rears = unpaired_rears[:len(unpaired_rears) - t_pair_count]
+                surplus_fronts = unpaired_fronts[t_pair_count:]
+            else:
+                # Fronts captured outbound (F_0 .. F_{M-1}), turnaround, Rears captured return (R_0 .. R_{N-1})
+                # Turnaround anchor is between F_{M-1} and R_0:
+                # Step k from turnaround: F_{M-1-k} <-> R_k
+                for step_idx, k in enumerate(range(t_pair_count - 1, -1, -1), 1):
+                    f_img = unpaired_fronts[len(unpaired_fronts) - 1 - k]
+                    r_img = unpaired_rears[k]
+                    canonical_plate = r_img.detected_plate or f_img.detected_plate
+                    if not canonical_plate:
+                        batch_tag = batch.batch_id.split("-")[-1] if batch else "SEQ"
+                        pair_num = summary.complete_pairs + len(resolved_pairs) + 1
+                        canonical_plate = f"PAIR-{batch_tag.upper()}-{pair_num:02d}"
+                    note = f"Auto-paired via {walk_desc} | Row Position #{step_idx}"
+                    resolved_pairs.append((f_img, r_img, canonical_plate, note))
+
+                surplus_fronts = unpaired_fronts[:len(unpaired_fronts) - t_pair_count]
+                surplus_rears = unpaired_rears[t_pair_count:]
+
+            unpaired_fronts = surplus_fronts
+            unpaired_rears = surplus_rears
 
     # --- Tier 4: Temporal Proximity Alignment (Parallel Walk) ---
     if unpaired_fronts and unpaired_rears:

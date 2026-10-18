@@ -188,6 +188,109 @@ class TestMobileCompanion:
         batch = vault_service.get_or_create_mobile_batch()
         assert batch.images.filter(orientation="REAR").count() >= 2
 
+    def test_uturn_pairing_aligns_turnaround_without_shutter_index_confusion(self):
+        """
+        Tests the 2-bike U-Turn walk session:
+        Bike A: Rear 1 (10:00:00, uturn_rear_1.jpg)
+        Bike B: Rear 2 (10:00:15, uturn_rear_2.jpg)
+        Turnaround!
+        Bike B: Front 1 (10:00:30, uturn_front_1.jpg)
+        Bike A: Front 2 (10:00:45, uturn_front_2.jpg)
+
+        Verifies:
+        1. Shutter sequence numbers in filenames (1 vs 1, 2 vs 2) do NOT cause incorrect
+           pairing of Front 1 with Rear 1 or Front 2 with Rear 2 in Tier 1B.
+        2. U-Turn turnaround alignment pairs Bike A = (Rear 1, Front 2) and Bike B = (Rear 2, Front 1).
+        3. Complete pairs are formed and verification_status is PENDING_REVIEW.
+        """
+        upload_url = reverse("core:api_mobile_upload")
+        finish_url = reverse("core:api_mobile_uturn_finish")
+        session_id = "walk-session-xyz"
+
+        # 1. Upload Rear 1 (Bike A)
+        f_r1 = io.BytesIO(_create_test_image_bytes(color=(120, 20, 20)))
+        f_r1.name = "uturn_rear_1.jpg"
+        resp_r1 = self.client.post(upload_url, {
+            "photo": f_r1,
+            "mode": "uturn",
+            "orientation": "REAR",
+            "sequence_number": "1",
+            "uturn_session_id": session_id,
+            "captured_at": "2026-10-18T10:00:00Z",
+        })
+        assert resp_r1.status_code == 200
+
+        # 2. Upload Rear 2 (Bike B)
+        f_r2 = io.BytesIO(_create_test_image_bytes(color=(140, 20, 20)))
+        f_r2.name = "uturn_rear_2.jpg"
+        resp_r2 = self.client.post(upload_url, {
+            "photo": f_r2,
+            "mode": "uturn",
+            "orientation": "REAR",
+            "sequence_number": "2",
+            "uturn_session_id": session_id,
+            "captured_at": "2026-10-18T10:00:15Z",
+        })
+        assert resp_r2.status_code == 200
+
+        # 3. Upload Front 1 (Bike B - first bike on return walk)
+        f_f1 = io.BytesIO(_create_test_image_bytes(color=(20, 20, 140)))
+        f_f1.name = "uturn_front_1.jpg"
+        resp_f1 = self.client.post(upload_url, {
+            "photo": f_f1,
+            "mode": "uturn",
+            "orientation": "FRONT",
+            "sequence_number": "1",
+            "uturn_session_id": session_id,
+            "captured_at": "2026-10-18T10:00:30Z",
+        })
+        assert resp_f1.status_code == 200
+
+        # 4. Upload Front 2 (Bike A - second bike on return walk)
+        f_f2 = io.BytesIO(_create_test_image_bytes(color=(20, 20, 120)))
+        f_f2.name = "uturn_front_2.jpg"
+        resp_f2 = self.client.post(upload_url, {
+            "photo": f_f2,
+            "mode": "uturn",
+            "orientation": "FRONT",
+            "sequence_number": "2",
+            "uturn_session_id": session_id,
+            "captured_at": "2026-10-18T10:00:45Z",
+        })
+        assert resp_f2.status_code == 200
+
+        # Call finish walk endpoint
+        resp_finish = self.client.post(finish_url, {
+            "uturn_session_id": session_id,
+        })
+        assert resp_finish.status_code == 200
+
+        # Retrieve images from DB
+        img_r1 = EvidenceImage.objects.filter(vault_file__contains="uturn_rear_1").first() or EvidenceImage.objects.get(original_source_path__endswith="uturn_rear_1.jpg")
+        img_r2 = EvidenceImage.objects.filter(vault_file__contains="uturn_rear_2").first() or EvidenceImage.objects.get(original_source_path__endswith="uturn_rear_2.jpg")
+        img_f1 = EvidenceImage.objects.filter(vault_file__contains="uturn_front_1").first() or EvidenceImage.objects.get(original_source_path__endswith="uturn_front_1.jpg")
+        img_f2 = EvidenceImage.objects.filter(vault_file__contains="uturn_front_2").first() or EvidenceImage.objects.get(original_source_path__endswith="uturn_front_2.jpg")
+
+        # Verify correct pairing:
+        # Bike A: Rear 1 + Front 2
+        # Bike B: Rear 2 + Front 1
+        pair_a = VehicleInstallationPair.objects.filter(front_image=img_f2, rear_image=img_r1).first()
+        assert pair_a is not None, "Bike A (Rear 1 + Front 2) must be paired together!"
+        assert pair_a.is_complete is True
+        assert "U-Turn Walk" in pair_a.operator_note
+
+        pair_b = VehicleInstallationPair.objects.filter(front_image=img_f1, rear_image=img_r2).first()
+        assert pair_b is not None, "Bike B (Rear 2 + Front 1) must be paired together!"
+        assert pair_b.is_complete is True
+        assert "U-Turn Walk" in pair_b.operator_note
+
+        # Verify INCORRECT pairings (Front 1 with Rear 1, or Front 2 with Rear 2) do NOT exist
+        bad_pair_1 = VehicleInstallationPair.objects.filter(front_image=img_f1, rear_image=img_r1).first()
+        assert bad_pair_1 is None, "Front 1 must NOT be paired with Rear 1!"
+
+        bad_pair_2 = VehicleInstallationPair.objects.filter(front_image=img_f2, rear_image=img_r2).first()
+        assert bad_pair_2 is None, "Front 2 must NOT be paired with Rear 2!"
+
     def test_offline_retransmission_deduplication(self):
         """
         Verifies that when a mobile client resends an already-synced photo

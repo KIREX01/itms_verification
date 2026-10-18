@@ -340,8 +340,11 @@ def api_mobile_upload(request: HttpRequest) -> JsonResponse:
     # Mode B: Off-Conveyor (U-Turn Walk) - Ingested into batch and trajectory aligned
     elif mode == "uturn":
         try:
-            from core.matcher import association
-            association.run_association(batch_id=batch.batch_id)
+            f_count = batch.images.filter(orientation=EvidenceImage.Orientation.FRONT).count()
+            r_count = batch.images.filter(orientation=EvidenceImage.Orientation.REAR).count()
+            if f_count > 0 and f_count == r_count:
+                from core.matcher import association
+                association.run_association(batch_id=batch.batch_id)
         except Exception as assoc_err:
             logger.debug("Auto-association notice on U-turn upload: %s", assoc_err)
 

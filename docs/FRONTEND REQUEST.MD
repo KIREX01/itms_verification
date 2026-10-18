@@ -350,3 +350,31 @@ All local shift selectors on Stock and Reports tabs have been dismantled and mig
      ```
 2. **Detail Modal in `core/templates/core/modals.html` (`#modal-history-detail`)**:
    - When inspecting an email dispatch log, the modal cleanly displays the shift suffix in the plate field, the action as `STOCK_REPORT_EMAILED`, the result as `SUCCESS` or `FAILURE`, and the full recipient and error information in the execution trace box.
+
+
+## 7. Bug Fix: `confirmDeletePair` Uncaught ReferenceError (`renderQueueList`)
+
+### 7.1 Defect Description
+When an operator deletes a pair in the Queue tab via `confirmDeletePair()`, the backend API call `POST /api/pairs/<pair_id>/action/` (with `action=delete_pair`) succeeds and soft-deletes the pair.
+However, immediately after removing the pair from `pairsData`, line 807 of `core/static/core/js/tab_queue.js` calls:
+```javascript
+renderQueueList();
+```
+Because no function named `renderQueueList` exists (the rendering function defined and used across `tab_queue.js` is `renderQueueCards()`), JavaScript throws:
+```
+Uncaught ReferenceError: renderQueueList is not defined
+```
+This unhandled error aborts execution of the remaining logic:
+- Metric refresh `fetchStats()` is skipped.
+- Selection of the adjacent pair (`selectPair(...)`) or clearing the inspector is aborted.
+- The `catch` block catches the ReferenceError and displays a false failure toast to the operator: `Error deleting pair: ReferenceError: renderQueueList is not defined`.
+
+### 7.2 Required Frontend Fix
+In `core/static/core/js/tab_queue.js` at line 807:
+```javascript
+// Replace line 807:
+renderQueueList();
+
+// With:
+renderQueueCards();
+```

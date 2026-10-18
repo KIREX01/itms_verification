@@ -191,54 +191,57 @@
 
 <!-- 3. Historical Activity Log Detail Modal -->
 <div class="modal-overlay" id="modal-history-detail">
-    <div class="modal-box" style="width: 620px;">
-        <div class="modal-header">
-            <span class="modal-title" id="hist-modal-title">📜 Verification Activity Log Detail</span>
-            <button class="modal-close" onclick="closeModal('modal-history-detail')">&times;</button>
+    <div class="modal-box" style="width: 100%; max-width: 640px; max-height: 90vh; display: flex; flex-direction: column; border: 1px solid var(--ug-border); background: var(--ug-black-card);">
+        <div class="modal-header" style="flex-shrink:0;">
+            <span class="modal-title" id="hist-modal-title" style="display:inline-flex; align-items:center; gap:8px;">
+                <i class="fas fa-shield-alt text-warning"></i>
+                <span>Verification Audit Log Detail</span>
+            </span>
+            <button class="modal-close" onclick="closeModal('modal-history-detail')" aria-label="Close modal">&times;</button>
         </div>
-        <div class="modal-body" style="gap:12px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 14px;">
+        <div class="modal-body" style="gap:12px; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 14px; flex-wrap:wrap; gap:8px;">
                 <div>
-                    <div style="font-size:0.72rem; color:var(--ug-text-dim);">TIMESTAMP</div>
+                    <div style="font-size:0.72rem; color:var(--ug-text-dim); font-weight:700;">TIMESTAMP</div>
                     <div style="font-family:var(--font-mono); font-weight:700; color:#fff;" id="hist-modal-time">--</div>
                 </div>
                 <div>
-                    <div style="font-size:0.72rem; color:var(--ug-text-dim);">OPERATOR</div>
+                    <div style="font-size:0.72rem; color:var(--ug-text-dim); font-weight:700;">OPERATOR</div>
                     <div style="font-weight:700; color:var(--ug-yellow);" id="hist-modal-operator">--</div>
                     <div style="font-size:0.7rem; color:var(--ug-text-dim); max-width:180px; overflow:hidden; text-overflow:ellipsis;" id="hist-modal-email"></div>
                 </div>
                 <div>
-                    <div style="font-size:0.72rem; color:var(--ug-text-dim);">RESULT</div>
+                    <div style="font-size:0.72rem; color:var(--ug-text-dim); font-weight:700;">RESULT</div>
                     <span class="badge badge-green" id="hist-modal-result">SUCCESS</span>
                 </div>
             </div>
 
-            <div class="hardware-box">
-                <div class="hw-row">
-                    <span class="hw-label">Action:</span>
-                    <span class="hw-val" id="hist-modal-action" style="font-weight:700;">--</span>
+            <div class="hardware-box" style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:12px;">
+                <div class="hw-row" style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                    <span class="hw-label" style="font-size:0.8rem; color:var(--ug-text-muted);">Action:</span>
+                    <span class="hw-val" id="hist-modal-action" style="font-weight:700; color:#ffffff;">--</span>
                 </div>
-                <div class="hw-row">
-                    <span class="hw-label">Vehicle Plate:</span>
-                    <span class="hw-val" id="hist-modal-plate" style="color:var(--ug-yellow); font-weight:800;">--</span>
+                <div class="hw-row" style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                    <span class="hw-label" style="font-size:0.8rem; color:var(--ug-text-muted);">Vehicle Plate:</span>
+                    <span class="hw-val" id="hist-modal-plate" style="color:var(--ug-yellow); font-weight:800; font-family:var(--font-mono); font-size:0.95rem;">--</span>
                 </div>
-                <div class="hw-row">
-                    <span class="hw-label">Matched Order #:</span>
-                    <span class="hw-val" id="hist-modal-order">--</span>
+                <div class="hw-row" style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                    <span class="hw-label" style="font-size:0.8rem; color:var(--ug-text-muted);">Matched Order #:</span>
+                    <span class="hw-val" id="hist-modal-order" style="font-family:var(--font-mono); color:#ffffff;">--</span>
                 </div>
-                <div class="hw-row">
-                    <span class="hw-label">Pair ID:</span>
-                    <span class="hw-val" id="hist-modal-pair">--</span>
+                <div class="hw-row" style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                    <span class="hw-label" style="font-size:0.8rem; color:var(--ug-text-muted);">Pair ID:</span>
+                    <span class="hw-val" id="hist-modal-pair" style="color:#ffffff;">--</span>
                 </div>
-                <div class="hw-row">
-                    <span class="hw-label">Submission Token / Receipt:</span>
-                    <span class="hw-val" id="hist-modal-token" style="font-family:var(--font-mono); font-size:0.75rem;">None</span>
+                <div class="hw-row" style="display:flex; justify-content:space-between; padding:4px 0;">
+                    <span class="hw-label" style="font-size:0.8rem; color:var(--ug-text-muted);">Submission Token / Receipt:</span>
+                    <span class="hw-val" id="hist-modal-token" style="font-family:var(--font-mono); font-size:0.75rem; color:#38bdf8;">None</span>
                 </div>
             </div>
 
             <div class="form-field">
-                <label>Audit Message / Execution Trace</label>
-                <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:12px; font-family:var(--font-mono); font-size:0.8rem; color:#fff; line-height:1.4; word-break:break-word; max-height:140px; overflow-y:auto;" id="hist-modal-message">
+                <label style="font-size:0.78rem; font-weight:700; color:var(--ug-text-muted); margin-bottom:6px; display:block;">Audit Message / Execution Trace</label>
+                <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:12px; font-family:var(--font-mono); font-size:0.82rem; color:#ffffff; line-height:1.45; word-break:break-word; max-height:140px; overflow-y:auto;" id="hist-modal-message">
                     --
                 </div>
             </div>
@@ -246,23 +249,26 @@
             <!-- Evidence Photo Previews (if linked pair exists) -->
             <div id="hist-modal-photos-container" style="display:none; flex-direction:column; gap:6px;">
                 <label style="font-size:0.75rem; font-weight:700; color:var(--ug-text-muted);">ASSOCIATED EVIDENCE PHOTOS</label>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                    <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:6px; text-align:center;">
-                        <span style="font-size:0.7rem; color:var(--ug-text-dim);">FRONT ANGLE</span>
-                        <img id="hist-img-front" src="" alt="Front" style="width:100%; height:110px; object-fit:cover; border-radius:4px; margin-top:4px; cursor:pointer;" onclick="openLightbox(this.src)">
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px;">
+                    <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:8px; text-align:center;">
+                        <span style="font-size:0.72rem; color:var(--ug-text-dim); font-weight:700;">FRONT ANGLE</span>
+                        <img id="hist-img-front" src="" alt="Front" style="width:100%; height:130px; object-fit:cover; border-radius:4px; margin-top:6px; cursor:pointer;" onclick="openLightbox(this.src)" title="Click to view full image in Lightbox">
                     </div>
-                    <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:6px; text-align:center;">
-                        <span style="font-size:0.7rem; color:var(--ug-text-dim);">REAR ANGLE</span>
-                        <img id="hist-img-rear" src="" alt="Rear" style="width:100%; height:110px; object-fit:cover; border-radius:4px; margin-top:4px; cursor:pointer;" onclick="openLightbox(this.src)">
+                    <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:8px; text-align:center;">
+                        <span style="font-size:0.72rem; color:var(--ug-text-dim); font-weight:700;">REAR ANGLE</span>
+                        <img id="hist-img-rear" src="" alt="Rear" style="width:100%; height:130px; object-fit:cover; border-radius:4px; margin-top:6px; cursor:pointer;" onclick="openLightbox(this.src)" title="Click to view full image in Lightbox">
                     </div>
                 </div>
             </div>
         </div>
-        <div class="modal-footer">
-            <button class="btn btn-success" id="btn-hist-jump-queue" style="margin-right:auto; display:none;" onclick="jumpFromHistoryToQueue()">
-                🔍 Open in Review Queue
+        <div class="modal-footer" style="flex-shrink:0; display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:var(--ug-black-surface); border-top:1px solid var(--ug-border);">
+            <button class="btn btn-success" id="btn-hist-jump-queue" style="display:none; align-items:center; gap:6px;" onclick="jumpFromHistoryToQueue()">
+                <i class="fas fa-search-plus"></i>
+                <span>Open in Review Queue</span>
             </button>
-            <button class="btn btn-secondary" onclick="closeModal('modal-history-detail')">Close</button>
+            <button class="btn btn-secondary" onclick="closeModal('modal-history-detail')" style="margin-left:auto; min-height:40px; padding:6px 20px; font-weight:700; color:#ffffff !important; background:#1e293b !important; border:1px solid rgba(255,255,255,0.2) !important;">
+                Close
+            </button>
         </div>
     </div>
 </div>

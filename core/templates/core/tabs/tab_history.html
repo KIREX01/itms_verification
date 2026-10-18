@@ -1,53 +1,252 @@
-<!-- TAB 5: HISTORY & AUDIT LOGS -->
+﻿<!-- TAB 5: HISTORY & AUDIT LOGS -->
 <div class="tab-pane" id="pane-history">
     <div class="history-pane-container">
-        <!-- Toolbar Card -->
+        <!-- High-Contrast Styling Overrides for Audit Explorer -->
+        <style>
+            #pane-history .scope-pill-btn {
+                background-color: #1e293b !important;
+                border: 1px solid rgba(255, 255, 255, 0.22) !important;
+                color: #ffffff !important;
+                font-weight: 700 !important;
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 0.82rem;
+                transition: all 0.15s ease;
+            }
+            #pane-history .scope-pill-btn:hover {
+                background-color: #334155 !important;
+                border-color: rgba(255, 255, 255, 0.4) !important;
+                color: #ffffff !important;
+                box-shadow: 0 0 8px rgba(255, 255, 255, 0.15);
+            }
+            #pane-history .scope-pill-btn.active {
+                background-color: #9a3412 !important;
+                border-color: #ea580c !important;
+                color: #ffffff !important;
+                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4) !important;
+            }
+            #pane-history .history-chip {
+                background-color: #1e293b !important;
+                border: 1px solid rgba(255, 255, 255, 0.15) !important;
+                color: #ffffff !important;
+                font-weight: 700;
+                padding: 6px 14px;
+                font-size: 0.8rem;
+                border-radius: 4px;
+                cursor: pointer;
+                transition: all 0.15s ease;
+            }
+            #pane-history .history-chip:hover {
+                background-color: #334155 !important;
+                color: #ffffff !important;
+                border-color: rgba(255, 255, 255, 0.3) !important;
+            }
+            #pane-history .history-chip.active {
+                background-color: #f59e0b !important;
+                border-color: #d97706 !important;
+                color: #000000 !important;
+                font-weight: 800;
+            }
+            .history-card-item {
+                background-color: #141720;
+                border: 1px solid var(--ug-border);
+                border-radius: 8px;
+                padding: 12px 14px;
+                margin-bottom: 8px;
+                cursor: pointer;
+                transition: transform 0.1s ease, border-color 0.15s ease, background-color 0.15s ease;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+            .history-card-item:hover, .history-card-item:active {
+                background-color: #1e2230;
+                border-color: var(--ug-yellow);
+                transform: translateY(-1px);
+            }
+            .history-card-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+            }
+            .history-card-meta {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 6px;
+                flex-wrap: wrap;
+                font-size: 0.78rem;
+                color: var(--ug-text-muted);
+            }
+            .history-card-msg {
+                font-size: 0.8rem;
+                color: #ffffff;
+                background: #0d0f14;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 4px;
+                padding: 6px 10px;
+                line-height: 1.35;
+                font-family: var(--font-mono);
+                word-break: break-word;
+            }
+            .history-search-box {
+                position: relative;
+                display: flex;
+                align-items: center;
+                flex: 1;
+                max-width: 360px;
+            }
+            .history-search-box input {
+                width: 100%;
+                background: #0c1017;
+                color: #ffffff;
+                border: 1px solid #334155;
+                border-radius: 4px;
+                padding: 6px 30px 6px 32px;
+                font-size: 0.82rem;
+                font-family: var(--font-mono);
+            }
+            .history-search-box input:focus {
+                border-color: var(--ug-yellow);
+                outline: none;
+                box-shadow: 0 0 0 2px rgba(252, 220, 4, 0.2);
+            }
+            .history-search-icon {
+                position: absolute;
+                left: 10px;
+                font-size: 0.78rem;
+                color: var(--ug-text-dim);
+                pointer-events: none;
+            }
+            .history-search-clear {
+                position: absolute;
+                right: 8px;
+                background: transparent;
+                border: none;
+                color: var(--ug-text-dim);
+                font-size: 1rem;
+                cursor: pointer;
+                padding: 0 4px;
+            }
+            .history-search-clear:hover {
+                color: #ffffff;
+            }
+            .history-pagination-bar {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                padding: 10px 16px;
+                background-color: #111622;
+                border-top: 1px solid var(--ug-border);
+                flex-wrap: wrap;
+                flex-shrink: 0;
+            }
+            .history-pagination-btn {
+                background-color: #1e293b !important;
+                border: 1px solid rgba(255, 255, 255, 0.25) !important;
+                color: #ffffff !important;
+                font-weight: 700 !important;
+                padding: 5px 12px;
+                border-radius: 4px;
+                font-size: 0.8rem;
+                cursor: pointer;
+            }
+            .history-pagination-btn:hover:not(:disabled) {
+                background-color: #334155 !important;
+                color: #ffffff !important;
+            }
+            .history-pagination-btn:disabled {
+                opacity: 0.4;
+                cursor: not-allowed;
+            }
+        </style>
+
+        <!-- Top Header & Primary Scope Toolbar -->
         <div class="history-toolbar-card">
             <div class="history-toolbar-left">
-                <span style="font-size:0.85rem; font-weight:800; color:#fff;" class="history-title">📜 <span class="hide-mobile">Historical Verification </span>Events</span>
-                <span style="font-size:0.72rem; color:var(--ug-text-dim);" class="hide-mobile">(Click any event row to inspect full audit details)</span>
-                <!-- Filter Chips (TUI Cycle Filter) -->
-                <div class="history-filter-chips">
-                    <button class="history-chip active" data-hfilter="ALL" onclick="setHistoryFilter('ALL')">All</button>
-                    <button class="history-chip" data-hfilter="SUBMITTED" onclick="setHistoryFilter('SUBMITTED')">Submitted</button>
-                    <button class="history-chip" data-hfilter="FAILED" onclick="setHistoryFilter('FAILED')">Failed</button>
-                    <button class="history-chip" data-hfilter="ISSUES" onclick="setHistoryFilter('ISSUES')">Issues / Conflicts</button>
+                <span class="history-title" style="font-size:0.95rem; font-weight:800; color:#ffffff; display:inline-flex; align-items:center; gap:8px;">
+                    <i class="fas fa-history text-warning"></i>
+                    <span>Verification &amp; Audit Trail</span>
+                </span>
+                
+                <div class="history-shift-pill-container" style="display:inline-flex; align-items:center; gap:6px;">
+                    <span class="badge badge-dark" style="display:inline-flex; align-items:center; gap:6px; padding:5px 10px; font-size:0.8rem; font-weight:700; background:#0c1017; border:1px solid #334155; border-radius:4px;">
+                        <span style="color:#ffffff !important;">Active Shift:</span>
+                        <strong id="history-active-shift-badge" style="color:#38bdf8; font-family:var(--font-mono);">Loading...</strong>
+                    </span>
                 </div>
             </div>
 
             <div class="history-toolbar-right">
                 <!-- Date Scope Filter & Actions -->
-                <div class="scope-pills-group" style="margin-left:0; display: flex; flex-wrap: wrap; gap: 4px;">
-                    <span style="font-size:0.68rem; color:var(--ug-text-dim); padding-left:4px; font-weight:700; align-self: center;" class="hide-mobile">DATE:</span>
-                    <button class="scope-pill-btn active" id="btn-hscope-today" onclick="setHistoryDateScope('TODAY')" title="Show audit logs from today's shift (Hotkey: D)">
-                        🔥 Today<span class="hide-mobile">'s Shift</span>
+                <div class="scope-pills-group" style="margin-left:0; display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
+                    <button class="scope-pill-btn active" id="btn-hscope-today" onclick="setHistoryDateScope('TODAY')" title="Show audit logs from active/today shift (Hotkey: D)">
+                        <i class="fas fa-calendar-day text-warning"></i>
+                        <span>Today<span class="hide-mobile">'s Shift</span></span>
                     </button>
                     <button class="scope-pill-btn" id="btn-hscope-all" onclick="setHistoryDateScope('ALL')" title="Show all audit logs across entire history">
-                        🌐 All<span class="hide-mobile"> Time</span>
+                        <i class="fas fa-globe text-primary"></i>
+                        <span>All<span class="hide-mobile"> Time</span></span>
                     </button>
-                    <button class="scope-pill-btn" onclick="fetchHistoryEvents()" title="Refresh" style="color: var(--ug-cyan);">
-                        🔄 Refresh
+                    <button class="scope-pill-btn" id="btn-hist-refresh" onclick="fetchHistoryEvents()" title="Refresh records">
+                        <i class="fas fa-sync-alt text-cyan"></i>
+                        <span>Refresh</span>
                     </button>
-                    <a href="/api/export/report/" class="scope-pill-btn" style="text-decoration:none; color: var(--ug-green); display:inline-flex; align-items:center;">
-                        📊 CSV
+                    <a href="/api/export/report/" class="scope-pill-btn" id="btn-hist-csv" style="text-decoration:none; color:#10b981 !important;" title="Export Shift Audit Report CSV">
+                        <i class="fas fa-file-csv"></i>
+                        <span>CSV</span>
                     </a>
                 </div>
             </div>
         </div>
 
-        <!-- History Table Card -->
+        <!-- Secondary Filter Controls & Live Search Bar -->
+        <div class="history-toolbar-card" style="padding:8px 14px; background-color:#0f131c; border-color:rgba(255,255,255,0.08);">
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; width:100%; justify-content:space-between;">
+                <!-- Filter Chips -->
+                <div class="history-filter-chips">
+                    <button class="history-chip active" data-hfilter="ALL" onclick="setHistoryFilter('ALL')">All</button>
+                    <button class="history-chip" data-hfilter="SUBMITTED" onclick="setHistoryFilter('SUBMITTED')">Submitted</button>
+                    <button class="history-chip" data-hfilter="FAILED" onclick="setHistoryFilter('FAILED')">Failed</button>
+                    <button class="history-chip" data-hfilter="ISSUES" onclick="setHistoryFilter('ISSUES')">Issues / Conflicts</button>
+                    <button class="history-chip" data-hfilter="STOCK" onclick="setHistoryFilter('STOCK')">Stock &amp; Ledger</button>
+                </div>
+
+                <!-- Live Search Box -->
+                <div class="history-search-box">
+                    <i class="fas fa-search history-search-icon"></i>
+                    <input type="text" id="history-search-input" placeholder="Search plate, order #, operator..." oninput="onHistorySearchInput(this.value)" autocomplete="off">
+                    <button type="button" class="history-search-clear" id="btn-clear-history-search" onclick="clearHistorySearch()" style="display:none;" title="Clear search">&times;</button>
+                </div>
+
+                <!-- Total Count Badge -->
+                <div class="history-summary-wrap">
+                    <span class="badge badge-dark" id="history-total-count-badge" style="font-weight:700; color:#ffffff; font-size:0.8rem; background:#1e293b; border:1px solid #334155; padding:5px 10px;">
+                        Loading...
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Content Container: Desktop Table vs Mobile Cards -->
         <div class="history-table-card">
-            <div class="history-table-scroll">
+            <!-- 1. Desktop & Tablet Data Table -->
+            <div class="history-table-scroll" id="history-table-container">
                 <table class="itms-grid-table">
                     <thead>
                         <tr>
                             <th style="width:160px;">Timestamp</th>
-                            <th style="width:130px;">Vehicle Plate</th>
+                            <th style="width:140px;">Vehicle Plate</th>
                             <th style="width:160px;">Matched Order #</th>
-                            <th style="width:140px;">Action</th>
-                            <th style="width:110px;">Status</th>
-                            <th style="width:120px;">Operator</th>
-                            <th>Audit Message</th>
+                            <th style="width:150px;">Action</th>
+                            <th style="width:120px;">Status</th>
+                            <th style="width:140px;">Operator</th>
+                            <th>Audit Message / Execution Trace</th>
                         </tr>
                     </thead>
                     <tbody id="history-table-tbody">
@@ -58,6 +257,39 @@
                         </tr>
                     </tbody>
                 </table>
+            </div>
+
+            <!-- 2. Mobile Responsive Touch Cards Container -->
+            <div id="history-mobile-cards-list" style="display:none; padding:10px; overflow-y:auto; flex:1;">
+                <!-- Populated dynamically on mobile viewports -->
+            </div>
+
+            <!-- 3. High-Velocity Pagination Toolbar -->
+            <div class="history-pagination-bar">
+                <div style="font-size:0.8rem; color:var(--ug-text-muted); font-weight:600;" id="history-pagination-summary">
+                    Showing 0 of 0 events
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <button type="button" class="history-pagination-btn" id="btn-hist-prev" onclick="changeHistoryPage(-1)" disabled>
+                        &ltrif; Prev
+                    </button>
+                    <span id="history-page-indicator" style="font-size:0.82rem; font-weight:700; color:#38bdf8; font-family:var(--font-mono); padding:0 4px;">
+                        Page 1 of 1
+                    </span>
+                    <button type="button" class="history-pagination-btn" id="btn-hist-next" onclick="changeHistoryPage(1)" disabled>
+                        Next &rtrif;
+                    </button>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <label for="history-page-size" style="font-size:0.75rem; color:var(--ug-text-muted); font-weight:600;" class="hide-mobile">Page Size:</label>
+                    <select id="history-page-size" onchange="setHistoryPageSize(this.value)" style="background:#0c1017; color:#ffffff; border:1px solid #334155; padding:4px 8px; border-radius:4px; font-size:0.8rem; font-weight:700;">
+                        <option value="15">15 / page</option>
+                        <option value="25" selected>25 / page</option>
+                        <option value="50">50 / page</option>
+                        <option value="100">100 / page</option>
+                        <option value="ALL">All Events</option>
+                    </select>
+                </div>
             </div>
         </div>
     </div>

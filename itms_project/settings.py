@@ -238,7 +238,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # --- Resend 2FA Email Service ---
 RESEND_API_KEY = env("RESEND_API_KEY", default="").strip()
-RESEND_FROM_EMAIL = env("RESEND_FROM_EMAIL", default="ITMS Verification <auth@info.kirex.online>").strip()
+RESEND_FROM_EMAIL = env("RESEND_FROM_EMAIL", default="CLOSE Copilot <notifications@info.kirex.online>").strip()
 SIGNUP_2FA_ENABLED = safe_env_bool("SIGNUP_2FA_ENABLED", default=True)
 
 # --- Operator vs Developer Permissions ---

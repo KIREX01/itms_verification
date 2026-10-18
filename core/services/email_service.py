@@ -38,9 +38,23 @@ def get_resend_api_key() -> str:
 
 
 def get_resend_from_email() -> str:
-    """Retrieves sender email address from Django settings or environment."""
-    from_email = getattr(settings, "RESEND_FROM_EMAIL", "") or os.environ.get("RESEND_FROM_EMAIL", "")
-    return from_email.strip() or "CLOSE Copilot <auth@info.kirex.online>"
+    """Retrieves sender email address from Django settings or environment.
+
+    Ensures RFC 5322 display name formatting (e.g. 'CLOSE Copilot <notifications@info.kirex.online>')
+    so email clients display the professional brand name instead of a raw username.
+    """
+    raw_from = getattr(settings, "RESEND_FROM_EMAIL", "") or os.environ.get("RESEND_FROM_EMAIL", "")
+    raw_from = raw_from.strip()
+    if not raw_from:
+        return "CLOSE Copilot <notifications@info.kirex.online>"
+    # Upgrade legacy 'auth@info.kirex.online' to standard notifications mailbox
+    if "auth@info.kirex.online" in raw_from:
+        raw_from = raw_from.replace("auth@info.kirex.online", "notifications@info.kirex.online")
+    # If already formatted with display name and angle brackets, preserve it
+    if "<" in raw_from and ">" in raw_from:
+        return raw_from
+    # If raw email address provided (e.g. notifications@info.kirex.online), wrap with brand display name
+    return f"CLOSE Copilot <{raw_from}>"
 
 
 def send_2fa_verification_code(

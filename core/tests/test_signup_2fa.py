@@ -129,3 +129,24 @@ class Signup2FATestCase(TestCase):
         client = get_web_client(user=user)
         self.assertFalse(client.session_store.session.is_authenticated)
         self.assertEqual(client.session_store.session.user_email, "")
+
+    def test_get_resend_from_email_formatting(self):
+        """Verify sender address adheres to enterprise display name standards."""
+        from django.test import override_settings
+        from core.services.email_service import get_resend_from_email
+
+        # Default empty string should return standard CLOSE Copilot mailbox
+        with override_settings(RESEND_FROM_EMAIL=""):
+            self.assertEqual(get_resend_from_email(), "CLOSE Copilot <notifications@info.kirex.online>")
+
+        # Bare email address without angle brackets should be wrapped with brand display name
+        with override_settings(RESEND_FROM_EMAIL="notifications@info.kirex.online"):
+            self.assertEqual(get_resend_from_email(), "CLOSE Copilot <notifications@info.kirex.online>")
+
+        # Legacy auth address should be upgraded automatically
+        with override_settings(RESEND_FROM_EMAIL="auth@info.kirex.online"):
+            self.assertEqual(get_resend_from_email(), "CLOSE Copilot <notifications@info.kirex.online>")
+
+        # Full RFC 5322 string should be preserved
+        with override_settings(RESEND_FROM_EMAIL="CLOSE Security <security@info.kirex.online>"):
+            self.assertEqual(get_resend_from_email(), "CLOSE Security <security@info.kirex.online>")

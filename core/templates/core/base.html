@@ -9,7 +9,7 @@
     <!-- Dedicated Modular Stylesheets (Uganda National Flag Design System) -->
     <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}?v=12">
     <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}?v=13">
-    <link rel="stylesheet" href="{% static 'core/css/tab_dashboard.css' %}?v=12">
+    <link rel="stylesheet" href="{% static 'core/css/tab_dashboard.css' %}?v=13">
     <link rel="stylesheet" href="{% static 'core/css/tab_itms.css' %}?v=8">
     <link rel="stylesheet" href="{% static 'core/css/tab_batches.css' %}?v=12">
     <link rel="stylesheet" href="{% static 'core/css/tab_queue.css' %}?v=8">
@@ -107,12 +107,12 @@
                         {% if dry_run %}● Dry Run{% else %}● Live{% endif %}
                     </button>
                     <!-- Global Application-Wide Shift Date Selector -->
-                    <div class="header-shift-control" style="display:inline-flex; align-items:center; gap:5px; background:rgba(15,23,42,0.85); border:1px solid #334155; padding:2px 8px; border-radius:6px;" title="Active Operating Shift Date (Uganda East Africa Time)">
-                        <span style="font-size:0.75rem; color:#94a3b8; font-weight:700;">📅 SHIFT:</span>
-                        <select id="global-shift-select" onchange="setGlobalShiftDate(this.value)" style="background:#0f172a; color:#38bdf8; border:1px solid #1e293b; font-weight:700; font-size:0.8rem; padding:2px 6px; border-radius:4px; font-family:var(--font-mono); cursor:pointer;">
+                    <div class="header-shift-control" style="display:inline-flex; align-items:center; gap:6px; background:rgba(15,23,42,0.85); border:1px solid #334155; padding:3px 8px; border-radius:6px;" title="Active Operating Shift Date (Uganda East Africa Time)">
+                        <span style="font-size:0.75rem; color:#ffffff; font-weight:700;">📅 SHIFT:</span>
+                        <select id="global-shift-select" onchange="setGlobalShiftDate(this.value)" class="form-select header-shift-select" style="min-height:30px; padding:3px 28px 3px 8px; font-size:0.78rem; font-family:var(--font-mono); font-weight:700; border-radius:4px;">
                             <option value="">Loading shift...</option>
                         </select>
-                        <button type="button" class="btn btn-secondary btn-sm" onclick="setGlobalShiftDate('today')" title="Reset to Live Shift (Today)" style="padding:2px 6px; font-size:0.72rem; line-height:1.2;">Today</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="setGlobalShiftDate('today')" title="Reset to Live Shift (Today)" style="padding:3px 8px; font-size:0.74rem; line-height:1.2; min-height:30px; color:#ffffff;">Today</button>
                     </div>
                 </div>
             </div>
@@ -230,7 +230,7 @@
     <script src="{% static 'core/js/vendor/qrcode.min.js' %}?v=12"></script>
     <script src="{% static 'core/js/state.js' %}?v=12"></script>
     <script src="{% static 'core/js/utils.js' %}?v=12"></script>
-    <script src="{% static 'core/js/navigation.js' %}?v=13"></script>
+    <script src="{% static 'core/js/navigation.js' %}?v=14"></script>
     <script src="{% static 'core/js/tab_dashboard.js' %}?v=12"></script>
     <script src="{% static 'core/js/tab_itms.js' %}?v=12"></script>
     <script src="{% static 'core/js/tab_batches.js' %}?v=9"></script>

@@ -1437,7 +1437,6 @@ async function syncStockScansToServer() {
         }
     }
 }
-}
 
 function renderBlockedPlatesTray() {
     const tray = document.getElementById("stock-blocked-tray");

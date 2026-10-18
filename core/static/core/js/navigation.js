@@ -12,7 +12,7 @@
  * 8: History
  */
 
-let activeNavTab = 1;
+activeNavTab = typeof activeNavTab !== "undefined" ? activeNavTab : 1;
 
 const NAV_TAB_NAMES = {
     1: "dashboard",

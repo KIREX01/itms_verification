@@ -813,6 +813,9 @@ def api_shift_date(request: HttpRequest) -> JsonResponse:
         elif target_str.lower() == "yesterday":
             config_service.set_setting("sync.shift_target_date_mode", "yesterday")
             config_service.set_setting("sync.manual_target_date", "")
+        elif target_str.upper() == "ALL":
+            config_service.set_setting("sync.shift_target_date_mode", "all")
+            config_service.set_setting("sync.manual_target_date", "ALL")
         else:
             parsed_d = date_service.parse_date_input(target_str)
             if parsed_d:

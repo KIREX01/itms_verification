@@ -122,3 +122,15 @@ class DateServiceTestCase(TestCase):
         data_post3 = res_post3.json()
         self.assertTrue(data_post3["success"])
         self.assertEqual(data_post3["active_shift"]["mode"], "today")
+
+        # POST 'ALL'
+        res_post4 = client.post(
+            "/api/settings/shift-date/",
+            data='{"target_date": "ALL"}',
+            content_type="application/json"
+        )
+        self.assertEqual(res_post4.status_code, 200)
+        data_post4 = res_post4.json()
+        self.assertTrue(data_post4["success"])
+        self.assertEqual(data_post4["active_shift"]["suffix"], "ALL")
+        self.assertEqual(data_post4["active_shift"]["formatted_date"], "All Dates")

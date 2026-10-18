@@ -282,6 +282,17 @@ def get_active_shift_info() -> Dict[str, Any]:
     except Exception:
         pass
 
+    if mode == "all" or manual_raw.strip().upper() == "ALL":
+        return {
+            "mode": "all",
+            "manual_date": "ALL",
+            "date": "ALL",
+            "suffix": "ALL",
+            "formatted_date": "All Dates",
+            "display": "All Dates (Aggregate)",
+            "is_today": False,
+        }
+
     return {
         "mode": mode,
         "manual_date": manual_raw,

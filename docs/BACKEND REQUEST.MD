@@ -201,3 +201,37 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
     - `test_spiked_csv_export_content_and_headers`: 100% pass.
     - `test_zero_empty_rows_and_crlf_format`: 100% pass.
     - `test_streaming_export_with_1000_records`: 100% pass.
+
+
+## 6. Feature: Centralized Shift Date Backend Architecture & "ALL" Mode Support - [COMPLETED]
+- **Core Requirements Implemented**:
+  1. **"ALL" Mode / Suffix Backend Support in Date Service**:
+     - Updated `core/services/date_service.py` (`get_active_shift_info`):
+       - Recognizes `mode == "all"` or `manual_date.upper() == "ALL"`.
+       - Returns dictionary payload:
+         ```python
+         {
+             "mode": "all",
+             "manual_date": "ALL",
+             "date": "ALL",
+             "suffix": "ALL",
+             "formatted_date": "All Dates",
+             "display": "All Dates (Aggregate)",
+             "is_today": False,
+         }
+         ```
+  2. **Global Shift Selection API Endpoint Update**:
+     - Updated `core/views/system.py` (`api_shift_date`):
+       - Accepts `POST /api/settings/shift-date/` with `{ "target_date": "ALL" }`.
+       - Persists `sync.shift_target_date_mode="all"` and `sync.manual_target_date="ALL"` in `GlobalConfigService`.
+       - Emits standardized JSON payload containing `active_shift` and `available_dates`.
+  3. **Universal Fallback Across All Operational Endpoints**:
+     - `/api/stock/reconcile/`, `/api/reports/totals/`, `/api/export/report/`, `/api/stock/export/` all fall back cleanly to `date_service.get_active_shift_info()` when no `?date=` or `?suffix=` query parameter is supplied by the frontend.
+     - Preserves full backward compatibility for explicit parameter calls.
+- **Automated Verification**:
+  - `core.tests.test_date_service.DateServiceTestCase`:
+    - Verified `test_api_shift_date_get_and_post`:
+      - `POST {"target_date": "yesterday"}` -> 200 OK, mode="yesterday"
+      - `POST {"target_date": "today"}` -> 200 OK, mode="today"
+      - `POST {"target_date": "ALL"}` -> 200 OK, mode="all", suffix="ALL", formatted_date="All Dates".
+    - Full test suite passed in 1.86s.

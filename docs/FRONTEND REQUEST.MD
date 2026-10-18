@@ -226,3 +226,76 @@ The backend now provides standardized, distinct CSV exports and explicit spiked 
 - Now streams directly as `text/csv; charset=utf-8` using HTTP chunked transfer encoding.
 - Includes UTF-8 BOM (`\xef\xbb\xbf`) and sequential `Row` numbers (1..N).
 - Zero blank spacer rows between records for seamless Excel and spreadsheet processing.
+
+
+## 5. Centralized Shift Date & Shift Selector Migration (Tab Cleanup)
+
+### 5.1 Architecture & Objectives
+To streamline operator workflows and eliminate state desynchronization across the platform, all local shift/date selectors in individual tabs (such as the Stock Tab and Reports Tab) are being migrated to the **top centralized header selector** (`#global-shift-select` in `core/templates/core/base.html`). Individual tabs must no longer maintain independent date dropdowns. Instead, they will:
+1. Rely on `#global-shift-select` as the single source of truth for the active shift date.
+2. Listen for the `shiftDateChanged` window event dispatched by `pipeline.js`.
+3. Display the currently active global shift in their status badge/pill rather than an interactive select.
+4. Auto-populate modal dates (e.g., Stock Inbound Delivery, Ledger Overrides, Email Dispatch) with the active global shift date.
+
+### 5.2 Actions Required by UI/UX & Frontend Developer
+
+#### 1. Stock Tab (`core/templates/core/tabs/tab_stock.html` & `tab_stock.js`)
+- **HTML Cleanup**:
+  - In `tab_stock.html`, remove `<select id="stock-shift-select" ...>`.
+  - Replace it with a read-only shift indicator pill/badge:
+    ```html
+    <div class="stock-shift-pill-container d-flex align-items-center gap-2">
+      <span class="badge badge-dark d-flex align-items-center gap-1 py-2 px-3 fs-6">
+        <i class="fas fa-calendar-alt text-warning"></i>
+        <span>Active Shift:</span>
+        <strong id="stock-active-shift-badge" class="text-info">Loading...</strong>
+      </span>
+    </div>
+    ```
+- **JavaScript Updates (`tab_stock.js`)**:
+  - Remove all event listeners and DOM references attached to `#stock-shift-select`.
+  - Listen for the global shift change event:
+    ```javascript
+    window.addEventListener("shiftDateChanged", function(e) {
+      const activeShift = e.detail; // { suffix, formatted_date, display, is_today, mode }
+      updateStockActiveShiftDisplay(activeShift);
+      loadStockReconciliation(); // Automatically reloads stock data for the new global shift
+    });
+    ```
+  - When opening modals (Delivery Intake modal, Ledger Override modal, Email Dispatch modal):
+    - Default the date input field to `window.activeShiftDateInfo?.suffix || activeShift.suffix`.
+  - In `loadStockReconciliation(shiftSuffix)`:
+    - If no `shiftSuffix` is passed, retrieve from `window.activeShiftDateInfo?.suffix` or let the backend use its active shift fallback by omitting `?date=`.
+
+#### 2. Reports Tab (`core/templates/core/tabs/tab_reports.html` & `tab_reports.js`)
+- **HTML Cleanup**:
+  - In `tab_reports.html`, remove `<select id="report-date-select" ...>`.
+  - Replace with an active shift indicator badge matching the Stock tab styling:
+    ```html
+    <div class="report-shift-pill-container d-flex align-items-center gap-2">
+      <span class="badge badge-dark d-flex align-items-center gap-1 py-2 px-3 fs-6">
+        <i class="fas fa-calendar-alt text-warning"></i>
+        <span>Active Shift:</span>
+        <strong id="report-active-shift-badge" class="text-info">Loading...</strong>
+      </span>
+    </div>
+    ```
+- **JavaScript Updates (`tab_reports.js`)**:
+  - Remove event listeners on `#report-date-select`.
+  - Hook into `shiftDateChanged`:
+    ```javascript
+    window.addEventListener("shiftDateChanged", function(e) {
+      const activeShift = e.detail;
+      updateReportActiveShiftDisplay(activeShift);
+      loadReportTotals(); // Reload report totals and breakdown for the active shift
+    });
+    ```
+  - When triggering exports (`/api/export/report/`, `/api/stock/export/category/...`):
+    - Omit the `?date=` parameter or pass `window.activeShiftDateInfo?.suffix`. When omitted, the backend automatically uses the centralized shift.
+
+#### 3. Global Pipeline Controller (`core/static/core/js/pipeline.js`)
+- In `populateAllShiftDropdowns(availableDates, activeShift)`:
+  - Populate `#global-shift-select` in the header bar.
+  - Ensure the options include an "All Dates (Aggregate)" option (`<option value="ALL">All Dates (Aggregate)</option>`) alongside available shift dates.
+  - Remove DOM population logic for removed IDs (`stock-shift-select`, `report-date-select`).
+  - Cache active shift details on `window.activeShiftDateInfo = activeShift;`.

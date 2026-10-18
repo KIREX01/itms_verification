@@ -5,6 +5,7 @@ All secrets/config are read from environment variables (.env) via django-environ
 See .env.example for the full list of variables this project expects.
 """
 import os
+import sys
 from pathlib import Path
 import environ
 
@@ -132,8 +133,9 @@ SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
 
 # SSL Redirect & HSTS
-SECURE_SSL_REDIRECT = safe_env_bool("SECURE_SSL_REDIRECT", default=not DEBUG)
-if not DEBUG:
+IS_TESTING = "test" in sys.argv or any("test" in arg for arg in sys.argv)
+SECURE_SSL_REDIRECT = False if IS_TESTING else safe_env_bool("SECURE_SSL_REDIRECT", default=not DEBUG)
+if not DEBUG and not IS_TESTING:
     SECURE_HSTS_SECONDS = safe_env_int("SECURE_HSTS_SECONDS", default=31536000)  # 1 year
     SECURE_HSTS_INCLUDE_SUBDOMAINS = safe_env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=True)
     SECURE_HSTS_PRELOAD = safe_env_bool("SECURE_HSTS_PRELOAD", default=True)

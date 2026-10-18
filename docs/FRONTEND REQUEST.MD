@@ -631,3 +631,56 @@ This transition aligns with our domain `close.kirex.online`, insulates operation
    - **Batches (`tab_batches.html`)**: Batch scope pills (`Today's Batches`, `Active Batch`, `Prior Carryover`, `All Batches`) remain visible; search field, density switcher, expand/collapse utilities, and upload/camera buttons collapse into `#batches-filter-drawer`.
    - **Reports (`tab_reports.html`)**: Active shift badge and Scope toggle (`📅 Scope [D]`) remain visible; Refresh, Sync Shift Orders, Shift Reconciliation, Stock Kit Sync, and categorized CSV exports collapse into `#reports-filter-drawer`.
 
+
+
+---
+
+## 12. Senior Developer Code Review & Rectification Request (Shift Date Selectors & Desktop Toolbar Regressions)
+
+### 12.1 Code Review Verdict & Architectural Findings
+- **Status**: ⚠️ **Changes Required (Design & Layout Regressions Identified)**
+- **Review Date**: Mon Oct 19, 2026
+- **Auditor**: Senior Backend & Systems Architect
+
+#### 1. Shift Date Selector Proliferation & Clutter
+- **Finding**: The implementation created 3 separate `<select>` dropdowns for the operating shift date:
+  1. Desktop header: `#global-shift-select` in `base.html` (inside `.header-controls.desktop-badges`, hidden on mobile $\le 992\text{px}$).
+  2. Mobile header strip: `#mobile-global-shift-select` pinned beneath the header via `.mobile-shift-strip` on viewports $\le 992\text{px}$.
+  3. Drawer: `#drawer-global-shift-select` in the off-canvas hamburger drawer.
+- **Defects & Anti-Patterns**:
+  - **Screen Real Estate Violation on Mobile**: The persistent `.mobile-shift-strip` takes up 44px of vertical height permanently pinned beneath the header on every single tab. On mobile screens (where viewport height is already constrained to 667–844px), consuming nearly 100px for headers pushes operational table rows off-screen, directly canceling out the benefits of collapsing secondary filters!
+  - **Triplication of DOM & Synchronization**: Managing 3 DOM dropdowns and keeping their state in sync across `pipeline.js` (`populateAllShiftDropdowns`, `syncAllDateSelectorsUI`) introduces unnecessary fragility.
+- **Architectural Decision**:
+  - Remove the pinned `.mobile-shift-strip` from `base.html` and `app_layout.css`.
+  - Place the primary shift date selector on the **Executive Dashboard** (`tab_dashboard.html`) at the top inside `.dash-shift-banner`, where shift telemetry and daily KPIs are managed.
+  - On the desktop header, keep the single canonical `#global-shift-select`.
+  - On the mobile hamburger drawer, retain `#drawer-global-shift-select` as a clean secondary access point without cluttering the main viewport.
+
+#### 2. Filter Funnel Desktop Toolbar Regressions
+- **Finding**: While `.mobile-filter-funnel-btn` is hidden on viewports $> 768\text{px}$ via `display: none !important;`, wrapping secondary tools inside `<div class="collapsible-filter-drawer" style="width:100%;">` caused desktop toolbars to split into **two stacked vertical rows**:
+  - **History Tab (`tab_history.html`)**: Filter chips are on row 1; the search box was pushed into row 2. (Originally sat side-by-side on 1 row).
+  - **Reports Tab (`tab_reports.html`)**: Active shift badge is on row 1; all 5 action buttons (Refresh, Sync, Reconcile, Kits, CSVs) were pushed into row 2.
+  - **ITMS Tab (`tab_itms.html`)**: Source toggle is on row 1; sync actions were pushed into row 2.
+  - **Queue Tab (`tab_queue.html`)**: Status pills are on row 1; search, batch, and scope pills were pushed into row 2.
+  - **Stock Tab (`tab_stock.html`)**: Mode 1-4 buttons are on row 1; universal command bar was pushed into row 2.
+- **Defects & Anti-Patterns**:
+  - On desktop displays (1920×1080), horizontal screen space is abundant. Forcing toolbars into two stacked rows consumes extra vertical room and pushes data tables down on desktop.
+  - In `app_layout.css:380`, `.collapsible-filter-drawer` on desktop only defines `display: flex;` with no flex direction or inline layout integration, resulting in layout breakage.
+- **Architectural Decision**:
+  - On desktop ($> 768\text{px}$), `.collapsible-filter-drawer` must render transparently / inline (`display: contents;` or inline flex flow) so all controls remain on **one single horizontal toolbar row** matching the original desktop design.
+  - The collapsible drawer and funnel button behavior must be **strictly isolated to mobile viewports ($\le 768\text{px}$)**.
+
+---
+
+### 12.2 Action Items for Frontend Developer
+1. **Remove `.mobile-shift-strip`**:
+   - Delete `.mobile-shift-strip` from `core/templates/core/base.html`.
+   - Remove its CSS rules from `core/static/core/css/app_layout.css`.
+2. **Move Mobile Shift Selector to Dashboard Top Banner**:
+   - Embed the shift selector control into `core/templates/core/tabs/tab_dashboard.html` inside `.dash-shift-banner` for mobile viewports.
+   - Ensure the hamburger drawer selector (`#drawer-global-shift-select`) remains functional for off-canvas access.
+3. **Restore Single-Row Desktop Toolbars**:
+   - In `app_layout.css`, style `.collapsible-filter-drawer` for desktop ($> 768\text{px}$) with `display: contents;` (or flex inline) so child inputs, buttons, and badges flow seamlessly on the same row as the subnav pills without taking up two rows.
+   - Verify all 6 tabs (Queue, History, ITMS, Stock, Batches, Reports) on desktop: toolbars must fit on 1 row with maximum vertical height reserved for tables.
+4. **Preserve Valid Features**:
+   - Keep Quick Install Modal (`tab_orders.html`, `tab_orders.js`) and Mobile Companion Mode 4 (`mobile_companion.html`, `mobile_companion.js`) intact—these components are verified and operational.

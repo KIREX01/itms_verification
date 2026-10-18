@@ -2387,8 +2387,9 @@ function initMobileCompanion() {
 }
 
 // ============================================================================
-// MODE 4: Quick Walk-in Order Installation Handlers
+// Mode 4: Single Order Quick Fitment & Submission
 // ============================================================================
+
 window.MobileOrderState = {
     currentOrder: null,
     frontPhotoFile: null,
@@ -2403,8 +2404,13 @@ async function loadMobilePendingOrdersList() {
         const resp = await fetch("/api/itms/orders/?source=auto&tab=active", {
             headers: { Accept: "application/json" }
         });
+        if (!resp.ok) {
+            console.warn("[MobileCompanion] Active orders endpoint returned status:", resp.status);
+            return;
+        }
         const data = await resp.json();
         if (data && data.success && Array.isArray(data.orders)) {
+            const currentSelected = window.MobileOrderState?.currentOrder?.order_number || "";
             picker.innerHTML = `<option value="">-- Tap to Select Active Order (${data.orders.length} available) --</option>`;
             data.orders.forEach(o => {
                 const opt = document.createElement("option");
@@ -2413,11 +2419,49 @@ async function loadMobilePendingOrdersList() {
                 const st = o.order_status || o.status || "Pending";
                 opt.value = num || plate;
                 opt.textContent = `${plate} — #${num} (${st})`;
+                if (currentSelected && (num === currentSelected || plate === currentSelected)) {
+                    opt.selected = true;
+                }
                 picker.appendChild(opt);
             });
         }
     } catch (e) {
         console.warn("[MobileCompanion] Error loading active orders:", e);
+    }
+}
+
+function clearSelectedMobileOrder() {
+    window.MobileOrderState.currentOrder = null;
+    window.MobileOrderState.frontPhotoFile = null;
+    window.MobileOrderState.rearPhotoFile = null;
+
+    const profileCard = document.getElementById("m-order-profile-card");
+    if (profileCard) profileCard.style.display = "none";
+
+    const sInput = document.getElementById("m-order-search-input");
+    if (sInput) sInput.value = "";
+
+    const picker = document.getElementById("m-order-picker-select");
+    if (picker) picker.value = "";
+
+    const fInput = document.getElementById("m-order-front-serial");
+    const rInput = document.getElementById("m-order-rear-serial");
+    const gInput = document.getElementById("m-order-gps-id");
+    if (fInput) fInput.value = "";
+    if (rInput) rInput.value = "";
+    if (gInput) gInput.value = "";
+
+    resetMobileOrderPhotoDropzone("front");
+    resetMobileOrderPhotoDropzone("rear");
+
+    try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("order");
+        url.searchParams.delete("order_number");
+        url.searchParams.delete("plate");
+        window.history.replaceState({}, "", url.toString());
+    } catch (e) {
+        // ignore
     }
 }
 
@@ -2444,7 +2488,7 @@ async function lookupMobileOrder(targetQuery) {
         const data = await resp.json();
 
         if (!data.success) {
-            showToastNotification(data.error || "Order not found.", "error");
+            showToastNotification(data.error || "Order not found in registry.", "error");
             return;
         }
 
@@ -2454,7 +2498,10 @@ async function lookupMobileOrder(targetQuery) {
 
         const o = data.order || {};
         const profileCard = document.getElementById("m-order-profile-card");
-        if (profileCard) profileCard.style.display = "flex";
+        if (profileCard) {
+            profileCard.style.display = "flex";
+            profileCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
 
         const plateEl = document.getElementById("m-order-plate");
         const numLabel = document.getElementById("m-order-num-label");
@@ -2468,8 +2515,23 @@ async function lookupMobileOrder(targetQuery) {
         if (whBadge) whBadge.innerText = o.warehouse_name || "AGM Bond";
 
         if (stageBadge) {
-            stageBadge.className = "badge badge-green";
-            stageBadge.innerText = data.stage || "Ready";
+            const rawStage = data.stage || o.status || "STAGE_1";
+            stageBadge.style.display = "inline-block";
+            stageBadge.className = (rawStage.includes("CONFIRM") || rawStage.includes("INSTALLED") || rawStage.includes("SUBMIT"))
+                ? "badge badge-green"
+                : "badge badge-primary";
+            stageBadge.innerText = rawStage.replace("STAGE_", "STEP ");
+        }
+
+        // Sync dropdown picker if options exist
+        const picker = document.getElementById("m-order-picker-select");
+        if (picker) {
+            for (let opt of picker.options) {
+                if (opt.value && (opt.value === o.order_number || opt.value === o.registration_number)) {
+                    picker.value = opt.value;
+                    break;
+                }
+            }
         }
 
         // Prepopulate hardware inputs
@@ -2481,16 +2543,26 @@ async function lookupMobileOrder(targetQuery) {
         if (rInput) rInput.value = o.rear_plate_serial || "";
         if (gInput) gInput.value = o.gps_tracker_id || "";
 
-        // Reset previews
+        // Reset photo dropzones
         resetMobileOrderPhotoDropzone("front");
         resetMobileOrderPhotoDropzone("rear");
 
         if (data.existing_pair) {
             if (data.existing_pair.front_image_url) {
                 setMobilePhotoPreview("front", data.existing_pair.front_image_url);
+                const frontStat = document.getElementById("m-front-status");
+                if (frontStat) {
+                    frontStat.className = "badge badge-info";
+                    frontStat.innerText = "✓ ITMS Vault";
+                }
             }
             if (data.existing_pair.rear_image_url) {
                 setMobilePhotoPreview("rear", data.existing_pair.rear_image_url);
+                const rearStat = document.getElementById("m-rear-status");
+                if (rearStat) {
+                    rearStat.className = "badge badge-info";
+                    rearStat.innerText = "✓ ITMS Vault";
+                }
             }
         }
 
@@ -2513,23 +2585,23 @@ async function saveMobileStep1() {
         return;
     }
 
-    const btn = document.getElementById("btn-m-save-step1");
-    if (btn) {
-        btn.disabled = true;
-        btn.innerText = "Saving...";
-    }
-
     const fSerial = (document.getElementById("m-order-front-serial")?.value || "").trim();
     const rSerial = (document.getElementById("m-order-rear-serial")?.value || "").trim();
     const gId = (document.getElementById("m-order-gps-id")?.value || "").trim();
-    const isDryRun = document.getElementById("m-order-dry-run-chk")?.checked ?? true;
 
     const fd = new FormData();
     fd.append("action", "save_step1");
     fd.append("front_plate_id", fSerial);
     fd.append("rear_plate_id", rSerial);
     fd.append("tracker_id", gId);
-    fd.append("dry_run", isDryRun ? "true" : "false");
+    fd.append("dry_run", "true");
+
+    const btn = document.getElementById("btn-m-save-step1");
+    const origText = btn ? btn.innerHTML : "";
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span class="spinner-border spinner-border-sm"></span> Saving...`;
+    }
 
     try {
         const resp = await fetch(`/api/itms/orders/${encodeURIComponent(o.order_number)}/install/`, {
@@ -2539,21 +2611,22 @@ async function saveMobileStep1() {
         });
         const res = await resp.json();
         if (res.success) {
-            showToastNotification("Step 1 Hardware Serials saved!", "success");
+            showToastNotification("Step 1 saved to ITMS! Proceed with photos.", "success");
             const stageBadge = document.getElementById("m-order-stage-badge");
             if (stageBadge) {
-                stageBadge.className = "badge badge-blue";
-                stageBadge.innerText = res.stage || "STAGE_2_EVIDENCE";
+                stageBadge.className = "badge badge-primary";
+                stageBadge.innerText = "STEP 2";
             }
         } else {
             showToastNotification(res.error || "Failed to save Step 1.", "error");
         }
-    } catch (err) {
-        showToastNotification("Network error saving Step 1.", "error");
+    } catch (e) {
+        console.error("[MobileOrder] saveStep1 error:", e);
+        showToastNotification("Network error saving hardware.", "error");
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.innerText = "💾 Save Step 1";
+            btn.innerHTML = origText;
         }
     }
 }
@@ -2701,11 +2774,13 @@ async function submitMobileOrderInstall() {
 }
 
 window.loadMobilePendingOrdersList = loadMobilePendingOrdersList;
+window.clearSelectedMobileOrder = clearSelectedMobileOrder;
 window.lookupMobileOrder = lookupMobileOrder;
 window.saveMobileStep1 = saveMobileStep1;
 window.triggerMobileOrderPhoto = triggerMobileOrderPhoto;
 window.onMobileOrderPhotoPicked = onMobileOrderPhotoPicked;
 window.submitMobileOrderInstall = submitMobileOrderInstall;
+
 
 if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", initMobileCompanion);

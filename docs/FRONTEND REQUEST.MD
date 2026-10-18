@@ -684,3 +684,23 @@ This transition aligns with our domain `close.kirex.online`, insulates operation
    - Verify all 6 tabs (Queue, History, ITMS, Stock, Batches, Reports) on desktop: toolbars must fit on 1 row with maximum vertical height reserved for tables.
 4. **Preserve Valid Features**:
    - Keep Quick Install Modal (`tab_orders.html`, `tab_orders.js`) and Mobile Companion Mode 4 (`mobile_companion.html`, `mobile_companion.js`) intact—these components are verified and operational.
+
+### 12.3 Resolution & Verification Summary
+- **Status**: ✅ **RESOLVED & VERIFIED**
+- **Date**: Mon Oct 19, 2026
+- **Changes Applied**:
+  1. **Shift Date Selector Architecture Rectified**:
+     - Removed `.mobile-shift-strip` from `core/templates/core/base.html` and deleted its CSS rules from `core/static/core/css/app_layout.css`. Mobile viewports reclaim 44px of vertical screen real estate for operational data tables.
+     - Added `#dash-global-shift-select` into `.dash-shift-banner` in `core/templates/core/tabs/tab_dashboard.html` alongside a "Today" quick-reset button. Operating shift date is cleanly controlled directly from the Executive Dashboard.
+     - Retained canonical `#global-shift-select` on the desktop header and `#drawer-global-shift-select` in the off-canvas hamburger drawer.
+     - Updated `pipeline.js` (`populateAllShiftDropdowns`, `syncAllDateSelectorsUI`) to synchronize all shift selectors seamlessly.
+  2. **Desktop 1-Row Toolbars Restored**:
+     - Configured `@media (min-width: 769px) { .collapsible-filter-drawer { display: contents !important; } ... }` in `app_layout.css`.
+     - Removed inline `width:100%` overrides from `tab_history.html`, `tab_reports.html`, `tab_itms.html`, `tab_batches.html`, `tab_stock.html`, and `tab_queue.html`.
+     - All 6 tabs now render on **1 single compact horizontal row** on desktop screens (> 768px), maximizing vertical table space while strictly isolating the collapsible drawer and funnel icon to mobile screens (≤ 768px).
+  3. **Preserved Features**:
+     - Quick Install Modal (`tab_orders.html`, `tab_orders.js`) and Mobile Companion Mode 4 (`mobile_companion.html`, `mobile_companion.js`) remain 100% operational.
+  4. **Verification**:
+     - Django check: `System check identified no issues (0 silenced)`.
+     - Static collection: `6 static files copied to 'staticfiles', 163 unmodified`.
+     - Automated test suite: `Ran 55 tests in 84.029s, OK (skipped=1)`.

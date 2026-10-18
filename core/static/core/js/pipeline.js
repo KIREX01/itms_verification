@@ -617,7 +617,7 @@ window.populateAllShiftDropdowns = function(dates, activeShift) {
     const activeSfx = activeShift ? activeShift.suffix : "";
 
     // Top Centralized Header & Mobile Selectors
-    const shiftSelects = document.querySelectorAll("select.header-shift-select, #global-shift-select, #mobile-global-shift-select, #drawer-global-shift-select");
+    const shiftSelects = document.querySelectorAll("select.header-shift-select, #global-shift-select, #dash-global-shift-select, #drawer-global-shift-select");
     shiftSelects.forEach(sel => {
         const currentSelected = sel.value || activeSfx;
         sel.innerHTML = "";
@@ -707,7 +707,7 @@ window.syncAllDateSelectorsUI = function(shiftInfo) {
     const shiftLabel = shiftInfo.formatted_date ? `${shiftInfo.formatted_date} (${sfx})` : (shiftInfo.display || sfx || "Live Shift");
 
     // Synchronize all shift selectors across desktop and mobile header/drawer
-    const shiftSelects = document.querySelectorAll("select.header-shift-select, #global-shift-select, #mobile-global-shift-select, #drawer-global-shift-select");
+    const shiftSelects = document.querySelectorAll("select.header-shift-select, #global-shift-select, #dash-global-shift-select, #drawer-global-shift-select");
     shiftSelects.forEach(sel => {
         if (sfx) {
             sel.value = sfx;

@@ -8,6 +8,14 @@
                 <span class="dash-shift-date" id="dash-shift-date-text">Shift: Loading...</span>
                 <span class="dash-shift-summary" id="dash-shift-summary-text">Loading today's metrics...</span>
             </div>
+            <!-- Dashboard Operating Shift Date Selector (Central Shift Telemetry) -->
+            <div class="dash-shift-selector-wrap" style="display:inline-flex; align-items:center; gap:8px;">
+                <span style="font-size:0.75rem; color:#ffffff; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">📅 Shift:</span>
+                <select id="dash-global-shift-select" class="form-select header-shift-select" onchange="setGlobalShiftDate(this.value)" style="min-height:32px; padding:3px 28px 3px 8px; font-size:0.8rem; font-family:var(--font-mono); font-weight:700; background:#0f172a; color:#ffffff; border:1px solid #334155; border-radius:6px;" aria-label="Active Operating Shift Date">
+                    <option value="">Loading shift...</option>
+                </select>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="setGlobalShiftDate('today')" title="Reset to Live Shift (Today)" style="min-height:32px; padding:3px 10px; font-size:0.75rem; font-weight:700; color:#ffffff;">Today</button>
+            </div>
             <div class="dash-view-toggle">
                 <span class="dash-toggle-label">VIEW MODE:</span>
                 <div class="scope-pills-group">

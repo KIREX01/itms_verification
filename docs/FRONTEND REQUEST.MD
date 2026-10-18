@@ -378,3 +378,159 @@ renderQueueList();
 // With:
 renderQueueCards();
 ```
+
+
+## 8. Brand Transition to "CLOSE Copilot" (Phase 1: Surface & Frontend Rebranding) - [PENDING FRONTEND ACTION]
+
+### 8.1 Context & Strategic Objectives
+The platform is transitioning its user-facing brand identity from *"ITMS Verification Copilot"* to **`CLOSE Copilot`** with the official tagline:
+> **"Focus on plate audit, inspection, and inventory"**
+
+This transition aligns with our domain `close.kirex.online`, insulates operational workflows, and eliminates misrepresentation risks prior to formal central procurement.
+
+**Strict Boundaries for Phase 1**:
+- **Scope**: Frontend templates, headers, page titles, meta tags, and footers only.
+- **Unchanged**: All backend logic, REST APIs, internal database models, and the **ITMS Registry Tab (`tab_itms.html`)** remain untouched and fully functional.
+
+---
+
+### 8.2 Checklist of Required Template Updates
+
+#### 1. Global Shell & Navigation (`core/templates/core/base.html`)
+- **Page `<title>`**:
+  ```html
+  <title>{% block title %}CLOSE Copilot | Plate Audit & Inspection Platform{% endblock %}</title>
+  ```
+- **Social & Open Graph Metadata**:
+  - `meta[property="og:site_name"]`: `content="CLOSE Copilot"`
+  - `meta[property="og:title"]`: `content="CLOSE Copilot - Plate Audit, Inspection & Inventory"`
+  - `meta[property="og:description"]`: `content="Depot plate audit, vehicle evidence inspection, and hardware inventory management."`
+  - `meta[name="twitter:title"]`: `content="CLOSE Copilot - Plate Audit, Inspection & Inventory"`
+  - `meta[name="twitter:description"]`: `content="Depot plate audit, vehicle evidence inspection, and hardware inventory management."`
+- **Header Brand Section (`.brand-section .brand-titles`)**:
+  ```html
+  <div class="brand-titles">
+      <span class="brand-name">CLOSE <span class="accent">COPILOT</span></span>
+      <span class="brand-sub">Focus on plate audit, inspection, and inventory</span>
+  </div>
+  ```
+- **Application Footer (`.app-footer`)**:
+  - Replace:
+    ```html
+    <span>Uganda National ITMS Verification Copilot • v2.6</span>
+    ```
+  - With:
+    ```html
+    <span>CLOSE Copilot • Depot Verification & Inventory Platform • v2.6</span>
+    ```
+
+---
+
+#### 2. Operator Authentication Suite
+
+##### A. Sign In (`core/templates/core/login.html`)
+- **Page `<title>`**:
+  ```html
+  <title>Sign In - CLOSE Copilot</title>
+  ```
+- **Metadata**:
+  - `meta[property="og:site_name"]`: `content="CLOSE Copilot"`
+  - `meta[property="og:title"]`: `content="Sign In - CLOSE Copilot"`
+  - `meta[property="og:description"]`: `content="Depot plate audit, vehicle evidence inspection, and hardware inventory management."`
+- **Header Branding (`.auth-card-head`)**:
+  ```html
+  <h1 style="font-size:1.35rem; font-weight:800; color:#ffffff; letter-spacing:0.5px;">
+      CLOSE <span style="color:var(--ug-yellow);">COPILOT</span>
+  </h1>
+  <p style="font-size:0.75rem; color:var(--ug-text-muted); margin-top:2px;">
+      Focus on plate audit, inspection, and inventory • Operator Sign In
+  </p>
+  ```
+
+##### B. Sign Up (`core/templates/core/signup.html`)
+- **Page `<title>`**:
+  ```html
+  <title>Create Operator Account - CLOSE Copilot</title>
+  ```
+- **Metadata**:
+  - `meta[property="og:site_name"]`: `content="CLOSE Copilot"`
+  - `meta[property="og:title"]`: `content="Create Operator Account - CLOSE Copilot"`
+- **Header Branding (`.auth-card-head`)**:
+  ```html
+  <h1 style="font-size:1.35rem; font-weight:800; color:#ffffff; letter-spacing:0.5px; margin:0;">
+      CLOSE <span style="color:var(--ug-yellow);">COPILOT</span>
+  </h1>
+  <p style="font-size:0.75rem; color:var(--ug-text-muted); margin-top:4px;">
+      Focus on plate audit, inspection, and inventory • Create Account
+  </p>
+  ```
+
+##### C. 2FA Security Code Verification (`core/templates/core/signup_verify.html`)
+- **Page `<title>`**:
+  ```html
+  <title>Verify Security Code - CLOSE Copilot</title>
+  ```
+- **Metadata**:
+  - `meta[property="og:site_name"]`: `content="CLOSE Copilot"`
+  - `meta[property="og:title"]`: `content="Verify Security Code - CLOSE Copilot"`
+- **Header Branding (`.auth-card-head`)**:
+  ```html
+  <h1 style="font-size:1.35rem; font-weight:800; color:#ffffff; letter-spacing:0.5px; margin:0;">
+      CLOSE <span style="color:var(--ug-yellow);">COPILOT</span>
+  </h1>
+  <p style="font-size:0.75rem; color:var(--ug-text-muted); margin-top:4px;">
+      Two-Factor Authentication • Security Code Verification
+  </p>
+  ```
+
+---
+
+#### 3. Mobile Companion Scanner (`core/templates/core/mobile_companion.html`)
+- **Page `<title>`**:
+  ```html
+  <title>CLOSE Mobile Scanner - Rapid Plate & Barcode Capture</title>
+  ```
+- **Metadata**:
+  - `meta[property="og:site_name"]`: `content="CLOSE Mobile Scanner"`
+  - `meta[property="og:title"]`: `content="CLOSE Mobile Companion - Rapid Evidence & Barcode Capture"`
+  - `meta[property="og:description"]`: `content="Mobile evidence capture, barcode validation, and depot inspection assistant."`
+- **Mobile Header (`.header-branding`)**:
+  ```html
+  <div>
+      <h1 class="brand-title">CLOSE MOBILE SCANNER</h1>
+      <div class="brand-subtitle">
+          PLATE AUDIT & INSPECTION COMPANION
+          {% if is_cloud_sync %}<span style="color:#10b981; font-weight:800; font-size:0.68rem; margin-left:4px;">• ☁️ CLOUD SYNCED</span>{% endif %}
+      </div>
+  </div>
+  ```
+
+---
+
+#### 4. Settings View & System Banner (`core/templates/core/tabs/tab_settings.html`)
+- In the System Diagnostics / About card (around line 265):
+  - Replace:
+    ```html
+    Running ITMS Verification Copilot v{{ app_version|default:"1.0.2" }}. Updates are distributed via GitHub Releases.
+    ```
+  - With:
+    ```html
+    Running CLOSE Copilot v{{ app_version|default:"1.0.8" }}. Updates are distributed via GitHub Releases.
+    ```
+
+---
+
+#### 5. Web App Manifest (`core/static/core/logos/site.webmanifest`)
+- Update application display names:
+  ```json
+  {
+    "name": "CLOSE Copilot - Plate Audit & Inspection",
+    "short_name": "CLOSE Copilot"
+  }
+  ```
+
+---
+
+#### 6. Preservation of ITMS Registry Tab (`core/templates/core/tabs/tab_itms.html`)
+- **DO NOT MODIFY** the title, layout, or functional sync controls of `tab_itms.html`.
+- The Registry tab continues to represent the external ITMS order synchronization interface as requested.

@@ -1,10 +1,16 @@
 from django.urls import path
+from django.views.generic.base import RedirectView
 
 from core import views, views_mobile
 
 app_name = "core"
 
 urlpatterns = [
+    # Static Assets & Metadata Direct Routing
+    path("favicon.ico", RedirectView.as_view(url="/static/core/logos/favicon.ico", permanent=True)),
+    path("apple-touch-icon.png", RedirectView.as_view(url="/static/core/logos/apple-touch-icon.png", permanent=True)),
+    path("site.webmanifest", RedirectView.as_view(url="/static/core/logos/site.webmanifest", permanent=True)),
+
     # Authentication & Operator Onboarding
     path("login/", views.login_view, name="login"),
     path("signup/", views.signup_view, name="signup"),
@@ -45,6 +51,7 @@ urlpatterns = [
     path("api/stream/events/", views.api_stream_events, name="api_stream_events"),
     path("api/submissions/batch/", views.api_batch_submit, name="api_batch_submit"),
     path("api/export/report/", views.api_export_report, name="api_export_report"),
+    path("api/history/export/", views.api_export_report, name="api_export_history_csv"),
     path("api/settings/", views.api_settings, name="api_settings"),
     path("api/settings/shift-date/", views.api_shift_date, name="api_shift_date"),
     path("api/settings/toggle-dry-run/", views.api_toggle_dry_run, name="api_toggle_dry_run"),

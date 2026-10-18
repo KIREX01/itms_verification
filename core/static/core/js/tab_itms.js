@@ -259,7 +259,6 @@ function switchItmsSubview(subview) {
                 <th class="hide-mobile" style="width:140px;">Warehouse</th>
                 <th class="hide-mobile" style="width:130px;">Officer</th>
                 <th class="hide-mobile" style="width:130px;">Date</th>
-                <th style="width:110px; text-align:center;">Action</th>
             </tr>`;
         }
     }
@@ -315,7 +314,7 @@ async function fetchItmsExplorerOrders() {
 
     const tbody = document.getElementById("itms-explorer-tbody");
     const labelKind = (tabName === "kits") ? "installation kits" : `${tabName} orders`;
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:30px; color:var(--ug-text-muted);">
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--ug-text-muted);">
         Fetching ${labelKind} from ${itmsExplorerSource.toUpperCase()}...
     </td></tr>`;
 
@@ -356,7 +355,7 @@ async function fetchItmsExplorerOrders() {
 function renderItmsOrdersTable(items) {
     const tbody = document.getElementById("itms-explorer-tbody");
     if (!items || items.length === 0) {
-        const colCount = 8;
+        const colCount = 7;
         tbody.innerHTML = `<tr><td colspan="${colCount}" style="text-align:center; padding:40px; color:var(--ug-text-dim);">
             No records found matching criteria.
         </td></tr>`;
@@ -415,11 +414,6 @@ function renderItmsOrdersTable(items) {
             <td class="hide-mobile"><span style="font-size:0.75rem; color:var(--ug-text-muted);">${wh}</span></td>
             <td class="hide-mobile"><span style="font-size:0.75rem; color:var(--ug-text-muted);">${officer}</span></td>
             <td class="hide-mobile"><span style="font-size:0.75rem; color:var(--ug-text-dim);">${date}</span></td>
-            <td style="text-align:center;">
-                <button type="button" class="btn btn-xs btn-primary gap-1" onclick="event.stopPropagation(); openOrderInstallModal('${orderNum}')" title="Quick Install Order" style="padding: 3px 8px; font-size: 0.72rem; font-weight: 700; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; background: #2563eb; border: 1px solid #3b82f6; border-radius: 4px; color: #ffffff; cursor: pointer;">
-                    ⚡ Quick Install
-                </button>
-            </td>
         </tr>`;
     }).join("");
 }
@@ -521,6 +515,22 @@ function openItmsOrderDetailsModal(order) {
             kitLink.href = detailUrl;
         } else {
             kitLink.style.display = "none";
+        }
+    }
+
+    // Quick Install button at bottom of details modal
+    const modalQuickInstallBtn = document.getElementById("btn-modal-itms-quick-install");
+    if (modalQuickInstallBtn) {
+        if (!isKit && order && order.order_number) {
+            modalQuickInstallBtn.style.display = "inline-flex";
+            modalQuickInstallBtn.onclick = () => {
+                closeModal("modal-itms-order-details");
+                if (typeof window.openOrderInstallModal === "function") {
+                    window.openOrderInstallModal(order.order_number);
+                }
+            };
+        } else {
+            modalQuickInstallBtn.style.display = "none";
         }
     }
 

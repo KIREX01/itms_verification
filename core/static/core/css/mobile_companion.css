@@ -273,13 +273,20 @@ body {
 /* Mode Switcher Bar */
 .mode-selector-bar {
     display: flex;
-    gap: 6px;
-    padding: 10px 16px;
+    gap: 8px;
+    padding: 10px 14px;
     background: var(--ug-black);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+.mode-selector-bar::-webkit-scrollbar {
+    display: none;
 }
 
 .mode-btn {
-    flex: 1;
+    flex: 1 0 auto;
+    white-space: nowrap;
     display: flex;
     align-items: center;
     justify-content: center;

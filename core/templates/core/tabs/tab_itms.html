@@ -252,7 +252,6 @@
                                 <th class="hide-mobile" style="width:140px;">Warehouse</th>
                                 <th class="hide-mobile" style="width:130px;">Officer</th>
                                 <th class="hide-mobile" style="width:130px;">Date</th>
-                                <th style="width:110px; text-align:center;">Action</th>
                             </tr>
                         </thead>
                         <tbody id="itms-explorer-tbody">
@@ -287,14 +286,11 @@
                 <div class="inspector-header">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                         <div class="inspector-plate-hero" id="itms-insp-plate">SELECT AN ORDER</div>
-                        <button type="button" class="btn btn-secondary btn-sm" onclick="openCurrentOrderInModal()" title="View in Pop Modal" style="font-size:0.75rem; color:#ffffff;">
-                            ⛶ Pop Modal
+                        <button type="button" class="btn btn-primary btn-sm" id="btn-itms-insp-quick-install" onclick="openCurrentOrderInInstallModal()" title="Quick Install Order" style="display:none; font-size:0.8rem; font-weight:800; padding:6px 14px; background:#2563eb; border:1px solid #3b82f6; border-radius:6px; color:#ffffff; align-items:center; gap:6px; box-shadow:0 0 10px rgba(37,99,235,0.4); cursor:pointer;">
+                            ⚡ Quick Install
                         </button>
                     </div>
                     <div class="inspector-order-num" id="itms-insp-order">Click an order on the left to inspect telematics &amp; photo links</div>
-                    <button type="button" class="btn btn-primary" id="btn-itms-insp-quick-install" onclick="openCurrentOrderInInstallModal()" style="display:none; width:100%; margin-top:8px; font-weight:800; font-size:0.82rem; justify-content:center; gap:6px; background:#2563eb; border:1px solid #3b82f6;">
-                        ⚡ Quick Install Order
-                    </button>
                 </div>
 
                 <!-- Hardware & Telematics Inventory -->

@@ -1,13 +1,8 @@
-
-.mobile-util-row, .mobile-primary-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-}
 /* ============================================================================
    TAB 3: INGESTION & BATCHES (Full-Scale Stream & Expandable Headers)
-   Features: Full-width batches feed, accordion minimization, full-scale photos
+   Features: Full-width batches feed, high-resolution direct photo inspection,
+   density mode toggles (Large Stream vs Grid), in-card magnification,
+   tactile evidence photo replacement, and mobile-optimized touch controls.
    ============================================================================ */
 
 .batches-pane-container {
@@ -21,6 +16,9 @@
     min-height: 0;
 }
 
+/* ----------------------------------------------------------------------------
+   Header & Toolbar
+   ---------------------------------------------------------------------------- */
 .batches-header-bar {
     display: flex;
     align-items: center;
@@ -29,35 +27,183 @@
     border: 1px solid var(--ug-border);
     border-radius: var(--radius-lg);
     padding: 12px 18px;
-    gap: 12px;
+    gap: 14px;
     flex-wrap: wrap;
     flex-shrink: 0;
+}
+
+.batches-header-title-block h3 {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #ffffff !important;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
 }
 
 .batches-toolbar-controls {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     flex-wrap: wrap;
+}
+
+.batch-search-wrap {
+    display: flex;
+    align-items: center;
 }
 
 .batch-search-field {
     background-color: var(--ug-black-surface);
     border: 1px solid var(--ug-border);
     border-radius: var(--radius-md);
-    color: #ffffff;
-    font-size: 0.78rem;
-    padding: 7px 12px;
-    width: 250px;
+    color: #ffffff !important;
+    font-size: 0.8rem;
+    padding: 8px 14px;
+    width: 260px;
     outline: none;
-    transition: border-color 0.15s ease;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.batch-search-field::placeholder {
+    color: rgba(255, 255, 255, 0.55);
 }
 
 .batch-search-field:focus {
-    border-color: var(--ug-yellow);
+    border-color: rgba(255, 255, 255, 0.5);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
 }
 
-/* Full-Width Batches Scrollable Stream */
+/* Density / Layout Mode Switcher */
+.batch-density-toggle-group {
+    display: inline-flex;
+    align-items: center;
+    background: #0d121c;
+    border: 1px solid var(--ug-border);
+    border-radius: var(--radius-md);
+    padding: 2px;
+    gap: 2px;
+}
+
+.density-toggle-btn {
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.7) !important;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.density-toggle-btn:hover {
+    color: #ffffff !important;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.density-toggle-btn.active {
+    background: #1f293d;
+    color: #ffffff !important;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.batch-util-actions,
+.batch-primary-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.batch-btn-action {
+    color: #ffffff !important;
+    font-weight: 700;
+    font-size: 0.78rem;
+    padding: 7px 14px;
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* ----------------------------------------------------------------------------
+   Scope Filter Bar (TUI Mirror)
+   ---------------------------------------------------------------------------- */
+.scope-filter-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: var(--ug-black-card);
+    border: 1px solid var(--ug-border);
+    border-radius: var(--radius-lg);
+    padding: 8px 14px;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.scope-filter-bar-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.scope-filter-label {
+    font-size: 0.75rem;
+    font-weight: 800;
+    color: #ffffff !important;
+    letter-spacing: 0.5px;
+}
+
+.scope-pills-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.scope-pill-btn {
+    background: var(--ug-black-surface);
+    border: 1px solid var(--ug-border);
+    border-radius: var(--radius-sm);
+    color: rgba(255, 255, 255, 0.8) !important;
+    font-size: 0.74rem;
+    font-weight: 700;
+    padding: 5px 11px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.scope-pill-btn:hover {
+    color: #ffffff !important;
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.scope-pill-btn.active {
+    background: #1e2638;
+    color: #ffffff !important;
+    border-color: rgba(255, 255, 255, 0.35);
+    font-weight: 800;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+}
+
+.scope-summary-tag {
+    font-size: 0.74rem;
+    color: rgba(255, 255, 255, 0.8) !important;
+    font-family: var(--font-mono);
+}
+
+/* ----------------------------------------------------------------------------
+   Batches Feed Stream Container
+   ---------------------------------------------------------------------------- */
 .batches-stream-scroll {
     flex: 1;
     overflow-y: auto;
@@ -68,7 +214,7 @@
     gap: 14px;
     padding-right: 6px;
     scrollbar-width: thin;
-    scrollbar-color: var(--ug-yellow) rgba(255, 255, 255, 0.06);
+    scrollbar-color: rgba(255, 255, 255, 0.25) rgba(255, 255, 255, 0.04);
 }
 
 .batches-stream-scroll::-webkit-scrollbar {
@@ -79,7 +225,7 @@
     border-radius: 4px;
 }
 .batches-stream-scroll::-webkit-scrollbar-thumb {
-    background: var(--ug-yellow);
+    background: rgba(255, 255, 255, 0.25);
     border-radius: 4px;
 }
 
@@ -87,7 +233,7 @@
 .batches-empty-state {
     padding: 60px 20px;
     text-align: center;
-    color: var(--ug-text-dim);
+    color: #ffffff !important;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -98,7 +244,9 @@
     font-size: 0.9rem;
 }
 
-/* Individual Batch Accordion Card */
+/* ----------------------------------------------------------------------------
+   Individual Batch Accordion Card
+   ---------------------------------------------------------------------------- */
 .batch-stream-card {
     background-color: var(--ug-black-card);
     border: 1px solid var(--ug-border);
@@ -109,11 +257,10 @@
 }
 
 .batch-stream-card.is-expanded {
-    border-color: rgba(252, 220, 4, 0.45);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    border-color: rgba(255, 255, 255, 0.3);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
 }
 
-/* Expandable / Collapsible Header */
 .batch-stream-header {
     position: sticky;
     top: 0;
@@ -146,37 +293,33 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 24px;
+    width: 26px;
+    height: 26px;
     border-radius: 4px;
-    font-size: 0.75rem;
+    font-size: 0.78rem;
     font-weight: 800;
-    color: var(--ug-yellow);
-    background-color: rgba(252, 220, 4, 0.1);
+    color: #ffffff !important;
+    background-color: rgba(255, 255, 255, 0.08);
     transition: transform 0.2s ease;
-}
-
-.batch-stream-card.is-expanded .batch-chevron {
-    transform: rotate(0deg);
 }
 
 .batch-id-text {
     font-family: var(--font-mono);
-    font-size: 0.95rem;
-    font-weight: 800;
-    color: var(--ug-yellow);
-    letter-spacing: 0.4px;
+    font-size: 0.98rem;
+    font-weight: 900;
+    color: #ffffff !important;
+    letter-spacing: 0.5px;
 }
 
 .batch-label-text {
-    font-size: 0.8rem;
-    color: #ffffff;
-    font-weight: 600;
+    font-size: 0.82rem;
+    color: #ffffff !important;
+    font-weight: 700;
 }
 
 .batch-time-text {
-    font-size: 0.72rem;
-    color: var(--ug-text-dim);
+    font-size: 0.74rem;
+    color: rgba(255, 255, 255, 0.8) !important;
     font-family: var(--font-mono);
 }
 
@@ -194,54 +337,55 @@
 }
 
 .batch-pill {
-    padding: 3px 9px;
+    padding: 4px 10px;
     border-radius: 4px;
-    font-size: 0.72rem;
+    font-size: 0.74rem;
     font-weight: 700;
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
+    color: #ffffff !important;
 }
 
 .pill-total {
     background: rgba(255, 255, 255, 0.08);
-    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 .pill-ingested {
-    background: rgba(16, 185, 129, 0.15);
-    color: #34d399;
-    border: 1px solid rgba(16, 185, 129, 0.3);
+    background: rgba(16, 185, 129, 0.18);
+    border: 1px solid rgba(16, 185, 129, 0.4);
 }
 
 .pill-dup {
-    background: rgba(245, 158, 11, 0.15);
-    color: var(--ug-yellow);
-    border: 1px solid rgba(245, 158, 11, 0.3);
+    background: rgba(245, 158, 11, 0.18);
+    border: 1px solid rgba(245, 158, 11, 0.4);
 }
 
 .batch-toggle-btn {
-    font-size: 0.72rem;
-    padding: 4px 10px;
-    font-weight: 700;
+    font-size: 0.76rem;
+    padding: 6px 14px;
+    font-weight: 800;
+    color: #ffffff !important;
+    min-height: 34px;
 }
 
-/* Batch Body / Full-Scale Photos Area (Dedicated Fixed-Height Scroll Container) */
+/* ----------------------------------------------------------------------------
+   Batch Stream Body & High-Resolution Direct Photo Inspection
+   ---------------------------------------------------------------------------- */
 .batch-stream-body {
     padding: 18px;
     background-color: var(--ug-black-card);
-    height: 540px;
-    max-height: 540px;
+    max-height: 82vh;
     overflow-y: auto;
     overflow-x: hidden;
     overscroll-behavior: contain;
     scrollbar-width: thin;
-    scrollbar-color: var(--ug-yellow) rgba(255, 255, 255, 0.12);
+    scrollbar-color: rgba(255, 255, 255, 0.25) rgba(255, 255, 255, 0.04);
 }
 
 .batch-stream-card.is-maximized .batch-stream-body {
-    height: calc(100vh - 210px);
-    max-height: calc(100vh - 210px);
+    max-height: calc(100vh - 180px);
 }
 
 .batch-stream-body::-webkit-scrollbar {
@@ -252,24 +396,57 @@
     border-radius: 4px;
 }
 .batch-stream-body::-webkit-scrollbar-thumb {
-    background: var(--ug-yellow);
+    background: rgba(255, 255, 255, 0.25);
     border-radius: 4px;
 }
 
+/* Stream Photos Grid: Laptop 3-in-a-row, Tablet 2-in-a-row, Phone 1-in-a-row */
 .batch-full-photos-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
     padding-bottom: 16px;
 }
 
-@media (max-width: 992px) {
+/* Tablet view (768px - 1199px): Exactly 2 photos in a row */
+@media (max-width: 1199px) and (min-width: 768px) {
     .batch-full-photos-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
     }
 }
 
-/* Full-Scale Photo Card */
+/* Phone view (< 768px): Exactly 1 photo in a row */
+@media (max-width: 767px) {
+    .batch-full-photos-grid {
+        grid-template-columns: 1fr;
+        gap: 14px;
+    }
+}
+
+/* Compact Grid View (Optional density switch) */
+.batch-full-photos-grid.view-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+
+@media (max-width: 1199px) and (min-width: 768px) {
+    .batch-full-photos-grid.view-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+    }
+}
+
+@media (max-width: 767px) {
+    .batch-full-photos-grid.view-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+}
+
+/* ----------------------------------------------------------------------------
+   Full-Scale Photo Card (Equal Height in Grid Rows)
+   ---------------------------------------------------------------------------- */
 .batch-photo-card-large {
     background-color: var(--ug-black-surface);
     border: 1px solid var(--ug-border);
@@ -277,103 +454,203 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    transition: transform 0.15s ease, border-color 0.15s ease;
+    height: 100%;
+    transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .batch-photo-card-large:hover {
-    border-color: var(--ug-yellow);
-    transform: translateY(-2px);
+    border-color: rgba(255, 255, 255, 0.4);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
 }
 
+/* Photo Wrapper Canvas: Fixed, calibrated frame for universal aspect ratio fit */
 .batch-photo-full-wrap {
     position: relative;
-    height: 380px;
-    min-height: 380px;
-    background-color: #06070a;
+    width: 100%;
+    height: 280px;
+    min-height: 280px;
+    max-height: 280px;
+    background-color: #05070b;
+    border-bottom: 1px solid var(--ug-border);
     display: flex;
     align-items: center;
     justify-content: center;
-    cursor: pointer;
     overflow: hidden;
+    user-select: none;
+    box-sizing: border-box;
 }
 
+/* On Tablet (2-column layout), 300px height provides optimal headroom for 3:5 portrait and 1:1 square photos */
+@media (max-width: 1199px) and (min-width: 768px) {
+    .batch-photo-full-wrap {
+        height: 300px;
+        min-height: 300px;
+        max-height: 300px;
+    }
+}
+
+/* On Phone (1-column layout), 280px height provides a clean inspection frame */
+@media (max-width: 767px) {
+    .batch-photo-full-wrap {
+        height: 280px;
+        min-height: 280px;
+        max-height: 280px;
+    }
+}
+
+.batch-full-photos-grid.view-grid .batch-photo-full-wrap {
+    height: 190px;
+    min-height: 190px;
+    max-height: 190px;
+}
+
+@media (max-width: 767px) {
+    .batch-full-photos-grid.view-grid .batch-photo-full-wrap {
+        height: 160px;
+        min-height: 160px;
+        max-height: 160px;
+    }
+}
+
+/* Universal Aspect Ratio Fit (Supports 3:5 portrait, 1:1 square, 4:3 and 16:9 landscape) */
 .batch-photo-full-img {
-    width: 100%;
-    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
     object-fit: contain;
-    transition: transform 0.2s ease;
+    transition: transform 0.25s cubic-bezier(0.2, 0, 0, 1);
+    transform-origin: center center;
+    display: block;
+    margin: auto;
 }
 
-.batch-photo-full-wrap:hover .batch-photo-full-img {
-    transform: scale(1.02);
+/* In-Card Magnifier State (Inspect fine plate details without modal lightbox) */
+.batch-photo-full-wrap.is-magnified {
+    overflow: auto;
+    cursor: grab;
 }
 
-.batch-photo-zoom-hint {
-    position: absolute;
-    bottom: 8px;
-    right: 8px;
-    background: rgba(0, 0, 0, 0.75);
-    backdrop-filter: blur(4px);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 4px;
-    padding: 3px 8px;
-    font-size: 0.68rem;
-    color: #ffffff;
-    pointer-events: none;
+.batch-photo-full-wrap.is-magnified:active {
+    cursor: grabbing;
 }
 
+.batch-photo-full-wrap.is-magnified .batch-photo-full-img {
+    transform: scale(1.85);
+    max-width: none;
+    max-height: none;
+    width: 185%;
+    height: 185%;
+}
+
+/* Orientation Badge */
 .batch-photo-orient-badge {
     position: absolute;
-    top: 10px;
-    left: 10px;
-    padding: 4px 10px;
-    border-radius: 4px;
+    top: 12px;
+    left: 12px;
+    padding: 5px 12px;
+    border-radius: 6px;
     font-size: 0.78rem;
     font-weight: 900;
     letter-spacing: 0.5px;
     text-transform: uppercase;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+    color: #ffffff !important;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.6);
+    z-index: 4;
 }
 
 .batch-photo-orient-badge.tag-front {
     background-color: rgba(16, 185, 129, 0.95);
-    color: #ffffff;
 }
 
 .batch-photo-orient-badge.tag-rear {
-    background-color: rgba(56, 189, 248, 0.95);
-    color: #000000;
+    background-color: rgba(14, 116, 144, 0.95);
 }
 
 .batch-photo-orient-badge.tag-unknown {
-    background-color: rgba(245, 158, 11, 0.95);
-    color: #000000;
+    background-color: rgba(100, 116, 139, 0.95);
 }
 
+/* Detected Plate & OCR Overlay */
 .batch-photo-plate-overlay {
     position: absolute;
-    top: 10px;
-    right: 10px;
+    top: 12px;
+    right: 12px;
     background: rgba(0, 0, 0, 0.88);
-    backdrop-filter: blur(6px);
-    border: 1px solid var(--ug-yellow);
-    border-radius: 4px;
-    padding: 4px 10px;
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 6px;
+    padding: 6px 14px;
     font-family: var(--font-mono);
-    font-size: 0.95rem;
-    font-weight: 800;
-    color: var(--ug-yellow);
+    font-size: 1.05rem;
+    font-weight: 900;
+    color: #ffffff !important;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.6);
+    z-index: 4;
+}
+
+.batch-photo-plate-overlay.no-plate {
+    border-color: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.7) !important;
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.plate-conf-tag {
+    font-size: 0.75rem;
+    color: #ffffff !important;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.15);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+/* In-Card Tool Overlay (Magnify & Lightbox) */
+.batch-photo-tools-overlay {
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
     display: flex;
     align-items: center;
     gap: 6px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+    z-index: 4;
 }
 
+.in-card-tool-btn {
+    background: rgba(0, 0, 0, 0.82);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 4px;
+    padding: 5px 10px;
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: #ffffff !important;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.in-card-tool-btn:hover {
+    background: #000000;
+    border-color: #ffffff;
+    color: #ffffff !important;
+}
+
+/* ----------------------------------------------------------------------------
+   Details Strip & Evidence Photo Replacement Section
+   ---------------------------------------------------------------------------- */
 .batch-photo-details-strip {
     padding: 12px 14px;
     display: flex;
     flex-direction: column;
     gap: 8px;
+    flex: 1;
+    justify-content: space-between;
     border-top: 1px solid var(--ug-border);
 }
 
@@ -381,20 +658,59 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    font-size: 0.75rem;
-    color: var(--ug-text-muted);
+    font-size: 0.76rem;
+    color: rgba(255, 255, 255, 0.85) !important;
 }
 
 .batch-photo-pair-strip {
     background-color: var(--ug-black-card);
     border: 1px solid var(--ug-border);
     border-radius: var(--radius-md);
-    padding: 10px 12px;
+    padding: 10px 14px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 10px;
     flex-wrap: wrap;
+}
+
+.batch-photo-actions-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: auto;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* Prominent, Tactile Evidence Photo Replace Button */
+.batch-btn-replace {
+    min-height: 38px;
+    padding: 6px 16px;
+    font-size: 0.82rem;
+    font-weight: 800;
+    border-radius: 6px;
+    background: #171e2e;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: #ffffff !important;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.batch-btn-replace:hover {
+    background: #242f46;
+    border-color: #ffffff;
+    color: #ffffff !important;
+    transform: translateY(-1px);
+}
+
+.batch-btn-replace:active {
+    transform: translateY(0);
 }
 
 /* Modal Dual Dropzone Upload Card Styles */
@@ -405,7 +721,7 @@
 }
 
 .dropzone-box {
-    border: 2px dashed var(--ug-border-light);
+    border: 2px dashed rgba(255, 255, 255, 0.25);
     border-radius: var(--radius-md);
     padding: 24px 16px;
     text-align: center;
@@ -415,8 +731,8 @@
 }
 
 .dropzone-box:hover, .dropzone-box.dragover {
-    border-color: var(--ug-yellow);
-    background-color: rgba(252, 220, 4, 0.05);
+    border-color: #ffffff;
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 .dropzone-box-icon {
@@ -427,20 +743,20 @@
 .dropzone-box-title {
     font-size: 0.92rem;
     font-weight: 800;
-    color: #ffffff;
+    color: #ffffff !important;
 }
 
 .dropzone-box-desc {
-    font-size: 0.74rem;
-    color: var(--ug-text-dim);
+    font-size: 0.76rem;
+    color: rgba(255, 255, 255, 0.8) !important;
     margin-top: 2px;
 }
 
 .dropzone-box-count {
     margin-top: 8px;
     font-weight: 800;
-    font-size: 0.82rem;
-    color: var(--ug-yellow);
+    font-size: 0.84rem;
+    color: #ffffff !important;
 }
 
 .symmetry-indicator {
@@ -453,88 +769,163 @@
     gap: 6px;
 }
 
-/* Mobile Responsive Overrides for Batches */
+/* ----------------------------------------------------------------------------
+   Mobile Responsive Overrides (< 768px & < 480px)
+   ---------------------------------------------------------------------------- */
 @media (max-width: 768px) {
+    .batches-pane-container {
+        padding: 10px 8px;
+        gap: 10px;
+    }
 
-    /* Hide descriptive text on mobile */
     .desktop-only-text {
         display: none !important;
     }
     
     .batches-header-bar {
-        padding: 8px 10px;
-    }
-
-    /* Shrink the title on mobile */
-    .batches-header-bar h3 span:first-child {
-        font-size: 0.9rem;
-    }
-
-    /* Group action buttons vs utility buttons */
-    .mobile-util-row {
-        display: none !important; /* Hide expand/collapse all on phone to save space */
-    }
-    
-    .mobile-primary-actions {
-        display: flex;
-        gap: 8px;
-        width: 100%;
-    }
-    .mobile-primary-actions .btn {
-        flex: 1;
-        padding: 6px;
-        font-size: 0.75rem;
-    }
-
-    /* Hide the scope filter bar behind a scroll on mobile, or make it extremely compact */
-    .scope-filter-bar {
-        padding: 4px 6px;
-        flex-direction: row;
-        align-items: center;
-    }
-    .scope-filter-label {
-        display: none !important;
-    }
-    .scope-summary-tag {
-        display: none !important;
-    }
-    .scope-pills-group {
-        width: 100%;
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        padding-bottom: 2px;
-    }
-    .scope-pill-btn {
-        white-space: nowrap;
-        flex: 0 0 auto;
-        padding: 4px 8px;
-        font-size: 0.7rem;
-    }
-
-    .batches-header-bar {
+        padding: 10px 12px;
         flex-direction: column;
         align-items: stretch;
-        gap: 6px;
+        gap: 10px;
     }
+
+    .batches-header-title-block h3 {
+        font-size: 0.95rem;
+    }
+
     .batches-toolbar-controls {
-        display: flex;
         flex-direction: column;
-        gap: 6px;
+        align-items: stretch;
         width: 100%;
+        gap: 8px;
     }
+
+    .batch-search-wrap,
     .batch-search-field {
         width: 100% !important;
         box-sizing: border-box;
     }
+
+    .batch-density-toggle-group {
+        width: 100%;
+        display: flex;
+    }
+
+    .density-toggle-btn {
+        flex: 1;
+        justify-content: center;
+        padding: 8px;
+        min-height: 38px;
+    }
+
+    .batch-util-actions {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        width: 100%;
+        gap: 6px;
+    }
+
+    .batch-util-actions .batch-btn-action {
+        justify-content: center;
+        padding: 8px 4px;
+        font-size: 0.74rem;
+        min-height: 38px;
+    }
     
+    .batch-primary-actions {
+        display: flex;
+        width: 100%;
+        gap: 8px;
+    }
+
+    .batch-primary-actions .batch-btn-action {
+        flex: 1;
+        justify-content: center;
+        min-height: 42px;
+        font-size: 0.8rem;
+    }
+
+    /* Scope Filter Bar on Mobile */
+    .scope-filter-bar {
+        padding: 8px 10px;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+
+    .scope-filter-bar-left {
+        width: 100%;
+    }
+
+    .scope-pills-group {
+        width: 100%;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        padding-bottom: 4px;
+        scrollbar-width: none;
+    }
+    .scope-pills-group::-webkit-scrollbar {
+        display: none;
+    }
+
+    .scope-pill-btn {
+        white-space: nowrap;
+        flex: 0 0 auto;
+        padding: 6px 12px;
+        font-size: 0.74rem;
+        min-height: 34px;
+    }
+
+    .scope-summary-tag {
+        font-size: 0.7rem;
+    }
+
+    /* Batch Header on Mobile */
     .batch-stream-header {
         flex-direction: column;
         align-items: flex-start;
+        padding: 10px 12px;
+        gap: 8px;
     }
     
     .batch-header-right {
         width: 100%;
         justify-content: space-between;
-        margin-top: 8px;
+        margin-top: 4px;
+    }
+
+    /* Batch Body on Mobile: Natural Height, Zero Nested Scroll Traps */
+    .batch-stream-body {
+        padding: 10px 8px;
+        max-height: none;
+        height: auto;
+        overflow: visible;
+    }
+
+    .batch-full-photos-grid {
+        grid-template-columns: 1fr;
+        gap: 14px;
+    }
+
+    .batch-photo-full-wrap {
+        height: 280px;
+        min-height: 280px;
+        max-height: 280px;
+    }
+
+    .batch-photo-plate-overlay {
+        font-size: 0.88rem;
+        padding: 4px 10px;
+    }
+
+    .batch-btn-replace {
+        width: 100%;
+        justify-content: center;
+        min-height: 42px;
+    }
+
+    .batch-photo-actions-row {
+        flex-direction: column;
+        align-items: stretch;
     }
 }

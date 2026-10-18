@@ -85,6 +85,8 @@ from .bond import (
     api_stock_audit,
     api_stock_previous_closing,
     api_stock_export_unregistered_csv,
+    api_stock_ledger_entry,
+    api_stock_report_email,
 )
 
 from .system import (
@@ -162,6 +164,8 @@ __all__ = [
     "api_stock_audit",
     "api_stock_previous_closing",
     "api_stock_export_unregistered_csv",
+    "api_stock_ledger_entry",
+    "api_stock_report_email",
     "api_stream_events",
     "api_sync_orders",
     "api_toggle_dry_run",

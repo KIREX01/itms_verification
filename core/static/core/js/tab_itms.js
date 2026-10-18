@@ -382,8 +382,8 @@ function renderItmsOrdersTable(items) {
             }
 
             return `<tr id="itms-row-${idx}" onclick="selectItmsOrderAtIndex(${idx})">
-                <td><strong style="color:#38bdf8; font-family:var(--font-mono);">${kitCode}</strong></td>
-                <td><span style="color:var(--ug-yellow); font-family:var(--font-mono); font-weight:800;">${regPlate}</span></td>
+                <td><strong style="color:#ffffff !important; font-family:var(--font-mono);">${kitCode}</strong></td>
+                <td><span style="color:#ffffff !important; font-family:var(--font-mono); font-weight:800;">${regPlate}</span></td>
                 <td class="hide-mobile"><span style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${frontPlate}</span></td>
                 <td class="hide-mobile"><span style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${rearPlate}</span></td>
                 <td class="hide-mobile"><span style="font-family:var(--font-mono); font-size:0.75rem; color:#a78bfa;">${gps}</span></td>
@@ -406,7 +406,7 @@ function renderItmsOrdersTable(items) {
 
         return `<tr id="itms-row-${idx}" onclick="selectItmsOrderAtIndex(${idx})">
             <td><strong style="color:#fff; font-family:var(--font-mono);">${orderNum}</strong></td>
-            <td><span style="color:var(--ug-yellow); font-family:var(--font-mono); font-weight:800;">${regPlate}</span></td>
+            <td><span style="color:#ffffff !important; font-family:var(--font-mono); font-weight:800;">${regPlate}</span></td>
             <td class="hide-mobile"><span style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${vin}</span></td>
             <td><span class="badge ${status.toLowerCase().includes('installed') ? 'badge-green' : 'badge-yellow'}">${status}</span></td>
             <td class="hide-mobile"><span style="font-size:0.75rem; color:var(--ug-text-muted);">${wh}</span></td>
@@ -416,26 +416,116 @@ function renderItmsOrdersTable(items) {
     }).join("");
 }
 
-function openItmsMobileInspector() {
-    const panel = document.getElementById("itms-inspector-panel");
-    if (panel) {
-        panel.classList.add("mobile-show");
-        panel.scrollTop = 0;
+function openItmsOrderDetailsModal(order) {
+    if (!order) return;
+    const isKit = (itmsCurrentSubview === "KITS" || (order.kit_code && !order.vin));
+    
+    setText("itms-modal-insp-title", isKit ? "📦 ITMS Kit Profile" : "📋 ITMS Order Details");
+    const stBadge = document.getElementById("itms-modal-insp-status-badge");
+    const status = order.order_status || order.status || "Pending";
+    if (stBadge) {
+        stBadge.innerText = status;
+        stBadge.className = "badge " + (status.toLowerCase().includes("installed") ? "badge-green" : "badge-yellow");
     }
+    
+    setText("itms-modal-insp-plate", order.registration_number || order.kit_code || "---");
+    setText("itms-modal-insp-order", isKit ? ("Kit #" + (order.kit_code || "")) : ("Order #" + (order.order_number || "")));
+    setText("itms-modal-insp-wh", order.warehouse || order.warehouse_name || "AGM Bonded Warehouse");
+    setText("itms-modal-insp-date", order.installation_date || order.created_date || "---");
+    
+    // Telematics
+    const hw = order.hardware || {};
+    setText("itms-modal-insp-gps", hw.gps_tracker_id || order.gps_tracker || "Not Fitted");
+    setText("itms-modal-insp-fbeacon", hw.front_beacon_id || order.front_tracker || order.front_beacon || "None");
+    setText("itms-modal-insp-rbeacon", hw.rear_beacon_id || order.rear_tracker || order.rear_beacon || "None");
+    setText("itms-modal-insp-fserial", hw.front_plate_serial || order.front_plate || "---");
+    setText("itms-modal-insp-rserial", hw.rear_plate_serial || order.rear_plate || "---");
+    
+    // Evidence photos
+    const modalPhotosGrid = document.getElementById("itms-modal-insp-photos-grid");
+    if (modalPhotosGrid) {
+        const photos = (order.order_details && order.order_details.photos) || order.photos || [];
+        if (photos.length > 0) {
+            modalPhotosGrid.innerHTML = photos.map(p => {
+                const lbl = escapeHtml(p.label || (p.orientation === "FRONT" ? "Front Plate" : "Rear Plate"));
+                const url = escapeHtml(p.url || "");
+                return `<div class="photo-link-card">
+                    <div class="photo-link-label">
+                        <span>${p.orientation === "FRONT" ? "🚘" : "🏍️"} ${lbl}</span>
+                    </div>
+                    <div class="photo-link-thumb" onclick="if(typeof openLightbox==='function'){openLightbox('${url}')}else{window.open('${url}','_blank')}" title="Click for full view">
+                        <img src="${url}" alt="${lbl}" onerror="this.onerror=null; this.parentElement.innerHTML='<span style='color:rgba(255,255,255,0.6); font-size:0.75rem;'>No Preview</span>';">
+                    </div>
+                    <div class="photo-link-footer">
+                        <a href="${url}" target="_blank" rel="noopener noreferrer">Open Link ↗</a>
+                    </div>
+                </div>`;
+            }).join("");
+        } else {
+            modalPhotosGrid.innerHTML = `<div style="grid-column:1/-1; padding:20px; text-align:center; color:rgba(255,255,255,0.7); font-size:0.8rem; background:var(--ug-black-surface); border-radius:var(--radius-md);">
+                ${isKit ? "Physical Kit enrolled in warehouse stock. Photos attach dynamically when fitment is completed." : "No photos uploaded on ITMS for this order."}
+            </div>`;
+        }
+    }
+    
+    // Jump to Queue button
+    const qBtn = document.getElementById("btn-modal-itms-jump-queue");
+    if (qBtn) {
+        if (order.matched_pair) {
+            qBtn.style.display = "inline-flex";
+            qBtn.onclick = () => {
+                closeModal("modal-itms-order-details");
+                switchNavTab(4);
+                if (typeof selectPair === "function") selectPair(order.matched_pair.id);
+            };
+        } else {
+            qBtn.style.display = "none";
+        }
+    }
+    
+    // Direct kit web link
+    const kitLink = document.getElementById("link-modal-itms-kit-web");
+    if (kitLink) {
+        const detailUrl = order.detail_url || (order.kit_uuid ? `https://stock.itms.ug/installation-kit/${order.kit_uuid}/main/information` : "");
+        if (isKit && detailUrl) {
+            kitLink.style.display = "inline-flex";
+            kitLink.href = detailUrl;
+        } else {
+            kitLink.style.display = "none";
+        }
+    }
+    
+    openModal("modal-itms-order-details");
 }
 
-function closeItmsMobileInspector() {
-    const panel = document.getElementById("itms-inspector-panel");
-    if (panel) {
-        panel.classList.remove("mobile-show");
+function openCurrentOrderInModal() {
+    if (selectedItmsOrder) {
+        openItmsOrderDetailsModal(selectedItmsOrder);
+    } else if (itmsExplorerOrders && itmsExplorerOrders.length > 0) {
+        openItmsOrderDetailsModal(itmsExplorerOrders[0]);
+    } else {
+        if (typeof showToast === "function") showToast("Please select an order from the list first.", "info");
     }
 }
 
 function selectItmsOrderAtIndex(idx) {
-    if (itmsExplorerOrders[idx]) {
-        selectItmsOrder(itmsExplorerOrders[idx]);
-        openItmsMobileInspector();
+    if (itmsExplorerOrders && itmsExplorerOrders[idx]) {
+        const order = itmsExplorerOrders[idx];
+        selectItmsOrder(order);
+        if (window.innerWidth <= 992) {
+            openItmsOrderDetailsModal(order);
+        }
     }
+}
+
+function openItmsMobileInspector() {
+    if (selectedItmsOrder) {
+        openItmsOrderDetailsModal(selectedItmsOrder);
+    }
+}
+
+function closeItmsMobileInspector() {
+    closeModal("modal-itms-order-details");
 }
 
 async function selectItmsOrder(order) {
@@ -495,6 +585,10 @@ async function selectItmsOrder(order) {
         const data = await res.json();
         if (data.success && data.order) {
             const o = data.order;
+            order.order_details = o;
+            order.photos = o.photos || [];
+            order.hardware = o.hardware || {};
+            order.matched_pair = o.matched_pair || null;
             const hw = o.hardware || {};
             setText("itms-insp-gps", hw.gps_tracker_id || "Not Fitted");
             setText("itms-insp-fbeacon", hw.front_beacon_id || "None");
@@ -702,3 +796,6 @@ document.addEventListener("DOMContentLoaded", () => {
 window.syncItmsShiftOrders = syncItmsShiftOrders;
 window.syncCurrentItmsPage = syncCurrentItmsPage;
 window.autoSyncAllItmsKits = autoSyncAllItmsKits;
+
+window.openItmsOrderDetailsModal = openItmsOrderDetailsModal;
+window.openCurrentOrderInModal = openCurrentOrderInModal;

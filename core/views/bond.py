@@ -9,6 +9,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from core.models import (
     StockDelivery,
+    SubmissionAuditLog,
 )
 from core.services import bond_service
 from core.services.security_envelope import require_itms_envelope
@@ -140,6 +141,7 @@ def api_stock_delivery(request: HttpRequest) -> JsonResponse:
     delivery_number = ""
     supplier = "Factory / Central Depot"
     plates_raw = None
+    plates_count = None
     target_date = None
     plate_category = "PSV"
     paper_note_reference = ""
@@ -153,6 +155,7 @@ def api_stock_delivery(request: HttpRequest) -> JsonResponse:
             delivery_number = body.get("delivery_number", "")
             supplier = body.get("supplier", "Factory / Central Depot")
             plates_raw = body.get("plates")
+            plates_count = body.get("plates_count") or body.get("quantity") or body.get("count")
             target_date = body.get("date") or body.get("date_suffix") or body.get("suffix")
             plate_category = body.get("plate_category", "PSV")
             paper_note_reference = body.get("paper_note_reference", "")
@@ -163,10 +166,11 @@ def api_stock_delivery(request: HttpRequest) -> JsonResponse:
         except Exception:
             pass
 
-    if not plates_raw:
+    if not plates_raw and not plates_count:
         delivery_number = request.POST.get("delivery_number", delivery_number)
         supplier = request.POST.get("supplier", supplier)
         plates_raw = request.POST.get("plates")
+        plates_count = request.POST.get("plates_count") or request.POST.get("quantity") or request.POST.get("count")
         target_date = (
             request.POST.get("date")
             or request.POST.get("date_suffix")
@@ -188,14 +192,15 @@ def api_stock_delivery(request: HttpRequest) -> JsonResponse:
         or request.POST.get("photo_path")
     )
 
-    if not plates_raw:
-        return JsonResponse({"success": False, "error": "No plate numbers provided in 'plates'."}, status=400)
+    if not plates_raw and not plates_count:
+        return JsonResponse({"success": False, "error": "No plate numbers or quantity count provided."}, status=400)
 
     try:
         user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
         res = stock_monitoring_service.record_delivery(
             delivery_number=delivery_number,
-            plates=plates_raw,
+            plates=plates_raw or (),
+            plates_count=int(plates_count) if plates_count else None,
             supplier=supplier,
             plate_category=plate_category,
             target_date_suffix=target_date,
@@ -1311,4 +1316,182 @@ def api_stock_export_unregistered_csv(request: HttpRequest) -> HttpResponse:
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     response["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
+
+
+@require_POST
+@require_itms_envelope
+def api_stock_ledger_entry(request: HttpRequest) -> JsonResponse:
+    """
+    POST /api/stock/ledger/entry/
+    Allows flexible manual entry/overrides of daily stock ledger metrics
+    (opening, received, scheduled, installed, bond transfers, physical count, notes).
+    """
+    data = {}
+    if request.content_type == "application/json" and request.body:
+        try:
+            data = json.loads(request.body.decode("utf-8"))
+        except Exception as e:
+            return JsonResponse({"success": False, "error": f"Invalid JSON payload: {e}"}, status=400)
+    else:
+        data = request.POST.dict()
+
+    target_date = data.get("date") or data.get("target_date_suffix") or data.get("date_suffix") or data.get("suffix")
+    storage_bond_name = data.get("storage_bond_name") or data.get("warehouse_name")
+
+    def _opt_int(k):
+        val = data.get(k)
+        if val is None or str(val).strip() == "":
+            return None
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return None
+
+    opening_balance_pmo = _opt_int("opening_balance_pmo")
+    opening_balance_psv = _opt_int("opening_balance_psv")
+    kits_received_pmo = _opt_int("kits_received_pmo")
+    kits_received_psv = _opt_int("kits_received_psv")
+    scheduled_pmo = _opt_int("scheduled_pmo")
+    scheduled_psv = _opt_int("scheduled_psv")
+    scheduled_total = _opt_int("scheduled_total")
+    kits_installed_pmo = _opt_int("kits_installed_pmo")
+    kits_installed_psv = _opt_int("kits_installed_psv")
+    bond_transfer_in_pmo = _opt_int("bond_transfer_in_pmo")
+    bond_transfer_in_psv = _opt_int("bond_transfer_in_psv")
+    bond_transfer_out_pmo = _opt_int("bond_transfer_out_pmo")
+    bond_transfer_out_psv = _opt_int("bond_transfer_out_psv")
+    physical_count = _opt_int("physical_count")
+    notes = data.get("notes")
+    operator_name = (
+        data.get("operator_name")
+        or (request.user.username if getattr(request, "user", None) and request.user.is_authenticated else "Operator")
+    )
+
+    try:
+        from core.services import stock_monitoring_service
+        recon = stock_monitoring_service.update_ledger_entry(
+            target_date_suffix=target_date,
+            storage_bond_name=storage_bond_name,
+            opening_balance_pmo=opening_balance_pmo,
+            opening_balance_psv=opening_balance_psv,
+            kits_received_pmo=kits_received_pmo,
+            kits_received_psv=kits_received_psv,
+            scheduled_pmo=scheduled_pmo,
+            scheduled_psv=scheduled_psv,
+            scheduled_total=scheduled_total,
+            kits_installed_pmo=kits_installed_pmo,
+            kits_installed_psv=kits_installed_psv,
+            bond_transfer_in_pmo=bond_transfer_in_pmo,
+            bond_transfer_in_psv=bond_transfer_in_psv,
+            bond_transfer_out_pmo=bond_transfer_out_pmo,
+            bond_transfer_out_psv=bond_transfer_out_psv,
+            physical_count=physical_count,
+            notes=notes,
+            operator_name=operator_name,
+        )
+        return JsonResponse({
+            "success": True,
+            "message": "Daily stock ledger updated successfully.",
+            "reconciliation": recon,
+        })
+    except Exception as exc:
+        logger.exception("Failed to update daily stock ledger: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
+@require_POST
+@require_itms_envelope
+def api_stock_report_email(request: HttpRequest) -> JsonResponse:
+    """
+    POST /api/stock/report/email/
+    Dispatches the official 9-row daily stock reconciliation report via email.
+    Recipients can include operator email, connected ITMS account email, or explicitly provided emails.
+    """
+    data = {}
+    if request.content_type == "application/json" and request.body:
+        try:
+            data = json.loads(request.body.decode("utf-8"))
+        except Exception as e:
+            return JsonResponse({"success": False, "error": f"Invalid JSON payload: {e}"}, status=400)
+    else:
+        data = request.POST.dict()
+
+    target_date = data.get("date") or data.get("target_date_suffix") or data.get("date_suffix") or data.get("suffix")
+    notes = data.get("notes") or data.get("remarks") or ""
+    operator_name = (
+        data.get("operator_name")
+        or (request.user.username if getattr(request, "user", None) and request.user.is_authenticated else "Operator")
+    )
+
+    # Resolve recipient email addresses
+    recipients = []
+
+    # 1. Explicitly provided recipient(s)
+    raw_recipients = data.get("recipients") or data.get("recipient_email") or data.get("email")
+    if raw_recipients:
+        if isinstance(raw_recipients, list):
+            recipients.extend(str(r).strip() for r in raw_recipients if str(r).strip())
+        elif isinstance(raw_recipients, str):
+            for part in raw_recipients.replace(";", ",").split(","):
+                part_clean = part.strip()
+                if part_clean:
+                    recipients.append(part_clean)
+
+    # 2. Operator email (from authenticated user)
+    include_op = str(data.get("include_operator_email", "true")).lower() in ("true", "1", "yes")
+    if include_op and getattr(request, "user", None) and request.user.is_authenticated:
+        u_email = (getattr(request.user, "email", "") or "").strip()
+        if u_email and "@" in u_email and u_email not in recipients:
+            recipients.append(u_email)
+
+    # 3. ITMS connected account email
+    include_itms = str(data.get("include_itms_email", "true")).lower() in ("true", "1", "yes")
+    if include_itms:
+        try:
+            from core.services.itms_web_client import get_current_itms_account
+            itms_acc = get_current_itms_account()
+            if itms_acc and "@" in itms_acc and itms_acc not in recipients:
+                recipients.append(itms_acc)
+        except Exception as itms_err:
+            logger.warning("Could not resolve ITMS account email: %s", itms_err)
+
+    # Validate and filter
+    valid_recipients = [r for r in set(recipients) if "@" in r]
+    if not valid_recipients:
+        return JsonResponse({
+            "success": False,
+            "error": "No valid recipient email addresses found. Please specify recipient emails or ensure an ITMS / operator email is configured.",
+        }, status=400)
+
+    try:
+        from core.services import stock_monitoring_service, email_service
+        recon = stock_monitoring_service.compute_daily_reconciliation(target_date)
+        success, msg, sent_to = email_service.send_stock_reconciliation_report_email(
+            recon_data=recon,
+            recipient_emails=valid_recipients,
+            operator_name=operator_name,
+            notes=notes,
+        )
+
+        if success:
+            SubmissionAuditLog.objects.create(
+                action=SubmissionAuditLog.Action.STOCK_REPORT_EMAILED,
+                operator_username=operator_name,
+                message=f"Stock reconciliation report for {recon.get('work_date_suffix')} emailed to: {', '.join(sent_to)}",
+            )
+            return JsonResponse({
+                "success": True,
+                "message": msg,
+                "recipients": sent_to,
+                "work_date_suffix": recon.get("work_date_suffix"),
+            })
+        else:
+            return JsonResponse({
+                "success": False,
+                "error": msg,
+                "recipients": valid_recipients,
+            }, status=500)
+    except Exception as exc:
+        logger.exception("Failed to dispatch stock report email: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
 

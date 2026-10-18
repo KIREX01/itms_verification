@@ -934,12 +934,12 @@ function switchReplaceModalTab(tabName) {
     if (uploadBtn) {
         uploadBtn.classList.toggle("active", isUpload);
         uploadBtn.style.borderBottomColor = isUpload ? "var(--ug-yellow)" : "transparent";
-        uploadBtn.style.color = isUpload ? "var(--ug-yellow)" : "var(--ug-text-muted)";
+        uploadBtn.style.color = isUpload ? "#ffffff" : "rgba(255, 255, 255, 0.7)";
     }
     if (batchBtn) {
         batchBtn.classList.toggle("active", !isUpload);
         batchBtn.style.borderBottomColor = !isUpload ? "var(--ug-yellow)" : "transparent";
-        batchBtn.style.color = !isUpload ? "var(--ug-yellow)" : "var(--ug-text-muted)";
+        batchBtn.style.color = !isUpload ? "#ffffff" : "rgba(255, 255, 255, 0.7)";
     }
     if (uploadPane) uploadPane.style.display = isUpload ? "flex" : "none";
     if (batchPane) batchPane.style.display = !isUpload ? "flex" : "none";
@@ -1013,19 +1013,19 @@ async function loadBatchCandidates() {
             grid.innerHTML = data.candidates.map(c => {
                 const isSelected = activeReplaceContext.selectedCandidateId === c.id;
                 return `
-                    <div class="candidate-tile ${isSelected ? 'selected' : ''}" onclick="selectBatchCandidate('${escapeHtml(c.id)}')" id="cand-tile-${escapeHtml(c.id)}">
-                        <div style="height:85px; background:#000; display:flex; align-items:center; justify-content:center; overflow:hidden;">
-                            <img src="${escapeHtml(c.thumb_url || c.url)}" alt="Candidate" style="width:100%; height:100%; object-fit:cover;">
+                    <div class="candidate-tile ${isSelected ? 'selected' : ''}" onclick="selectBatchCandidate('${escapeHtml(c.id)}')" id="cand-tile-${escapeHtml(c.id)}" style="background:#111622; border:1px solid rgba(255,255,255,0.15); border-radius:6px; overflow:hidden; cursor:pointer;">
+                        <div style="height:95px; background:#05070a; display:flex; align-items:center; justify-content:center; overflow:hidden;">
+                            <img src="${escapeHtml(c.thumb_url || c.url)}" alt="Candidate" style="width:100%; height:100%; object-fit:contain;">
                         </div>
-                        <div style="padding:4px 6px; font-size:0.7rem; display:flex; flex-direction:column; gap:2px;">
+                        <div style="padding:6px 8px; font-size:0.72rem; display:flex; flex-direction:column; gap:3px;">
                             <div style="display:flex; justify-content:space-between; align-items:center;">
-                                <span class="badge ${c.orientation === 'REAR' ? 'badge-yellow' : 'badge-green'}" style="font-size:0.62rem; padding:1px 4px;">${escapeHtml(c.orientation)}</span>
-                                <span style="color:var(--ug-text-dim); font-size:0.65rem;">${escapeHtml(c.captured_at || '')}</span>
+                                <span class="badge ${c.orientation === 'REAR' ? 'badge-yellow' : 'badge-green'}" style="font-size:0.64rem; padding:1px 5px; color:#ffffff !important; font-weight:800;">${escapeHtml(c.orientation)}</span>
+                                <span style="color:rgba(255,255,255,0.75); font-size:0.65rem;">${escapeHtml(c.captured_at || '')}</span>
                             </div>
-                            <div style="font-weight:700; color:#f1f5f9; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                                ${escapeHtml(c.detected_plate || 'Unread')}
+                            <div style="font-weight:800; font-family:var(--font-mono); color:#ffffff !important; font-size:0.82rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                                ${escapeHtml(c.detected_plate || 'Unread Plate')}
                             </div>
-                            <div style="font-size:0.65rem; color:${c.is_assigned ? '#f59e0b' : '#10b981'};">
+                            <div style="font-size:0.68rem; font-weight:700; color:${c.is_assigned ? '#f59e0b' : '#34d399'};">
                                 ${c.is_assigned ? `Pair #${c.current_pair_id || 'Assigned'}` : '● Unassigned'}
                             </div>
                         </div>

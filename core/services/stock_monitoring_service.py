@@ -199,6 +199,7 @@ def generate_delivery_note_reference(target_date: Optional[Any] = None) -> str:
 def record_delivery(
     delivery_number: Optional[str] = None,
     plates: Iterable[str] = (),
+    plates_count: Optional[int] = None,
     supplier: str = "Factory / Central Depot",
     plate_category: str = PlateCategory.PSV,
     delivery_date: Optional[date] = None,
@@ -219,9 +220,13 @@ def record_delivery(
     suffix = target_date_suffix or def_suffix
     category = PlateCategory.PMO if str(plate_category).strip().upper() == "PMO" else PlateCategory.PSV
 
-    clean_plates, dup_count, dup_plates = parse_plate_input_with_stats(plates)
+    clean_plates, dup_count, dup_plates = parse_plate_input_with_stats(plates) if plates else ([], 0, [])
+    deliv_plates_count = len(clean_plates)
     if not clean_plates:
-        raise ValueError("No valid license plate numbers provided for delivery.")
+        if plates_count is not None and int(plates_count) > 0:
+            deliv_plates_count = int(plates_count)
+        else:
+            raise ValueError("No valid license plate numbers or quantity count provided for delivery.")
 
     deliv_no = (delivery_number or "").strip()
     if not deliv_no or deliv_no.upper() == "AUTO":
@@ -255,7 +260,7 @@ def record_delivery(
                 "plate_category": category,
                 "delivery_date": deliv_date,
                 "target_date_suffix": suffix,
-                "total_plates_count": len(clean_plates),
+                "total_plates_count": deliv_plates_count,
                 "received_by": received_by,
                 "operator_name": operator_name or "Operator",
                 "notes": notes or "",
@@ -269,32 +274,33 @@ def record_delivery(
             delivery.supplier = supplier or delivery.supplier
             delivery.plate_category = category
             delivery.notes = notes or delivery.notes
-            delivery.total_plates_count = len(clean_plates)
+            delivery.total_plates_count = deliv_plates_count
             delivery.save()
             delivery.items.all().delete()
 
-        items = [
-            StockDeliveryItem(
-                delivery=delivery,
-                registration_number=p,
-                plate_category=category,
-                kit_code=f"IK-{p}",
-            )
-            for p in clean_plates
-        ]
-        StockDeliveryItem.objects.bulk_create(items)
-
         created_kits_count = 0
-        if auto_create_kits:
-            from core.services import kit_provisioning_service, bond_service
-            active_bond = bond_service.get_active_bond()
-            prov_res = kit_provisioning_service.sync_and_provision_warehouse_kits(
-                target_date_suffix=suffix,
-                source_plates=clean_plates,
-                sync_itms=False,
-                facility_name=active_bond.get("name", "Bond Warehouse"),
-            )
-            created_kits_count = prov_res.get("kits_created", 0)
+        if clean_plates:
+            items = [
+                StockDeliveryItem(
+                    delivery=delivery,
+                    registration_number=p,
+                    plate_category=category,
+                    kit_code=f"IK-{p}",
+                )
+                for p in clean_plates
+            ]
+            StockDeliveryItem.objects.bulk_create(items)
+
+            if auto_create_kits:
+                from core.services import kit_provisioning_service, bond_service
+                active_bond = bond_service.get_active_bond()
+                prov_res = kit_provisioning_service.sync_and_provision_warehouse_kits(
+                    target_date_suffix=suffix,
+                    source_plates=clean_plates,
+                    sync_itms=False,
+                    facility_name=active_bond.get("name", "Bond Warehouse"),
+                )
+                created_kits_count = prov_res.get("kits_created", 0)
 
         recon = compute_daily_reconciliation(suffix)
 
@@ -322,8 +328,8 @@ def record_delivery(
         "delivery_number": delivery.delivery_number,
         "paper_note_reference": delivery.paper_note_reference or "",
         "plate_category": category,
-        "plates_count": len(clean_plates),
-        "total_submitted": len(clean_plates) + dup_count,
+        "plates_count": deliv_plates_count,
+        "total_submitted": deliv_plates_count if not clean_plates else (len(clean_plates) + dup_count),
         "duplicate_scans_skipped": dup_count,
         "duplicate_plates": dup_plates,
         "created_kits_count": created_kits_count,
@@ -1136,49 +1142,70 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
             ledger.save(update_fields=["opening_balance_psv", "opening_balance_pmo", "opening_stock"])
 
     # 1. Inbound Deliveries (Kits Received)
-    deliveries_qs = StockDelivery.objects.filter(
-        Q(target_date_suffix=suffix) | Q(delivery_date=work_d)
-    )
-    kits_received_psv = 0
-    kits_received_pmo = 0
-    for itm in StockDeliveryItem.objects.filter(delivery__in=deliveries_qs):
-        if itm.plate_category == PlateCategory.PMO:
-            kits_received_pmo += 1
-        else:
-            kits_received_psv += 1
-    total_kits_received = kits_received_psv + kits_received_pmo
+    if ledger.override_received:
+        kits_received_psv = ledger.kits_received_psv
+        kits_received_pmo = ledger.kits_received_pmo
+        total_kits_received = kits_received_psv + kits_received_pmo
+    else:
+        deliveries_qs = StockDelivery.objects.filter(
+            Q(target_date_suffix=suffix) | Q(delivery_date=work_d)
+        )
+        kits_received_psv = 0
+        kits_received_pmo = 0
+        for d in deliveries_qs:
+            items_qs = d.items.all()
+            if items_qs.exists():
+                for itm in items_qs:
+                    if itm.plate_category == PlateCategory.PMO:
+                        kits_received_pmo += 1
+                    else:
+                        kits_received_psv += 1
+            elif d.total_plates_count > 0:
+                if d.plate_category == PlateCategory.PMO:
+                    kits_received_pmo += d.total_plates_count
+                else:
+                    kits_received_psv += d.total_plates_count
+        total_kits_received = kits_received_psv + kits_received_pmo
 
     # 2. Bond Transfers (Transfer In / Transfer Out)
-    transfers_qs = StockBondTransfer.objects.filter(
-        Q(target_date_suffix=suffix) | Q(transfer_date=work_d)
-    )
-    transfer_in_psv = sum(
-        t.plates_count
-        for t in transfers_qs
-        if t.transfer_type == StockBondTransfer.TransferType.TRANSFER_IN
-        and t.plate_category == PlateCategory.PSV
-    )
-    transfer_in_pmo = sum(
-        t.plates_count
-        for t in transfers_qs
-        if t.transfer_type == StockBondTransfer.TransferType.TRANSFER_IN
-        and t.plate_category == PlateCategory.PMO
-    )
-    total_transfer_in = transfer_in_psv + transfer_in_pmo
+    if ledger.override_transfers:
+        transfer_in_psv = ledger.bond_transfer_in_psv
+        transfer_in_pmo = ledger.bond_transfer_in_pmo
+        total_transfer_in = transfer_in_psv + transfer_in_pmo
+        transfer_out_psv = ledger.bond_transfer_out_psv
+        transfer_out_pmo = ledger.bond_transfer_out_pmo
+        total_transfer_out = transfer_out_psv + transfer_out_pmo
+    else:
+        transfers_qs = StockBondTransfer.objects.filter(
+            Q(target_date_suffix=suffix) | Q(transfer_date=work_d)
+        )
+        transfer_in_psv = sum(
+            t.plates_count
+            for t in transfers_qs
+            if t.transfer_type == StockBondTransfer.TransferType.TRANSFER_IN
+            and t.plate_category == PlateCategory.PSV
+        )
+        transfer_in_pmo = sum(
+            t.plates_count
+            for t in transfers_qs
+            if t.transfer_type == StockBondTransfer.TransferType.TRANSFER_IN
+            and t.plate_category == PlateCategory.PMO
+        )
+        total_transfer_in = transfer_in_psv + transfer_in_pmo
 
-    transfer_out_psv = sum(
-        t.plates_count
-        for t in transfers_qs
-        if t.transfer_type == StockBondTransfer.TransferType.TRANSFER_OUT
-        and t.plate_category == PlateCategory.PSV
-    )
-    transfer_out_pmo = sum(
-        t.plates_count
-        for t in transfers_qs
-        if t.transfer_type == StockBondTransfer.TransferType.TRANSFER_OUT
-        and t.plate_category == PlateCategory.PMO
-    )
-    total_transfer_out = transfer_out_psv + transfer_out_pmo
+        transfer_out_psv = sum(
+            t.plates_count
+            for t in transfers_qs
+            if t.transfer_type == StockBondTransfer.TransferType.TRANSFER_OUT
+            and t.plate_category == PlateCategory.PSV
+        )
+        transfer_out_pmo = sum(
+            t.plates_count
+            for t in transfers_qs
+            if t.transfer_type == StockBondTransfer.TransferType.TRANSFER_OUT
+            and t.plate_category == PlateCategory.PMO
+        )
+        total_transfer_out = transfer_out_psv + transfer_out_pmo
 
     active_bond = bond_service.get_active_bond()
     active_bond_code = active_bond.get("code", "AGM")
@@ -1203,32 +1230,37 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         if o.is_archived or (o.order_status or "").strip().lower() == "installed"
     ]
 
-    # Classify installed orders into PSV vs PMO
-    # Check dispatches, inbound delivery items, and verification audit logs for PMO yellow
-    pmo_plates_set = {
-        normalizer.canonicalize(p)
-        for p in StockDispatchScan.objects.filter(plate_category=PlateCategory.PMO).values_list("registration_number", flat=True)
-    }
-    pmo_plates_set.update(
-        normalizer.canonicalize(p)
-        for p in StockDeliveryItem.objects.filter(plate_category=PlateCategory.PMO).values_list("registration_number", flat=True)
-    )
-    for l in SubmissionAuditLog.objects.filter(
-        pair__order__in=installed_orders_qs, message__icontains="Category: PMO"
-    ):
-        if l.pair and l.pair.order:
-            pmo_plates_set.add(normalizer.canonicalize(l.pair.order.registration_number))
+    if ledger.override_installed:
+        installed_psv_count = ledger.kits_installed_psv
+        installed_pmo_count = ledger.kits_installed_pmo
+        total_installed = installed_psv_count + installed_pmo_count
+    else:
+        # Classify installed orders into PSV vs PMO
+        # Check dispatches, inbound delivery items, and verification audit logs for PMO yellow
+        pmo_plates_set = {
+            normalizer.canonicalize(p)
+            for p in StockDispatchScan.objects.filter(plate_category=PlateCategory.PMO).values_list("registration_number", flat=True)
+        }
+        pmo_plates_set.update(
+            normalizer.canonicalize(p)
+            for p in StockDeliveryItem.objects.filter(plate_category=PlateCategory.PMO).values_list("registration_number", flat=True)
+        )
+        for l in SubmissionAuditLog.objects.filter(
+            pair__order__in=installed_orders_qs, message__icontains="Category: PMO"
+        ):
+            if l.pair and l.pair.order:
+                pmo_plates_set.add(normalizer.canonicalize(l.pair.order.registration_number))
 
-    installed_psv_count = 0
-    installed_pmo_count = 0
-    for o in installed_orders_qs:
-        c_p = normalizer.canonicalize(o.registration_number)
-        if c_p in pmo_plates_set:
-            installed_pmo_count += 1
-        else:
-            installed_psv_count += 1
+        installed_psv_count = 0
+        installed_pmo_count = 0
+        for o in installed_orders_qs:
+            c_p = normalizer.canonicalize(o.registration_number)
+            if c_p in pmo_plates_set:
+                installed_pmo_count += 1
+            else:
+                installed_psv_count += 1
 
-    total_installed = installed_psv_count + installed_pmo_count
+        total_installed = installed_psv_count + installed_pmo_count
 
     # 4. Closing Balance calculations:
     # Closing = Opening + Received + Transfer In - Transfer Out - Installed
@@ -1342,22 +1374,25 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
 
     # 7. Update DailyStockLedger with calculated snapshot
     ledger.opening_stock = ledger.opening_balance_psv + ledger.opening_balance_pmo
-    ledger.kits_received_psv = kits_received_psv
-    ledger.kits_received_pmo = kits_received_pmo
-    ledger.delivered_count = total_kits_received
+    if not ledger.override_received:
+        ledger.kits_received_psv = kits_received_psv
+        ledger.kits_received_pmo = kits_received_pmo
+        ledger.delivered_count = total_kits_received
 
-    ledger.bond_transfer_in_psv = transfer_in_psv
-    ledger.bond_transfer_in_pmo = transfer_in_pmo
-    ledger.bond_transfer_in_total = total_transfer_in
+    if not ledger.override_transfers:
+        ledger.bond_transfer_in_psv = transfer_in_psv
+        ledger.bond_transfer_in_pmo = transfer_in_pmo
+        ledger.bond_transfer_in_total = total_transfer_in
 
-    ledger.bond_transfer_out_psv = transfer_out_psv
-    ledger.bond_transfer_out_pmo = transfer_out_pmo
-    ledger.bond_transfer_out_total = total_transfer_out
+        ledger.bond_transfer_out_psv = transfer_out_psv
+        ledger.bond_transfer_out_pmo = transfer_out_pmo
+        ledger.bond_transfer_out_total = total_transfer_out
 
     ledger.scheduled_total = scheduled_total
-    ledger.kits_installed_psv = installed_psv_count
-    ledger.kits_installed_pmo = installed_pmo_count
-    ledger.installed_count = total_installed
+    if not ledger.override_installed:
+        ledger.kits_installed_psv = installed_psv_count
+        ledger.kits_installed_pmo = installed_pmo_count
+        ledger.installed_count = total_installed
 
     ledger.closing_balance_psv = closing_psv
     ledger.closing_balance_pmo = closing_pmo
@@ -1397,7 +1432,7 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         "closing_balance_psv": closing_psv,
         "closing_balance_pmo": closing_pmo,
         # Structured report columns adhering to official spreadsheet (IMG-20260929-WA0005.jpg)
-        "storage_bond_name": ledger.warehouse_name or "AGM SPIRO/8/2",
+        "storage_bond_name": ledger.warehouse_name or "AGM / SPIRO",
         "remarks": ledger.notes or "",
         "consumables": ["Rivets", "Cable ties", "Drill bits", "Insulating Tape"],
         "scheduled_summary": {
@@ -1447,9 +1482,9 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
                 },
                 {
                     "metric": "Daily perfomance, %",
-                    "pmo": f"{daily_perf_pmo}%" if ledger.scheduled_pmo > 0 else "0%",
-                    "psv": f"{daily_perf_psv}%" if ledger.scheduled_psv > 0 else "0%",
-                    "total": f"{daily_perf_total}%",
+                    "pmo": f"{int(round(daily_perf_pmo))}%" if ledger.scheduled_pmo > 0 else "0%",
+                    "psv": f"{int(round(daily_perf_psv))}%" if ledger.scheduled_psv > 0 else "0%",
+                    "total": f"{int(round(daily_perf_total))}%" if scheduled_total > 0 else "0%",
                     "note": "Kits Installed vs Scheduled Target",
                 },
                 {
@@ -1610,6 +1645,140 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         },
     }
 
+
+
+def update_ledger_entry(
+    target_date_suffix: Optional[str] = None,
+    storage_bond_name: Optional[str] = None,
+    warehouse_name: Optional[str] = None,
+    opening_balance_pmo: Optional[int] = None,
+    opening_balance_psv: Optional[int] = None,
+    kits_received_pmo: Optional[int] = None,
+    kits_received_psv: Optional[int] = None,
+    scheduled_pmo: Optional[int] = None,
+    scheduled_psv: Optional[int] = None,
+    scheduled_total: Optional[int] = None,
+    kits_installed_pmo: Optional[int] = None,
+    kits_installed_psv: Optional[int] = None,
+    bond_transfer_in_pmo: Optional[int] = None,
+    bond_transfer_in_psv: Optional[int] = None,
+    bond_transfer_out_pmo: Optional[int] = None,
+    bond_transfer_out_psv: Optional[int] = None,
+    physical_count: Optional[int] = None,
+    notes: Optional[str] = None,
+    operator_name: str = "Operator",
+) -> Dict[str, Any]:
+    """
+    Updates daily stock ledger metrics directly with full flexibility for safe-room workflows.
+    Sets manual override flags when received, installed, or transfer counts are explicitly supplied.
+    Recalculates closing balances and logs an immutable audit trail.
+    """
+    work_d, suffix = resolve_date_and_suffix(target_date_suffix)
+    with transaction.atomic():
+        ledger, _ = DailyStockLedger.objects.get_or_create(
+            work_date=work_d,
+            defaults={
+                "work_date_suffix": suffix,
+                "opening_stock": 0,
+                "opening_balance_psv": 0,
+                "opening_balance_pmo": 0,
+            },
+        )
+
+        bond_nm = (storage_bond_name or warehouse_name or "").strip()
+        if bond_nm:
+            ledger.warehouse_name = bond_nm
+
+        if opening_balance_pmo is not None:
+            ledger.opening_balance_pmo = max(0, int(opening_balance_pmo))
+        if opening_balance_psv is not None:
+            ledger.opening_balance_psv = max(0, int(opening_balance_psv))
+        ledger.opening_stock = ledger.opening_balance_psv + ledger.opening_balance_pmo
+
+        if kits_received_pmo is not None or kits_received_psv is not None:
+            ledger.override_received = True
+            if kits_received_pmo is not None:
+                ledger.kits_received_pmo = max(0, int(kits_received_pmo))
+            if kits_received_psv is not None:
+                ledger.kits_received_psv = max(0, int(kits_received_psv))
+            ledger.delivered_count = ledger.kits_received_psv + ledger.kits_received_pmo
+
+        if scheduled_pmo is not None:
+            ledger.scheduled_pmo = max(0, int(scheduled_pmo))
+        if scheduled_psv is not None:
+            ledger.scheduled_psv = max(0, int(scheduled_psv))
+        if scheduled_total is not None:
+            ledger.scheduled_total = max(0, int(scheduled_total))
+        elif scheduled_pmo is not None or scheduled_psv is not None:
+            ledger.scheduled_total = ledger.scheduled_psv + ledger.scheduled_pmo
+
+        if kits_installed_pmo is not None or kits_installed_psv is not None:
+            ledger.override_installed = True
+            if kits_installed_pmo is not None:
+                ledger.kits_installed_pmo = max(0, int(kits_installed_pmo))
+            if kits_installed_psv is not None:
+                ledger.kits_installed_psv = max(0, int(kits_installed_psv))
+            ledger.installed_count = ledger.kits_installed_psv + ledger.kits_installed_pmo
+
+        if (
+            bond_transfer_in_pmo is not None
+            or bond_transfer_in_psv is not None
+            or bond_transfer_out_pmo is not None
+            or bond_transfer_out_psv is not None
+        ):
+            ledger.override_transfers = True
+            if bond_transfer_in_pmo is not None:
+                ledger.bond_transfer_in_pmo = max(0, int(bond_transfer_in_pmo))
+            if bond_transfer_in_psv is not None:
+                ledger.bond_transfer_in_psv = max(0, int(bond_transfer_in_psv))
+            ledger.bond_transfer_in_total = ledger.bond_transfer_in_psv + ledger.bond_transfer_in_pmo
+
+            if bond_transfer_out_pmo is not None:
+                ledger.bond_transfer_out_pmo = max(0, int(bond_transfer_out_pmo))
+            if bond_transfer_out_psv is not None:
+                ledger.bond_transfer_out_psv = max(0, int(bond_transfer_out_psv))
+            ledger.bond_transfer_out_total = ledger.bond_transfer_out_psv + ledger.bond_transfer_out_pmo
+
+        if physical_count is not None:
+            ledger.physical_count = max(0, int(physical_count))
+
+        if notes is not None:
+            ledger.notes = notes
+
+        # Recalculate closing balances
+        ledger.closing_balance_psv = (
+            ledger.opening_balance_psv
+            + ledger.kits_received_psv
+            + ledger.bond_transfer_in_psv
+            - ledger.bond_transfer_out_psv
+            - ledger.kits_installed_psv
+        )
+        ledger.closing_balance_pmo = (
+            ledger.opening_balance_pmo
+            + ledger.kits_received_pmo
+            + ledger.bond_transfer_in_pmo
+            - ledger.bond_transfer_out_pmo
+            - ledger.kits_installed_pmo
+        )
+        ledger.closing_stock = ledger.closing_balance_psv + ledger.closing_balance_pmo
+        if ledger.physical_count is not None:
+            ledger.variance = ledger.physical_count - ledger.closing_stock
+
+        ledger.save()
+
+        # Audit log entry
+        SubmissionAuditLog.objects.create(
+            action=SubmissionAuditLog.Action.STOCK_LEDGER_UPDATED,
+            operator_username=operator_name or "Operator",
+            message=(
+                f"Stock ledger entry updated for {suffix}: "
+                f"Open PSV={ledger.opening_balance_psv}, PMO={ledger.opening_balance_pmo}; "
+                f"Recv PSV={ledger.kits_received_psv}, PMO={ledger.kits_received_pmo}; "
+                f"Close PSV={ledger.closing_balance_psv}, PMO={ledger.closing_balance_pmo}"
+            ),
+        )
+
+    return compute_daily_reconciliation(suffix)
 
 
 def export_stock_reconciliation_csv(target_date_suffix: Optional[str] = None) -> str:

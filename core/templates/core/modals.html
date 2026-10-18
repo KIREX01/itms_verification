@@ -840,97 +840,181 @@
      MODAL: REPLACE EVIDENCE IMAGE (Queue & Batch Interfaces)
      ============================================================================ -->
 <div class="modal-overlay" id="modal-replace-image">
-    <div class="modal-box" style="max-width:680px; width:92%; max-height:90vh; display:flex; flex-direction:column;">
+    <div class="modal-box" style="max-width:700px; width:94%; max-height:92vh; display:flex; flex-direction:column;">
         <div class="modal-header">
-            <span class="modal-title" style="display:flex; align-items:center; gap:8px;">
+            <span class="modal-title" style="display:flex; align-items:center; gap:8px; color:#ffffff !important; font-weight:800;">
                 <span>🔁</span>
                 <span id="replace-image-modal-title">Replace Evidence Photo</span>
             </span>
-            <button type="button" class="modal-close" onclick="closeModal('modal-replace-image')" aria-label="Close">&times;</button>
+            <button type="button" class="modal-close" onclick="closeModal('modal-replace-image')" aria-label="Close modal">&times;</button>
         </div>
 
         <!-- Target Context Banner -->
-        <div id="replace-image-target-banner" style="background:rgba(234,179,8,0.1); border-bottom:1px solid rgba(234,179,8,0.25); padding:8px 16px; font-size:0.8rem; color:#fef08a; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
-            <span>Target: <strong id="replace-target-desc">Front Photo (Pair #12)</strong></span>
-            <span id="replace-target-batch-badge" class="badge badge-secondary" style="font-size:0.72rem;">Batch: BATCH-01</span>
+        <div id="replace-image-target-banner" style="background:#111622; border-bottom:1px solid rgba(255,255,255,0.12); padding:10px 18px; font-size:0.82rem; color:rgba(255,255,255,0.9); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <span>Target: <strong id="replace-target-desc" style="color:#ffffff !important; font-weight:800;">Front Photo (Pair #12)</strong></span>
+            <span id="replace-target-batch-badge" class="badge badge-secondary" style="font-size:0.75rem; color:#ffffff !important; border:1px solid rgba(255,255,255,0.25);">Batch: BATCH-01</span>
         </div>
 
         <!-- Dual-Tab Navigation (Upload vs Pick from Batch) -->
-        <div class="replace-tab-nav" style="display:flex; border-bottom:1px solid var(--ug-border); background:var(--ug-black-card);">
-            <button type="button" class="replace-tab-btn active" id="tab-btn-replace-upload" onclick="switchReplaceModalTab('upload')" style="flex:1; padding:10px; font-weight:700; font-size:0.84rem; background:transparent; border:none; border-bottom:2px solid var(--ug-yellow); color:var(--ug-yellow); cursor:pointer;">
-                📤 Upload New File
+        <div class="replace-tab-nav" style="display:flex; border-bottom:1px solid rgba(255,255,255,0.12); background:var(--ug-black-card);">
+            <button type="button" class="replace-tab-btn active" id="tab-btn-replace-upload" onclick="switchReplaceModalTab('upload')" style="flex:1; padding:12px; font-weight:800; font-size:0.86rem; background:transparent; border:none; border-bottom:2px solid var(--ug-yellow); color:#ffffff !important; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
+                <span>📁 Upload New File</span>
             </button>
-            <button type="button" class="replace-tab-btn" id="tab-btn-replace-batch" onclick="switchReplaceModalTab('batch')" style="flex:1; padding:10px; font-weight:700; font-size:0.84rem; background:transparent; border:none; border-bottom:2px solid transparent; color:var(--ug-text-muted); cursor:pointer;">
-                📦 Pick from Batch
+            <button type="button" class="replace-tab-btn" id="tab-btn-replace-batch" onclick="switchReplaceModalTab('batch')" style="flex:1; padding:12px; font-weight:800; font-size:0.86rem; background:transparent; border:none; border-bottom:2px solid transparent; color:rgba(255,255,255,0.7) !important; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
+                <span>🖼️ Pick from Batch</span>
             </button>
         </div>
 
         <div class="modal-body" style="padding:16px; flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:14px;">
             <!-- Tab Pane 1: Upload New File -->
             <div id="replace-pane-upload" class="replace-tab-pane" style="display:flex; flex-direction:column; gap:12px;">
-                <div class="replace-dropzone" id="replace-dropzone" onclick="document.getElementById('replace-file-input').click()" style="border:2px dashed #475569; border-radius:8px; padding:24px 16px; text-align:center; background:rgba(255,255,255,0.02); cursor:pointer; transition:all 0.15s ease;">
+                <div class="replace-dropzone" id="replace-dropzone" onclick="document.getElementById('replace-file-input').click()" style="border:2px dashed rgba(255,255,255,0.25); border-radius:var(--radius-md); padding:28px 18px; text-align:center; background:#0c1017; cursor:pointer; transition:all 0.2s ease;">
                     <input type="file" id="replace-file-input" accept="image/*" style="display:none;" onchange="handleReplaceFileSelected(this.files[0])">
                     <div id="replace-dropzone-prompt">
-                        <div style="font-size:2rem; margin-bottom:6px;">📷</div>
-                        <div style="font-weight:700; color:#f1f5f9; font-size:0.92rem; margin-bottom:4px;">Drag &amp; drop evidence photo here, or click to browse</div>
-                        <div style="font-size:0.75rem; color:var(--ug-text-dim);">Accepts JPEG, PNG, WEBP (Camera or Phone capture)</div>
+                        <div style="font-size:2.4rem; margin-bottom:8px;">📷</div>
+                        <div style="font-weight:800; color:#ffffff !important; font-size:0.95rem; margin-bottom:4px;">Drag &amp; drop replacement photo here, or click to browse</div>
+                        <div style="font-size:0.78rem; color:rgba(255,255,255,0.85);">Accepts JPEG, PNG, WEBP (Camera capture or mobile upload)</div>
                     </div>
-                    <div id="replace-file-preview-wrap" style="display:none; flex-direction:column; align-items:center; gap:8px;">
-                        <img id="replace-file-preview" src="" alt="Replacement preview" style="max-height:180px; max-width:100%; border-radius:6px; border:1px solid var(--ug-border); object-fit:contain;">
-                        <div id="replace-file-info" style="font-size:0.78rem; color:var(--ug-yellow); font-family:var(--font-mono);">photo.jpg (1.2 MB)</div>
-                        <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); clearReplaceFileSelection()">Change Photo</button>
+                    <div id="replace-file-preview-wrap" style="display:none; flex-direction:column; align-items:center; gap:10px;">
+                        <img id="replace-file-preview" src="" alt="Replacement preview" style="max-height:220px; max-width:100%; border-radius:6px; border:1px solid rgba(255,255,255,0.2); object-fit:contain; background:#000;">
+                        <div id="replace-file-info" style="font-size:0.82rem; color:#ffffff !important; font-family:var(--font-mono); font-weight:700;">photo.jpg (1.2 MB)</div>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); clearReplaceFileSelection()" style="color:#ffffff !important; min-height:36px; padding:4px 14px;">🔄 Change Photo</button>
                     </div>
                 </div>
             </div>
 
             <!-- Tab Pane 2: Pick from Batch Candidates -->
-            <div id="replace-pane-batch" class="replace-tab-pane" style="display:none; flex-direction:column; gap:10px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
-                    <div style="display:flex; gap:6px; align-items:center;">
-                        <label style="font-size:0.75rem; color:var(--ug-text-muted); font-weight:700;">Orientation:</label>
-                        <select id="replace-batch-filter-orient" onchange="loadBatchCandidates()" style="background:#0f172a; color:#fff; border:1px solid #334155; font-size:0.75rem; padding:3px 6px; border-radius:4px;">
+            <div id="replace-pane-batch" class="replace-tab-pane" style="display:none; flex-direction:column; gap:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; background:#111622; padding:10px 14px; border-radius:var(--radius-md); border:1px solid rgba(255,255,255,0.1);">
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <label style="font-size:0.78rem; color:#ffffff !important; font-weight:700;">Orientation:</label>
+                        <select id="replace-batch-filter-orient" class="form-select" onchange="loadBatchCandidates()" style="background:#171e2e; color:#ffffff !important; border:1px solid rgba(255,255,255,0.25); font-size:0.78rem; padding:5px 28px 5px 10px; border-radius:var(--radius-sm); font-weight:700;">
                             <option value="ALL">All Orientations</option>
                             <option value="FRONT">Front Only</option>
                             <option value="REAR">Rear Only</option>
                         </select>
                     </div>
-                    <label style="display:inline-flex; align-items:center; gap:6px; font-size:0.75rem; color:#cbd5e1; cursor:pointer;">
-                        <input type="checkbox" id="replace-batch-filter-unassigned" onchange="loadBatchCandidates()" style="accent-color:var(--ug-yellow);">
-                        Unassigned only
+                    <label style="display:inline-flex; align-items:center; gap:8px; font-size:0.78rem; color:#ffffff !important; font-weight:600; cursor:pointer;">
+                        <input type="checkbox" id="replace-batch-filter-unassigned" onchange="loadBatchCandidates()" style="width:16px; height:16px; accent-color:var(--ug-yellow); cursor:pointer;">
+                        <span>Show unassigned photos only</span>
                     </label>
                 </div>
 
-                <div id="replace-candidates-loading" style="display:none; text-align:center; padding:24px; color:var(--ug-yellow); font-size:0.85rem;">
-                    Loading candidate photos from batch...
+                <div id="replace-candidates-loading" style="display:none; text-align:center; padding:28px; color:#ffffff !important; font-size:0.88rem; font-weight:700;">
+                    ⏳ Loading candidate photos from batch...
                 </div>
 
-                <div id="replace-candidates-empty" style="display:none; text-align:center; padding:24px; color:var(--ug-text-dim); font-size:0.82rem; background:rgba(255,255,255,0.02); border-radius:6px;">
+                <div id="replace-candidates-empty" style="display:none; text-align:center; padding:28px; color:rgba(255,255,255,0.85); font-size:0.84rem; background:rgba(255,255,255,0.03); border-radius:var(--radius-md); border:1px dashed rgba(255,255,255,0.15);">
                     No eligible candidate photos found in this batch.
                 </div>
 
-                <div id="replace-candidates-grid" class="replace-candidates-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:10px; max-height:260px; overflow-y:auto; padding:4px;">
+                <div id="replace-candidates-grid" class="replace-candidates-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:12px; max-height:280px; overflow-y:auto; padding:4px;">
                     <!-- Dynamically populated candidate tiles -->
                 </div>
             </div>
 
             <!-- Purge Old File Checkbox -->
-            <label style="display:flex; align-items:center; gap:10px; background:rgba(255,255,255,0.03); border:1px solid var(--ug-border); padding:8px 12px; border-radius:6px; cursor:pointer; margin-top:auto;">
-                <input type="checkbox" id="replace-purge-old-chk" checked style="width:16px; height:16px; accent-color:var(--ug-yellow); cursor:pointer;">
+            <label style="display:flex; align-items:center; gap:12px; background:#111622; border:1px solid rgba(255,255,255,0.12); padding:10px 14px; border-radius:var(--radius-md); cursor:pointer; margin-top:auto;">
+                <input type="checkbox" id="replace-purge-old-chk" checked style="width:18px; height:18px; accent-color:var(--ug-yellow); cursor:pointer; flex-shrink:0;">
                 <div style="display:flex; flex-direction:column;">
-                    <span style="font-size:0.8rem; font-weight:700; color:#f1f5f9;">Purge old evidence photo from disk storage</span>
-                    <span style="font-size:0.72rem; color:var(--ug-text-dim);">Permanently unlinks physical binary files of the replaced image if unreferenced elsewhere.</span>
+                    <span style="font-size:0.82rem; font-weight:800; color:#ffffff !important;">Purge old evidence photo from disk storage</span>
+                    <span style="font-size:0.74rem; color:rgba(255,255,255,0.85);">Permanently unlinks physical binary files of the replaced image if unreferenced elsewhere.</span>
                 </div>
             </label>
         </div>
 
-        <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; padding:12px 20px;">
-            <span id="replace-status-hint" style="font-size:0.75rem; color:var(--ug-text-dim);">Select a file or candidate image</span>
-            <div style="display:flex; gap:8px;">
-                <button type="button" class="btn btn-secondary" onclick="closeModal('modal-replace-image')">Cancel</button>
-                <button type="button" class="btn btn-primary" id="btn-submit-replace-image" onclick="submitReplaceImage()" disabled style="font-weight:800; background:var(--ug-yellow); color:#000; border-color:var(--ug-yellow);">
+        <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; padding:12px 20px; flex-wrap:wrap; gap:10px;">
+            <span id="replace-status-hint" style="font-size:0.78rem; color:rgba(255,255,255,0.9) !important; font-weight:600;">Select a file or candidate image</span>
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('modal-replace-image')" style="color:#ffffff !important; min-height:40px; padding:8px 18px;">Cancel</button>
+                <button type="button" class="btn btn-primary" id="btn-submit-replace-image" onclick="submitReplaceImage()" disabled style="font-weight:800; min-height:40px; padding:8px 22px;">
                     🔁 Replace Photo
                 </button>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- 14. ITMS Order & Kit Details Pop Modal (Mobile & Desktop Item Viewer) -->
+<div class="modal-overlay" id="modal-itms-order-details">
+    <div class="modal-box" style="width: 760px; max-width: 95vw; max-height: 90vh;">
+        <div class="modal-header">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span class="modal-title" id="itms-modal-insp-title">📋 ITMS Record Details</span>
+                <span class="badge badge-green" id="itms-modal-insp-status-badge">Loaded</span>
+            </div>
+            <button type="button" class="modal-close" onclick="closeModal('modal-itms-order-details')" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body" style="gap:14px; overflow-y:auto; padding:16px;">
+            <!-- Hero Card: Plate, Order/Kit Number & Facility -->
+            <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:14px 16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <div>
+                    <div style="font-family:var(--font-mono); font-size:1.45rem; font-weight:900; color:#ffffff !important; letter-spacing:0.02em;" id="itms-modal-insp-plate">
+                        ---
+                    </div>
+                    <div style="font-family:var(--font-mono); font-size:0.84rem; color:rgba(255,255,255,0.85); margin-top:2px;" id="itms-modal-insp-order">
+                        Order #---
+                    </div>
+                </div>
+                <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+                    <span class="badge badge-secondary" id="itms-modal-insp-wh" style="color:#ffffff;">---</span>
+                    <span style="font-size:0.75rem; color:rgba(255,255,255,0.8);" id="itms-modal-insp-date">---</span>
+                </div>
+            </div>
+
+            <!-- Hardware & Telematics Section -->
+            <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:14px;">
+                <div style="font-size:0.8rem; font-weight:800; text-transform:uppercase; color:#ffffff; letter-spacing:0.05em; margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+                    <span>🛰️</span> Hardware &amp; Telematics Inventory
+                </div>
+                <div class="hardware-box" style="padding:0; border:none; background:transparent; display:flex; flex-direction:column; gap:0;">
+                    <div class="hw-row" style="padding:7px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
+                        <span class="hw-label" style="color:rgba(255,255,255,0.85); font-weight:600; font-size:0.82rem;">GPS Tracker:</span>
+                        <span class="hw-val" id="itms-modal-insp-gps" style="color:#ffffff; font-weight:800; font-family:var(--font-mono); font-size:0.82rem;">---</span>
+                    </div>
+                    <div class="hw-row" style="padding:7px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
+                        <span class="hw-label" style="color:rgba(255,255,255,0.85); font-weight:600; font-size:0.82rem;">Front Beacon:</span>
+                        <span class="hw-val" id="itms-modal-insp-fbeacon" style="color:#ffffff; font-weight:800; font-family:var(--font-mono); font-size:0.82rem;">---</span>
+                    </div>
+                    <div class="hw-row" style="padding:7px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
+                        <span class="hw-label" style="color:rgba(255,255,255,0.85); font-weight:600; font-size:0.82rem;">Rear Beacon:</span>
+                        <span class="hw-val" id="itms-modal-insp-rbeacon" style="color:#ffffff; font-weight:800; font-family:var(--font-mono); font-size:0.82rem;">---</span>
+                    </div>
+                    <div class="hw-row" style="padding:7px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
+                        <span class="hw-label" style="color:rgba(255,255,255,0.85); font-weight:600; font-size:0.82rem;">Front Plate Serial:</span>
+                        <span class="hw-val" id="itms-modal-insp-fserial" style="color:#ffffff; font-weight:800; font-family:var(--font-mono); font-size:0.82rem;">---</span>
+                    </div>
+                    <div class="hw-row" style="padding:7px 0;">
+                        <span class="hw-label" style="color:rgba(255,255,255,0.85); font-weight:600; font-size:0.82rem;">Rear Plate Serial:</span>
+                        <span class="hw-val" id="itms-modal-insp-rserial" style="color:#ffffff; font-weight:800; font-family:var(--font-mono); font-size:0.82rem;">---</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Evidence Photos Gallery -->
+            <div>
+                <div style="font-size:0.8rem; font-weight:800; text-transform:uppercase; color:#ffffff; letter-spacing:0.05em; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+                    <span>📷</span> Evidence Photos (Direct Cloud Links)
+                </div>
+                <div class="inspector-photos-grid" id="itms-modal-insp-photos-grid">
+                    <div style="grid-column:1/-1; padding:20px; text-align:center; color:rgba(255,255,255,0.7); font-size:0.8rem; background:var(--ug-black-surface); border-radius:var(--radius-md);">
+                        Loading evidence photos...
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <div style="display:flex; gap:8px; align-items:center;">
+                <button type="button" class="btn btn-success" id="btn-modal-itms-jump-queue" style="display:none; font-size:0.8rem; padding:6px 12px; color:#ffffff;">
+                    👉 Open in Review Queue
+                </button>
+                <a href="#" id="link-modal-itms-kit-web" target="_blank" rel="noopener noreferrer" class="btn btn-primary" style="display:none; font-size:0.8rem; padding:6px 12px; text-decoration:none; color:#000000; font-weight:700;">
+                    Open on ITMS ↗
+                </a>
+            </div>
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-itms-order-details')" style="color:#ffffff; font-weight:700; padding:6px 18px; min-height:36px;">
+                Close
+            </button>
         </div>
     </div>
 </div>

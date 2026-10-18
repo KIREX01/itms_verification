@@ -1775,14 +1775,158 @@ class StockMonitoringTests(TestCase):
         self.assertTrue(blocked_data["success"])
         self.assertIn("docket", blocked_data)
         self.assertIn("UBB999ZZ", blocked_data["docket"]["raw_plates"])
+    def test_count_only_delivery_intake(self):
+        """Verifies recording delivery by count without plate scans (e.g., 200 public kits)."""
+        suffix = "20261018"
+        res = stock_monitoring_service.record_delivery(
+            plates_count=200,
+            plate_category=PlateCategory.PSV,
+            target_date_suffix=suffix,
+            supplier="Factory / Central Depot",
+        )
+        self.assertTrue(res["success"])
+        self.assertEqual(res["plates_count"], 200)
 
+        delivery = StockDelivery.objects.get(delivery_number=res["delivery_number"])
+        self.assertEqual(delivery.total_plates_count, 200)
+        self.assertEqual(delivery.items.count(), 0)
 
+        # Check reconciliation kits received count
+        recon = res["reconciliation"]
+        kits_recv_row = recon["report_table"]["rows_by_metric"]["Kits Received"]
+        self.assertEqual(kits_recv_row["psv"], 200)
+        self.assertEqual(kits_recv_row["pmo"], 0)
+        self.assertEqual(kits_recv_row["total"], 200)
 
+        # Verify via REST API
+        api_resp = self.client.post(
+            "/api/stock/delivery/",
+            data=json.dumps({
+                "quantity": 50,
+                "plate_category": "PMO",
+                "target_date_suffix": suffix,
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(api_resp.status_code, 200)
+        api_data = api_resp.json()
+        self.assertTrue(api_data["success"])
+        self.assertEqual(api_data["plates_count"], 50)
 
+    def test_direct_ledger_entry_matches_user_report(self):
+        """
+        Tests flexible manual ledger entry matching the user's official 9-row report:
+        AGM / SPIRO:
+        Opening: PMO 90, PSV 857, Total 947
+        Kits Received: PMO 0, PSV 200, Total 200
+        SCHEDULED: PMO 0, PSV 300, Total 300
+        Kits Installed: PMO 0, PSV 317, Total 317
+        Daily perfomance, %: 0%, 106%, 106%
+        Bond transfer IN: 0, 0, 0
+        Bond transfer OUT: 90, 0, 90
+        Backlog level: 0, 0, 0
+        Closing Balance: 0, 740, 740
+        """
+        suffix = "181026"
+        res = stock_monitoring_service.update_ledger_entry(
+            target_date_suffix=suffix,
+            storage_bond_name="AGM / SPIRO",
+            opening_balance_pmo=90,
+            opening_balance_psv=857,
+            kits_received_pmo=0,
+            kits_received_psv=200,
+            scheduled_pmo=0,
+            scheduled_psv=300,
+            scheduled_total=300,
+            kits_installed_pmo=0,
+            kits_installed_psv=317,
+            bond_transfer_in_pmo=0,
+            bond_transfer_in_psv=0,
+            bond_transfer_out_pmo=90,
+            bond_transfer_out_psv=0,
+            notes="Daily shift sign-off",
+            operator_name="Lead Verifier",
+        )
 
+        rows = {r["metric"]: r for r in res["report_table"]["rows"]}
 
+        self.assertEqual(rows["Opening Balance"]["pmo"], 90)
+        self.assertEqual(rows["Opening Balance"]["psv"], 857)
+        self.assertEqual(rows["Opening Balance"]["total"], 947)
 
+        self.assertEqual(rows["Kits Received"]["pmo"], 0)
+        self.assertEqual(rows["Kits Received"]["psv"], 200)
+        self.assertEqual(rows["Kits Received"]["total"], 200)
 
+        self.assertEqual(rows["SCHEDULED"]["pmo"], 0)
+        self.assertEqual(rows["SCHEDULED"]["psv"], 300)
+        self.assertEqual(rows["SCHEDULED"]["total"], 300)
 
+        self.assertEqual(rows["Kits Installed"]["pmo"], 0)
+        self.assertEqual(rows["Kits Installed"]["psv"], 317)
+        self.assertEqual(rows["Kits Installed"]["total"], 317)
 
+        self.assertEqual(rows["Daily perfomance, %"]["pmo"], "0%")
+        self.assertEqual(rows["Daily perfomance, %"]["psv"], "106%")
+        self.assertEqual(rows["Daily perfomance, %"]["total"], "106%")
+
+        self.assertEqual(rows["Bond transfer IN"]["pmo"], 0)
+        self.assertEqual(rows["Bond transfer IN"]["psv"], 0)
+        self.assertEqual(rows["Bond transfer IN"]["total"], 0)
+
+        self.assertEqual(rows["Bond transfer OUT"]["pmo"], 90)
+        self.assertEqual(rows["Bond transfer OUT"]["psv"], 0)
+        self.assertEqual(rows["Bond transfer OUT"]["total"], 90)
+
+        self.assertEqual(rows["Backlog level"]["pmo"], 0)
+        self.assertEqual(rows["Backlog level"]["psv"], 0)
+        self.assertEqual(rows["Backlog level"]["total"], 0)
+
+        self.assertEqual(rows["Closing Balance"]["pmo"], 0)
+        self.assertEqual(rows["Closing Balance"]["psv"], 740)
+        self.assertEqual(rows["Closing Balance"]["total"], 740)
+
+        self.assertEqual(res["storage_bond_name"], "AGM / SPIRO")
+
+        # Test updating via REST API
+        api_resp = self.client.post(
+            "/api/stock/ledger/entry/",
+            data=json.dumps({
+                "target_date_suffix": suffix,
+                "storage_bond_name": "AGM / SPIRO",
+                "opening_balance_pmo": 90,
+                "opening_balance_psv": 857,
+                "kits_received_psv": 200,
+                "scheduled_psv": 300,
+                "kits_installed_psv": 317,
+                "bond_transfer_out_pmo": 90,
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(api_resp.status_code, 200)
+        data = api_resp.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["reconciliation"]["closing_balance_psv"], 740)
+        self.assertEqual(data["reconciliation"]["closing_balance_pmo"], 0)
+
+    @patch("core.services.email_service.send_stock_reconciliation_report_email")
+    def test_stock_report_email_dispatch(self, mock_send_email):
+        """Verifies report email dispatch with recipient resolution and audit logging."""
+        mock_send_email.return_value = (True, "Email sent successfully", ["supervisor@example.com"])
+        suffix = "181026"
+
+        resp = self.client.post(
+            "/api/stock/report/email/",
+            data=json.dumps({
+                "target_date_suffix": suffix,
+                "recipients": ["supervisor@example.com"],
+                "notes": "End of shift report for manager review",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        self.assertIn("supervisor@example.com", data["recipients"])
+        mock_send_email.assert_called_once()
 

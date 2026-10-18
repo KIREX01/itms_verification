@@ -100,6 +100,8 @@ urlpatterns = [
     path("api/stock/audit/", views.api_stock_audit, name="api_stock_audit"),
     path("api/stock/previous-closing/", views.api_stock_previous_closing, name="api_stock_previous_closing"),
     path("api/stock/export/unregistered/", views.api_stock_export_unregistered_csv, name="api_stock_export_unregistered_csv"),
+    path("api/stock/ledger/entry/", views.api_stock_ledger_entry, name="api_stock_ledger_entry"),
+    path("api/stock/report/email/", views.api_stock_report_email, name="api_stock_report_email"),
     # URL aliases for web UI compatibility
     path("api/stock/bond_transfer/", views.api_stock_bond_transfer, name="api_stock_bond_transfer_alias"),
     path("api/stock/physical_count/", views.api_stock_physical_count, name="api_stock_physical_count_alias"),

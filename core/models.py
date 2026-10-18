@@ -564,6 +564,8 @@ class SubmissionAuditLog(models.Model):
         FALLBACK = "FALLBACK", "Manual Fallback Triggered"
         PAIR_DELETED = "PAIR_DELETED", "Pair Deleted / Purged"
         IMAGE_REPLACED = "IMAGE_REPLACED", "Evidence Image Replaced"
+        STOCK_LEDGER_UPDATED = "STOCK_LEDGER_UPDATED", "Stock Ledger Updated"
+        STOCK_REPORT_EMAILED = "STOCK_REPORT_EMAILED", "Stock Report Emailed"
 
     class ResultStatus(models.TextChoices):
         SUCCESS = "SUCCESS", "Success"
@@ -1066,6 +1068,18 @@ class DailyStockLedger(models.Model):
 
     physical_count = models.IntegerField(null=True, blank=True, help_text="Optional manual physical count audit")
     variance = models.IntegerField(default=0, help_text="Variance between physical count and closing stock")
+    override_installed = models.BooleanField(
+        default=False,
+        help_text="True if installed count was manually entered/overridden rather than auto-counted from orders",
+    )
+    override_received = models.BooleanField(
+        default=False,
+        help_text="True if kits received count was manually entered rather than counted from scanned delivery items",
+    )
+    override_transfers = models.BooleanField(
+        default=False,
+        help_text="True if bond transfers were manually entered rather than counted from scan transfers",
+    )
     is_closed = models.BooleanField(default=False, help_text="True if shift stock has been locked/closed")
     notes = models.TextField(blank=True, default="")
     last_reconciled_at = models.DateTimeField(null=True, blank=True)

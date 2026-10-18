@@ -149,6 +149,43 @@ function filterBatchesStream() {
     renderBatchesStream();
 }
 
+let currentBatchViewMode = (function() {
+    try {
+        return localStorage.getItem("itms_batch_view_mode") || "large";
+    } catch (_) {
+        return "large";
+    }
+})();
+
+function setBatchViewMode(mode) {
+    currentBatchViewMode = mode;
+    try {
+        localStorage.setItem("itms_batch_view_mode", mode);
+    } catch (_) {}
+
+    const bLarge = document.getElementById("btn-density-large");
+    const bGrid = document.getElementById("btn-density-grid");
+    if (bLarge) bLarge.classList.toggle("active", mode === "large");
+    if (bGrid) bGrid.classList.toggle("active", mode === "grid");
+
+    document.querySelectorAll(".batch-full-photos-grid").forEach(el => {
+        el.classList.toggle("view-grid", mode === "grid");
+    });
+}
+
+function toggleInCardZoom(imageId, event) {
+    if (event) {
+        event.stopPropagation();
+    }
+    const wrap = document.getElementById(`photo-wrap-${imageId}`);
+    if (!wrap) return;
+    const isMagnified = wrap.classList.toggle("is-magnified");
+    const btn = document.getElementById(`photo-zoom-btn-${imageId}`);
+    if (btn) {
+        btn.innerHTML = isMagnified ? "🔍 Fit Normal" : "🔍 Magnify 1.8x";
+    }
+}
+
 function renderBatchesStream() {
     const container = document.getElementById("batches-stream-container");
     if (!container) return;
@@ -165,8 +202,8 @@ function renderBatchesStream() {
         container.innerHTML = `
             <div class="batches-empty-state">
                 <span style="font-size:2.2rem;">🔍</span>
-                <h4 style="color:#fff; font-size:1rem; margin-top:8px;">No batches matching '${escapeHtml(batchSearchQuery)}'</h4>
-                <p style="font-size:0.75rem; color:var(--ug-text-muted);">Try a different batch ID or shift label.</p>
+                <h4 style="color:#ffffff !important; font-size:1rem; margin-top:8px; font-weight:800;">No batches matching '${escapeHtml(batchSearchQuery)}'</h4>
+                <p style="font-size:0.75rem; color:rgba(255,255,255,0.85);">Try a different batch ID or shift label.</p>
             </div>
         `;
         return;
@@ -179,10 +216,10 @@ function renderBatchesStream() {
         ` : '';
 
         const shiftBadge = b.is_latest
-            ? `<span class="badge badge-green" style="font-size:0.65rem;" title="Latest active batch">🔥 TODAY (Active)</span>`
+            ? `<span class="badge badge-secondary" style="font-size:0.68rem; font-weight:800; color:#ffffff !important; border:1px solid rgba(255,255,255,0.3); background:#1e293b;" title="Latest active batch">⚡ TODAY (Active)</span>`
             : (b.is_today
-                ? `<span class="badge badge-green" style="font-size:0.65rem;" title="Today's shift batch">● TODAY</span>`
-                : `<span class="badge badge-yellow" style="font-size:0.65rem;" title="Prior shift batch">⏳ PRIOR (${escapeHtml(b.created_date || '')})</span>`);
+                ? `<span class="badge badge-secondary" style="font-size:0.68rem; font-weight:800; color:#ffffff !important; border:1px solid rgba(255,255,255,0.25);" title="Today's shift batch">● TODAY</span>`
+                : `<span class="badge badge-secondary" style="font-size:0.68rem; font-weight:800; color:rgba(255,255,255,0.85) !important;" title="Prior shift batch">⏳ PRIOR (${escapeHtml(b.created_date || '')})</span>`);
 
         return `
             <div class="batch-stream-card ${isExp ? 'is-expanded' : ''}" id="batch-stream-${escapeHtml(b.batch_id)}">
@@ -191,7 +228,7 @@ function renderBatchesStream() {
                         <span class="batch-chevron" id="batch-chevron-${escapeHtml(b.batch_id)}">${isExp ? '▼' : '▶'}</span>
                         <span class="batch-id-text">${escapeHtml(b.batch_id)}</span>
                         ${shiftBadge}
-                        <span class="badge badge-yellow">${escapeHtml(b.source_type || 'WEB')}</span>
+                        <span class="badge badge-secondary" style="font-size:0.7rem; color:#ffffff !important; border:1px solid rgba(255,255,255,0.2);">${escapeHtml(b.source_type || 'WEB')}</span>
                         <span class="batch-label-text">${escapeHtml(b.source_label || 'Ingestion Session')}</span>
                         <span class="batch-time-text">📅 ${escapeHtml(b.created_at || '--')}</span>
                     </div>
@@ -208,8 +245,8 @@ function renderBatchesStream() {
                 </div>
                 <div class="batch-stream-body" id="batch-body-${escapeHtml(b.batch_id)}" style="display:${isExp ? 'block' : 'none'};">
                     <div id="batch-photos-${escapeHtml(b.batch_id)}">
-                        <div style="padding:20px; text-align:center; color:var(--ug-text-dim);">
-                            Loading photos for ${escapeHtml(b.batch_id)}...
+                        <div style="padding:24px; text-align:center; color:#ffffff !important; font-weight:600;">
+                            ⏳ Loading photos for ${escapeHtml(b.batch_id)}...
                         </div>
                     </div>
                 </div>
@@ -272,11 +309,11 @@ async function loadBatchDetailsAndRender(batchId) {
             batchDetailsCache[batchId] = data.images;
             renderFullScaleBatchPhotos(batchId, data.images);
         } else {
-            container.innerHTML = `<div style="padding:20px; text-align:center; color:var(--ug-text-dim);">No photos found in batch.</div>`;
+            container.innerHTML = `<div style="padding:24px; text-align:center; color:rgba(255,255,255,0.8) !important;">No photos found in batch.</div>`;
         }
     } catch (err) {
         console.warn(`Failed loading batch ${batchId}:`, err);
-        container.innerHTML = `<div style="padding:20px; text-align:center; color:var(--ug-red);">Failed to load photos.</div>`;
+        container.innerHTML = `<div style="padding:24px; text-align:center; color:#ef4444; font-weight:700;">Failed to load photos.</div>`;
     }
 }
 
@@ -285,29 +322,38 @@ function renderFullScaleBatchPhotos(batchId, images) {
     if (!container) return;
 
     if (!images || images.length === 0) {
-        container.innerHTML = `<div style="padding:24px; text-align:center; color:var(--ug-text-dim);">No photos recorded in this batch.</div>`;
+        container.innerHTML = `<div style="padding:28px; text-align:center; color:rgba(255,255,255,0.8) !important;">No evidence photos recorded in this batch.</div>`;
         return;
     }
 
+    const gridClass = currentBatchViewMode === "grid" ? "batch-full-photos-grid view-grid" : "batch-full-photos-grid";
+
     container.innerHTML = `
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.07);">
-            <span style="font-size:0.78rem; font-weight:700; color:var(--ug-text-muted); text-transform:uppercase;">
-                📷 Evidence Photos (${images.length} images)
-            </span>
-            <span style="font-size:0.72rem; color:var(--ug-yellow); display:inline-flex; align-items:center; gap:4px;">
-                ↕ Scroll down to inspect all photos
-            </span>
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.1); flex-wrap:wrap; gap:8px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:0.82rem; font-weight:800; color:#ffffff !important; text-transform:uppercase; letter-spacing:0.5px;">
+                    📷 Evidence Photos (${images.length} images)
+                </span>
+                <span style="font-size:0.74rem; color:rgba(255,255,255,0.7) !important;">
+                    • High-Resolution Inspection Stream
+                </span>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:0.74rem; color:#ffffff !important; font-weight:600;">
+                    ↕ Tap/Hover to inspect fine plate details
+                </span>
+            </div>
         </div>
-        <div class="batch-full-photos-grid">
+        <div class="${gridClass}" id="batch-grid-${escapeHtml(batchId)}">
             ${images.map(img => {
                 const orientTag = img.orientation === "FRONT" ? "tag-front" : (img.orientation === "REAR" ? "tag-rear" : "tag-unknown");
                 const plateHtml = img.detected_plate ? `
                     <div class="batch-photo-plate-overlay">
-                        <span>🔍 ${escapeHtml(img.detected_plate)}</span>
-                        ${img.ocr_confidence !== null ? `<span style="font-size:0.75rem; color:#fff; font-weight:normal;">(${img.ocr_confidence}%)</span>` : ''}
+                        <span class="plate-code">🔍 ${escapeHtml(img.detected_plate)}</span>
+                        ${img.ocr_confidence !== null ? `<span class="plate-conf-tag">(${img.ocr_confidence}%)</span>` : ''}
                     </div>
                 ` : `
-                    <div class="batch-photo-plate-overlay" style="border-color:rgba(255,255,255,0.2); color:var(--ug-text-dim);">
+                    <div class="batch-photo-plate-overlay no-plate">
                         <span>No OCR Plate</span>
                     </div>
                 `;
@@ -315,42 +361,51 @@ function renderFullScaleBatchPhotos(batchId, images) {
                 const pairHtml = img.pair ? `
                     <div class="batch-photo-pair-strip">
                         <div>
-                            <div style="color:var(--ug-green); font-weight:700; font-size:0.8rem;">🔗 Pair #${img.pair.pair_id} (${escapeHtml(img.pair.role)})</div>
-                            <div style="color:#fff; font-weight:700; font-size:0.78rem;">Detected: ${escapeHtml(img.pair.detected_plate || '—')}</div>
-                            <div style="color:var(--ug-text-dim); font-size:0.72rem;">Order: ${img.pair.order_number ? '#' + escapeHtml(img.pair.order_number) : 'Unlinked'}</div>
+                            <div style="color:#ffffff !important; font-weight:800; font-size:0.82rem;">🔗 Pair #${img.pair.pair_id} (${escapeHtml(img.pair.role)})</div>
+                            <div style="color:#ffffff !important; font-weight:700; font-size:0.78rem;">Detected Plate: ${escapeHtml(img.pair.detected_plate || '—')}</div>
+                            <div style="color:rgba(255,255,255,0.8) !important; font-size:0.74rem;">Order: ${img.pair.order_number ? '#' + escapeHtml(img.pair.order_number) : 'Unlinked'}</div>
                         </div>
-                        <button class="btn btn-secondary" style="padding:4px 10px; font-size:0.75rem;" onclick="jumpToPairInQueue(${img.pair.pair_id})">
+                        <button type="button" class="btn btn-secondary" style="padding:6px 12px; font-size:0.76rem; min-height:36px; font-weight:700; color:#ffffff !important;" onclick="jumpToPairInQueue(${img.pair.pair_id})">
                             🔍 Inspect in Queue
                         </button>
                     </div>
                 ` : `
-                    <div class="batch-photo-pair-strip" style="border-color:rgba(245, 158, 11, 0.3);">
+                    <div class="batch-photo-pair-strip" style="border-color:rgba(255, 255, 255, 0.2);">
                         <div>
-                            <div style="color:var(--ug-yellow); font-weight:700; font-size:0.78rem;">⚠️ Unassigned Evidence Photo</div>
-                            <div style="color:var(--ug-text-dim); font-size:0.7rem;">Click 'Match Pairs [M]' on Dashboard to associate.</div>
+                            <div style="color:#ffffff !important; font-weight:800; font-size:0.8rem;">⚠️ Unassigned Evidence Photo</div>
+                            <div style="color:rgba(255,255,255,0.8) !important; font-size:0.72rem;">Available for pairing. Click 'Match Pairs [M]' on Dashboard to associate.</div>
                         </div>
                     </div>
                 `;
 
                 return `
-                    <div class="batch-photo-card-large">
-                        <div class="batch-photo-full-wrap" onclick="openLightbox('${escapeHtml(img.url)}')">
-                            <img class="batch-photo-full-img" src="${escapeHtml(img.url)}" alt="${escapeHtml(img.file_name)}" onerror="this.onerror=null; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'100\' height=\'100\' viewBox=\'0 0 100 100\'><rect fill=\'%23222\' width=\'100\' height=\'100\'/><text fill=\'%23888\' x=\'50\' y=\'55\' text-anchor=\'middle\' font-size=\'11\'>Photo Missing</text></svg>';">
-                            <span class="batch-photo-orient-badge ${orientTag}">${img.orientation}</span>
+                    <div class="batch-photo-card-large" id="photo-card-${escapeHtml(img.id)}">
+                        <div class="batch-photo-full-wrap" id="photo-wrap-${escapeHtml(img.id)}">
+                            <img class="batch-photo-full-img" src="${escapeHtml(img.url)}" alt="${escapeHtml(img.file_name)}" onerror="this.onerror=null; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'100\' height=\'100\' viewBox=\'0 0 100 100\'><rect fill=\'%23111\' width=\'100\' height=\'100\'/><text fill=\'%23fff\' x=\'50\' y=\'55\' text-anchor=\'middle\' font-size=\'11\'>Photo Missing</text></svg>';">
+                            <span class="batch-photo-orient-badge ${orientTag}">${escapeHtml(img.orientation || 'UNKNOWN')}</span>
                             ${plateHtml}
-                            <span class="batch-photo-zoom-hint">🔍 Click to zoom</span>
+                            <div class="batch-photo-tools-overlay">
+                                <button type="button" class="in-card-tool-btn" id="photo-zoom-btn-${escapeHtml(img.id)}" onclick="toggleInCardZoom('${escapeHtml(img.id)}', event)" title="Magnify photo 1.8x without opening modal">
+                                    🔍 Magnify 1.8x
+                                </button>
+                                <button type="button" class="in-card-tool-btn" onclick="openLightbox('${escapeHtml(img.url)}'); event.stopPropagation();" title="Open full screen lightbox">
+                                    ⛶ Fullscreen
+                                </button>
+                            </div>
                         </div>
                         <div class="batch-photo-details-strip">
                             <div class="batch-photo-meta-row">
-                                <span style="font-family:var(--font-mono); font-size:0.75rem; color:#fff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:260px;" title="${escapeHtml(img.file_name)}">
+                                <span style="font-family:var(--font-mono); font-size:0.78rem; font-weight:700; color:#ffffff !important; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:280px;" title="${escapeHtml(img.file_name)}">
                                     📁 ${escapeHtml(img.file_name)}
                                 </span>
-                                <span>${img.file_size_kb} KB • ${escapeHtml(img.captured_at || 'No timestamp')}</span>
+                                <span style="color:rgba(255,255,255,0.85) !important;">${img.file_size_kb} KB • ${escapeHtml(img.captured_at || 'No timestamp')}</span>
                             </div>
                             ${pairHtml}
-                            <div class="batch-photo-actions-row" style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,255,255,0.06);">
-                                <span style="font-size:0.7rem; color:var(--ug-text-dim);">ID: ${escapeHtml(img.id ? String(img.id).slice(0, 8) : '')}</span>
-                                <button type="button" class="btn btn-secondary btn-sm" onclick="openReplaceBatchImageModal('${escapeHtml(img.id)}', '${escapeHtml(batchId)}', '${escapeHtml(img.orientation || 'FRONT')}', '${escapeHtml(img.file_name)}')" style="padding:2px 8px; font-size:0.72rem; border-color:var(--ug-border); color:#f1f5f9;">
+                            <div class="batch-photo-actions-row">
+                                <span style="font-size:0.74rem; font-family:var(--font-mono); color:rgba(255,255,255,0.8) !important;">
+                                    ID: <strong>${escapeHtml(img.id ? String(img.id).slice(0, 8) : '')}</strong>
+                                </span>
+                                <button type="button" class="batch-btn-replace" onclick="openReplaceBatchImageModal('${escapeHtml(img.id)}', '${escapeHtml(batchId)}', '${escapeHtml(img.orientation || 'FRONT')}', '${escapeHtml(img.file_name)}')" title="Replace this evidence image with a new upload or candidate photo">
                                     🔁 Replace Photo
                                 </button>
                             </div>

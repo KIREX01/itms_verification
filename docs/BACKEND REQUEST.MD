@@ -146,3 +146,28 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
   4. **Upload Association Throttling**: In `api_mobile_upload`, auto-association only runs when photo counts are balanced (`fronts == rears > 0`), and final sealing runs cleanly in `api_mobile_uturn_finish`.
 - **Automated Verification**:
   - `TestMobileCompanion.test_uturn_pairing_aligns_turnaround_without_shutter_index_confusion` in `core/tests/test_mobile_companion.py` (100% pass).
+## 4. Feature: Flexible Stock Ledger Entry & Official Report Email Dispatch - [COMPLETED]
+- **Requirements Implemented**:
+  1. **Count-Only Inbound Delivery Intake**:
+     - Endpoint `POST /api/stock/delivery/` and service `record_delivery` now accept `plates_count` / `quantity` directly without requiring individual plate barcode scans.
+     - Automatically updates inbound kits received (`kits_received_psv` or `kits_received_pmo`) and reconciles the shift.
+  2. **Flexible Manual Ledger Entry & Metric Overrides**:
+     - Model fields added: `override_installed`, `override_received`, `override_transfers` on `DailyStockLedger`.
+     - Endpoint `POST /api/stock/ledger/entry/` and service `update_ledger_entry`:
+       - Allows safe-room teams to record/override any row in the official 9-row reconciliation (Opening Balance, Kits Received, SCHEDULED, Kits Installed, Bond Transfer IN, Bond Transfer OUT, Physical Count, Notes, and Storage Bond Name).
+       - Automatically recalculates closing balances using:
+         $$\text{Closing Balance} = \text{Opening} + \text{Received} + \text{Transfer In} - \text{Transfer Out} - \text{Installed}$$
+       - Correctly formats Daily Performance % ($0\%$, $106\%$, etc.) and Backlog Level ($\max(0, \text{Scheduled} - \text{Installed})$).
+       - Generates immutable audit log in `SubmissionAuditLog` (`action=STOCK_LEDGER_UPDATED`).
+  3. **Official 9-Row Reconciliation Report Email Dispatch**:
+     - Endpoint `POST /api/stock/report/email/`:
+       - Dispatches Uganda Flag Ribbon-branded, mobile-responsive HTML report table and ASCII text fallback.
+       - Resolves recipients from user email, connected ITMS account email, or explicitly passed list.
+       - Dispatches via Resend API with offline graceful fallback and records `STOCK_REPORT_EMAILED` audit log.
+- **Automated Verification**:
+  - `core.tests.test_stock_monitoring.StockMonitoringTests`:
+    - `test_count_only_delivery_intake`: Verifies inbound delivery count intake without plate barcodes.
+    - `test_direct_ledger_entry_matches_user_report`: Verifies exact matching of the user's 9-row table (AGM / SPIRO: 90/857 opening, 200 received, 300 scheduled, 317 installed -> 106% perf, 90 transfer out, 0/740 closing).
+    - `test_stock_report_email_dispatch`: Verifies email dispatch, recipient resolution, and audit log.
+    - Full suite: 62/62 tests passing.
+

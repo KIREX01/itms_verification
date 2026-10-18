@@ -75,3 +75,97 @@ The backend endpoints and frontend UI templates, modals, CSS styling, and client
    - Direct `fetch()` calls scattered across UI rendering functions should be centralized into dedicated API client wrappers with uniform error handling and retry mechanisms.
 3. **State Management**:
    - Shared client state (e.g. current batch, selected pair, queue filters) should use an observable or deterministic state store rather than relying on DOM element attributes.
+---
+
+## 3. Feature: Stock Monitoring Tool - Manual Entry & Report Email UI Integration
+
+To support safe-room workflows during morning shift rush where teams receive kits or adjust ledger metrics without scanning barcodes immediately, the backend has implemented flexible count intake and report email endpoints. Frontend components and modal bindings are requested:
+
+### 3.1 Endpoint Specifications
+
+#### A. Inbound Count Delivery (`POST /api/stock/delivery/`)
+- **Payload (`application/json` or `multipart/form-data`)**:
+  ```json
+  {
+    "quantity": 200,
+    "plate_category": "PSV",
+    "supplier": "Factory / Central Depot",
+    "paper_note_reference": "DN-89211",
+    "target_date_suffix": "181026",
+    "notes": "Morning bulk delivery"
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "success": true,
+    "delivery_number": "DN-261018-01",
+    "plates_count": 200,
+    "plate_category": "PSV",
+    "reconciliation": { ... }
+  }
+  ```
+
+#### B. Direct Ledger Entry / Overrides (`POST /api/stock/ledger/entry/`)
+- **Payload (`application/json`)**:
+  ```json
+  {
+    "target_date_suffix": "181026",
+    "storage_bond_name": "AGM / SPIRO",
+    "opening_balance_pmo": 90,
+    "opening_balance_psv": 857,
+    "kits_received_pmo": 0,
+    "kits_received_psv": 200,
+    "scheduled_pmo": 0,
+    "scheduled_psv": 300,
+    "scheduled_total": 300,
+    "kits_installed_pmo": 0,
+    "kits_installed_psv": 317,
+    "bond_transfer_in_pmo": 0,
+    "bond_transfer_in_psv": 0,
+    "bond_transfer_out_pmo": 90,
+    "bond_transfer_out_psv": 0,
+    "physical_count": 740,
+    "notes": "Shift sign-off"
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "success": true,
+    "message": "Daily stock ledger updated successfully.",
+    "reconciliation": { ... }
+  }
+  ```
+
+#### C. Report Email Dispatch (`POST /api/stock/report/email/`)
+- **Payload (`application/json`)**:
+  ```json
+  {
+    "target_date_suffix": "181026",
+    "recipients": ["supervisor@example.com", "operations@spiro.ug"],
+    "include_operator_email": true,
+    "include_itms_email": true,
+    "notes": "Daily stock reconciliation report attached"
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "success": true,
+    "message": "Stock reconciliation report sent successfully.",
+    "recipients": ["operator@test.com", "supervisor@example.com"],
+    "work_date_suffix": "181026"
+  }
+  ```
+
+### 3.2 Frontend UI Requirements (`tab_itms.html` / `tab_itms.js`)
+1. **Quick Delivery Modal / Action**:
+   - Add a "Quick Count Inbound" button on the Stock Delivery card allowing operators to simply type a quantity (e.g. 200) and pick category (PSV/PMO) without scanning barcode lists.
+2. **Ledger Edit / Override Modal**:
+   - Add an "✏️ Edit Ledger" button above the 9-row Stock Reconciliation Table allowing direct numeric entry into any cell of the 9 rows.
+   - On save, dispatch `POST /api/stock/ledger/entry/` and refresh the table state.
+3. **Email Report Button**:
+   - Add an "📧 Email Report" button on the Stock Reconciliation Table header.
+   - Triggers an email dialog with input for optional extra recipient emails and a "Send Report" action dispatching `POST /api/stock/report/email/`.
+

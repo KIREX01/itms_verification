@@ -171,3 +171,33 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
     - `test_stock_report_email_dispatch`: Verifies email dispatch, recipient resolution, and audit log.
     - Full suite: 62/62 tests passing.
 
+## 5. Feature: Standardized CSV Reports, Spiked Kit Detection & High-Performance Streaming - [COMPLETED]
+- **Core Requirements Implemented**:
+  1. **Standardized CSV Exports Across Stock & Reports Pages**:
+     - Exports have distinct, clearly defined schemas without redundant data repetition:
+       - Master Reconciliation (`/api/stock/export/`): Clean operational summary covering 9-row balance table, floor operations, and discrepancy counts without dumping hundreds of redundant row-level dispatch lists.
+       - Dispatched Kits Export (`/api/stock/export/category/dispatched/`): Dedicated itemized listing of physically scanned-out kits.
+       - Unallocated Discrepancies (`/api/stock/export/category/unallocated/`): Kits scanned out to line without active ITMS order or archive.
+       - Spiked / Undispatched Kits (`/api/stock/export/category/spiked/`): Dedicated audit listing of plates appearing in ITMS orders that bypassed safe room dispatch scanning.
+  2. **Spiked / Undispatched Kit Identification Logic**:
+     - Integrated into `compute_daily_reconciliation` in `core/services/stock_monitoring_service.py` and `get_date_driven_plate_totals` in `core/services/report_service.py`.
+     - Cross-references all scoped ITMS orders (`installed` and `pending`) against `dispatched_plates_map`.
+     - Distinguishes:
+       - `spiked_installed`: Plates verified and archived in ITMS without safe room dispatch scan.
+       - `spiked_pending`: Plates active in installation queue without safe room dispatch scan.
+     - Exposes `spiked_undispatched` in `floor_operations`, `graduated_scale`, and top-level recon dictionary.
+  3. **Zero Empty Rows and CRLF Format Integrity**:
+     - Diagnosed and resolved Windows text-mode `\r\r\n` duplication by enforcing direct binary writes via `.write_bytes(content.encode("utf-8-sig"))` or opening files with `newline=""` / binary mode.
+     - All `csv.writer` instances explicitly specify `lineterminator="\r\n"`.
+     - All exports prepend UTF-8 BOM (`\xef\xbb\xbf`) for 100% native Microsoft Excel rendering.
+     - Eliminated all artificial `writer.writerow([])` spacer rows. Every exported row is structured data.
+  4. **High-Performance & Scalability for 1,000+ Records**:
+     - Refactored `api_export_report` (`/api/export/report/`) to use `StreamingHttpResponse` with chunked generator yielding 200-row byte chunks.
+     - Replaced greedy `pairs.all()` with `.only(...)` and `.iterator(chunk_size=1000)`.
+     - Replaced loop-based N+1 count queries in `report_service.py` (`get_system_totals`) with single conditional database aggregations (`Count(..., filter=Q(...))`).
+- **Automated Verification**:
+  - `core.tests.test_report_exports.ReportExportsAndSpikedKitTests`:
+    - `test_spiked_undispatched_kit_detection`: 100% pass.
+    - `test_spiked_csv_export_content_and_headers`: 100% pass.
+    - `test_zero_empty_rows_and_crlf_format`: 100% pass.
+    - `test_streaming_export_with_1000_records`: 100% pass.

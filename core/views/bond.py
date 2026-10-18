@@ -504,7 +504,7 @@ def api_stock_export_csv(request: HttpRequest) -> HttpResponse:
     exports_dir = Path(settings.BASE_DIR) / "exports"
     exports_dir.mkdir(parents=True, exist_ok=True)
     filename = f"itms_stock_reconciliation_{suf}.csv"
-    (exports_dir / filename).write_text(csv_content, encoding="utf-8-sig")
+    (exports_dir / filename).write_bytes(csv_content.encode("utf-8-sig"))
 
     response = HttpResponse(csv_content.encode("utf-8-sig"), content_type="text/csv")
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
@@ -776,6 +776,7 @@ def api_stock_export_category_csv(request: HttpRequest, category: str) -> HttpRe
     - 'audit'
     - 'unregistered'
     - 'blocked'
+    - 'spiked' / 'undispatched'
     """
     if not (request.user and getattr(request.user, "is_authenticated", False)):
         return HttpResponse("Authentication required", status=401)
@@ -797,7 +798,7 @@ def api_stock_export_category_csv(request: HttpRequest, category: str) -> HttpRe
     exports_dir = Path(settings.BASE_DIR) / "exports"
     exports_dir.mkdir(parents=True, exist_ok=True)
     filename = f"shift_{suffix}_{cat_clean}.csv"
-    (exports_dir / filename).write_text(csv_content, encoding="utf-8-sig")
+    (exports_dir / filename).write_bytes(csv_content.encode("utf-8-sig"))
 
     response = HttpResponse(csv_content.encode("utf-8-sig"), content_type="text/csv")
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
@@ -1300,7 +1301,7 @@ def api_stock_export_unregistered_csv(request: HttpRequest) -> HttpResponse:
     unregistered = [p for p in audits if p not in known_kits]
 
     out = io.StringIO()
-    writer = csv.writer(out)
+    writer = csv.writer(out, lineterminator="\r\n")
     writer.writerow(["Row", "Plate Number", "Audit Shift Date", "Audit Status", "Action Required"])
     for i, plate in enumerate(unregistered, 1):
         writer.writerow([i, plate, suffix, "UNREGISTERED_IN_SAFE_ROOM", "Manual Registration Required"])
@@ -1310,7 +1311,7 @@ def api_stock_export_unregistered_csv(request: HttpRequest) -> HttpResponse:
     exports_dir = Path(settings.BASE_DIR) / "exports"
     exports_dir.mkdir(parents=True, exist_ok=True)
     filename = f"unregistered_stocktake_{suffix}.csv"
-    (exports_dir / filename).write_text(csv_data, encoding="utf-8-sig")
+    (exports_dir / filename).write_bytes(csv_data.encode("utf-8-sig"))
 
     response = HttpResponse(csv_data.encode("utf-8-sig"), content_type="text/csv")
     response["Content-Disposition"] = f'attachment; filename="{filename}"'

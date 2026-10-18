@@ -77,7 +77,7 @@ def export_shift_report(
 
     row_count = 0
     with open(file_path, "w", newline="", encoding="utf-8-sig") as csvfile:
-        writer = csv.writer(csvfile)
+        writer = csv.writer(csvfile, lineterminator="\r\n")
         writer.writerow(headers)
 
         for pair in pairs:

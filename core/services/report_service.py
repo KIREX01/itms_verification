@@ -231,6 +231,29 @@ def get_date_driven_plate_totals(target_date: Optional[str] = None) -> Dict[str,
     stock_kits_count = 0
 
 
+    # 4. Category 4: Spiked / Undispatched Plates (In ITMS orders without safe room dispatch scan)
+    spiked_installed_list = (stock_recon.get("spiked_installed_plates") or stock_recon.get("spiked_installed") or []) if stock_recon else []
+    spiked_pending_list = (stock_recon.get("spiked_pending_plates") or stock_recon.get("spiked_pending") or []) if stock_recon else []
+    spiked_total_count = stock_recon.get("spiked_undispatched_count", len(spiked_installed_list) + len(spiked_pending_list)) if stock_recon else 0
+
+    spiked_items: List[Dict[str, Any]] = []
+    for p in spiked_installed_list[:50]:
+        spiked_items.append({
+            "plate": p,
+            "display_plate": format_display_plate(p),
+            "status": "In ITMS Archive (Installed)",
+            "reason": "Kit verified/installed in ITMS without safe room dispatch scan",
+            "date": formatted_date,
+        })
+    for p in spiked_pending_list[:50]:
+        spiked_items.append({
+            "plate": p,
+            "display_plate": format_display_plate(p),
+            "status": "In Active Pending Queue",
+            "reason": "Kit active in pending queue without safe room dispatch scan",
+            "date": formatted_date,
+        })
+
     return {
         "selected_date_suffix": selected_suffix,
         "selected_date_formatted": formatted_date,
@@ -255,6 +278,12 @@ def get_date_driven_plate_totals(target_date: Optional[str] = None) -> Dict[str,
             "stock_kits_count": stock_kits_count,
             "dispatched_unallocated_count": dispatched_unallocated_count,
             "items": unallocated_items,
+        },
+        "spiked_undispatched": {
+            "total_count": spiked_total_count,
+            "installed_count": len(spiked_installed_list),
+            "pending_count": len(spiked_pending_list),
+            "items": spiked_items,
         },
         "stock_reconciliation": stock_recon,
     }
@@ -309,60 +338,55 @@ def get_system_totals(scope: str = "ALL", target_date: Optional[str] = None) -> 
     total_pairs = pairs_qs.count()
     today_pairs = today_pairs_qs.count()
 
-    status_counts = {
-        s: pairs_qs.filter(verification_status=s).count()
-        for s in [
-            VehicleInstallationPair.VerificationStatus.PENDING_REVIEW,
-            VehicleInstallationPair.VerificationStatus.APPROVED,
-            VehicleInstallationPair.VerificationStatus.SUBMITTED,
-            VehicleInstallationPair.VerificationStatus.FAILED,
-            VehicleInstallationPair.VerificationStatus.INCOMPLETE,
-            VehicleInstallationPair.VerificationStatus.CONFLICT,
-            VehicleInstallationPair.VerificationStatus.UNREGISTERED,
-            VehicleInstallationPair.VerificationStatus.OFFLINE_OUTBOX,
-        ]
-    }
+    # High-performance conditional aggregation (1 query across 1000s of pairs)
+    all_status_agg = pairs_qs.aggregate(
+        pending_review=Count("id", filter=Q(verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW)),
+        approved=Count("id", filter=Q(verification_status=VehicleInstallationPair.VerificationStatus.APPROVED)),
+        submitted=Count("id", filter=Q(verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED)),
+        failed=Count("id", filter=Q(verification_status=VehicleInstallationPair.VerificationStatus.FAILED)),
+        incomplete=Count("id", filter=Q(verification_status=VehicleInstallationPair.VerificationStatus.INCOMPLETE)),
+        conflict=Count("id", filter=Q(verification_status=VehicleInstallationPair.VerificationStatus.CONFLICT)),
+        unregistered=Count("id", filter=Q(verification_status=VehicleInstallationPair.VerificationStatus.UNREGISTERED)),
+        offline_outbox=Count("id", filter=Q(verification_status=VehicleInstallationPair.VerificationStatus.OFFLINE_OUTBOX)),
+        manual_overrides=Count("id", filter=Q(is_manual_override=True)),
+    )
+    today_status_agg = today_pairs_qs.aggregate(
+        pending_review=Count("id", filter=Q(verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW)),
+        approved=Count("id", filter=Q(verification_status=VehicleInstallationPair.VerificationStatus.APPROVED)),
+        submitted=Count("id", filter=Q(verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED)),
+        failed=Count("id", filter=Q(verification_status=VehicleInstallationPair.VerificationStatus.FAILED)),
+        incomplete=Count("id", filter=Q(verification_status=VehicleInstallationPair.VerificationStatus.INCOMPLETE)),
+        conflict=Count("id", filter=Q(verification_status=VehicleInstallationPair.VerificationStatus.CONFLICT)),
+        unregistered=Count("id", filter=Q(verification_status=VehicleInstallationPair.VerificationStatus.UNREGISTERED)),
+        offline_outbox=Count("id", filter=Q(verification_status=VehicleInstallationPair.VerificationStatus.OFFLINE_OUTBOX)),
+        manual_overrides=Count("id", filter=Q(is_manual_override=True)),
+    )
 
-    today_status_counts = {
-        s: today_pairs_qs.filter(verification_status=s).count()
-        for s in [
-            VehicleInstallationPair.VerificationStatus.PENDING_REVIEW,
-            VehicleInstallationPair.VerificationStatus.APPROVED,
-            VehicleInstallationPair.VerificationStatus.SUBMITTED,
-            VehicleInstallationPair.VerificationStatus.FAILED,
-            VehicleInstallationPair.VerificationStatus.INCOMPLETE,
-            VehicleInstallationPair.VerificationStatus.CONFLICT,
-            VehicleInstallationPair.VerificationStatus.UNREGISTERED,
-            VehicleInstallationPair.VerificationStatus.OFFLINE_OUTBOX,
-        ]
-    }
-
-    manual_overrides_count = pairs_qs.filter(is_manual_override=True).count()
-    today_manual_overrides = today_pairs_qs.filter(is_manual_override=True).count()
-
-    approved_cnt = status_counts[VehicleInstallationPair.VerificationStatus.APPROVED]
-    submitted_cnt = status_counts[VehicleInstallationPair.VerificationStatus.SUBMITTED]
-    failed_cnt = status_counts[VehicleInstallationPair.VerificationStatus.FAILED]
-    pending_cnt = status_counts[VehicleInstallationPair.VerificationStatus.PENDING_REVIEW]
-    incomplete_cnt = status_counts[VehicleInstallationPair.VerificationStatus.INCOMPLETE]
-    conflict_cnt = status_counts[VehicleInstallationPair.VerificationStatus.CONFLICT]
-    outbox_cnt = status_counts[VehicleInstallationPair.VerificationStatus.OFFLINE_OUTBOX]
+    approved_cnt = all_status_agg["approved"] or 0
+    submitted_cnt = all_status_agg["submitted"] or 0
+    failed_cnt = all_status_agg["failed"] or 0
+    pending_cnt = all_status_agg["pending_review"] or 0
+    incomplete_cnt = all_status_agg["incomplete"] or 0
+    conflict_cnt = all_status_agg["conflict"] or 0
+    outbox_cnt = all_status_agg["offline_outbox"] or 0
+    manual_overrides_count = all_status_agg["manual_overrides"] or 0
+    today_manual_overrides = today_status_agg["manual_overrides"] or 0
 
     sub_attempted = submitted_cnt + failed_cnt
     submission_success_rate = round((submitted_cnt / sub_attempted * 100), 1) if sub_attempted > 0 else 100.0
 
-    # ──────────────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # 4. ITMS Orders Totals (Active vs Archive)
-    # ──────────────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     orders_qs = InstallationOrder.objects.all()
     total_orders = orders_qs.count()
     active_orders = orders_qs.filter(is_archived=False).count()
     archive_orders = orders_qs.filter(is_archived=True).count()
     orders_with_photos = orders_qs.filter(has_front_photo=True, has_rear_photo=True).count()
 
-    # ──────────────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # 5. ITMS Installation Kits & Plate Lifecycle Totals
-    # ──────────────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     kits_qs = InstallationKit.objects.all()
     total_kits = kits_qs.count()
     new_kits = kits_qs.filter(status__iexact="New").count()
@@ -370,30 +394,31 @@ def get_system_totals(scope: str = "ALL", target_date: Optional[str] = None) -> 
     installed_kits = kits_qs.filter(status__icontains="Install").count()
     other_kits = max(0, total_kits - (new_kits + allocated_kits + installed_kits))
 
-    # Kits breakdown by warehouse
+    # Kits breakdown by warehouse (Single aggregated query avoiding loop N+1s)
     warehouse_groups = (
         kits_qs.values("warehouse")
-        .annotate(total=Count("id"))
+        .annotate(
+            total=Count("id"),
+            new=Count("id", filter=Q(status__iexact="New")),
+            allocated=Count("id", filter=Q(status__icontains="Allocat")),
+            installed=Count("id", filter=Q(status__icontains="Install")),
+        )
         .order_by("-total")
     )
-    warehouse_stats: List[Dict[str, Any]] = []
-    for g in warehouse_groups:
-        wh_name = g.get("warehouse") or "Unassigned Warehouse"
-        wh_total = g.get("total", 0)
-        wh_new = kits_qs.filter(warehouse=wh_name, status__iexact="New").count()
-        wh_alloc = kits_qs.filter(warehouse=wh_name, status__icontains="Allocat").count()
-        wh_inst = kits_qs.filter(warehouse=wh_name, status__icontains="Install").count()
-        warehouse_stats.append({
-            "warehouse": wh_name,
-            "total": wh_total,
-            "new": wh_new,
-            "allocated": wh_alloc,
-            "installed": wh_inst,
-        })
+    warehouse_stats = [
+        {
+            "warehouse": g.get("warehouse") or "Unassigned Warehouse",
+            "total": g.get("total", 0),
+            "new": g.get("new", 0),
+            "allocated": g.get("allocated", 0),
+            "installed": g.get("installed", 0),
+        }
+        for g in warehouse_groups
+    ]
 
-    # ──────────────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # 6. Hardware & Component Inventory Totals
-    # ──────────────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     kits_with_front_plate = kits_qs.exclude(front_plate="").exclude(front_plate__isnull=True).count()
     kits_with_rear_plate = kits_qs.exclude(rear_plate="").exclude(rear_plate__isnull=True).count()
     kits_with_gps = kits_qs.exclude(gps_tracker="").exclude(gps_tracker__isnull=True).count()
@@ -402,19 +427,17 @@ def get_system_totals(scope: str = "ALL", target_date: Optional[str] = None) -> 
     ).count()
     kits_with_sim = kits_qs.exclude(sim_serial="").exclude(sim_serial__isnull=True).count()
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # 7. Vehicle Categories & Plate Classes Breakdown
-    # ──────────────────────────────────────────────────────────────────────────
-    psv_count = 0
-    pmo_count = 0
-    color_conflicts = 0
-    for l in SubmissionAuditLog.objects.filter(message__icontains="Category:"):
-        if "Category: PSV" in l.message:
-            psv_count += 1
-        elif "Category: PMO" in l.message:
-            pmo_count += 1
-        elif "COLOR_CONFLICT" in l.message:
-            color_conflicts += 1
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # 7. Vehicle Categories & Plate Classes Breakdown (Aggregated queries)
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    audit_agg = SubmissionAuditLog.objects.aggregate(
+        psv=Count("id", filter=Q(message__icontains="Category: PSV")),
+        pmo=Count("id", filter=Q(message__icontains="Category: PMO")),
+        conflicts=Count("id", filter=Q(message__icontains="COLOR_CONFLICT")),
+    )
+    psv_count = audit_agg.get("psv") or 0
+    pmo_count = audit_agg.get("pmo") or 0
+    color_conflicts = audit_agg.get("conflicts") or 0
 
     return {
         "generated_at": timezone.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -444,9 +467,9 @@ def get_system_totals(scope: str = "ALL", target_date: Optional[str] = None) -> 
             "conflict": conflict_cnt,
             "offline_outbox": outbox_cnt,
             "manual_overrides": manual_overrides_count,
-            "today_approved": today_status_counts[VehicleInstallationPair.VerificationStatus.APPROVED],
-            "today_submitted": today_status_counts[VehicleInstallationPair.VerificationStatus.SUBMITTED],
-            "today_failed": today_status_counts[VehicleInstallationPair.VerificationStatus.FAILED],
+            "today_approved": today_status_agg["approved"] or 0,
+            "today_submitted": today_status_agg["submitted"] or 0,
+            "today_failed": today_status_agg["failed"] or 0,
             "submission_success_rate": f"{submission_success_rate}%",
         },
         "orders": {

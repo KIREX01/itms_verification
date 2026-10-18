@@ -140,7 +140,11 @@ def api_stream_events(request: HttpRequest) -> HttpResponse:
 
 @require_GET
 def api_export_report(request: HttpRequest) -> HttpResponse:
-    """Exports shift verification report as a clean downloadable CSV file."""
+    """
+    Exports shift verification report as a high-performance streaming CSV.
+    Uses chunked streaming to handle 10,000+ records seamlessly with minimal memory footprint,
+    and simultaneously saves an Excel-compatible (UTF-8 BOM, zero empty rows) backup to disk.
+    """
     if not (request.user and getattr(request.user, "is_authenticated", False)):
         return HttpResponse("Unauthorized", status=401)
 
@@ -150,6 +154,23 @@ def api_export_report(request: HttpRequest) -> HttpResponse:
     pairs = (
         VehicleInstallationPair.objects.all()
         .select_related("order", "front_image", "rear_image")
+        .only(
+            "id",
+            "registration_number_detected",
+            "verification_status",
+            "match_type",
+            "match_score",
+            "matched_via",
+            "is_manual_override",
+            "submitted_at",
+            "updated_at",
+            "order__order_number",
+            "order__registration_number",
+            "order__vin",
+            "order__warehouse_name",
+            "front_image__vault_file",
+            "rear_image__vault_file",
+        )
         .order_by("-updated_at")
     )
 
@@ -165,53 +186,90 @@ def api_export_report(request: HttpRequest) -> HttpResponse:
             Q(rear_image__ingested_at__date=work_d)
         )
 
-    out = io.StringIO()
-    writer = csv.writer(out)
-    writer.writerow([
-        "Pair ID",
-        "Detected Plate",
-        "Verification Status",
-        "Match Type",
-        "Match Score (%)",
-        "Matched Via",
-        "Order Number",
-        "Order Plate",
-        "VIN",
-        "Warehouse",
-        "Front Photo",
-        "Rear Photo",
-        "Manual Override",
-        "Submitted At (EAT)",
-        "Updated At (EAT)",
-    ])
-
-    for p in pairs:
-        writer.writerow([
-            p.id,
-            p.registration_number_detected,
-            p.verification_status,
-            p.match_type,
-            f"{p.match_score:.1f}" if p.match_score is not None else "",
-            p.matched_via,
-            p.order.order_number if p.order else "",
-            p.order.registration_number if p.order else "",
-            p.order.vin if p.order else "",
-            p.order.warehouse_name if p.order else "",
-            p.front_image.vault_file if p.front_image else "",
-            p.rear_image.vault_file if p.rear_image else "",
-            "YES" if p.is_manual_override else "NO",
-            date_service.format_itms_timestamp(p.submitted_at),
-            date_service.format_itms_timestamp(p.updated_at),
-        ])
-
     exports_dir = Path(settings.BASE_DIR) / "exports"
     exports_dir.mkdir(parents=True, exist_ok=True)
     date_str = date_service.now_kampala().strftime("%Y%m%d_%H%M")
-    filename = f"itms_shift_report_{selected_suffix}_{date_str}.csv" if selected_suffix != "ALL" else f"itms_shift_report_all_{date_str}.csv"
-    csv_data = out.getvalue()
-    (exports_dir / filename).write_text(csv_data, encoding="utf-8-sig")
+    filename = (
+        f"itms_shift_report_{selected_suffix}_{date_str}.csv"
+        if selected_suffix != "ALL"
+        else f"itms_shift_report_all_{date_str}.csv"
+    )
+    backup_file_path = exports_dir / filename
 
-    response = HttpResponse(csv_data.encode("utf-8-sig"), content_type="text/csv; charset=utf-8")
+    def stream_report_generator():
+        with open(backup_file_path, "wb") as disk_file:
+            # UTF-8 BOM for Microsoft Excel compatibility
+            bom = b"\xef\xbb\xbf"
+            disk_file.write(bom)
+            yield bom
+
+            buffer = io.StringIO()
+            writer = csv.writer(buffer, lineterminator="\r\n")
+
+            writer.writerow([
+                "Row",
+                "Pair ID",
+                "Detected Plate",
+                "Verification Status",
+                "Match Type",
+                "Match Score (%)",
+                "Matched Via",
+                "Order Number",
+                "Order Plate",
+                "VIN",
+                "Warehouse",
+                "Front Photo",
+                "Rear Photo",
+                "Manual Override",
+                "Submitted At (EAT)",
+                "Updated At (EAT)",
+            ])
+            chunk = buffer.getvalue().encode("utf-8")
+            disk_file.write(chunk)
+            yield chunk
+            buffer.seek(0)
+            buffer.truncate(0)
+
+            row_idx = 1
+            for p in pairs.iterator(chunk_size=1000):
+                order = p.order
+                front = p.front_image
+                rear = p.rear_image
+                writer.writerow([
+                    row_idx,
+                    p.id,
+                    p.registration_number_detected or "",
+                    p.verification_status or "",
+                    p.match_type or "",
+                    f"{p.match_score:.1f}" if p.match_score is not None else "",
+                    p.matched_via or "",
+                    order.order_number if order else "",
+                    order.registration_number if order else "",
+                    order.vin if order else "",
+                    order.warehouse_name if order else "",
+                    front.vault_file if front else "",
+                    rear.vault_file if rear else "",
+                    "YES" if p.is_manual_override else "NO",
+                    date_service.format_itms_timestamp(p.submitted_at),
+                    date_service.format_itms_timestamp(p.updated_at),
+                ])
+                row_idx += 1
+                if row_idx % 200 == 0:
+                    chunk = buffer.getvalue().encode("utf-8")
+                    disk_file.write(chunk)
+                    yield chunk
+                    buffer.seek(0)
+                    buffer.truncate(0)
+
+            rem = buffer.getvalue()
+            if rem:
+                chunk = rem.encode("utf-8")
+                disk_file.write(chunk)
+                yield chunk
+                buffer.seek(0)
+                buffer.truncate(0)
+
+    response = StreamingHttpResponse(stream_report_generator(), content_type="text/csv; charset=utf-8")
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     response["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response

@@ -1245,11 +1245,17 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
             normalizer.canonicalize(p)
             for p in StockDeliveryItem.objects.filter(plate_category=PlateCategory.PMO).values_list("registration_number", flat=True)
         )
-        for l in SubmissionAuditLog.objects.filter(
-            pair__order__in=installed_orders_qs, message__icontains="Category: PMO"
-        ):
-            if l.pair and l.pair.order:
-                pmo_plates_set.add(normalizer.canonicalize(l.pair.order.registration_number))
+        pmo_audit_plates = (
+            SubmissionAuditLog.objects.filter(
+                message__icontains="Category: PMO",
+                pair__order__order_number__endswith=suffix,
+            )
+            .values_list("pair__order__registration_number", flat=True)
+            .distinct()
+        )
+        for p in pmo_audit_plates:
+            if p:
+                pmo_plates_set.add(normalizer.canonicalize(p))
 
         installed_psv_count = 0
         installed_pmo_count = 0
@@ -1367,6 +1373,23 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
     if scans_to_update:
         StockDispatchScan.objects.bulk_update(scans_to_update, ["status"])
 
+    # Identify Spiked / Undispatched plates:
+    # Orders appearing in ITMS (installed or active pending) whose plate was NEVER scanned at safe room dispatch
+    spiked_installed: List[str] = []
+    spiked_pending: List[str] = []
+    for c_plate, order in scoped_order_by_plate.items():
+        if c_plate not in dispatched_plates_map:
+            orig_plate = order.registration_number
+            if order.is_archived or (order.order_status or "").strip().lower() == "installed":
+                spiked_installed.append(orig_plate)
+            else:
+                spiked_pending.append(orig_plate)
+
+    spiked_installed.sort()
+    spiked_pending.sort()
+    spiked_undispatched_plates = spiked_installed + spiked_pending
+    spiked_undispatched_count = len(spiked_undispatched_plates)
+
     itms_pending_count = len([
         o for o in scoped_orders
         if not o.is_archived and (o.order_status or "").strip().lower() != "installed"
@@ -1435,6 +1458,10 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         "storage_bond_name": ledger.warehouse_name or "AGM / SPIRO",
         "remarks": ledger.notes or "",
         "consumables": ["Rivets", "Cable ties", "Drill bits", "Insulating Tape"],
+        "spiked_installed": spiked_installed,
+        "spiked_pending": spiked_pending,
+        "spiked_undispatched": spiked_undispatched_plates,
+        "spiked_undispatched_count": spiked_undispatched_count,
         "scheduled_summary": {
             "scheduled_target": scheduled_total,
             "installed_total": total_installed,
@@ -1567,6 +1594,15 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
             "cross_bond_count": len(cross_bond_orders),
             "unallocated_discrepancy": len(unresolved_discrepancy),
             "unallocated_plates": unresolved_discrepancy,
+            "spiked_undispatched_count": spiked_undispatched_count,
+            "spiked_installed_count": len(spiked_installed),
+            "spiked_pending_count": len(spiked_pending),
+            "spiked_undispatched_plates": spiked_undispatched_plates,
+            "spiked_installed_plates": spiked_installed,
+            "spiked_pending_plates": spiked_pending,
+            "spiked_undispatched": spiked_undispatched_plates,
+            "spiked_installed": spiked_installed,
+            "spiked_pending": spiked_pending,
             "graduated_scale": {
                 "reconciled_installed": {
                     "count": len(reconciled_installed),
@@ -1598,11 +1634,21 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
                     "label": "Unresolved Discrepancy (Requires MVR Investigation)",
                     "badge": "danger",
                 },
+                "spiked_undispatched": {
+                    "count": spiked_undispatched_count,
+                    "plates": spiked_undispatched_plates,
+                    "installed_count": len(spiked_installed),
+                    "pending_count": len(spiked_pending),
+                    "label": "Undispatched System Plates (Spiked on Line without Safe Room Scan)",
+                    "badge": "warning",
+                },
             },
         },
         "is_closed": ledger.is_closed,
         "last_reconciled_at": ledger.last_reconciled_at.strftime("%Y-%m-%d %H:%M:%S") if ledger.last_reconciled_at else "",
         "unallocated_plates": unresolved_discrepancy,
+        "spiked_undispatched_count": spiked_undispatched_count,
+        "spiked_undispatched_plates": spiked_undispatched_plates,
         "physical_count": ledger.physical_count or 0,
         "variance": ledger.variance or 0,
         "has_physical_count": bool(ledger.physical_count is not None and ledger.physical_count > 0),
@@ -1782,16 +1828,16 @@ def update_ledger_entry(
 
 
 def export_stock_reconciliation_csv(target_date_suffix: Optional[str] = None) -> str:
-    """Generates the clean CSV export strictly adhering to the user's report format (IMG-20260929-WA0005.jpg)."""
+    """Generates the clean standardized master CSV export adhering strictly to official report standards without spacer rows."""
     recon = compute_daily_reconciliation(target_date_suffix)
     suffix = recon["work_date_suffix"]
     formatted_date = recon["formatted_date"]
-    bond_name = recon.get("storage_bond_name") or recon.get("warehouse_name") or "AGM SPIRO/8/2"
+    bond_name = recon.get("storage_bond_name") or recon.get("warehouse_name") or "AGM / SPIRO"
 
-    out = io.StringIO()
-    writer = csv.writer(out)
+    out = io.StringIO(newline="")
+    writer = csv.writer(out, lineterminator="\r\n")
 
-    # Official spreadsheet header from IMG-20260929-WA0005.jpg
+    # 1. Official spreadsheet header
     writer.writerow([
         "STORAGE BOND NAME",
         "DESCRIPTION",
@@ -1822,34 +1868,23 @@ def export_stock_reconciliation_csv(target_date_suffix: Optional[str] = None) ->
             cons_cell,
         ])
 
-    writer.writerow([])
-    writer.writerow(["SHIFT CONTEXT METADATA"])
-    writer.writerow(["Work Date", formatted_date, f"Suffix: {suffix}"])
-    writer.writerow(["Generated At", timezone.now().strftime("%Y-%m-%d %H:%M:%S")])
-    writer.writerow([])
-    writer.writerow(["FLOOR OPERATIONS & DISCREPANCY AUDIT"])
+    # 2. Structured Operational Summary (No blank spacer rows)
     floor = recon["floor_operations"]
-    writer.writerow(["Plates Dispatched to Floor", floor["dispatched_count"]])
-    writer.writerow(["Plates Returned Uninstalled", floor["returned_count"]])
-    writer.writerow(["Net Plates on Installation Floor", floor["net_dispatched"]])
-    writer.writerow(["Active in Orders Queue (Pending)", floor["itms_pending_count"]])
-    writer.writerow(["UNALLOCATED DISCREPANCY", floor["unallocated_discrepancy"]])
-    writer.writerow([])
+    sched_summary = recon.get("scheduled_summary", {})
+    now_str = timezone.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    writer.writerow(["DISPATCHED PLATES DETAIL AUDIT"])
-    writer.writerow(["#", "Plate Number", "Category", "Dispatched At", "Operator", "Status", "Notes"])
-
-    dispatches = StockDispatchScan.objects.filter(work_date_suffix=suffix).order_by("dispatched_at")
-    for idx, d in enumerate(dispatches, start=1):
-        writer.writerow([
-            idx,
-            d.registration_number,
-            d.plate_category,
-            d.dispatched_at.strftime("%Y-%m-%d %H:%M:%S") if d.dispatched_at else "",
-            d.operator_name,
-            d.status,
-            d.notes or "—",
-        ])
+    writer.writerow(["SECTION", "METRIC", "VALUE", "ADDITIONAL INFO", "", "", ""])
+    writer.writerow(["Shift Context", "Work Date", formatted_date, f"Suffix: {suffix}", "", "", ""])
+    writer.writerow(["Shift Context", "Storage Facility", bond_name, f"Generated: {now_str}", "", "", ""])
+    writer.writerow(["Floor Operations", "Plates Dispatched to Floor", floor.get("dispatched_count", 0), "Morning safe room issues", "", "", ""])
+    writer.writerow(["Floor Operations", "Plates Returned Uninstalled", floor.get("returned_count", 0), "Returned to safe room box", "", "", ""])
+    writer.writerow(["Floor Operations", "Net Plates on Installation Floor", floor.get("net_dispatched", 0), "Dispatched minus returned", "", "", ""])
+    writer.writerow(["Floor Operations", "Active in Orders Queue (Pending)", floor.get("itms_pending_count", 0), "Pending installation / verification", "", "", ""])
+    writer.writerow(["Floor Operations", "Kits Installed & Archived in ITMS", sched_summary.get("installed_total", 0), "Verified completed installations", "", "", ""])
+    writer.writerow(["Discrepancy Audit", "Unallocated Plates (Line Surplus)", floor.get("unallocated_discrepancy", 0), "Dispatched but absent from ITMS orders", "", "", ""])
+    writer.writerow(["Discrepancy Audit", "Spiked Plates (Missing Dispatch Scan)", floor.get("spiked_undispatched_count", 0), "In ITMS order without safe room scan", "", "", ""])
+    writer.writerow(["Safe Room Audit", "Physical Count Audit", recon.get("physical_count", 0), "Physical plates counted in safe room", "", "", ""])
+    writer.writerow(["Safe Room Audit", "Safe Room Variance", recon.get("variance", 0), "Physical count vs calculated closing", "", "", ""])
 
     return out.getvalue()
 
@@ -2350,12 +2385,17 @@ def get_mvr_unallocated_docket(target_date_suffix: Optional[Any] = None) -> Dict
 def generate_category_csv_content(category: str, target_date_suffix: Optional[str] = None) -> str:
     """
     Generates standard downloadable CSV content for a specific shift category:
-    - 'unallocated': Kits counted/dispatched with NO order in ITMS (Status New).
+    - 'master' or 'reconciliation': Master spreadsheet combining ledger balances & floor audits.
     - 'archived' or 'installed': Officially completed & verified orders in ITMS archive.
     - 'pending' or 'active': Active installation orders still in progress/queue.
     - 'dispatched' or 'counted': Morning counted & issued plates for the shift.
+    - 'unallocated' or 'new': Kits counted/dispatched with NO order in ITMS (Line Surplus).
+    - 'spiked' or 'undispatched': Kits in ITMS orders (installed or pending) missing safe room dispatch scans.
     - 'returned': Plates returned uninstalled to safe room storage.
-    - 'master' or 'reconciliation': Master spreadsheet combining ledger balances & floor audits.
+    - 'blocked': Plates not on ITMS stock (set aside in safe room).
+    - 'movements': Chronological movement log of deliveries, transfers, returns.
+    - 'audit': Physical safe room audit scans.
+    - 'unregistered': Physical plates in safe room not found in ITMS registered InstallationKits.
     """
     work_d, suffix = resolve_date_and_suffix(target_date_suffix)
     cat_lower = str(category).strip().lower()
@@ -2367,30 +2407,33 @@ def generate_category_csv_content(category: str, target_date_suffix: Optional[st
     active_code = active_bond.get("code", "AGM")
     active_name = active_bond.get("name", DEFAULT_SPIRO_BOND_NAME)
 
-    out = io.StringIO()
-    writer = csv.writer(out)
+    out = io.StringIO(newline="")
+    writer = csv.writer(out, lineterminator="\r\n")
 
-    if cat_lower in ("unallocated", "new"):
-        # Unallocated plates: Dispatched but not found in ITMS orders or archive, and not returned
+    if cat_lower in ("unallocated", "new", "surplus"):
+        # Unallocated plates: Dispatched from safe room but not found in ITMS orders or archive, and not returned
         recon = compute_daily_reconciliation(suffix)
         unalloc_plates = recon.get("unallocated_plates", [])
 
         writer.writerow([
-            "#",
-            "Registration Number",
+            "Row",
+            "Plate Number",
             "Series",
+            "Plate Category",
             "Kit Status",
             "ITMS Order Found",
             "Operating Facility",
-            "Audit Note",
+            "Audit Finding",
         ])
         for idx, p in enumerate(unalloc_plates, start=1):
             m = re.search(r"U[A-Z]{2}\d{3}([A-Z]{1,2})", p)
             series = m.group(1) if m else "UG"
+            cat = "PMO" if "PMO" in p.upper() else "PSV"
             writer.writerow([
                 idx,
                 p,
                 series,
+                cat,
                 "New / Unallocated",
                 "NO",
                 active_name,
@@ -2398,20 +2441,84 @@ def generate_category_csv_content(category: str, target_date_suffix: Optional[st
             ])
         return out.getvalue()
 
+    if cat_lower in ("spiked", "undispatched", "skipped"):
+        # Spiked / Undispatched plates: In ITMS orders (installed or pending) but NEVER scanned at safe room dispatch
+        recon = compute_daily_reconciliation(suffix)
+        floor = recon.get("floor_operations", {})
+        spiked_installed = floor.get("spiked_installed_plates", [])
+        spiked_pending = floor.get("spiked_pending_plates", [])
+
+        orders_qs = list(InstallationOrder.objects.filter(order_number__endswith=suffix).only(
+            "order_number", "registration_number", "order_status", "itms_stage", "vin", "warehouse_name", "is_archived"
+        ))
+        order_by_plate = {normalizer.canonicalize(o.registration_number): o for o in orders_qs if o.registration_number}
+
+        writer.writerow([
+            "Row",
+            "Plate Number",
+            "Plate Category",
+            "Order Number",
+            "Order Status",
+            "System Stage",
+            "Safe Room Dispatch Scan",
+            "VIN",
+            "Operating Facility",
+            "Audit Alert",
+        ])
+        row_idx = 1
+        for p in spiked_installed:
+            c_p = normalizer.canonicalize(p)
+            o = order_by_plate.get(c_p)
+            cat = "PMO" if "PMO" in p.upper() else "PSV"
+            writer.writerow([
+                row_idx,
+                p,
+                cat,
+                o.order_number if o else "—",
+                o.order_status if o else "Installed",
+                "Installed (ITMS Archive)",
+                "MISSING DISPATCH SCAN (Spiked on Line)",
+                (o.vin if o else "") or "—",
+                (o.warehouse_name if o else "") or active_name,
+                "Plate was fitted and archived in ITMS without safe room dispatch scan",
+            ])
+            row_idx += 1
+
+        for p in spiked_pending:
+            c_p = normalizer.canonicalize(p)
+            o = order_by_plate.get(c_p)
+            cat = "PMO" if "PMO" in p.upper() else "PSV"
+            writer.writerow([
+                row_idx,
+                p,
+                cat,
+                o.order_number if o else "—",
+                o.order_status if o else "Ready for installation",
+                o.itms_stage if (o and o.itms_stage) else "Active Pending Queue",
+                "MISSING DISPATCH SCAN (Spiked on Line)",
+                (o.vin if o else "") or "—",
+                (o.warehouse_name if o else "") or active_name,
+                "Order exists in ITMS active queue without safe room dispatch scan",
+            ])
+            row_idx += 1
+        return out.getvalue()
+
     if cat_lower in ("archived", "installed"):
-        orders_qs = list(InstallationOrder.objects.filter(order_number__endswith=suffix))
+        orders_qs = (
+            InstallationOrder.objects.filter(order_number__endswith=suffix)
+            .only("order_number", "registration_number", "vin", "installation_officer", "installation_date", "order_status", "warehouse_name", "is_archived")
+        )
         archived_orders = [
             o for o in orders_qs
             if bond_service.classify_order_bond_scope(o, active_code=active_code) == "ACTIVE_BOND"
             and (o.is_archived or (o.order_status or "").strip().lower() == "installed")
         ]
-        # Sort by installation date or order number
         archived_orders.sort(key=lambda o: (o.installation_date or "", o.order_number))
 
         writer.writerow([
-            "#",
+            "Row",
             "Order Number",
-            "Registration Number",
+            "Plate Number",
             "VIN",
             "Installation Officer",
             "Installation Date",
@@ -2432,7 +2539,10 @@ def generate_category_csv_content(category: str, target_date_suffix: Optional[st
         return out.getvalue()
 
     if cat_lower in ("pending", "active"):
-        orders_qs = list(InstallationOrder.objects.filter(order_number__endswith=suffix))
+        orders_qs = (
+            InstallationOrder.objects.filter(order_number__endswith=suffix)
+            .only("order_number", "registration_number", "vin", "order_status", "itms_stage", "warehouse_name", "is_archived")
+        )
         active_orders = [
             o for o in orders_qs
             if bond_service.classify_order_bond_scope(o, active_code=active_code) == "ACTIVE_BOND"
@@ -2442,9 +2552,9 @@ def generate_category_csv_content(category: str, target_date_suffix: Optional[st
         active_orders.sort(key=lambda o: (o.order_status or "", o.registration_number))
 
         writer.writerow([
-            "#",
+            "Row",
             "Order Number",
-            "Registration Number",
+            "Plate Number",
             "VIN",
             "Order Status",
             "ITMS Stage",
@@ -2463,20 +2573,21 @@ def generate_category_csv_content(category: str, target_date_suffix: Optional[st
         return out.getvalue()
 
     if cat_lower in ("dispatched", "counted", "morning"):
-        dispatches = list(
+        dispatches = (
             StockDispatchScan.objects.filter(work_date_suffix=suffix)
+            .only("registration_number", "plate_category", "dispatched_at", "operator_name", "status", "bond_code")
             .order_by("registration_number")
         )
         writer.writerow([
-            "#",
-            "Registration Number",
+            "Row",
+            "Plate Number",
             "Plate Category",
             "Dispatched At",
             "Operator",
             "Reconciliation Status",
             "Bond Facility",
         ])
-        for idx, d in enumerate(dispatches, start=1):
+        for idx, d in enumerate(dispatches.iterator(chunk_size=1000), start=1):
             writer.writerow([
                 idx,
                 d.registration_number,
@@ -2489,20 +2600,22 @@ def generate_category_csv_content(category: str, target_date_suffix: Optional[st
         return out.getvalue()
 
     if cat_lower in ("returned", "returns"):
-        returns = list(
+        returns = (
             StockReturnScan.objects.filter(work_date_suffix=suffix)
+            .only("registration_number", "plate_category", "returned_at", "operator_name", "reason", "notes")
             .order_by("registration_number")
         )
         writer.writerow([
-            "#",
-            "Registration Number",
+            "Row",
+            "Plate Number",
             "Plate Category",
             "Returned At",
             "Operator",
             "Return Reason",
             "Notes",
+            "Bond Facility",
         ])
-        for idx, r in enumerate(returns, start=1):
+        for idx, r in enumerate(returns.iterator(chunk_size=1000), start=1):
             writer.writerow([
                 idx,
                 r.registration_number,
@@ -2510,15 +2623,16 @@ def generate_category_csv_content(category: str, target_date_suffix: Optional[st
                 r.returned_at.strftime("%Y-%m-%d %H:%M:%S") if r.returned_at else "",
                 r.operator_name or "Operator",
                 r.get_reason_display() if hasattr(r, "get_reason_display") else r.reason,
-                r.notes or "",
+                r.notes or "—",
+                active_name,
             ])
         return out.getvalue()
 
     if cat_lower in ("blocked", "not_on_stock", "rejected"):
         blocked_plates = get_blocked_plates_for_date(suffix)
         writer.writerow([
-            "#",
-            "Registration Plate",
+            "Row",
+            "Plate Number",
             "Plate Category",
             "Kit Code",
             "Operating Facility",
@@ -2540,7 +2654,7 @@ def generate_category_csv_content(category: str, target_date_suffix: Optional[st
 
     if cat_lower in ("movements", "movement", "deliveries", "transfers"):
         writer.writerow([
-            "#",
+            "Row",
             "Movement Type",
             "Timestamp",
             "Plate Category",
@@ -2602,8 +2716,8 @@ def generate_category_csv_content(category: str, target_date_suffix: Optional[st
     if cat_lower in ("audit", "audits", "physical_count", "safe_audit"):
         audits_qs = SafeAuditScan.objects.filter(work_date_suffix=suffix).order_by("scanned_at")
         writer.writerow([
-            "#",
-            "Registration Number",
+            "Row",
+            "Plate Number",
             "Plate Category",
             "Scanned At",
             "Kit Code",
@@ -2614,16 +2728,16 @@ def generate_category_csv_content(category: str, target_date_suffix: Optional[st
             "Status",
             "Bond Facility",
         ])
-        for idx, a in enumerate(audits_qs, start=1):
+        for idx, a in enumerate(audits_qs.iterator(chunk_size=1000), start=1):
             writer.writerow([
                 idx,
                 a.registration_number,
                 a.plate_category,
                 a.scanned_at.strftime("%Y-%m-%d %H:%M:%S") if a.scanned_at else "",
                 a.kit_code or f"IK-{a.registration_number}",
-                a.gps_tracker or "-",
-                a.ble_front or "-",
-                a.ble_rear or "-",
+                a.gps_tracker or "—",
+                a.ble_front or "—",
+                a.ble_rear or "—",
                 a.operator_name or "Operator",
                 a.status or "AUDITED",
                 a.bond_code or active_code,
@@ -2639,7 +2753,7 @@ def generate_category_csv_content(category: str, target_date_suffix: Optional[st
             ).values_list("registration_number", flat=True)
         )
         unregistered = [p for p in audits if p not in known_kits]
-        writer.writerow(["#", "Registration Plate", "Audit Shift Date", "Audit Status", "Operating Facility", "Action Required"])
+        writer.writerow(["Row", "Plate Number", "Audit Shift Date", "Audit Status", "Operating Facility", "Action Required"])
         for idx, plate in enumerate(unregistered, start=1):
             writer.writerow([idx, plate, suffix, "UNREGISTERED_IN_SAFE_ROOM", active_name, "Manual Registration Required"])
         return out.getvalue()
@@ -2658,9 +2772,10 @@ def export_shift_csvs(
     2. shift_{suffix}_itms_archived_{count}.csv
     3. shift_{suffix}_itms_active_pending_{count}.csv
     4. shift_{suffix}_unallocated_kits_{count}.csv
-    5. shift_{suffix}_reconciliation_master.csv
-    6. shift_{suffix}_returned_to_stock_{count}.csv (if any returns exist)
-    7. blocked_dispatch_kits_{suffix}_{timestamp}.csv (all non-stock kits set aside)
+    5. shift_{suffix}_spiked_undispatched_{count}.csv
+    6. shift_{suffix}_reconciliation_master.csv
+    7. shift_{suffix}_returned_to_stock_{count}.csv (if any returns exist)
+    8. blocked_dispatch_kits_{suffix}_{timestamp}.csv (all non-stock kits set aside)
 
     Returns dictionary of {category_key: absolute_file_path}.
     """
@@ -2674,6 +2789,7 @@ def export_shift_csvs(
     disp_cnt = floor.get("dispatched_count", 0)
     ret_cnt = floor.get("returned_count", 0)
     unalloc_cnt = floor.get("unallocated_discrepancy", 0)
+    spiked_cnt = floor.get("spiked_undispatched_count", 0)
 
     sched_summary = recon.get("scheduled_summary", {})
     arch_cnt = sched_summary.get("installed_total", 0)
@@ -2684,41 +2800,48 @@ def export_shift_csvs(
     # 1. Unallocated Kits CSV
     unalloc_csv = generate_category_csv_content("unallocated", suffix)
     unalloc_path = out_dir / f"shift_{suffix}_unallocated_kits_{unalloc_cnt}.csv"
-    unalloc_path.write_text(unalloc_csv, encoding="utf-8")
+    unalloc_path.write_bytes(unalloc_csv.encode("utf-8-sig"))
     files_generated["unallocated"] = str(unalloc_path)
 
-    # 2. ITMS Archived / Installed CSV
+    # 2. Spiked / Undispatched Kits CSV
+    spiked_csv = generate_category_csv_content("spiked", suffix)
+    spiked_path = out_dir / f"shift_{suffix}_spiked_undispatched_{spiked_cnt}.csv"
+    spiked_path.write_bytes(spiked_csv.encode("utf-8-sig"))
+    files_generated["spiked"] = str(spiked_path)
+    files_generated["undispatched"] = str(spiked_path)
+
+    # 3. ITMS Archived / Installed CSV
     arch_csv = generate_category_csv_content("archived", suffix)
     arch_path = out_dir / f"shift_{suffix}_itms_archived_{arch_cnt}.csv"
-    arch_path.write_text(arch_csv, encoding="utf-8")
+    arch_path.write_bytes(arch_csv.encode("utf-8-sig"))
     files_generated["archived"] = str(arch_path)
 
-    # 3. ITMS Active / Pending Orders CSV
+    # 4. ITMS Active / Pending Orders CSV
     pend_csv = generate_category_csv_content("pending", suffix)
     pend_path = out_dir / f"shift_{suffix}_itms_active_pending_{pend_cnt}.csv"
-    pend_path.write_text(pend_csv, encoding="utf-8")
+    pend_path.write_bytes(pend_csv.encode("utf-8-sig"))
     files_generated["pending"] = str(pend_path)
 
-    # 4. Morning Dispatched Plates CSV
+    # 5. Morning Dispatched Plates CSV
     disp_csv = generate_category_csv_content("dispatched", suffix)
     disp_path = out_dir / f"shift_{suffix}_morning_dispatched_{disp_cnt}.csv"
-    disp_path.write_text(disp_csv, encoding="utf-8")
+    disp_path.write_bytes(disp_csv.encode("utf-8-sig"))
     files_generated["dispatched"] = str(disp_path)
 
-    # 5. Returns CSV (if any)
+    # 6. Returns CSV (if any)
     if ret_cnt > 0:
         ret_csv = generate_category_csv_content("returned", suffix)
         ret_path = out_dir / f"shift_{suffix}_returned_to_stock_{ret_cnt}.csv"
-        ret_path.write_text(ret_csv, encoding="utf-8")
+        ret_path.write_bytes(ret_csv.encode("utf-8-sig"))
         files_generated["returned"] = str(ret_path)
 
-    # 6. Master Shift Reconciliation CSV
+    # 7. Master Shift Reconciliation CSV
     master_csv = export_stock_reconciliation_csv(suffix)
     master_path = out_dir / f"shift_{suffix}_reconciliation_master.csv"
-    master_path.write_text(master_csv, encoding="utf-8")
+    master_path.write_bytes(master_csv.encode("utf-8-sig"))
     files_generated["master"] = str(master_path)
 
-    # 7. Blocked / Not-On-Stock Kits CSV (for ITMS Stock Transfer Officer)
+    # 8. Blocked / Not-On-Stock Kits CSV (for ITMS Stock Transfer Officer)
     blocked_plates = get_blocked_plates_for_date(suffix)
     if blocked_plates:
         blocked_path, _, _ = export_blocked_kits_csv(

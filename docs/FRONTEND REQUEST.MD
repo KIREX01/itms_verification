@@ -174,3 +174,55 @@ The frontend UI templates, modals, CSS styling, and client-side JavaScript contr
     "work_date_suffix": "181026"
   }
   ```
+
+## 4. Standardized CSV Export Categories & Spiked Kit Audit UI
+
+The backend now provides standardized, distinct CSV exports and explicit spiked / undispatched kit detection.
+
+### 4.1 New Export Category: Spiked / Undispatched Kits
+- **Endpoint**: `GET /api/stock/export/category/spiked/?date=<suffix>` (alias: `/api/stock/export/category/undispatched/?date=<suffix>`)
+- **Headers in CSV**: `Row, Plate Number, Plate Category, Order Number, Order Status, System Stage, Safe Room Dispatch Scan, VIN, Operating Facility, Audit Alert`
+- **Purpose**: Exports all kits that bypassed the safe-room dispatch scanner but appear in the ITMS installation queue or archive.
+
+### 4.2 Updated Reconciliation & Date-Driven Payload (`GET /api/stock/reconcile/` & `GET /api/reports/totals/`)
+- In `reconciliation.floor_operations`:
+  ```json
+  {
+    "spiked_undispatched_count": 2,
+    "spiked_installed_count": 1,
+    "spiked_pending_count": 1,
+    "spiked_undispatched": ["UMA901SP", "UMA902SP"],
+    "graduated_scale": {
+      "spiked_undispatched": {
+        "count": 2,
+        "plates": ["UMA901SP", "UMA902SP"],
+        "installed_count": 1,
+        "pending_count": 1,
+        "label": "Undispatched System Plates (Spiked on Line without Safe Room Scan)",
+        "badge": "warning"
+      }
+    }
+  }
+  ```
+- In `reports.date_driven.spiked_undispatched`:
+  ```json
+  {
+    "total_count": 2,
+    "installed_count": 1,
+    "pending_count": 1,
+    "items": [
+      {
+        "plate": "UMA901SP",
+        "display_plate": "UMA 901SP",
+        "status": "In ITMS Archive (Installed)",
+        "reason": "Kit verified/installed in ITMS without safe room dispatch scan",
+        "date": "18.10.2026"
+      }
+    ]
+  }
+  ```
+
+### 4.3 High-Performance Shift Verification Export (`GET /api/export/report/?date=<suffix>`)
+- Now streams directly as `text/csv; charset=utf-8` using HTTP chunked transfer encoding.
+- Includes UTF-8 BOM (`\xef\xbb\xbf`) and sequential `Row` numbers (1..N).
+- Zero blank spacer rows between records for seamless Excel and spreadsheet processing.

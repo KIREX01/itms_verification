@@ -205,17 +205,50 @@
             </div>
         </div>
 
+        <!-- Early Stub to prevent ReferenceErrors during initial script download -->
+        <script>
+            if (typeof window.setHistoryFilter === "undefined") {
+                window.setHistoryFilter = function(filter) {
+                    window._pendingHistoryFilter = filter;
+                    document.querySelectorAll(".history-chip").forEach(function(c) {
+                        c.classList.toggle("active", c.getAttribute("data-hfilter") === filter);
+                    });
+                };
+            }
+            if (typeof window.setHistoryDateScope === "undefined") {
+                window.setHistoryDateScope = function(scope) {
+                    window._pendingHistoryDateScope = scope;
+                    var btnToday = document.getElementById("btn-hscope-today");
+                    var btnAll = document.getElementById("btn-hscope-all");
+                    if (btnToday) btnToday.classList.toggle("active", scope === "TODAY");
+                    if (btnAll) btnAll.classList.toggle("active", scope === "ALL");
+                };
+            }
+            if (typeof window.fetchHistoryEvents === "undefined") {
+                window.fetchHistoryEvents = function() {};
+            }
+            if (typeof window.clearHistorySearch === "undefined") {
+                window.clearHistorySearch = function() {};
+            }
+            if (typeof window.changeHistoryPage === "undefined") {
+                window.changeHistoryPage = function() {};
+            }
+            if (typeof window.onHistorySearchInput === "undefined") {
+                window.onHistorySearchInput = function() {};
+            }
+        </script>
+
         <!-- Secondary Filter Controls & Live Search Bar -->
         <div class="history-toolbar-card" style="padding:8px 14px; background-color:#0f131c; border-color:rgba(255,255,255,0.08);">
             <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; width:100%; justify-content:space-between;">
                 <!-- Filter Chips -->
                 <div class="history-filter-chips">
-                    <button class="history-chip active" data-hfilter="ALL" onclick="setHistoryFilter('ALL')">All</button>
-                    <button class="history-chip" data-hfilter="SUBMITTED" onclick="setHistoryFilter('SUBMITTED')">Submitted</button>
-                    <button class="history-chip" data-hfilter="FAILED" onclick="setHistoryFilter('FAILED')">Failed</button>
-                    <button class="history-chip" data-hfilter="ISSUES" onclick="setHistoryFilter('ISSUES')">Issues / Conflicts</button>
-                    <button class="history-chip" data-hfilter="STOCK" onclick="setHistoryFilter('STOCK')">Stock &amp; Ledger</button>
-                    <button class="history-chip" data-hfilter="EMAIL" onclick="setHistoryFilter('EMAIL')">Emails</button>
+                    <button class="history-chip active" data-hfilter="ALL" onclick="window.setHistoryFilter('ALL')">All</button>
+                    <button class="history-chip" data-hfilter="SUBMITTED" onclick="window.setHistoryFilter('SUBMITTED')">Submitted</button>
+                    <button class="history-chip" data-hfilter="FAILED" onclick="window.setHistoryFilter('FAILED')">Failed</button>
+                    <button class="history-chip" data-hfilter="ISSUES" onclick="window.setHistoryFilter('ISSUES')">Issues / Conflicts</button>
+                    <button class="history-chip" data-hfilter="STOCK" onclick="window.setHistoryFilter('STOCK')">Stock &amp; Ledger</button>
+                    <button class="history-chip" data-hfilter="EMAIL" onclick="window.setHistoryFilter('EMAIL')">Emails</button>
                 </div>
 
                 <!-- Live Search Box -->

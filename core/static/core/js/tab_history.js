@@ -15,6 +15,18 @@ let filteredHistoryEvents = [];
 let historyItemsMap = {};
 let activeHistoryLog = null;
 
+// Pickup any filter or date scope set before this script was loaded
+if (typeof window !== "undefined") {
+    if (window._pendingHistoryFilter) {
+        currentHistoryFilter = window._pendingHistoryFilter;
+        delete window._pendingHistoryFilter;
+    }
+    if (window._pendingHistoryDateScope) {
+        currentHistoryDateScope = window._pendingHistoryDateScope;
+        delete window._pendingHistoryDateScope;
+    }
+}
+
 function setHistoryFilter(filter) {
     currentHistoryFilter = filter;
     document.querySelectorAll(".history-chip").forEach(c => {
@@ -351,5 +363,33 @@ document.addEventListener("DOMContentLoaded", () => {
     if (window.activeShiftDateInfo) {
         updateHistoryActiveShiftDisplay(window.activeShiftDateInfo);
     }
+    // Attach reliable delegated event listeners to history filter chips
+    const chipContainer = document.querySelector(".history-filter-chips");
+    if (chipContainer) {
+        chipContainer.addEventListener("click", (e) => {
+            const btn = e.target.closest(".history-chip");
+            if (btn) {
+                const targetFilter = btn.getAttribute("data-hfilter");
+                if (targetFilter) {
+                    setHistoryFilter(targetFilter);
+                }
+            }
+        });
+    }
     void fetchHistoryEvents();
 });
+
+// Explicit global window bindings for inline HTML event handlers
+window.setHistoryFilter = setHistoryFilter;
+window.setHistoryDateScope = setHistoryDateScope;
+window.cycleHistoryDateScope = cycleHistoryDateScope;
+window.onHistorySearchInput = onHistorySearchInput;
+window.clearHistorySearch = clearHistorySearch;
+window.setHistoryPageSize = setHistoryPageSize;
+window.changeHistoryPage = changeHistoryPage;
+window.applyHistoryFiltering = applyHistoryFiltering;
+window.renderHistoryData = renderHistoryData;
+window.fetchHistoryEvents = fetchHistoryEvents;
+window.openHistoryModal = openHistoryModal;
+window.jumpFromHistoryToQueue = jumpFromHistoryToQueue;
+window.updateHistoryActiveShiftDisplay = updateHistoryActiveShiftDisplay;

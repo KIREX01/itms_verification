@@ -804,7 +804,7 @@ async function confirmDeletePair() {
                 pairsData.splice(removedIndex, 1);
             }
 
-            renderQueueList();
+            renderQueueCards();
             if (typeof fetchStats === "function") fetchStats();
 
             // Select adjacent pair in queue or clear inspector

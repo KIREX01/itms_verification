@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ITMS CLOSING SYSTEM - TAB 5: HISTORY & AUDIT LOGS
  * High-Velocity Verification & Audit Trail Explorer
  * Features: Mobile Touch Cards, In-Memory Fast Filter & Search,
@@ -96,6 +96,12 @@ function applyHistoryFiltering() {
             const act = (item.action || "").toUpperCase();
             const plt = (item.plate || "").toUpperCase();
             if (!act.includes("STOCK") && !act.includes("DELIVERY") && !act.includes("LEDGER") && !plt.startsWith("SHIFT_")) {
+                return false;
+            }
+        } else if (currentHistoryFilter === "EMAIL") {
+            const act = (item.action || "").toUpperCase();
+            const ord = (item.order_number || "").toUpperCase();
+            if (!act.includes("EMAIL") && ord !== "EMAIL_DISPATCH") {
                 return false;
             }
         }

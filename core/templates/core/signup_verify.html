@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Verify Email & Complete Registration - ITMS Verification</title>
+    <title>Verify Security Code - CLOSE Copilot</title>
 
     <!-- Favicon & Touch Icons -->
     <link rel="shortcut icon" href="{% static 'core/logos/favicon.ico' %}">
@@ -15,17 +15,17 @@
     <link rel="manifest" href="{% static 'core/logos/site.webmanifest' %}">
 
     <!-- Open Graph & Link Sharing Metadata -->
-    <meta property="og:site_name" content="ITMS Verification Copilot">
-    <meta property="og:title" content="Two-Factor Security Verification - ITMS Console">
-    <meta property="og:description" content="Verify your 6-digit confirmation code to activate your ITMS operator account.">
+    <meta property="og:site_name" content="CLOSE Copilot">
+    <meta property="og:title" content="Verify Security Code - CLOSE Copilot">
+    <meta property="og:description" content="Verify your 6-digit confirmation code to activate your CLOSE Copilot account.">
     <meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'core/logos/android-chrome-512x512.png' %}">
     <meta property="og:type" content="website">
     <meta property="og:url" content="{{ request.build_absolute_uri }}">
 
     <!-- Twitter Card Metadata -->
     <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="Two-Factor Security Verification - ITMS Console">
-    <meta name="twitter:description" content="Verify your 6-digit confirmation code to activate your ITMS operator account.">
+    <meta name="twitter:title" content="Verify Security Code - CLOSE Copilot">
+    <meta name="twitter:description" content="Verify your 6-digit confirmation code to activate your CLOSE Copilot account.">
     <meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'core/logos/android-chrome-512x512.png' %}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}">
@@ -104,11 +104,11 @@
                 <div style="display:flex; justify-content:center; margin-bottom:14px;">
                     <img src="{% static 'core/logos/android-chrome-192x192.png' %}" alt="ITMS Logo" style="width:64px; height:64px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,0.5); border:1px solid var(--ug-border); object-fit:contain; background:#0c0f17;">
                 </div>
-                <h1 style="font-size:1.35rem; font-weight:800; color:#ffffff; letter-spacing:0.5px;">
-                    TWO-FACTOR <span style="color:var(--ug-yellow);">VERIFICATION</span>
+                <h1 style="font-size:1.35rem; font-weight:800; color:#ffffff; letter-spacing:0.5px; margin:0;">
+                    CLOSE <span style="color:var(--ug-yellow);">COPILOT</span>
                 </h1>
-                <p style="font-size:0.75rem; color:var(--ug-text-muted); margin-top:2px;">
-                    We sent a 6-digit confirmation code to your email
+                <p style="font-size:0.75rem; color:var(--ug-text-muted); margin-top:4px;">
+                    Two-Factor Authentication &bull; Security Code Verification
                 </p>
                 <div class="email-badge">
                     ✉️ {{ email|default:"your email" }}

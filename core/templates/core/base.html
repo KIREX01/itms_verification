@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ITMS Closing System - Verification Copilot</title>
+    <title>{% block title %}CLOSE Copilot | Plate Audit & Inspection Platform{% endblock %}</title>
     
     <!-- Favicon & Touch Icons -->
     <link rel="shortcut icon" href="{% static 'core/logos/favicon.ico' %}">
@@ -15,20 +15,20 @@
     <link rel="manifest" href="{% static 'core/logos/site.webmanifest' %}">
 
     <!-- Open Graph & Link Sharing Metadata (WhatsApp, Telegram, Slack, Twitter/X, LinkedIn) -->
-    <meta property="og:site_name" content="ITMS Verification Copilot">
-    <meta property="og:title" content="ITMS Verification Copilot - Official Vehicle Inspection Console">
-    <meta property="og:description" content="Ugandan vehicle fitment verification, evidence review, inventory ledger, and ITMS registry sync platform.">
+    <meta property="og:site_name" content="CLOSE Copilot">
+    <meta property="og:title" content="CLOSE Copilot - Plate Audit, Inspection & Inventory">
+    <meta property="og:description" content="Depot plate audit, vehicle evidence inspection, and hardware inventory management.">
     <meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'core/logos/android-chrome-512x512.png' %}">
     <meta property="og:image:width" content="512">
     <meta property="og:image:height" content="512">
-    <meta property="og:image:alt" content="ITMS Verification Copilot Official Logo">
+    <meta property="og:image:alt" content="CLOSE Copilot Official Logo">
     <meta property="og:type" content="website">
     <meta property="og:url" content="{{ request.build_absolute_uri }}">
 
     <!-- Twitter Card Metadata -->
     <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="ITMS Verification Copilot - Official Vehicle Inspection Console">
-    <meta name="twitter:description" content="Ugandan vehicle fitment verification, evidence review, inventory ledger, and ITMS registry sync platform.">
+    <meta name="twitter:title" content="CLOSE Copilot - Plate Audit, Inspection & Inventory">
+    <meta name="twitter:description" content="Depot plate audit, vehicle evidence inspection, and hardware inventory management.">
     <meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'core/logos/android-chrome-512x512.png' %}">
     
     <!-- Dedicated Modular Stylesheets (Uganda National Flag Design System) -->
@@ -106,8 +106,8 @@
                 <div class="brand-logo">
                     <img src="{% static 'core/logos/favicon-32x32.png' %}" alt="Logo" class="brand-logo-img" style="width:28px; height:28px; border-radius:6px; object-fit:contain; margin-right:8px; display:inline-block; vertical-align:middle;">
                     <div class="brand-titles">
-                        <span class="brand-name">ITMS <span class="accent">CLOSING</span> SYSTEM</span>
-                        <span class="brand-sub">VERIFICATION COPILOT</span>
+                        <span class="brand-name">CLOSE <span class="accent">COPILOT</span></span>
+                        <span class="brand-sub">Focus on plate audit, inspection, and inventory</span>
                     </div>
                 </div>
 
@@ -159,8 +159,8 @@
                 <div class="drawer-branding">
                     <img src="{% static 'core/logos/favicon-32x32.png' %}" alt="Logo" style="width:32px; height:32px; border-radius:6px; object-fit:contain; margin-right:8px; display:inline-block; vertical-align:middle;">
                     <div class="drawer-titles">
-                        <span class="drawer-app-name">ITMS COPILOT</span>
-                        <span class="drawer-sub">Verification System</span>
+                        <span class="drawer-app-name">CLOSE COPILOT</span>
+                        <span class="drawer-sub">Plate Audit &amp; Inspection</span>
                     </div>
                 </div>
                 <button type="button" class="btn-close-mobile-nav" onclick="closeMobileMenu()" aria-label="Close Navigation" title="Close Menu">
@@ -244,7 +244,7 @@
             <span class="footer-hotkey-item"><span class="footer-key">L</span> Link Order</span>
         </div>
         <div>
-            <span>Uganda National ITMS Verification Copilot • v2.6</span>
+            <span>CLOSE Copilot • Depot Verification &amp; Inventory Platform • v2.6</span>
         </div>
     </footer>
 

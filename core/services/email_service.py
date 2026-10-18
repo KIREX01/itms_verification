@@ -40,7 +40,7 @@ def get_resend_api_key() -> str:
 def get_resend_from_email() -> str:
     """Retrieves sender email address from Django settings or environment."""
     from_email = getattr(settings, "RESEND_FROM_EMAIL", "") or os.environ.get("RESEND_FROM_EMAIL", "")
-    return from_email.strip() or "ITMS Verification <auth@info.kirex.online>"
+    return from_email.strip() or "CLOSE Copilot <auth@info.kirex.online>"
 
 
 def send_2fa_verification_code(
@@ -99,7 +99,7 @@ def send_2fa_verification_code(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>ITMS Verification Code: {code}</title>
+  <title>CLOSE Copilot Verification Code: {code}</title>
   <style type="text/css">
     body, table, td, a {{ -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }}
     table, td {{ mso-table-lspace: 0pt; mso-table-rspace: 0pt; }}
@@ -141,15 +141,15 @@ def send_2fa_verification_code(
               <table role="presentation" border="0" cellspacing="0" cellpadding="0" align="center" style="margin:0 auto 12px;">
                 <tr>
                   <td align="center">
-                    <img src="{logo_src}" width="60" height="60" alt="ITMS Logo" style="display:block; width:60px; height:60px; border-radius:12px; border:1px solid #282d3d; object-fit:contain; background-color:#0d0f16; margin:0 auto;" />
+                    <img src="{logo_src}" width="60" height="60" alt="CLOSE Copilot Logo" style="display:block; width:60px; height:60px; border-radius:12px; border:1px solid #282d3d; object-fit:contain; background-color:#0d0f16; margin:0 auto;" />
                   </td>
                 </tr>
               </table>
               <h1 style="margin:0; font-size:20px; font-weight:800; color:#ffffff; letter-spacing:0.5px;">
-                ITMS VERIFICATION <span style="color:#ffd100;">COPILOT</span>
+                CLOSE <span style="color:#ffd100;">COPILOT</span>
               </h1>
               <p style="margin:6px 0 0; font-size:11px; font-weight:700; color:#8b949e; letter-spacing:0.8px; text-transform:uppercase;">
-                Official Operator Onboarding &bull; Security Verification
+                Focus on plate audit, inspection, and inventory &bull; Security Verification
               </p>
             </td>
           </tr>
@@ -161,7 +161,7 @@ def send_2fa_verification_code(
                 Hello <strong>{username or 'Operator'}</strong>,
               </p>
               <p style="margin:0 0 22px; font-size:14px; color:#94a3b8; line-height:1.55;">
-                You are completing registration or authenticating your access on the <strong>ITMS Vehicle Verification Console</strong>. Use the 6-digit confirmation code below to verify your email address:
+                You are completing registration or authenticating your access on <strong>CLOSE Copilot</strong>. Use the 6-digit confirmation code below to verify your email address:
               </p>
 
               <!-- OTP Code Display Card with One-Tap Copy Support -->
@@ -211,7 +211,7 @@ def send_2fa_verification_code(
           <!-- Footer -->
           <tr>
             <td align="center" style="padding:18px 24px; background-color:#0d0f16; border-top:1px solid #232838; font-size:11px; color:#64748b; line-height:1.5;">
-              ITMS Verification Copilot &bull; Ministry of Works and Transport / ITMS Operations &bull; Kampala, Uganda<br>
+              CLOSE Copilot &bull; Plate Audit, Inspection &amp; Inventory Platform &bull; Kampala, Uganda<br>
               <span style="color:#475569;">This is an automated operational transmission. Please do not reply directly to this email.</span>
             </td>
           </tr>
@@ -225,7 +225,7 @@ def send_2fa_verification_code(
 
     text_verify_url = f"Direct Verification Link: {verify_url}\n" if verify_url else ""
     text_content = (
-        f"ITMS VERIFICATION COPILOT - SECURITY CODE\n\n"
+        f"CLOSE COPILOT - SECURITY CODE\n\n"
         f"Hello {username or 'Operator'},\n\n"
         f"Your 6-digit operator verification code is: {code}\n\n"
         f"This code is valid for 10 minutes.\n\n"
@@ -234,7 +234,7 @@ def send_2fa_verification_code(
         f"{text_verify_url}\n"
         f"NOT YOUR REQUEST?\n\n"
         f"If you did not request this verification code or were not expecting this email, please safely disregard and ignore this message. No account has been activated, no changes have been made, and your email remains completely secure.\n\n"
-        f"Ministry of Works and Transport - ITMS Operations - Kampala, Uganda\n"
+        f"CLOSE Copilot - Plate Audit, Inspection & Inventory - Kampala, Uganda\n"
     )
 
     payload = {
@@ -360,7 +360,7 @@ def send_stock_reconciliation_report_email(
     # Build ASCII text representation
     text_lines = [
         "=" * 72,
-        "ITMS DAILY STOCK RECONCILIATION REPORT",
+        "CLOSE COPILOT - DAILY STOCK RECONCILIATION REPORT",
         f"Storage Bond Name: {bond_name}",
         f"Report Date:       {report_date} (Shift #{suffix})",
         f"Generated By:      {operator_name}",
@@ -381,7 +381,7 @@ def send_stock_reconciliation_report_email(
     text_lines.append("NOT INTENDED RECIPIENT?")
     text_lines.append("This reconciliation report is confidential and intended solely for authorized depot operations.")
     text_lines.append("If received in error, please disregard and notify operations@itms.ug immediately.")
-    text_lines.append("Ministry of Works and Transport - ITMS Operations - Kampala, Uganda")
+    text_lines.append("CLOSE Copilot - Plate Audit, Inspection & Inventory - Kampala, Uganda")
     text_content = "\n".join(text_lines)
 
     remarks_html = ""
@@ -437,10 +437,10 @@ def send_stock_reconciliation_report_email(
             <td style="padding:24px 28px 18px; border-bottom:1px solid #232838; background-color:#161a24;">
               <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;" class="report-header-flex">
                 <div style="display:flex; align-items:center; gap:14px;">
-                  <img src="{logo_src}" width="48" height="48" alt="ITMS Logo" style="display:block; width:48px; height:48px; border-radius:10px; border:1px solid #282d3d; object-fit:contain; background-color:#0d0f16;" />
+                  <img src="{logo_src}" width="48" height="48" alt="CLOSE Copilot Logo" style="display:block; width:48px; height:48px; border-radius:10px; border:1px solid #282d3d; object-fit:contain; background-color:#0d0f16;" />
                   <div>
                     <div style="font-size:11px; font-weight:800; color:#ffd100; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">
-                      ITMS Verification Copilot &bull; Daily Shift Ledger
+                      CLOSE Copilot &bull; Daily Shift Ledger
                     </div>
                     <h1 style="margin:0; font-size:20px; font-weight:800; color:#ffffff; letter-spacing:0.3px;">
                       {bond_name}
@@ -517,7 +517,7 @@ def send_stock_reconciliation_report_email(
           <!-- Footer -->
           <tr>
             <td align="center" style="padding:16px 24px; background-color:#0d0f16; border-top:1px solid #232838; font-size:11px; color:#6e7681;">
-              ITMS Verification Copilot &bull; Ministry of Works and Transport / ITMS Operations &bull; Kampala, Uganda
+              CLOSE Copilot &bull; Plate Audit, Inspection &amp; Inventory Platform &bull; Kampala, Uganda
             </td>
           </tr>
 

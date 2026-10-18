@@ -80,7 +80,11 @@ def ensure_directories() -> bool:
     """Creates all required runtime directories if missing."""
     log_step("Checking required directory structure...")
     for d in REQUIRED_DIRS:
-        d.mkdir(parents=True, exist_ok=True)
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            if not d.is_dir():
+                log_warning(f"Could not create directory {d}: Permission denied.")
     log_success("Runtime directories verified.")
     return True
 

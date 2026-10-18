@@ -149,7 +149,7 @@ def save_remembered_session(user: User, remember: bool = True) -> None:
         session_file.parent.mkdir(parents=True, exist_ok=True)
         with open(session_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        platform_service.safe_chmod(session_file, 0o600)
+        platform_service.safe_chmod(session_file, 0o660)
         save_operator_preferences({
             "last_username": user.username,
             "last_database_vendor": db_info.get("vendor", ""),
@@ -222,7 +222,7 @@ def save_operator_preferences(updates: Dict[str, Any]) -> None:
     try:
         with open(prefs_file, "w", encoding="utf-8") as f:
             json.dump(prefs, f, indent=2)
-        platform_service.safe_chmod(prefs_file, 0o600)
+        platform_service.safe_chmod(prefs_file, 0o660)
     except Exception as exc:
         logger.warning("Could not save operator preferences: %s", exc)
 

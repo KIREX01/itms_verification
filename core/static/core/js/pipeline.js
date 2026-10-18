@@ -613,11 +613,12 @@ window.populateAllShiftDropdowns = function(dates, activeShift) {
     if (activeShift) {
         window.activeShiftDateInfo = activeShift;
     }
-    if (!dates || dates.length === 0) return;
     const activeSfx = activeShift ? activeShift.suffix : "";
 
-    // Top Centralized Header & Mobile Selectors
+    // Top Centralized Header, Dashboard & Mobile Drawer Selectors
     const shiftSelects = document.querySelectorAll("select.header-shift-select, #global-shift-select, #dash-global-shift-select, #drawer-global-shift-select");
+    if (!shiftSelects || shiftSelects.length === 0) return;
+
     shiftSelects.forEach(sel => {
         const currentSelected = sel.value || activeSfx;
         sel.innerHTML = "";
@@ -631,16 +632,24 @@ window.populateAllShiftDropdowns = function(dates, activeShift) {
         }
         sel.appendChild(optAll);
 
-        dates.forEach(d => {
+        if (Array.isArray(dates) && dates.length > 0) {
+            dates.forEach(d => {
+                const opt = document.createElement("option");
+                opt.value = d.suffix;
+                const star = d.is_today ? " (Live Shift)" : "";
+                opt.textContent = `${d.formatted_date} [${d.suffix}]${star}`;
+                if (d.suffix === currentSelected || (!currentSelected && d.suffix === activeSfx)) {
+                    opt.selected = true;
+                }
+                sel.appendChild(opt);
+            });
+        } else if (activeShift && activeShift.suffix) {
             const opt = document.createElement("option");
-            opt.value = d.suffix;
-            const star = d.is_today ? " (Live Shift)" : "";
-            opt.textContent = `${d.formatted_date} [${d.suffix}]${star}`;
-            if (d.suffix === currentSelected || (!currentSelected && d.suffix === activeSfx)) {
-                opt.selected = true;
-            }
+            opt.value = activeShift.suffix;
+            opt.textContent = `${activeShift.formatted_date || activeShift.suffix} [${activeShift.suffix}] (Live Shift)`;
+            opt.selected = true;
             sel.appendChild(opt);
-        });
+        }
     });
 };
 

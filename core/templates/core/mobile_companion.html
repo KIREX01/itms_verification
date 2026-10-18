@@ -527,6 +527,19 @@
                         <span>🔍</span> Find
                     </button>
                 </div>
+
+                <!-- Active Orders Quick-Picker Dropdown -->
+                <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.08);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+                        <span style="font-size:0.72rem; color:var(--ug-yellow, #fcdc04); font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">📋 Or Select Yard Order:</span>
+                        <button type="button" class="btn btn-xs btn-secondary" onclick="loadMobilePendingOrdersList()" style="font-size:0.7rem; padding:2px 8px; color:#ffffff; background:#1e293b; border:1px solid #334155; border-radius:4px;">
+                            🔄 Refresh
+                        </button>
+                    </div>
+                    <select id="m-order-picker-select" class="form-select" onchange="if(this.value){ lookupMobileOrder(this.value); }" style="width:100%; box-sizing:border-box; background:#0c1017; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-weight:700; padding:8px 10px; border-radius:6px; font-size:0.82rem; min-height:38px;">
+                        <option value="">-- Tap to Select Active Installation Order --</option>
+                    </select>
+                </div>
             </div>
 
             <!-- Active Order Information & Hardware Card (Initially Hidden) -->

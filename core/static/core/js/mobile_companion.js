@@ -564,6 +564,9 @@ function switchMobileMode(mode) {
             cont.classList.add("active");
             cont.style.display = "flex";
         }
+        if (typeof loadMobilePendingOrdersList === "function") {
+            loadMobilePendingOrdersList();
+        }
     }
 }
 
@@ -2335,6 +2338,22 @@ function initMobileCompanion() {
     } catch (e) {
         console.error("Error in checkSecureContextBanner:", e);
     }
+
+    try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const reqMode = urlParams.get("mode");
+        const reqOrder = urlParams.get("order") || urlParams.get("order_number") || urlParams.get("plate");
+        if (reqMode === "order" || reqOrder) {
+            switchMobileMode("order");
+            if (reqOrder) {
+                const sInput = document.getElementById("m-order-search-input");
+                if (sInput) sInput.value = reqOrder;
+                lookupMobileOrder(reqOrder);
+            }
+        }
+    } catch (e) {
+        console.warn("[MobileCompanion] Error processing URL parameters:", e);
+    }
     try {
         updateConveyorStepper();
     } catch (e) {
@@ -2377,9 +2396,36 @@ window.MobileOrderState = {
     isSubmitting: false,
 };
 
-async function lookupMobileOrder() {
+async function loadMobilePendingOrdersList() {
+    const picker = document.getElementById("m-order-picker-select");
+    if (!picker) return;
+    try {
+        const resp = await fetch("/api/itms/orders/?source=auto&tab=active", {
+            headers: { Accept: "application/json" }
+        });
+        const data = await resp.json();
+        if (data && data.success && Array.isArray(data.orders)) {
+            picker.innerHTML = `<option value="">-- Tap to Select Active Order (${data.orders.length} available) --</option>`;
+            data.orders.forEach(o => {
+                const opt = document.createElement("option");
+                const num = o.order_number || "";
+                const plate = o.registration_number || "NO PLATE";
+                const st = o.order_status || o.status || "Pending";
+                opt.value = num || plate;
+                opt.textContent = `${plate} — #${num} (${st})`;
+                picker.appendChild(opt);
+            });
+        }
+    } catch (e) {
+        console.warn("[MobileCompanion] Error loading active orders:", e);
+    }
+}
+
+async function lookupMobileOrder(targetQuery) {
     const input = document.getElementById("m-order-search-input");
-    const query = (input ? input.value : "").trim();
+    const query = (typeof targetQuery === "string" && targetQuery.trim()) ? targetQuery.trim() : (input ? input.value : "").trim();
+    if (input && query) input.value = query;
+
     if (!query) {
         showToastNotification("Enter an order number or plate to lookup.", "error");
         return;
@@ -2514,24 +2560,45 @@ async function saveMobileStep1() {
 
 function triggerMobileOrderPhoto(angle) {
     const input = document.getElementById(`m-${angle}-file-input`);
-    if (input) input.click();
+    if (input) {
+        input.value = "";
+        input.click();
+    }
 }
 
-function onMobileOrderPhotoPicked(angle, input) {
+async function onMobileOrderPhotoPicked(angle, input) {
     if (!input || !input.files || input.files.length === 0) return;
-    const file = input.files[0];
+    const rawFile = input.files[0];
 
-    if (angle === "front") {
-        window.MobileOrderState.frontPhotoFile = file;
-    } else {
-        window.MobileOrderState.rearPhotoFile = file;
+    try {
+        const file = (typeof compressImageForUpload === "function") 
+            ? await compressImageForUpload(rawFile, 1920, 0.85) 
+            : rawFile;
+
+        if (angle === "front") {
+            window.MobileOrderState.frontPhotoFile = file;
+        } else {
+            window.MobileOrderState.rearPhotoFile = file;
+        }
+
+        const reader = new FileReader();
+        reader.onload = function (e) {
+            setMobilePhotoPreview(angle, e.target.result);
+        };
+        reader.readAsDataURL(file);
+    } catch (err) {
+        console.error("Photo compression error:", err);
+        if (angle === "front") {
+            window.MobileOrderState.frontPhotoFile = rawFile;
+        } else {
+            window.MobileOrderState.rearPhotoFile = rawFile;
+        }
+        const reader = new FileReader();
+        reader.onload = function (e) {
+            setMobilePhotoPreview(angle, e.target.result);
+        };
+        reader.readAsDataURL(rawFile);
     }
-
-    const reader = new FileReader();
-    reader.onload = function (e) {
-        setMobilePhotoPreview(angle, e.target.result);
-    };
-    reader.readAsDataURL(file);
 }
 
 function setMobilePhotoPreview(angle, url) {
@@ -2633,6 +2700,7 @@ async function submitMobileOrderInstall() {
     }
 }
 
+window.loadMobilePendingOrdersList = loadMobilePendingOrdersList;
 window.lookupMobileOrder = lookupMobileOrder;
 window.saveMobileStep1 = saveMobileStep1;
 window.triggerMobileOrderPhoto = triggerMobileOrderPhoto;

@@ -131,6 +131,16 @@ function openMobileMenu() {
     if (nav) nav.classList.add("show-mobile");
     if (backdrop) backdrop.classList.add("active");
     document.body.classList.add("mobile-menu-open");
+
+    // Ensure mobile drawer shift dropdown is populated with dates
+    const drawerSel = document.getElementById("drawer-global-shift-select");
+    if (drawerSel && (drawerSel.options.length <= 1 || !drawerSel.value)) {
+        if (typeof populateAllShiftDropdowns === "function" && window.cachedAvailableShiftDates && window.cachedAvailableShiftDates.length > 0) {
+            populateAllShiftDropdowns(window.cachedAvailableShiftDates, window.activeShiftDateInfo);
+        } else if (typeof initGlobalShiftDate === "function") {
+            void initGlobalShiftDate();
+        }
+    }
 }
 
 function closeMobileMenu() {

@@ -403,10 +403,12 @@ function renderItmsOrdersTable(items) {
         const wh = escapeHtml(o.warehouse || o.warehouse_name || "---");
         const officer = escapeHtml(o.officer || o.installation_officer || "---");
         const date = escapeHtml(o.installation_date || "---");
+        const hasPhoto = Boolean(o.has_photos || (o.photos && o.photos.length > 0));
+        const photoBadge = hasPhoto ? '<span title="Evidence photos available" style="margin-left:5px; font-size:0.75rem; vertical-align:middle; cursor:pointer;">📷</span>' : '';
 
         return `<tr id="itms-row-${idx}" onclick="selectItmsOrderAtIndex(${idx})">
             <td><strong style="color:#fff; font-family:var(--font-mono);">${orderNum}</strong></td>
-            <td><span style="color:#ffffff !important; font-family:var(--font-mono); font-weight:800;">${regPlate}</span></td>
+            <td><span style="color:#ffffff !important; font-family:var(--font-mono); font-weight:800;">${regPlate}</span>${photoBadge}</td>
             <td class="hide-mobile"><span style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${vin}</span></td>
             <td><span class="badge ${status.toLowerCase().includes('installed') ? 'badge-green' : 'badge-yellow'}">${status}</span></td>
             <td class="hide-mobile"><span style="font-size:0.75rem; color:var(--ug-text-muted);">${wh}</span></td>
@@ -416,10 +418,42 @@ function renderItmsOrdersTable(items) {
     }).join("");
 }
 
+function renderItmsPhotoCards(photos, isKit = false) {
+    if (!photos || photos.length === 0) {
+        return `<div style="grid-column:1/-1; padding:22px; text-align:center; color:rgba(255,255,255,0.7); font-size:0.8rem; background:var(--ug-black-surface); border-radius:var(--radius-md); line-height:1.5;">
+            ${isKit ? "Physical Kit enrolled in warehouse stock. Evidence photos attach dynamically when fitment is completed." : "No photos uploaded on ITMS for this order."}
+        </div>`;
+    }
+
+    return photos.map(p => {
+        const lbl = escapeHtml(p.label || (p.orientation === "FRONT" ? "Front Plate" : "Rear Plate"));
+        const rawUrl = p.url || "";
+        const url = escapeHtml(rawUrl);
+        const icon = (p.orientation === "FRONT") ? "📷" : "📸";
+        return `<div class="photo-link-card">
+            <div class="photo-link-label">
+                <span style="font-weight:700; color:#ffffff;">${icon} ${lbl}</span>
+                <span class="badge badge-secondary" style="font-size:0.68rem; padding:2px 6px; font-weight:700; color:#ffffff;">${escapeHtml(p.orientation || "EVIDENCE")}</span>
+            </div>
+            <div class="photo-link-thumb" onclick="if(typeof openLightbox==='function'){openLightbox('${url}')}else{window.open('${url}','_blank')}" title="Click for full view">
+                <img src="${url}" alt="${lbl}" loading="lazy" onerror="this.onerror=null; this.src=''; this.parentElement.innerHTML='<div style=\'padding:22px 10px; text-align:center; color:#94a3b8; font-size:0.75rem;\'><div style=\'font-size:1.3rem; margin-bottom:4px;\'>⚠️</div>Preview unavailable<br><span style=\'font-size:0.7rem; color:#64748b;\'>Direct link active below</span></div>';">
+            </div>
+            <div class="photo-link-footer" style="display:flex; justify-content:space-between; align-items:center;">
+                <a href="${url}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:none; display:inline-flex; align-items:center; gap:4px; font-weight:700;">
+                    <span>Open Link</span> <span>↗</span>
+                </a>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="if(typeof openLightbox==='function'){openLightbox('${url}')}else{window.open('${url}','_blank')}; event.stopPropagation();" style="font-size:0.7rem; padding:3px 9px; color:#ffffff; background:#1e293b; border:1px solid rgba(255,255,255,0.25);">
+                    🔍 Enlarge
+                </button>
+            </div>
+        </div>`;
+    }).join("");
+}
+
 function openItmsOrderDetailsModal(order) {
     if (!order) return;
     const isKit = (itmsCurrentSubview === "KITS" || (order.kit_code && !order.vin));
-    
+
     setText("itms-modal-insp-title", isKit ? "📦 ITMS Kit Profile" : "📋 ITMS Order Details");
     const stBadge = document.getElementById("itms-modal-insp-status-badge");
     const status = order.order_status || order.status || "Pending";
@@ -427,62 +461,51 @@ function openItmsOrderDetailsModal(order) {
         stBadge.innerText = status;
         stBadge.className = "badge " + (status.toLowerCase().includes("installed") ? "badge-green" : "badge-yellow");
     }
-    
+
     setText("itms-modal-insp-plate", order.registration_number || order.kit_code || "---");
     setText("itms-modal-insp-order", isKit ? ("Kit #" + (order.kit_code || "")) : ("Order #" + (order.order_number || "")));
     setText("itms-modal-insp-wh", order.warehouse || order.warehouse_name || "AGM Bonded Warehouse");
     setText("itms-modal-insp-date", order.installation_date || order.created_date || "---");
-    
+
     // Telematics
-    const hw = order.hardware || {};
+    const hw = order.hardware || (order.order_details && order.order_details.hardware) || {};
     setText("itms-modal-insp-gps", hw.gps_tracker_id || order.gps_tracker || "Not Fitted");
     setText("itms-modal-insp-fbeacon", hw.front_beacon_id || order.front_tracker || order.front_beacon || "None");
     setText("itms-modal-insp-rbeacon", hw.rear_beacon_id || order.rear_tracker || order.rear_beacon || "None");
     setText("itms-modal-insp-fserial", hw.front_plate_serial || order.front_plate || "---");
     setText("itms-modal-insp-rserial", hw.rear_plate_serial || order.rear_plate || "---");
-    
+
     // Evidence photos
     const modalPhotosGrid = document.getElementById("itms-modal-insp-photos-grid");
     if (modalPhotosGrid) {
         const photos = (order.order_details && order.order_details.photos) || order.photos || [];
         if (photos.length > 0) {
-            modalPhotosGrid.innerHTML = photos.map(p => {
-                const lbl = escapeHtml(p.label || (p.orientation === "FRONT" ? "Front Plate" : "Rear Plate"));
-                const url = escapeHtml(p.url || "");
-                return `<div class="photo-link-card">
-                    <div class="photo-link-label">
-                        <span>${p.orientation === "FRONT" ? "🚘" : "🏍️"} ${lbl}</span>
-                    </div>
-                    <div class="photo-link-thumb" onclick="if(typeof openLightbox==='function'){openLightbox('${url}')}else{window.open('${url}','_blank')}" title="Click for full view">
-                        <img src="${url}" alt="${lbl}" onerror="this.onerror=null; this.parentElement.innerHTML='<span style='color:rgba(255,255,255,0.6); font-size:0.75rem;'>No Preview</span>';">
-                    </div>
-                    <div class="photo-link-footer">
-                        <a href="${url}" target="_blank" rel="noopener noreferrer">Open Link ↗</a>
-                    </div>
-                </div>`;
-            }).join("");
-        } else {
-            modalPhotosGrid.innerHTML = `<div style="grid-column:1/-1; padding:20px; text-align:center; color:rgba(255,255,255,0.7); font-size:0.8rem; background:var(--ug-black-surface); border-radius:var(--radius-md);">
-                ${isKit ? "Physical Kit enrolled in warehouse stock. Photos attach dynamically when fitment is completed." : "No photos uploaded on ITMS for this order."}
+            modalPhotosGrid.innerHTML = renderItmsPhotoCards(photos, isKit);
+        } else if (order.is_loading_details) {
+            modalPhotosGrid.innerHTML = `<div style="grid-column:1/-1; padding:24px; text-align:center; color:#93c5fd; font-size:0.82rem; background:var(--ug-black-surface); border-radius:var(--radius-md);">
+                <span class="spinner" style="display:inline-block; width:14px; height:14px; border:2px solid #3b82f6; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; vertical-align:middle; margin-right:8px;"></span> Loading ITMS evidence photos...
             </div>`;
+        } else {
+            modalPhotosGrid.innerHTML = renderItmsPhotoCards([], isKit);
         }
     }
-    
+
     // Jump to Queue button
     const qBtn = document.getElementById("btn-modal-itms-jump-queue");
     if (qBtn) {
-        if (order.matched_pair) {
+        const matched = order.matched_pair || (order.order_details && order.order_details.matched_pair);
+        if (matched) {
             qBtn.style.display = "inline-flex";
             qBtn.onclick = () => {
                 closeModal("modal-itms-order-details");
                 switchNavTab(4);
-                if (typeof selectPair === "function") selectPair(order.matched_pair.id);
+                if (typeof selectPair === "function") selectPair(matched.id);
             };
         } else {
             qBtn.style.display = "none";
         }
     }
-    
+
     // Direct kit web link
     const kitLink = document.getElementById("link-modal-itms-kit-web");
     if (kitLink) {
@@ -494,7 +517,7 @@ function openItmsOrderDetailsModal(order) {
             kitLink.style.display = "none";
         }
     }
-    
+
     openModal("modal-itms-order-details");
 }
 
@@ -529,6 +552,7 @@ function closeItmsMobileInspector() {
 }
 
 async function selectItmsOrder(order) {
+    if (!order) return;
     selectedItmsOrder = order;
 
     // Highlight row
@@ -539,23 +563,22 @@ async function selectItmsOrder(order) {
     const linkKitWeb = document.getElementById("link-itms-kit-web");
     const qBanner = document.getElementById("itms-insp-queue-banner");
     const photosGrid = document.getElementById("itms-insp-photos-grid");
+    const modalPhotosGrid = document.getElementById("itms-modal-insp-photos-grid");
+
+    const isKit = (itmsCurrentSubview === "KITS" || (order.kit_code && !order.vin));
 
     // Case A: Installation Kit Profile
-    if (itmsCurrentSubview === "KITS" || (order.kit_code && !order.vin)) {
+    if (isKit) {
         setText("itms-insp-plate", order.registration_number || order.kit_code || "---");
-        setText("itms-insp-order", `Kit #${order.kit_code || ''} • ${order.warehouse || 'Warehouse Stock'}`);
+        setText("itms-insp-order", `Kit #${order.kit_code || ''}   ${order.warehouse || 'Warehouse Stock'}`);
         setText("itms-insp-gps", order.gps_tracker || "Not Fitted");
         setText("itms-insp-fbeacon", order.front_tracker || "None");
         setText("itms-insp-rbeacon", order.rear_tracker || "None");
         setText("itms-insp-fserial", order.front_plate || "---");
         setText("itms-insp-rserial", order.rear_plate || "---");
 
-        if (photosGrid) {
-            photosGrid.innerHTML = `<div style="grid-column:1/-1; padding:18px; text-align:center; color:var(--ug-text-dim); font-size:0.78rem; background:var(--ug-black-surface); border-radius:var(--radius-md); line-height:1.5;">
-                Physical Kit enrolled in warehouse stock with status <strong style="color:var(--ug-green);">${order.status || 'New'}</strong>.<br>
-                <span style="color:#94a3b8; font-size:0.72rem;">Evidence photos attach dynamically once fitment is assigned to a vehicle order.</span>
-            </div>`;
-        }
+        if (photosGrid) photosGrid.innerHTML = renderItmsPhotoCards([], true);
+        if (modalPhotosGrid) modalPhotosGrid.innerHTML = renderItmsPhotoCards([], true);
 
         if (qBanner) qBanner.style.display = "none";
 
@@ -577,12 +600,38 @@ async function selectItmsOrder(order) {
 
     // Populate Inspector panel
     setText("itms-insp-plate", order.registration_number || "---");
-    setText("itms-insp-order", `Order #${order.order_number || ''} • ${order.warehouse || order.warehouse_name || 'Uganda Hub'}`);
+    setText("itms-insp-order", `Order #${order.order_number || ''}   ${order.warehouse || order.warehouse_name || 'Uganda Hub'}`);
+
+    // If photos or hardware are already cached on order, render immediately!
+    const existingPhotos = (order.order_details && order.order_details.photos) || order.photos || [];
+    if (existingPhotos.length > 0) {
+        if (photosGrid) photosGrid.innerHTML = renderItmsPhotoCards(existingPhotos, false);
+        if (modalPhotosGrid) modalPhotosGrid.innerHTML = renderItmsPhotoCards(existingPhotos, false);
+    } else {
+        const loadingHtml = `<div style="grid-column:1/-1; padding:22px; text-align:center; color:#93c5fd; font-size:0.8rem; background:var(--ug-black-surface); border-radius:var(--radius-md);">
+            <span class="spinner" style="display:inline-block; width:14px; height:14px; border:2px solid #3b82f6; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; vertical-align:middle; margin-right:8px;"></span> Loading ITMS evidence photos & telematics...
+        </div>`;
+        if (photosGrid) photosGrid.innerHTML = loadingHtml;
+        if (modalPhotosGrid) modalPhotosGrid.innerHTML = loadingHtml;
+    }
+
+    const existingHw = order.hardware || (order.order_details && order.order_details.hardware);
+    if (existingHw) {
+        setText("itms-insp-gps", existingHw.gps_tracker_id || "Not Fitted");
+        setText("itms-insp-fbeacon", existingHw.front_beacon_id || "None");
+        setText("itms-insp-rbeacon", existingHw.rear_beacon_id || "None");
+        setText("itms-insp-fserial", existingHw.front_plate_serial || "---");
+        setText("itms-insp-rserial", existingHw.rear_plate_serial || "---");
+    }
+
+    order.is_loading_details = true;
 
     // Fetch full order details including hardware & direct photo links
     try {
-        const res = await fetch(`/api/itms/orders/${encodeURIComponent(order.order_number)}/?live=1`);
+        const ident = order.order_number || order.order_key || order.registration_number || "";
+        const res = await fetch(`/api/itms/orders/${encodeURIComponent(ident)}/?live=1`);
         const data = await res.json();
+        order.is_loading_details = false;
         if (data.success && data.order) {
             const o = data.order;
             order.order_details = o;
@@ -590,38 +639,25 @@ async function selectItmsOrder(order) {
             order.hardware = o.hardware || {};
             order.matched_pair = o.matched_pair || null;
             const hw = o.hardware || {};
+
             setText("itms-insp-gps", hw.gps_tracker_id || "Not Fitted");
             setText("itms-insp-fbeacon", hw.front_beacon_id || "None");
             setText("itms-insp-rbeacon", hw.rear_beacon_id || "None");
             setText("itms-insp-fserial", hw.front_plate_serial || "---");
             setText("itms-insp-rserial", hw.rear_plate_serial || "---");
 
+            setText("itms-modal-insp-gps", hw.gps_tracker_id || "Not Fitted");
+            setText("itms-modal-insp-fbeacon", hw.front_beacon_id || "None");
+            setText("itms-modal-insp-rbeacon", hw.rear_beacon_id || "None");
+            setText("itms-modal-insp-fserial", hw.front_plate_serial || "---");
+            setText("itms-modal-insp-rserial", hw.rear_plate_serial || "---");
+
             // Evidence Photos (Direct Web Links - ZERO download required!)
             const photos = o.photos || [];
+            const photoCardsHtml = renderItmsPhotoCards(photos, false);
 
-            if (photosGrid) {
-                if (photos.length === 0) {
-                    photosGrid.innerHTML = `<div style="grid-column:1/-1; padding:18px; text-align:center; color:var(--ug-text-dim); font-size:0.78rem; background:var(--ug-black-surface); border-radius:var(--radius-md);">
-                        No photos uploaded on ITMS for this order.
-                    </div>`;
-                } else {
-                    photosGrid.innerHTML = photos.map(p => {
-                        const lbl = escapeHtml(p.label || (p.orientation === 'FRONT' ? 'Front Plate' : 'Rear Plate'));
-                        const url = escapeHtml(p.url || '');
-                        return `<div class="photo-link-card">
-                            <div class="photo-link-label">
-                                <span>${p.orientation === 'FRONT' ? '🚘' : '🏍️'} ${lbl}</span>
-                            </div>
-                            <div class="photo-link-thumb" onclick="openLightbox('${url}')" title="Click for full view">
-                                <img src="${url}" alt="${lbl}" onerror="this.onerror=null; this.parentElement.innerHTML='<span style=\\'color:var(--ug-text-dim); font-size:0.7rem;\\'>No Preview</span>';">
-                            </div>
-                            <div class="photo-link-footer">
-                                <a href="${url}" target="_blank" rel="noopener noreferrer">Open Link ↗</a>
-                            </div>
-                        </div>`;
-                    }).join("");
-                }
-            }
+            if (photosGrid) photosGrid.innerHTML = photoCardsHtml;
+            if (modalPhotosGrid) modalPhotosGrid.innerHTML = photoCardsHtml;
 
             // Verification Queue correlation
             const qBtn = document.getElementById("btn-itms-jump-queue");
@@ -634,9 +670,35 @@ async function selectItmsOrder(order) {
             } else if (qBanner) {
                 qBanner.style.display = "none";
             }
+
+            const modalQBtn = document.getElementById("btn-modal-itms-jump-queue");
+            if (modalQBtn) {
+                if (o.matched_pair) {
+                    modalQBtn.style.display = "inline-flex";
+                    modalQBtn.onclick = () => {
+                        closeModal("modal-itms-order-details");
+                        switchNavTab(4);
+                        if (typeof selectPair === "function") selectPair(o.matched_pair.id);
+                    };
+                } else {
+                    modalQBtn.style.display = "none";
+                }
+            }
+        } else {
+            const errHtml = `<div style="grid-column:1/-1; padding:18px; text-align:center; color:rgba(255,255,255,0.7); font-size:0.78rem; background:var(--ug-black-surface); border-radius:var(--radius-md);">
+                ${escapeHtml(data.error || "No photos or live details returned from ITMS.")}
+            </div>`;
+            if (photosGrid && (!order.photos || order.photos.length === 0)) photosGrid.innerHTML = errHtml;
+            if (modalPhotosGrid && (!order.photos || order.photos.length === 0)) modalPhotosGrid.innerHTML = errHtml;
         }
     } catch (err) {
+        order.is_loading_details = false;
         console.warn("Error fetching order detail:", err);
+        const errHtml = `<div style="grid-column:1/-1; padding:18px; text-align:center; color:#f87171; font-size:0.78rem; background:var(--ug-black-surface); border-radius:var(--radius-md);">
+            Failed fetching details: ${escapeHtml(String(err))}
+        </div>`;
+        if (photosGrid && (!order.photos || order.photos.length === 0)) photosGrid.innerHTML = errHtml;
+        if (modalPhotosGrid && (!order.photos || order.photos.length === 0)) modalPhotosGrid.innerHTML = errHtml;
     }
 }
 

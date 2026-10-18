@@ -2535,6 +2535,40 @@ class ITMSWebClient:
                 elif orientation == "REAR" and not rear_photo_url:
                     rear_photo_url = full_url
 
+        # Resilient fallback: scan for any evidence img elements if strict col blocks were not matched
+        if not photos:
+            for img_match in re.finditer(r"<img[^>]*src=[\"']([^\"']+)[\"'][^>]*>", html, re.IGNORECASE):
+                src = img_match.group(1).strip()
+                src_lower = src.lower()
+                if any(k in src_lower for k in ("plate", "photo", "storage", "upload", "installation")):
+                    full_url = urllib.parse.urljoin(self.base_url, src)
+                    filename = os.path.basename(urllib.parse.urlparse(src).path)
+                    start_pos = max(0, img_match.start() - 250)
+                    end_pos = min(len(html), img_match.end() + 250)
+                    surrounding = html[start_pos:end_pos].lower()
+                    if "front" in surrounding:
+                        orientation = "FRONT"
+                        lbl = "Front Plate Photo"
+                    elif "rear" in surrounding:
+                        orientation = "REAR"
+                        lbl = "Rear Plate Photo"
+                    else:
+                        orientation = "FRONT" if not front_photo_url else "REAR"
+                        lbl = f"{orientation.capitalize()} Plate Photo"
+
+                    entry = {
+                        "label": lbl,
+                        "url": full_url,
+                        "relative_url": src,
+                        "filename": filename,
+                        "orientation": orientation,
+                    }
+                    photos.append(entry)
+                    if orientation == "FRONT" and not front_photo_url:
+                        front_photo_url = full_url
+                    elif orientation == "REAR" and not rear_photo_url:
+                        rear_photo_url = full_url
+
         return {
             "order_number": order_number,
             "page_title": title_text,

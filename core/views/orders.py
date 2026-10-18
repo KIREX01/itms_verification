@@ -454,6 +454,11 @@ def api_itms_orders_explorer(request: HttpRequest) -> JsonResponse:
                         if p.registration_number_detected and p.registration_number_detected not in pairs_by_reg:
                             pairs_by_reg[p.registration_number_detected] = p
 
+                cached_orders_by_num = {
+                    loc.order_number: loc
+                    for loc in InstallationOrder.objects.filter(order_number__in=order_nums)
+                }
+
                 enriched_orders = []
                 for o in raw_orders:
                     order_num = o.get("order_number", "")
@@ -468,6 +473,23 @@ def api_itms_orders_explorer(request: HttpRequest) -> JsonResponse:
                     o_dict = dict(o)
                     o_dict["matched_pair_id"] = pair.id if pair else None
                     o_dict["verification_status"] = pair.verification_status if pair else None
+
+                    cached = cached_orders_by_num.get(order_num)
+                    if cached:
+                        has_cached_photos = bool(cached.front_photo_url or cached.rear_photo_url or cached.photos_json)
+                        o_dict["has_photos"] = has_cached_photos
+                        if has_cached_photos:
+                            o_dict["photos"] = cached.photos_json or (
+                                ([{"label": "Front Plate", "url": cached.front_photo_url, "orientation": "FRONT"}] if cached.front_photo_url else []) +
+                                ([{"label": "Rear Plate", "url": cached.rear_photo_url, "orientation": "REAR"}] if cached.rear_photo_url else [])
+                            )
+                            o_dict["hardware"] = {
+                                "gps_tracker_id": cached.gps_tracker_id,
+                                "front_beacon_id": cached.front_beacon_id,
+                                "rear_beacon_id": cached.rear_beacon_id,
+                                "front_plate_serial": cached.front_plate_serial,
+                                "rear_plate_serial": cached.rear_plate_serial,
+                            }
                     enriched_orders.append(o_dict)
 
                 return JsonResponse({
@@ -546,6 +568,7 @@ def api_itms_orders_explorer(request: HttpRequest) -> JsonResponse:
     for o in paged_qs:
         pair = pairs_by_order_id.get(o.id) or (pairs_by_reg.get(o.registration_number) if o.registration_number else None)
 
+        has_ph = bool(o.front_photo_url or o.rear_photo_url or o.photos_json)
         local_orders.append({
             "id": o.id,
             "order_number": o.order_number,
@@ -562,8 +585,21 @@ def api_itms_orders_explorer(request: HttpRequest) -> JsonResponse:
             "itms_stage": o.itms_stage,
             "matched_pair_id": pair.id if pair else None,
             "verification_status": pair.verification_status if pair else None,
-            "has_photos": bool(o.front_photo_url or o.rear_photo_url or o.photos_json),
+            "has_photos": has_ph,
             "has_tracker": bool(o.gps_tracker_id),
+            "front_photo_url": o.front_photo_url,
+            "rear_photo_url": o.rear_photo_url,
+            "photos": o.photos_json or (
+                ([{"label": "Front Plate", "url": o.front_photo_url, "orientation": "FRONT"}] if o.front_photo_url else []) +
+                ([{"label": "Rear Plate", "url": o.rear_photo_url, "orientation": "REAR"}] if o.rear_photo_url else [])
+            ),
+            "hardware": {
+                "gps_tracker_id": o.gps_tracker_id,
+                "front_beacon_id": o.front_beacon_id,
+                "rear_beacon_id": o.rear_beacon_id,
+                "front_plate_serial": o.front_plate_serial,
+                "rear_plate_serial": o.rear_plate_serial,
+            },
         })
 
     summary_text = f"Showing {offset + 1} to {min(offset + len(local_orders), total_count)} of {total_count} local records" if total_count > 0 else "0 orders found"
@@ -637,6 +673,7 @@ def api_itms_order_detail(request: HttpRequest, order_ident: str) -> JsonRespons
                     "photos_json": live_info.get("photos", []),
                     "details_json": live_info.get("raw_details", {}),
                     "itms_order_uuid": live_info.get("order_uuid", ""),
+                    "is_archived": order.is_archived if order else False,
                     "info_fetched_at": timezone.now(),
                 }
                 order, _ = InstallationOrder.objects.update_or_create(

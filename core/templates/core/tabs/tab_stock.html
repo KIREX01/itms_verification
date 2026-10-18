@@ -43,6 +43,7 @@
                         ⚠️ Not On Stock (<span id="lbl-blocked-stock-count">0</span>)
                     </button>
                     <button class="btn btn-secondary" onclick="openStockPasteModal()" title="Paste registration numbers from Excel (V)">📋 Paste <span class="hotkey">V</span></button>
+                    <button class="btn btn-secondary" id="btn-quick-delivery-top" onclick="openQuickDeliveryModal()" title="Quick Count Inbound Delivery (Bulk intake by quantity)">📦 Quick Delivery</button>
                     <button class="btn btn-primary" onclick="syncStock()" title="Unified sync with ITMS (S)">⟳ Sync <span class="hotkey">S</span></button>
                     <div class="dropdown" style="position:relative; display:inline-block;">
                         <button class="btn btn-secondary dropdown-toggle" onclick="toggleStockExportMenu(event)" title="Export Shift Stock CSVs (Hotkey: E)">
@@ -142,6 +143,7 @@
                     </table>
                 </div>
                 <div class="table-pagination-bar" style="margin-top: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 0 0 0;">
+                    <button class="btn btn-primary" id="btn-quick-delivery-mvt" onclick="openQuickDeliveryModal()" style="padding: 6px 14px; font-size: 0.85rem; font-weight: 700;" title="Quick count inbound delivery without barcode scanning">📦 Quick Delivery</button>
                     <select id="movement-type" class="form-control" style="width: 160px; font-size: 0.85rem;" aria-label="Stock Movement Type">
                         <option value="DELIVERY">Inbound Delivery</option>
                         <option value="TRANSFER_IN">Bond Transfer In</option>
@@ -204,9 +206,11 @@
                         </tbody>
                     </table>
                 </div>
-                <div class="table-pagination-bar" style="margin-top: auto; display: flex; gap: 10px; padding: 10px 0 0 0;">
-                    <button class="btn btn-primary" onclick="openLedgerTargetModal()" style="font-size: 0.85rem;">✎ Edit Opening & Target <span class="hotkey">O</span></button>
-                    <button class="btn btn-secondary" onclick="refreshStockLedger()" style="font-size: 0.85rem;">⟳ Refresh Ledger <span class="hotkey">R</span></button>
+                <div class="table-pagination-bar" style="margin-top: auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 0 0 0;">
+                    <button class="btn btn-primary" id="btn-open-edit-ledger" onclick="openEditLedgerModal()" style="font-size: 0.85rem; font-weight: 700;" title="Full 9-row direct manual numeric entry and metric overrides">✏️ Edit Ledger (9-Row Overrides)</button>
+                    <button class="btn btn-secondary" onclick="openLedgerTargetModal()" style="font-size: 0.85rem;">✎ Opening & Target <span class="hotkey">O</span></button>
+                    <button class="btn btn-primary" id="btn-open-email-report" onclick="openEmailStockReportModal()" style="font-size: 0.85rem; font-weight: 700; background: #2563eb; border-color: #3b82f6;" title="Email official 9-row daily reconciliation report">📧 Email Report</button>
+                    <button class="btn btn-secondary" onclick="refreshStockLedger()" style="font-size: 0.85rem;">🔄 Refresh Ledger <span class="hotkey">R</span></button>
                     <button class="btn btn-success" id="btn-export-ledger" onclick="exportStockCSV()" style="font-size: 0.85rem; font-weight: 700;" title="Export full daily reconciliation ledger as CSV">📊 Export Reconciliation CSV</button>
                 </div>
             </div>

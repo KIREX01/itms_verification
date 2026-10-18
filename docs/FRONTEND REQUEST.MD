@@ -77,11 +77,27 @@ The backend endpoints and frontend UI templates, modals, CSS styling, and client
    - Shared client state (e.g. current batch, selected pair, queue filters) should use an observable or deterministic state store rather than relying on DOM element attributes.
 ---
 
-## 3. Feature: Stock Monitoring Tool - Manual Entry & Report Email UI Integration
+## 3. Feature: Stock Monitoring Tool - Manual Entry & Report Email UI Integration - [COMPLETED]
 
-To support safe-room workflows during morning shift rush where teams receive kits or adjust ledger metrics without scanning barcodes immediately, the backend has implemented flexible count intake and report email endpoints. Frontend components and modal bindings are requested:
+The frontend UI templates, modals, CSS styling, and client-side JavaScript controllers for **Quick Count Inbound Delivery**, **Direct Ledger Entry / Overrides (9-Row Full Metric Editor)**, and **Report Email Dispatch** are fully implemented and verified:
 
-### 3.1 Endpoint Specifications
+### 3.1 Implemented Components & Files
+- **Modals (`core/templates/core/modals.html`)**:
+  - `#modal-quick-delivery`: Fast safe-room bulk intake by quantity and category (PSV/PMO) with waybill ref and auto-provisioning option.
+  - `#modal-edit-ledger`: Full 9-row direct numeric override editor for Opening, Received, Scheduled, Installed, Transfers In/Out, and Physical Count, with auto-fill from current shift and live calculated totals.
+  - `#modal-email-stock-report`: Official reconciliation report email dispatch with recipient list, operator/ITMS account inclusion toggles, and shift notes.
+- **Stock Tab Navigation & Action Strips (`core/templates/core/tabs/tab_stock.html`)**:
+  - Universal Command Bar: Added `[📦 Quick Delivery]` button next to `[📋 Paste]`.
+  - Mode 2 (Movements) action bar: Added `[📦 Quick Delivery]` button for fast inbound intake without scanning.
+  - Mode 4 (Ledger) action bar: Added `[✏️ Edit Ledger (9-Row Overrides)]` and `[📧 Email Report]` buttons alongside `[✎ Opening & Target]` and `[📊 Export Reconciliation CSV]`.
+- **View Controller (`core/static/core/js/tab_stock.js`)**:
+  - `openQuickDeliveryModal()`, `closeQuickDeliveryModal()`, `submitQuickDelivery()`: Dispatches to `POST /api/stock/delivery/`, refreshes ledger and movement metrics.
+  - `openEditLedgerModal()`, `closeEditLedgerModal()`, `prefillEditLedgerFromCurrent()`, `calcEditLedgerTotals()`, `submitEditLedger()`: Pre-fills metrics from `lastReconData`, computes row totals, and dispatches to `POST /api/stock/ledger/entry/`.
+  - `openEmailStockReportModal()`, `closeEmailStockReportModal()`, `submitEmailStockReport()`: Dispatches to `POST /api/stock/report/email/` and notifies recipient count.
+- **Cache Busting (`core/templates/core/base.html`)**:
+  - Bumpered `tab_stock.js?v=14`.
+
+### 3.2 Endpoint Specifications
 
 #### A. Inbound Count Delivery (`POST /api/stock/delivery/`)
 - **Payload (`application/json` or `multipart/form-data`)**:
@@ -158,14 +174,3 @@ To support safe-room workflows during morning shift rush where teams receive kit
     "work_date_suffix": "181026"
   }
   ```
-
-### 3.2 Frontend UI Requirements (`tab_itms.html` / `tab_itms.js`)
-1. **Quick Delivery Modal / Action**:
-   - Add a "Quick Count Inbound" button on the Stock Delivery card allowing operators to simply type a quantity (e.g. 200) and pick category (PSV/PMO) without scanning barcode lists.
-2. **Ledger Edit / Override Modal**:
-   - Add an "✏️ Edit Ledger" button above the 9-row Stock Reconciliation Table allowing direct numeric entry into any cell of the 9 rows.
-   - On save, dispatch `POST /api/stock/ledger/entry/` and refresh the table state.
-3. **Email Report Button**:
-   - Add an "📧 Email Report" button on the Stock Reconciliation Table header.
-   - Triggers an email dialog with input for optional extra recipient emails and a "Send Report" action dispatching `POST /api/stock/report/email/`.
-

@@ -1558,3 +1558,391 @@ window.addEventListener('shiftDateChanged', (e) => {
         void refreshStockLedger();
     }
 });
+
+
+// -----------------------------------------------------------------------------
+// Quick Count Inbound Delivery (Bulk intake by quantity)
+// -----------------------------------------------------------------------------
+
+function openQuickDeliveryModal() {
+    const qtyInput = document.getElementById('quick-delivery-quantity');
+    if (qtyInput) qtyInput.value = '';
+
+    const catSelect = document.getElementById('quick-delivery-category');
+    if (catSelect) {
+        catSelect.value = (typeof currentStockCategory !== 'undefined' && currentStockCategory) ? currentStockCategory : 'PSV';
+    }
+
+    const dateInput = document.getElementById('quick-delivery-date');
+    if (dateInput) {
+        dateInput.value = currentStockDateSuffix || '';
+    }
+
+    const refInput = document.getElementById('quick-delivery-ref');
+    if (refInput) refInput.value = '';
+
+    const notesInput = document.getElementById('quick-delivery-notes');
+    if (notesInput) notesInput.value = '';
+
+    const autoKitsChk = document.getElementById('quick-delivery-autokits');
+    if (autoKitsChk) autoKitsChk.checked = true;
+
+    if (typeof openModal === 'function') {
+        openModal('modal-quick-delivery');
+    } else {
+        const m = document.getElementById('modal-quick-delivery');
+        if (m) m.classList.add('active');
+    }
+
+    if (qtyInput) {
+        setTimeout(() => qtyInput.focus(), 120);
+    }
+}
+
+function closeQuickDeliveryModal() {
+    if (typeof closeModal === 'function') {
+        closeModal('modal-quick-delivery');
+    } else {
+        const m = document.getElementById('modal-quick-delivery');
+        if (m) m.classList.remove('active');
+    }
+}
+
+async function submitQuickDelivery() {
+    const qtyInput = document.getElementById('quick-delivery-quantity');
+    const catSelect = document.getElementById('quick-delivery-category');
+    const supInput = document.getElementById('quick-delivery-supplier');
+    const refInput = document.getElementById('quick-delivery-ref');
+    const dateInput = document.getElementById('quick-delivery-date');
+    const notesInput = document.getElementById('quick-delivery-notes');
+    const autoKitsChk = document.getElementById('quick-delivery-autokits');
+    const submitBtn = document.getElementById('btn-submit-quick-delivery');
+
+    const quantity = parseInt(qtyInput ? qtyInput.value : '0', 10);
+    if (!quantity || quantity <= 0) {
+        notify('Please enter a valid quantity of plates to deliver.', 'warning');
+        if (qtyInput) qtyInput.focus();
+        return;
+    }
+
+    const payload = {
+        quantity: quantity,
+        plate_category: catSelect ? catSelect.value : 'PSV',
+        supplier: (supInput && supInput.value.trim()) ? supInput.value.trim() : 'Factory / Central Depot',
+        paper_note_reference: refInput ? refInput.value.trim() : '',
+        target_date_suffix: (dateInput && dateInput.value.trim()) ? dateInput.value.trim() : (currentStockDateSuffix || ''),
+        notes: notesInput ? notesInput.value.trim() : '',
+        auto_create_kits: autoKitsChk ? autoKitsChk.checked : true,
+    };
+
+    try {
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerText = 'Ingesting Delivery...';
+        }
+
+        const res = await fetch('/api/stock/delivery/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            notify(`📦 Inbound delivery of ${data.plates_count || quantity} ${payload.plate_category} plates recorded!`, 'success');
+            const feedback = document.getElementById('stock-feedback-alert');
+            if (feedback) {
+                feedback.className = 'alert alert-success';
+                feedback.innerHTML = `📦 INBOUND DELIVERY SAVED: ${data.plates_count || quantity} ${payload.plate_category} plates recorded under ${data.delivery_number || 'DN'}.`;
+            }
+            closeQuickDeliveryModal();
+            await refreshStockLedger();
+        } else {
+            notify(`Delivery recording failed: ${data.error || 'Server error'}`, 'error');
+        }
+    } catch (e) {
+        notify(`Network error: ${e.message}`, 'error');
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerText = '📦 Ingest Inbound Delivery';
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Daily Stock Ledger Edit & Overrides (9-Row Full Metric Editor)
+// -----------------------------------------------------------------------------
+
+function openEditLedgerModal() {
+    const dateInput = document.getElementById('edit-ledger-date');
+    if (dateInput) {
+        dateInput.value = currentStockDateSuffix || '';
+    }
+
+    prefillEditLedgerFromCurrent();
+
+    if (typeof openModal === 'function') {
+        openModal('modal-edit-ledger');
+    } else {
+        const m = document.getElementById('modal-edit-ledger');
+        if (m) m.classList.add('active');
+    }
+}
+
+function closeEditLedgerModal() {
+    if (typeof closeModal === 'function') {
+        closeModal('modal-edit-ledger');
+    } else {
+        const m = document.getElementById('modal-edit-ledger');
+        if (m) m.classList.remove('active');
+    }
+}
+
+function prefillEditLedgerFromCurrent() {
+    if (!lastReconData) {
+        calcEditLedgerTotals();
+        return;
+    }
+
+    const rep = lastReconData.report_table || {};
+    const rows = rep.rows || [];
+
+    function findRow(name) {
+        return rows.find(r => (r.metric || '').toLowerCase().includes(name.toLowerCase())) || {};
+    }
+
+    const openRow = findRow('Opening Balance');
+    const rcvRow = findRow('Kits Received') || findRow('Received');
+    const schedRow = findRow('Target') || findRow('Scheduled');
+    const instRow = findRow('Installed');
+    const trinRow = findRow('Transfer In');
+    const troutRow = findRow('Transfer Out');
+    const physRow = findRow('Physical');
+
+    function setField(id, val) {
+        const el = document.getElementById(id);
+        if (el) el.value = (val !== undefined && val !== null) ? val : '';
+    }
+
+    setField('edit-ledger-open-pmo', openRow.pmo);
+    setField('edit-ledger-open-psv', openRow.psv);
+
+    setField('edit-ledger-recv-pmo', rcvRow.pmo);
+    setField('edit-ledger-recv-psv', rcvRow.psv);
+
+    setField('edit-ledger-sched-pmo', schedRow.pmo);
+    setField('edit-ledger-sched-psv', schedRow.psv);
+    setField('edit-ledger-sched-total', schedRow.total);
+
+    setField('edit-ledger-inst-pmo', instRow.pmo);
+    setField('edit-ledger-inst-psv', instRow.psv);
+
+    setField('edit-ledger-trin-pmo', trinRow.pmo);
+    setField('edit-ledger-trin-psv', trinRow.psv);
+
+    setField('edit-ledger-trout-pmo', troutRow.pmo);
+    setField('edit-ledger-trout-psv', troutRow.psv);
+
+    setField('edit-ledger-physical', physRow.total !== undefined ? physRow.total : (lastReconData.total ? lastReconData.total.physical_count : ''));
+
+    const notesEl = document.getElementById('edit-ledger-notes');
+    if (notesEl && lastReconData.notes) {
+        notesEl.value = lastReconData.notes;
+    }
+
+    calcEditLedgerTotals();
+}
+
+function calcEditLedgerTotals() {
+    function getVal(id) {
+        const el = document.getElementById(id);
+        if (!el || el.value === '') return 0;
+        const n = parseInt(el.value, 10);
+        return isNaN(n) ? 0 : n;
+    }
+
+    function setTotal(id, val) {
+        const el = document.getElementById(id);
+        if (el) el.innerText = (val || 0).toLocaleString();
+    }
+
+    const openPmo = getVal('edit-ledger-open-pmo');
+    const openPsv = getVal('edit-ledger-open-psv');
+    setTotal('edit-ledger-open-total', openPmo + openPsv);
+
+    const rcvPmo = getVal('edit-ledger-recv-pmo');
+    const rcvPsv = getVal('edit-ledger-recv-psv');
+    setTotal('edit-ledger-recv-total', rcvPmo + rcvPsv);
+
+    const schedPmo = getVal('edit-ledger-sched-pmo');
+    const schedPsv = getVal('edit-ledger-sched-psv');
+    const schedTotEl = document.getElementById('edit-ledger-sched-total');
+    if (schedTotEl && !schedTotEl.value && (schedPmo > 0 || schedPsv > 0)) {
+        schedTotEl.value = schedPmo + schedPsv;
+    }
+
+    const instPmo = getVal('edit-ledger-inst-pmo');
+    const instPsv = getVal('edit-ledger-inst-psv');
+    setTotal('edit-ledger-inst-total', instPmo + instPsv);
+
+    const trinPmo = getVal('edit-ledger-trin-pmo');
+    const trinPsv = getVal('edit-ledger-trin-psv');
+    setTotal('edit-ledger-trin-total', trinPmo + trinPsv);
+
+    const troutPmo = getVal('edit-ledger-trout-pmo');
+    const troutPsv = getVal('edit-ledger-trout-psv');
+    setTotal('edit-ledger-trout-total', troutPmo + troutPsv);
+}
+
+async function submitEditLedger() {
+    const submitBtn = document.getElementById('btn-submit-edit-ledger');
+    const dateInput = document.getElementById('edit-ledger-date');
+    const bondSelect = document.getElementById('edit-ledger-bond');
+
+    function optInt(id) {
+        const el = document.getElementById(id);
+        if (!el || el.value.trim() === '') return null;
+        const n = parseInt(el.value, 10);
+        return isNaN(n) ? null : n;
+    }
+
+    const payload = {
+        target_date_suffix: (dateInput && dateInput.value.trim()) ? dateInput.value.trim() : (currentStockDateSuffix || ''),
+        storage_bond_name: (bondSelect && bondSelect.value) ? bondSelect.value : 'AGM / SPIRO',
+        opening_balance_pmo: optInt('edit-ledger-open-pmo'),
+        opening_balance_psv: optInt('edit-ledger-open-psv'),
+        kits_received_pmo: optInt('edit-ledger-recv-pmo'),
+        kits_received_psv: optInt('edit-ledger-recv-psv'),
+        scheduled_pmo: optInt('edit-ledger-sched-pmo'),
+        scheduled_psv: optInt('edit-ledger-sched-psv'),
+        scheduled_total: optInt('edit-ledger-sched-total'),
+        kits_installed_pmo: optInt('edit-ledger-inst-pmo'),
+        kits_installed_psv: optInt('edit-ledger-inst-psv'),
+        bond_transfer_in_pmo: optInt('edit-ledger-trin-pmo'),
+        bond_transfer_in_psv: optInt('edit-ledger-trin-psv'),
+        bond_transfer_out_pmo: optInt('edit-ledger-trout-pmo'),
+        bond_transfer_out_psv: optInt('edit-ledger-trout-psv'),
+        physical_count: optInt('edit-ledger-physical'),
+        notes: (document.getElementById('edit-ledger-notes') || {}).value || '',
+    };
+
+    try {
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerText = 'Saving Overrides...';
+        }
+
+        const res = await fetch('/api/stock/ledger/entry/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            notify('✏️ Daily stock ledger overrides saved successfully!', 'success');
+            closeEditLedgerModal();
+            await refreshStockLedger();
+        } else {
+            notify(`Failed to save ledger overrides: ${data.error || 'Server error'}`, 'error');
+        }
+    } catch (e) {
+        notify(`Network error: ${e.message}`, 'error');
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerText = '💾 Save 9-Row Ledger Overrides';
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Email Stock Reconciliation Report Modal
+// -----------------------------------------------------------------------------
+
+function openEmailStockReportModal() {
+    const dateInput = document.getElementById('email-stock-date');
+    if (dateInput) {
+        dateInput.value = currentStockDateSuffix || '';
+    }
+
+    const recipInput = document.getElementById('email-stock-recipients');
+    if (recipInput) recipInput.value = '';
+
+    const notesInput = document.getElementById('email-stock-notes');
+    if (notesInput) notesInput.value = '';
+
+    const chkOp = document.getElementById('email-stock-chk-operator');
+    if (chkOp) chkOp.checked = true;
+
+    const chkItms = document.getElementById('email-stock-chk-itms');
+    if (chkItms) chkItms.checked = true;
+
+    if (typeof openModal === 'function') {
+        openModal('modal-email-stock-report');
+    } else {
+        const m = document.getElementById('modal-email-stock-report');
+        if (m) m.classList.add('active');
+    }
+}
+
+function closeEmailStockReportModal() {
+    if (typeof closeModal === 'function') {
+        closeModal('modal-email-stock-report');
+    } else {
+        const m = document.getElementById('modal-email-stock-report');
+        if (m) m.classList.remove('active');
+    }
+}
+
+async function submitEmailStockReport() {
+    const submitBtn = document.getElementById('btn-submit-email-stock');
+    const dateInput = document.getElementById('email-stock-date');
+    const recipInput = document.getElementById('email-stock-recipients');
+    const notesInput = document.getElementById('email-stock-notes');
+    const chkOp = document.getElementById('email-stock-chk-operator');
+    const chkItms = document.getElementById('email-stock-chk-itms');
+
+    const rawRecipients = recipInput ? recipInput.value.trim() : '';
+    const recipientsList = rawRecipients
+        ? rawRecipients.split(/[,;]+/).map(r => r.trim()).filter(r => r.includes('@'))
+        : [];
+
+    const payload = {
+        target_date_suffix: (dateInput && dateInput.value.trim()) ? dateInput.value.trim() : (currentStockDateSuffix || ''),
+        recipients: recipientsList,
+        include_operator_email: chkOp ? chkOp.checked : true,
+        include_itms_email: chkItms ? chkItms.checked : true,
+        notes: notesInput ? notesInput.value.trim() : '',
+    };
+
+    try {
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerText = 'Dispatching Email...';
+        }
+
+        const res = await fetch('/api/stock/report/email/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            const count = (data.recipients && data.recipients.length) ? data.recipients.length : 1;
+            notify(`📧 Stock reconciliation report emailed to ${count} recipient(s)!`, 'success');
+            closeEmailStockReportModal();
+        } else {
+            notify(`Failed to send report email: ${data.error || 'Server error'}`, 'error');
+        }
+    } catch (e) {
+        notify(`Network error: ${e.message}`, 'error');
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerText = '📤 Send Report Email';
+        }
+    }
+}

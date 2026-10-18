@@ -1019,6 +1019,235 @@
     </div>
 </div>
 
+<!-- 15. Quick Count Inbound Delivery Modal -->
+<div class="modal-overlay" id="modal-quick-delivery">
+    <div class="modal-box" style="width: 540px; max-width: 95vw;">
+        <div class="modal-header">
+            <span class="modal-title" style="display:flex; align-items:center; gap:8px; color:#ffffff !important; font-weight:800;">
+                <span>📦</span> Quick Count Inbound Delivery
+            </span>
+            <button type="button" class="modal-close" onclick="closeModal('modal-quick-delivery')">&times;</button>
+        </div>
+        <div class="modal-body" style="gap: 12px; padding: 18px;">
+            <div style="background:#111622; border:1px solid rgba(255,255,255,0.12); border-radius:var(--radius-md); padding:10px 14px; font-size:0.8rem; color:rgba(255,255,255,0.85); line-height:1.4;">
+                <strong style="color:#ffffff;">Fast Safe-Room Intake:</strong> Record bulk batch delivery by quantity count without scanning barcodes one-by-one. Automatically provisions installation kits marked <em>New</em> in stock.
+            </div>
+
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+                <div class="form-field">
+                    <label style="color:#ffffff !important; font-weight:700;">Quantity Count (Plates) *</label>
+                    <input type="number" id="quick-delivery-quantity" min="1" placeholder="e.g. 200" required
+                           style="width:100%; box-sizing:border-box; padding:8px 12px; font-family:var(--font-mono); font-size:1rem; font-weight:800; background:#0c1017; border:1px solid rgba(255,255,255,0.25); border-radius:var(--radius-sm); color:#ffffff;">
+                </div>
+                <div class="form-field">
+                    <label style="color:#ffffff !important; font-weight:700;">Plate Category *</label>
+                    <select id="quick-delivery-category" class="form-select"
+                            style="width:100%; box-sizing:border-box; padding:8px 28px 8px 12px; font-size:0.88rem; font-weight:700; background:#0c1017; border:1px solid rgba(255,255,255,0.25); border-radius:var(--radius-sm); color:#ffffff;">
+                        <option value="PSV">PSV White (Commercial)</option>
+                        <option value="PMO">PMO Yellow (Motorcycle)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+                <div class="form-field">
+                    <label style="color:#ffffff !important; font-weight:700;">Supplier / Source Depot</label>
+                    <input type="text" id="quick-delivery-supplier" value="Factory / Central Depot"
+                           style="width:100%; box-sizing:border-box; padding:8px 12px; font-size:0.85rem; background:#0c1017; border:1px solid rgba(255,255,255,0.25); border-radius:var(--radius-sm); color:#ffffff;">
+                </div>
+                <div class="form-field">
+                    <label style="color:#ffffff !important; font-weight:700;">Paper Waybill / Note Ref</label>
+                    <input type="text" id="quick-delivery-ref" placeholder="e.g. DN-89211"
+                           style="width:100%; box-sizing:border-box; padding:8px 12px; font-family:var(--font-mono); font-size:0.85rem; background:#0c1017; border:1px solid rgba(255,255,255,0.25); border-radius:var(--radius-sm); color:#ffffff;">
+                </div>
+            </div>
+
+            <div class="form-field">
+                <label style="color:#ffffff !important; font-weight:700;">Target Shift Date Suffix</label>
+                <input type="text" id="quick-delivery-date" placeholder="Auto (Current active shift)"
+                       style="width:100%; box-sizing:border-box; padding:8px 12px; font-family:var(--font-mono); font-size:0.85rem; background:#0c1017; border:1px solid rgba(255,255,255,0.25); border-radius:var(--radius-sm); color:#ffffff;">
+            </div>
+
+            <div class="form-field">
+                <label style="color:#ffffff !important; font-weight:700;">Delivery Notes / Remarks</label>
+                <textarea id="quick-delivery-notes" rows="2" placeholder="Optional delivery notes (e.g. Morning bulk line replenishment)..."
+                          style="width:100%; box-sizing:border-box; padding:8px 12px; font-size:0.85rem; background:#0c1017; border:1px solid rgba(255,255,255,0.25); border-radius:var(--radius-sm); color:#ffffff; resize:vertical;"></textarea>
+            </div>
+
+            <label style="display:flex; align-items:center; gap:8px; font-size:0.82rem; color:#ffffff !important; font-weight:600; cursor:pointer;">
+                <input type="checkbox" id="quick-delivery-autokits" checked style="width:16px; height:16px; accent-color:var(--ug-yellow); cursor:pointer;">
+                <span>Auto-provision local installation kits in stock</span>
+            </label>
+        </div>
+        <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; padding:12px 20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-quick-delivery')" style="color:#ffffff !important; min-height:40px; padding:8px 18px;">Cancel</button>
+            <button type="button" class="btn btn-primary" id="btn-submit-quick-delivery" onclick="submitQuickDelivery()" style="font-weight:800; min-height:40px; padding:8px 22px;">
+                ✓ Ingest Inbound Delivery
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 16. Daily Stock Ledger Edit & Overrides Modal (9-Row Full Metric Editor) -->
+<div class="modal-overlay" id="modal-edit-ledger">
+    <div class="modal-box" style="width: 780px; max-width: 95vw; max-height: 92vh; display:flex; flex-direction:column;">
+        <div class="modal-header">
+            <span class="modal-title" style="display:flex; align-items:center; gap:8px; color:#ffffff !important; font-weight:800;">
+                <span>✏️</span> Edit Daily Stock Ledger (9-Row Overrides)
+            </span>
+            <button type="button" class="modal-close" onclick="closeModal('modal-edit-ledger')">&times;</button>
+        </div>
+        <div class="modal-body" style="padding:16px; flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:14px;">
+            <!-- Header Controls: Shift Date, Bond, & Auto-Fill Helper -->
+            <div style="background:#111622; border:1px solid rgba(255,255,255,0.12); border-radius:var(--radius-md); padding:12px 16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <label style="font-size:0.78rem; font-weight:700; color:#ffffff !important;">Shift:</label>
+                        <input type="text" id="edit-ledger-date" style="width:110px; font-family:var(--font-mono); font-weight:800; font-size:0.85rem; padding:4px 8px; background:#0c1017; border:1px solid rgba(255,255,255,0.25); border-radius:4px; color:#ffffff;">
+                    </div>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <label style="font-size:0.78rem; font-weight:700; color:#ffffff !important;">Bond:</label>
+                        <input type="text" id="edit-ledger-bond" value="AGM / SPIRO" style="width:130px; font-weight:700; font-size:0.85rem; padding:4px 8px; background:#0c1017; border:1px solid rgba(255,255,255,0.25); border-radius:4px; color:#ffffff;">
+                    </div>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="prefillEditLedgerFromCurrent()" style="color:#ffffff !important; font-size:0.76rem; padding:4px 12px; min-height:32px;">
+                    ⚡ Auto-Fill From Current Shift
+                </button>
+            </div>
+
+            <!-- 9-Row Metrics Table Form -->
+            <div style="overflow-x:auto; border:1px solid rgba(255,255,255,0.12); border-radius:var(--radius-md);">
+                <table class="itms-grid-table" style="width:100%; margin:0;">
+                    <thead>
+                        <tr>
+                            <th style="width:240px; color:#ffffff !important;">Reconciliation Metric</th>
+                            <th style="width:140px; color:#ffffff !important; text-align:center;">PMO Yellow</th>
+                            <th style="width:140px; color:#ffffff !important; text-align:center;">PSV White</th>
+                            <th style="color:#ffffff !important; text-align:center;">Combined Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- 1. Opening Balance -->
+                        <tr>
+                            <td style="font-weight:700; color:#ffffff !important;">1. Opening Balance</td>
+                            <td><input type="number" id="edit-ledger-open-pmo" oninput="calcEditLedgerTotals()" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:700; background:#0c1017; color:#ffffff; border:1px solid rgba(255,255,255,0.2);"></td>
+                            <td><input type="number" id="edit-ledger-open-psv" oninput="calcEditLedgerTotals()" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:700; background:#0c1017; color:#ffffff; border:1px solid rgba(255,255,255,0.2);"></td>
+                            <td id="edit-ledger-open-total" style="text-align:center; font-family:var(--font-mono); font-weight:800; color:#ffffff !important;">0</td>
+                        </tr>
+                        <!-- 2. Kits Received / Deliveries -->
+                        <tr>
+                            <td style="font-weight:700; color:#ffffff !important;">2. Inbound Deliveries (Received)</td>
+                            <td><input type="number" id="edit-ledger-recv-pmo" oninput="calcEditLedgerTotals()" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:700; background:#0c1017; color:#ffffff; border:1px solid rgba(255,255,255,0.2);"></td>
+                            <td><input type="number" id="edit-ledger-recv-psv" oninput="calcEditLedgerTotals()" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:700; background:#0c1017; color:#ffffff; border:1px solid rgba(255,255,255,0.2);"></td>
+                            <td id="edit-ledger-recv-total" style="text-align:center; font-family:var(--font-mono); font-weight:800; color:#ffffff !important;">0</td>
+                        </tr>
+                        <!-- 3. Scheduled / Target -->
+                        <tr>
+                            <td style="font-weight:700; color:#ffffff !important;">3. Scheduled Target</td>
+                            <td><input type="number" id="edit-ledger-sched-pmo" oninput="calcEditLedgerTotals()" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:700; background:#0c1017; color:#ffffff; border:1px solid rgba(255,255,255,0.2);"></td>
+                            <td><input type="number" id="edit-ledger-sched-psv" oninput="calcEditLedgerTotals()" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:700; background:#0c1017; color:#ffffff; border:1px solid rgba(255,255,255,0.2);"></td>
+                            <td><input type="number" id="edit-ledger-sched-total" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:800; background:#0c1017; color:#ffffff; border:1px solid rgba(255,255,255,0.2);"></td>
+                        </tr>
+                        <!-- 4. Installed Kits -->
+                        <tr>
+                            <td style="font-weight:700; color:#ffffff !important;">4. Kits Installed</td>
+                            <td><input type="number" id="edit-ledger-inst-pmo" oninput="calcEditLedgerTotals()" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:700; background:#0c1017; color:#ffffff; border:1px solid rgba(255,255,255,0.2);"></td>
+                            <td><input type="number" id="edit-ledger-inst-psv" oninput="calcEditLedgerTotals()" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:700; background:#0c1017; color:#ffffff; border:1px solid rgba(255,255,255,0.2);"></td>
+                            <td id="edit-ledger-inst-total" style="text-align:center; font-family:var(--font-mono); font-weight:800; color:#ffffff !important;">0</td>
+                        </tr>
+                        <!-- 5. Bond Transfer In -->
+                        <tr>
+                            <td style="font-weight:700; color:#ffffff !important;">5. Bond Transfer In</td>
+                            <td><input type="number" id="edit-ledger-trin-pmo" oninput="calcEditLedgerTotals()" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:700; background:#0c1017; color:#ffffff; border:1px solid rgba(255,255,255,0.2);"></td>
+                            <td><input type="number" id="edit-ledger-trin-psv" oninput="calcEditLedgerTotals()" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:700; background:#0c1017; color:#ffffff; border:1px solid rgba(255,255,255,0.2);"></td>
+                            <td id="edit-ledger-trin-total" style="text-align:center; font-family:var(--font-mono); font-weight:800; color:#ffffff !important;">0</td>
+                        </tr>
+                        <!-- 6. Bond Transfer Out -->
+                        <tr>
+                            <td style="font-weight:700; color:#ffffff !important;">6. Bond Transfer Out</td>
+                            <td><input type="number" id="edit-ledger-trout-pmo" oninput="calcEditLedgerTotals()" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:700; background:#0c1017; color:#ffffff; border:1px solid rgba(255,255,255,0.2);"></td>
+                            <td><input type="number" id="edit-ledger-trout-psv" oninput="calcEditLedgerTotals()" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:700; background:#0c1017; color:#ffffff; border:1px solid rgba(255,255,255,0.2);"></td>
+                            <td id="edit-ledger-trout-total" style="text-align:center; font-family:var(--font-mono); font-weight:800; color:#ffffff !important;">0</td>
+                        </tr>
+                        <!-- 7. Physical Count -->
+                        <tr>
+                            <td style="font-weight:700; color:#ffffff !important;">7. Physical Safe Count</td>
+                            <td colspan="2" style="text-align:center; font-size:0.78rem; color:rgba(255,255,255,0.7);">Total physical kits verified in safe room</td>
+                            <td><input type="number" id="edit-ledger-physical" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:800; background:#0c1017; color:#ffffff; border:1px solid rgba(255,255,255,0.2);"></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Notes -->
+            <div class="form-field">
+                <label style="color:#ffffff !important; font-weight:700;">Shift Handover &amp; Audit Notes</label>
+                <input type="text" id="edit-ledger-notes" placeholder="e.g. Shift sign-off, reconciled with safe officer..."
+                       style="width:100%; box-sizing:border-box; padding:8px 12px; font-size:0.85rem; background:#0c1017; border:1px solid rgba(255,255,255,0.25); border-radius:var(--radius-sm); color:#ffffff;">
+            </div>
+        </div>
+        <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; padding:12px 20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-ledger')" style="color:#ffffff !important; min-height:40px; padding:8px 18px;">Cancel</button>
+            <button type="button" class="btn btn-primary" id="btn-submit-edit-ledger" onclick="submitEditLedger()" style="font-weight:800; min-height:40px; padding:8px 22px;">
+                💾 Save 9-Row Ledger Overrides
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 17. Email Daily Stock Reconciliation Report Modal -->
+<div class="modal-overlay" id="modal-email-stock-report">
+    <div class="modal-box" style="width: 580px; max-width: 95vw;">
+        <div class="modal-header">
+            <span class="modal-title" style="display:flex; align-items:center; gap:8px; color:#ffffff !important; font-weight:800;">
+                <span>📧</span> Email Daily Stock Reconciliation Report
+            </span>
+            <button type="button" class="modal-close" onclick="closeModal('modal-email-stock-report')">&times;</button>
+        </div>
+        <div class="modal-body" style="gap: 14px; padding: 18px;">
+            <div style="background:#111622; border:1px solid rgba(255,255,255,0.12); border-radius:var(--radius-md); padding:10px 14px; font-size:0.8rem; color:rgba(255,255,255,0.85); line-height:1.4;">
+                <strong style="color:#ffffff;">Official Report Dispatch:</strong> Sends the complete 9-row daily stock reconciliation ledger table and shift metrics to stakeholders via email.
+            </div>
+
+            <div class="form-field">
+                <label style="color:#ffffff !important; font-weight:700;">Shift Work Date Suffix</label>
+                <input type="text" id="email-stock-date" readonly
+                       style="width:100%; box-sizing:border-box; padding:8px 12px; font-family:var(--font-mono); font-weight:800; font-size:0.88rem; background:#0c1017; border:1px solid rgba(255,255,255,0.2); border-radius:var(--radius-sm); color:#ffffff; opacity:0.9;">
+            </div>
+
+            <div class="form-field">
+                <label style="color:#ffffff !important; font-weight:700;">Additional Recipient Emails</label>
+                <input type="text" id="email-stock-recipients" placeholder="supervisor@example.com, manager@spiro.ug"
+                       style="width:100%; box-sizing:border-box; padding:8px 12px; font-size:0.85rem; background:#0c1017; border:1px solid rgba(255,255,255,0.25); border-radius:var(--radius-sm); color:#ffffff;">
+                <span style="font-size:0.74rem; color:rgba(255,255,255,0.7);">Separate multiple emails with commas or semicolons.</span>
+            </div>
+
+            <div style="display:flex; flex-direction:column; gap:8px; background:#111622; border:1px solid rgba(255,255,255,0.1); border-radius:var(--radius-md); padding:10px 14px;">
+                <label style="display:flex; align-items:center; gap:8px; font-size:0.82rem; color:#ffffff !important; font-weight:600; cursor:pointer;">
+                    <input type="checkbox" id="email-stock-chk-operator" checked style="width:16px; height:16px; accent-color:var(--ug-yellow); cursor:pointer;">
+                    <span>Include Authenticated Operator Email</span>
+                </label>
+                <label style="display:flex; align-items:center; gap:8px; font-size:0.82rem; color:#ffffff !important; font-weight:600; cursor:pointer;">
+                    <input type="checkbox" id="email-stock-chk-itms" checked style="width:16px; height:16px; accent-color:var(--ug-yellow); cursor:pointer;">
+                    <span>Include Connected ITMS Portal Account Email</span>
+                </label>
+            </div>
+
+            <div class="form-field">
+                <label style="color:#ffffff !important; font-weight:700;">Email Body Remarks / Notes</label>
+                <textarea id="email-stock-notes" rows="3" placeholder="Optional comments to include in the email report..."
+                          style="width:100%; box-sizing:border-box; padding:8px 12px; font-size:0.85rem; background:#0c1017; border:1px solid rgba(255,255,255,0.25); border-radius:var(--radius-sm); color:#ffffff; resize:vertical;"></textarea>
+            </div>
+        </div>
+        <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; padding:12px 20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-email-stock-report')" style="color:#ffffff !important; min-height:40px; padding:8px 18px;">Cancel</button>
+            <button type="button" class="btn btn-primary" id="btn-submit-email-stock" onclick="submitEmailStockReport()" style="font-weight:800; min-height:40px; padding:8px 22px;">
+                🚀 Send Report Email
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- Toast Notifications Container -->
 <div class="toast-container" id="toast-container"></div>
 

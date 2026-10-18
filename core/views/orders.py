@@ -5,6 +5,7 @@ import json
 import logging
 import math
 
+from django.conf import settings
 from django.db.models import Q
 from django.http import HttpRequest, JsonResponse
 from django.utils import timezone
@@ -12,11 +13,21 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from core.models import (
+    EvidenceImage,
+    IngestionBatch,
     InstallationKit,
     InstallationOrder,
+    SubmissionAuditLog,
     VehicleInstallationPair,
 )
-from core.services import auth_service, bond_service, scoped_order_service
+from core.services import (
+    auth_service,
+    bond_service,
+    config_service,
+    scoped_order_service,
+    submission_worker,
+    vault_service,
+)
 from core.services.itms_web_client import get_web_client
 from core.services.pipeline_runner import runner as pipeline_runner
 from core.services.security_envelope import require_itms_envelope
@@ -985,3 +996,269 @@ def api_itms_kits(request: HttpRequest) -> JsonResponse:
     })
 
 
+
+
+def _format_evidence_url(img) -> str:
+    if not img:
+        return ""
+    raw = getattr(img, "preview_file", "") or getattr(img, "vault_file", "")
+    if hasattr(raw, "url"):
+        return raw.url
+    if raw:
+        base = getattr(settings, "MEDIA_URL", "/media/").rstrip("/")
+        return f"{base}/{str(raw).lstrip('/').replace(chr(92), '/')}"
+    return ""
+
+
+@csrf_exempt
+def api_itms_order_install(request: HttpRequest, order_ident: str) -> JsonResponse:
+    """
+    Direct Single-Order Installation & Submission API (Two-Way ITMS Flow).
+
+    Supports:
+      GET:
+        Detects live order stage on ITMS (STAGE_1_INSTALLATION, STAGE_2_EVIDENCE, STAGE_3_CONFIRMATION, STAGE_ARCHIVED),
+        returns hardware fitment details and attached local photos/pair if present.
+      POST:
+        Executes immediate single-order action:
+        - action='save_step1': Submits Step 1 ("Save and continue") to advance ITMS to photo upload stage.
+        - action='attach_photos': Uploads front and/or rear photos, ingests to vault, runs fast OCR detection.
+        - action='submit' (default): Full submission. Ingests photos (if attached), drives ITMS workflow
+          (Step 1 fitment -> Step 2 photo upload -> Step 3 finalize), updates pair/order to SUBMITTED,
+          and writes audit trail.
+    """
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
+    order_ident = (order_ident or "").strip()
+    if not order_ident:
+        return JsonResponse({"success": False, "error": "Order identifier is required."}, status=400)
+
+    # Resolve order in local database
+    order = InstallationOrder.objects.filter(
+        Q(order_number__iexact=order_ident) |
+        Q(registration_number__iexact=normalizer.canonicalize(order_ident) or order_ident) |
+        Q(itms_order_uuid__iexact=order_ident) |
+        Q(vin__iexact=order_ident)
+    ).first()
+
+    client = get_web_client(user=request.user)
+
+    # If order is not found locally, attempt to discover from ITMS if session is valid
+    if not order and client.session_store.session.is_cookie_valid():
+        try:
+            live_info = client.fetch_order_info(order_ident)
+            if live_info.get("success"):
+                reg_num = live_info.get("registration_number") or ""
+                order_num = live_info.get("order_number") or order_ident
+                front_plate = live_info.get("front_plate", {})
+                rear_plate = live_info.get("rear_plate", {})
+                gps = live_info.get("gps_tracker", {})
+                order, _ = InstallationOrder.objects.get_or_create(
+                    order_number=order_num,
+                    defaults={
+                        "registration_number": normalizer.canonicalize(reg_num) or reg_num,
+                        "vin": live_info.get("vin") or "",
+                        "warehouse_name": live_info.get("warehouse") or "",
+                        "itms_order_uuid": live_info.get("order_uuid") or "",
+                        "front_plate_serial": front_plate.get("serial", ""),
+                        "rear_plate_serial": rear_plate.get("serial", ""),
+                        "gps_tracker_id": gps.get("device_id", ""),
+                    }
+                )
+        except Exception as exc:
+            logger.warning("Error fetching live order info for '%s': %s", order_ident, exc)
+
+    if not order:
+        return JsonResponse({"success": False, "error": f"Order '{order_ident}' was not found in the local registry or ITMS."}, status=404)
+
+    order_uuid = order.itms_order_uuid or order.order_number
+    pair = VehicleInstallationPair.objects.filter(order=order).first()
+
+    # --- GET: Stage & Hardware Inspection ---
+    if request.method == "GET":
+        stage_info = {}
+        stage = "UNKNOWN"
+        if client.session_store.session.is_cookie_valid():
+            try:
+                stage_info = client.detect_order_stage(order_uuid)
+                stage = stage_info.get("stage", "UNKNOWN")
+            except Exception as exc:
+                stage_info = {"success": False, "error": str(exc)}
+
+        pair_data = None
+        if pair:
+            pair_data = {
+                "id": pair.id,
+                "verification_status": pair.verification_status,
+                "is_complete": pair.is_complete,
+                "front_image_url": _format_evidence_url(pair.front_image),
+                "rear_image_url": _format_evidence_url(pair.rear_image),
+                "plate_detected": pair.registration_number_detected,
+            }
+
+        return JsonResponse({
+            "success": True,
+            "order": {
+                "order_number": order.order_number,
+                "registration_number": order.registration_number,
+                "status": order.status,
+                "vin": order.vin,
+                "warehouse_name": order.warehouse_name,
+                "itms_uuid": order.itms_order_uuid,
+                "front_plate_serial": order.front_plate_serial,
+                "rear_plate_serial": order.rear_plate_serial,
+                "gps_tracker_id": order.gps_tracker_id,
+            },
+            "stage": stage,
+            "stage_info": stage_info,
+            "existing_pair": pair_data,
+        })
+
+    # --- POST: Single-Order Action Execution ---
+    action = (request.POST.get("action") or "submit").lower().strip()
+    dry_run_param = request.POST.get("dry_run")
+    if dry_run_param is not None and str(dry_run_param).strip() != "":
+        is_dry_run = str(dry_run_param).lower().strip() in ("true", "1", "yes")
+    else:
+        is_dry_run = config_service.get_setting("submission.dry_run_mode", getattr(settings, "ITMS_WEB_DRY_RUN", True))
+
+    # Action 1: Save and Proceed (Step 1 only)
+    if action == "save_step1":
+        front_plate_id = request.POST.get("front_plate_id", "").strip()
+        rear_plate_id = request.POST.get("rear_plate_id", "").strip()
+        tracker_id = request.POST.get("tracker_id", "").strip()
+
+        step1_res = client.submit_installation_step1(
+            order_uuid=order_uuid,
+            front_plate_id=front_plate_id,
+            back_plate_id=rear_plate_id,
+            tracker_id=tracker_id,
+            just_save=False,
+            run_validation_first=True,
+            dry_run=is_dry_run,
+        )
+        if not step1_res.get("success"):
+            return JsonResponse({
+                "success": False,
+                "error": f"Step 1 failed: {step1_res.get('error')}",
+                "details": step1_res,
+            }, status=400)
+
+        # Audit log
+        SubmissionAuditLog.objects.create(
+            pair=pair,
+            operator=request.user,
+            simulated_token=order.order_number,
+            action=SubmissionAuditLog.Action.SUBMIT,
+            result=SubmissionAuditLog.ResultStatus.SUCCESS if not is_dry_run else SubmissionAuditLog.ResultStatus.INFO,
+            message=f"{'[DRY RUN] ' if is_dry_run else ''}Step 1 (Hardware fitment) saved and proceeded successfully for #{order.order_number}.",
+        )
+
+        return JsonResponse({
+            "success": True,
+            "stage": "STAGE_2_EVIDENCE",
+            "message": f"{'[DRY RUN] ' if is_dry_run else ''}Step 1 saved successfully. Order is ready for photo upload.",
+            "details": step1_res,
+        })
+
+    # Ingest any uploaded photos (front_photo / rear_photo)
+    front_file = request.FILES.get("front_photo")
+    rear_file = request.FILES.get("rear_photo")
+
+    if front_file or rear_file:
+        target_batch = IngestionBatch.objects.filter(
+            source_type=IngestionBatch.SourceType.WEB,
+            source_label=f"Direct Order #{order.order_number}",
+        ).first()
+        if not target_batch:
+            target_batch = vault_service.create_ingestion_batch(
+                source_type=IngestionBatch.SourceType.WEB,
+                source_label=f"Direct Order #{order.order_number}",
+                user=request.user,
+            )
+
+        new_front = None
+        new_rear = None
+
+        if front_file:
+            new_front, _st = vault_service.ingest_uploaded_file(
+                uploaded_file=front_file,
+                batch=target_batch,
+                orientation_override="FRONT",
+            )
+            if new_front:
+                vault_service.process_single_image_vision(new_front)
+
+        if rear_file:
+            new_rear, _st = vault_service.ingest_uploaded_file(
+                uploaded_file=rear_file,
+                batch=target_batch,
+                orientation_override="REAR",
+            )
+            if new_rear:
+                vault_service.process_single_image_vision(new_rear)
+
+        if not pair:
+            pair = VehicleInstallationPair.objects.create(
+                order=order,
+                registration_number_detected=order.registration_number,
+                operator=request.user,
+                match_type=VehicleInstallationPair.MatchType.EXACT,
+                verification_status=VehicleInstallationPair.VerificationStatus.APPROVED,
+            )
+        if new_front:
+            pair.front_image = new_front
+        if new_rear:
+            pair.rear_image = new_rear
+        pair.refresh_completeness()
+        pair.save()
+
+    # Action 2: Attach Photos Only
+    if action == "attach_photos":
+        if not pair:
+            return JsonResponse({"success": False, "error": "No photos were uploaded or attached."}, status=400)
+
+        return JsonResponse({
+            "success": True,
+            "message": "Photos attached and processed successfully.",
+            "pair_id": pair.id,
+            "is_complete": pair.is_complete,
+            "front_image_url": _format_evidence_url(pair.front_image),
+            "rear_image_url": _format_evidence_url(pair.rear_image),
+            "front_plate": pair.front_image.detected_plate if pair.front_image else "",
+            "rear_plate": pair.rear_image.detected_plate if pair.rear_image else "",
+        })
+
+    # Action 3: Submit / Direct Submit (Default)
+    if not pair or not (pair.front_image and pair.rear_image):
+        return JsonResponse({
+            "success": False,
+            "error": "Both front and rear evidence photos are required to submit installation.",
+        }, status=400)
+
+    # Submit using established submission_worker
+    outcome = submission_worker.submit_pair(pair, backend="web", dry_run=is_dry_run, operator=request.user)
+
+    if outcome.success:
+        return JsonResponse({
+            "success": True,
+            "message": f"{'[DRY RUN] ' if is_dry_run else ''}Order #{order.order_number} ({order.registration_number}) submitted successfully to ITMS!",
+            "is_finalized": True,
+            "dry_run": is_dry_run,
+            "order_number": order.order_number,
+            "registration_number": order.registration_number,
+            "pair_id": pair.id,
+            "token": outcome.token,
+            "front_image_url": _format_evidence_url(pair.front_image),
+            "rear_image_url": _format_evidence_url(pair.rear_image),
+        })
+    else:
+        return JsonResponse({
+            "success": False,
+            "error": f"Submission failed: {outcome.error}",
+            "dry_run": is_dry_run,
+            "order_number": order.order_number,
+            "registration_number": order.registration_number,
+            "pair_id": pair.id,
+        }, status=400)

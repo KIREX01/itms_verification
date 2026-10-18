@@ -560,3 +560,37 @@ This transition aligns with our domain `close.kirex.online`, insulates operation
   2. **Deduplication**: Removed duplicate `let currentHistoryFilter` declaration, standardizing on a single module-scoped state variable with default value `"ALL"`.
 - **Verification**: Toggling All, Approved, Rejected, Live Writes, and Email Dispatches works seamlessly with zero console errors.
 
+
+## 10. Feature Specification: Direct Single-Order Installation & 1-Click Submission UI
+- **Target Surfaces**:
+  - Orders Tab: `core/templates/core/tabs/tab_orders.html` & `core/static/core/js/tab_orders.js`
+  - Mobile Companion: `core/templates/core/mobile_companion.html` & `core/static/core/js/mobile_companion.js`
+- **Background & Workflow Objectives**:
+  - For operators handling individual walk-in bikes or single orders, enable a direct "search -> save & proceed -> capture/attach photos -> 1-click submit" workflow without needing the bulk batch photo ingestion pipeline or leaving the dashboard.
+- **UI/UX Component Requirements**:
+  1. **Order Row "⚡ Quick Install" Action**:
+     - In the active orders table (`tab_orders.html`), introduce a button:
+       ```html
+       <button class="btn btn-xs btn-primary gap-1" onclick="openOrderInstallModal('{{ order.order_number }}')">
+         <i class="bi bi-lightning-charge"></i> Quick Install
+       </button>
+       ```
+  2. **Inspector Modal / Slide-over (`#order-install-modal`)**:
+     - When opened, triggers `GET /api/itms/orders/<order_ident>/install/` to load live order metadata, ITMS stage (`STAGE_1_INSTALLATION`, `STAGE_2_EVIDENCE`, etc.), and existing photos.
+     - **Stage 1 (Hardware Fitment)**:
+       - Input fields prepopulated from order details:
+         - Front Plate Serial / ID
+         - Rear Plate Serial / ID
+         - GPS Tracker ID
+       - Action: **"Save & Proceed to Photos"** (`POST` with `action=save_step1`).
+     - **Stage 2 (Evidence Photo Dropzone & Camera)**:
+       - Two dual dropzones/camera buttons:
+         - Front Plate Photo: `<input type="file" accept="image/*" capture="environment">`
+         - Rear Plate Photo: `<input type="file" accept="image/*" capture="environment">`
+       - Instant image preview and plate OCR preview badge.
+     - **Stage 3 (Finalize & 1-Click Submission)**:
+       - Prominent primary action button: **"🚀 Finalize & Submit Installation"** (`POST` with `action=submit`).
+       - Dry run toggle switch (`dry_run=true` or `false`).
+       - Active loading state displaying sub-progress (`Submitting Hardware...`, `Uploading Evidence...`, `Finalizing Order...`).
+       - Success state with green checkmark badge, submission token, and updated order status.
+

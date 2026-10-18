@@ -303,3 +303,22 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
   2. **Duplicate Identifier Declaration Fix**:
      - Fixed duplicate `let currentHistoryFilter` declaration in `tab_history.js` that caused `SyntaxError: Identifier 'currentHistoryFilter' has already been declared`.
 
+
+## 11. Feature: Two-Way Direct Single-Order Installation & 1-Click ITMS Submission API - [COMPLETED]
+- **Core Requirements Implemented**:
+  1. **Two-Way Flexible Workflow Support**:
+     - Provides operators dealing with single walk-in bikes or individual orders a rapid, direct installation path directly from the Orders tab or Mobile Companion, eliminating the need to wait for bulk photo batching or switch to the external `stock.itms.ug` portal.
+  2. **Endpoint Architecture (`/api/itms/orders/<order_ident>/install/`)**:
+     - `GET /api/itms/orders/<order_ident>/install/`:
+       - Live detection of current order stage on ITMS (`STAGE_1_INSTALLATION`, `STAGE_2_EVIDENCE`, `STAGE_3_CONFIRMATION`, `STAGE_ARCHIVED`).
+       - Returns assigned hardware serials (`front_plate_serial`, `rear_plate_serial`, `gps_tracker_id`) and existing attached `VehicleInstallationPair` / evidence photo preview URLs.
+     - `POST /api/itms/orders/<order_ident>/install/`:
+       - `action="save_step1"`: Submits Step 1 hardware fitment (`front_plate_id`, `rear_plate_id`, `tracker_id`) to ITMS, advancing order stage to `STAGE_2_EVIDENCE`.
+       - `action="attach_photos"`: Ingests direct single-order photo uploads (`front_photo`, `rear_photo`), runs vision/OCR parsing, links to `VehicleInstallationPair`.
+       - `action="submit"` (default): 1-click or multi-step submission driving the full ITMS workflow (Step 1 -> Step 2 -> Step 3 finalize), marking the pair as `SUBMITTED`, updating local order status, and logging append-only `SubmissionAuditLog`.
+  3. **Backward Compatibility & Sandbox Safety**:
+     - Supports `dry_run` flag (`true`/`false`) override in POST body or fallback to system configuration `submission.dry_run_mode`.
+     - Completely non-disruptive to the existing bulk batch processing pipeline.
+  4. **Automated Verification**:
+     - Unit test suite implemented in `core/tests/test_direct_order_install.py` with 100% pass rate (6/6 tests passing).
+

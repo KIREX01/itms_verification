@@ -26,6 +26,7 @@ urlpatterns = [
     path("api/itms/orders/", views.api_itms_orders_explorer, name="api_itms_orders_explorer"),
     path("api/itms/orders/sync/now/", views.api_itms_sync_now, name="api_itms_sync_now"),
     path("api/itms/orders/<str:order_ident>/", views.api_itms_order_detail, name="api_itms_order_detail"),
+    path("api/itms/orders/<str:order_ident>/install/", views.api_itms_order_install, name="api_itms_order_install"),
     path("api/itms/kits/", views.api_itms_kits, name="api_itms_kits"),
     path("api/itms/plate-lifecycle/", views.api_itms_plate_lifecycle, name="api_itms_plate_lifecycle"),
 
@@ -36,6 +37,7 @@ urlpatterns = [
     path("api/pairs/<int:pair_id>/", views.api_pair_detail, name="api_pair_detail"),
     path("api/pairs/<int:pair_id>/action/", views.api_pair_action, name="api_pair_action"),
     path("api/orders/", views.api_orders_list, name="api_orders_list"),
+    path("api/orders/<str:order_ident>/install/", views.api_itms_order_install, name="api_order_install"),
     path("api/orders/sync/", views.api_sync_orders, name="api_sync_orders"),
     path("api/orders/seed/", views.api_seed_orders, name="api_seed_orders"),
     path("api/pipeline/run/", views.api_run_pipeline, name="api_run_pipeline"),

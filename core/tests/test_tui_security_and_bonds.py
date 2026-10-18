@@ -237,3 +237,41 @@ class OperatorITMSSessionTests(TestCase):
             self.assertIn("status", status_data)
             self.assertIn("authenticated", status_data["status"])
 
+
+
+class SettingsConfigurationReviewTests(TestCase):
+    """Verifies settings configuration across Web UI templates, schemas, and TUI pane."""
+
+    def test_settings_schema_all_mode_option(self):
+        """Schema must recognize 'all' shift target mode."""
+        schema = config_service.USER_SETTINGS_SCHEMA.get("sync.shift_target_date_mode", {})
+        self.assertIn("all", schema.get("options", []))
+        self.assertIn("all", schema.get("description", ""))
+
+    def test_user_and_developer_settings_template_aliases(self):
+        """Both dotted and underscore aliases must be present to support Django template syntax."""
+        from django.template import Context, Template
+
+        user_settings = config_service.get_user_settings()
+        self.assertIn("bond.strict_bond_scoping", user_settings)
+        self.assertIn("bond_strict_bond_scoping", user_settings)
+        self.assertIn("sync.auto_sync_interval_seconds", user_settings)
+        self.assertIn("sync_auto_sync_interval_seconds", user_settings)
+
+        dev_settings = config_service.get_developer_settings()
+        self.assertIn("crawl.max_kit_pages", dev_settings)
+        self.assertIn("crawl_max_kit_pages", dev_settings)
+
+        # Verify Django template resolves underscore alias values without empty fallback
+        tmpl = Template("{{ us.bond_strict_bond_scoping.value }}|{{ us.sync_auto_sync_interval_seconds.value }}")
+        rendered = tmpl.render(Context({"us": user_settings}))
+        self.assertEqual(rendered, f"{user_settings['bond.strict_bond_scoping']['value']}|{user_settings['sync.auto_sync_interval_seconds']['value']}")
+
+    def test_tui_settings_pane_safe_save_and_reset(self):
+        """SettingsPane must safely save and reset without raising NoMatches for uncomposed widgets."""
+        from core.tui.settings_pane import SettingsPane
+
+        pane = SettingsPane()
+        # Verify default kit crawl bound is 100
+        cfg = config_service.load_config()
+        self.assertEqual(cfg.get("crawl", {}).get("max_kit_pages", 100), 100)

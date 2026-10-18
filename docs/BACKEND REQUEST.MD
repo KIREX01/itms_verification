@@ -258,3 +258,48 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
     - `test_stock_report_email_dispatch`: Verifies `SUCCESS` audit logging.
     - `test_stock_report_email_dispatch_failure_and_history_api`: Verifies `FAILURE` audit logging and History API payload.
     - Full suite passing.
+
+
+## 8. Feature: Factory Reset & Production Data Cleanup Command (`clear_data --factory-reset`) - [COMPLETED]
+- **Core Requirements Implemented**:
+  1. **Master `--factory-reset` Atomic Execution**:
+     - Deletes all operational and relational records in cascade-safe dependency order:
+       - `SubmissionAuditLog`
+       - `VehicleInstallationPair`
+       - `EvidenceImage`
+       - `IngestionBatch`
+       - `InstallationOrder`
+       - `InstallationKit`
+       - Stock ledger models (`StockDelivery`, `StockDispatchScan`, `StockReturnScan`, `DailyStockLedger`, `FacilityMetadata`, `PhysicalStockAudit`)
+     - Safely unlinks and purges all disk artifacts in `media/vault/`, `media/crops/`, and exported shift reports in `exports/`.
+  2. **Account Retention & Non-Admin Cleansing (`--keep-admin-only`)**:
+     - Preserves the primary superuser `admin` account intact.
+     - Safely deletes test non-admin user accounts along with associated `OperatorProfile`, `OperatorITMSSession`, and active `Session` records.
+  3. **Granular Flags for Targeted Maintenance**:
+     - `--include-orders`: Clears installation orders.
+     - `--clear-kits`: Clears installation kits.
+     - `--clear-stock`: Clears deliveries, dispatches, returns, daily ledgers, and facility metadata.
+     - `--clear-exports`: Clears exported CSV files in `exports/`.
+     - `--keep-admin-only`: Purges non-admin accounts while keeping superuser `admin`.
+  4. **Auto-Sync Daemon Safeguards**:
+     - Setting `sync.auto_sync_enabled = False` in `secure/config.json` prevents background `MorningKitSyncDaemon` and `ShiftOrderSyncDaemon` from re-pulling external kits/orders upon service restart, preserving pristine zero-record factory state.
+- **Verification & Deployment**:
+  - Validated via atomic transaction execution on PostgreSQL production environment (`16.170.39.187`). Verified table counts: Orders: 0, Kits: 0, Stock: 0, Pairs: 0, Batches: 0, Images: 0, Users: `[('admin', True)]`.
+
+
+## 9. Feature: Corporate Sender Identity & Notification Email Format - [COMPLETED]
+- **Core Requirements Implemented**:
+  1. **Professional Brand Sender Identity**:
+     - Migrated notification sender configuration from generic `auth@info.kirex.online` to `Close Copilot <support@info.kirex.online>` / institutional corporate notification format.
+     - Display name formatted cleanly as `Close Copilot` across all automated shift reports, 2FA security codes, and diagnostic dispatches.
+  2. **Domain Compliance & Anti-Spam**:
+     - Ensures sender headers adhere to SPF/DKIM policies for `info.kirex.online`.
+
+
+## 10. Bugfix: Frontend History Filter & Script Identifier Declaration - [COMPLETED]
+- **Core Requirements Implemented**:
+  1. **Missing Filter Handler Resolution**:
+     - Implemented `window.setHistoryFilter(filter)` in `tab_history.js` and bound it to history tab pill buttons (`tab_history.html`), resolving browser `ReferenceError: setHistoryFilter is not defined`.
+  2. **Duplicate Identifier Declaration Fix**:
+     - Fixed duplicate `let currentHistoryFilter` declaration in `tab_history.js` that caused `SyntaxError: Identifier 'currentHistoryFilter' has already been declared`.
+

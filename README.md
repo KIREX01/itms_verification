@@ -1,6 +1,8 @@
-# Intelligent Vehicle Installation-Photo Recognition & Verification System (ITMS Verification Copilot)
+# CLOSE Copilot - Plate Audit, Inspection & Inventory Platform
 
-Django/SQLite/PostgreSQL-backed computer vision verification pipeline that ingests unsorted vehicle installation photos, localizes and reads number plates via fine-tuned YOLOv8 models, pairs front/rear photos, matches against ITMS installation orders, and facilitates 1-click bulk submission via Web Console and Textual TUI.
+> **"Focus on plate audit, inspection, and inventory"**
+
+Django/SQLite/PostgreSQL-backed computer vision verification pipeline that ingests unsorted vehicle installation photos, localizes and reads number plates via fine-tuned YOLOv8 models, pairs front/rear photos, matches against installation orders, reconciles depot hardware inventory, and facilitates automated batch verification via Web Console and Textual TUI.
 
 ---
 
@@ -306,16 +308,28 @@ python manage.py prune_vault --batch BATCH-20260907-142030-ab12
 
 ### 3.6 Resetting / Clearing Test Data (`clear_data`)
 
-When testing new photo sets, onboarding new batches, or re-evaluating the vision pipeline from scratch, use `clear_data` to wipe all temporary evidence state and remove vaulted files on disk so SHA-256 hash deduplication does not mark re-uploaded photos as skipped duplicates:
+When testing new photo sets, onboarding new batches, or re-evaluating the vision pipeline from scratch, use `clear_data` to wipe temporary evidence state, reset stock registers, or perform a complete pristine factory reset:
 
 ```bash
-# Clear all evidence images, batches, pairs, audit logs, and vaulted/crop files on disk
+# 1. Standard Reset: Clear evidence images, batches, pairs, audit logs, and vaulted/crop files on disk
 python manage.py clear_data
 
-# Also clear the InstallationOrder registry table
+# 2. Reset with Installation Orders: Also clear the InstallationOrder registry table
 python manage.py clear_data --include-orders
 
-# Clear database records only, keeping files on disk in media/vault
+# 3. Factory Reset: Master atomic wipe of all orders, kits, stock ledgers, batches, pairs, evidence, and exports
+python manage.py clear_data --factory-reset
+
+# 4. User Account Cleansing: Purge non-admin test accounts while preserving primary superuser admin
+python manage.py clear_data --keep-admin-only
+
+# 5. Granular Stock Cleansing: Clear hardware stock ledger, dispatches, deliveries, and returns
+python manage.py clear_data --clear-stock
+
+# 6. Granular Kit Cleansing: Clear synced installation kits
+python manage.py clear_data --clear-kits
+
+# 7. Database records only: Keep files on disk in media/vault
 python manage.py clear_data --keep-files
 ```
 

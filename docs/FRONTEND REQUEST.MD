@@ -534,3 +534,29 @@ This transition aligns with our domain `close.kirex.online`, insulates operation
 #### 6. Preservation of ITMS Registry Tab (`core/templates/core/tabs/tab_itms.html`)
 - **DO NOT MODIFY** the title, layout, or functional sync controls of `tab_itms.html`.
 - The Registry tab continues to represent the external ITMS order synchronization interface as requested.
+
+---
+
+### 8.4 Implementation & Verification Status - [COMPLETED]
+- **Verification Status**: Fully verified on local and remote EC2 production environment (`https://close.kirex.online/`).
+- **Commit Reference**: `39385bb` (*feat(ui): transition surface branding to CLOSE Copilot with plate audit & inspection tagline*).
+- **Deliverables Completed**:
+  - `index.html`: Header logo, page `<title>`, OpenGraph/Twitter social meta tags, and footer badge updated to CLOSE Copilot.
+  - `login.html`: Branded head section and `<title>` updated to CLOSE Copilot.
+  - `signup.html`: Branded head section and `<title>` updated to CLOSE Copilot.
+  - `auth_2fa.html`: Security code header and `<title>` updated to CLOSE Copilot.
+  - `mobile_companion.html`: Header title updated to `CLOSE MOBILE SCANNER` with `PLATE AUDIT & INSPECTION COMPANION` subtitle.
+  - `tab_settings.html`: System diagnostics card displays `CLOSE Copilot v1.0.8`.
+  - `site.webmanifest`: Progressive Web App (PWA) manifest names updated.
+  - `tab_itms.html`: Preserved without modification as required.
+
+
+## 9. Bugfix: History Tab Filter Handlers & Variable Scope Resolution - [COMPLETED]
+- **Context & Error Encountered**:
+  - When operators toggled history filter pills in `tab_history.html`, the browser console reported `Uncaught ReferenceError: setHistoryFilter is not defined`.
+  - Concurrently, loading `tab_history.js` caused `Uncaught SyntaxError: Identifier 'currentHistoryFilter' has already been declared`.
+- **Resolution Implemented**:
+  1. **Global Handler Definition**: Defined `window.setHistoryFilter = function(filter)` in `tab_history.js` to ensure the onclick attribute in `tab_history.html` invokes the filter controller without reference scoping issues.
+  2. **Deduplication**: Removed duplicate `let currentHistoryFilter` declaration, standardizing on a single module-scoped state variable with default value `"ALL"`.
+- **Verification**: Toggling All, Approved, Rejected, Live Writes, and Email Dispatches works seamlessly with zero console errors.
+

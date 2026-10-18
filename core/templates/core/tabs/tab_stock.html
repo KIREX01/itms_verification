@@ -73,16 +73,68 @@
                 </div>
             </div>
 
-            <!-- Instant Metrics Strip -->
-            <div id="stock-status-strip" class="stock-status-pills">
-                <span class="badge badge-muted">Opening: 0</span>
-                <span class="badge badge-muted">Received: 0</span>
-                <span class="badge badge-muted">Dispatched: 0</span>
-                <span class="badge badge-muted">Installed: 0</span>
-                <span class="badge badge-cyan">Closing: 0</span>
-                <span class="badge badge-yellow">Physical: 0</span>
-                <span class="badge badge-green">Unallocated: 0</span>
+            <!-- Executive Stock KPI Metric Counter Cards -->
+            <div class="stock-kpi-grid" id="stock-kpi-grid">
+                <div class="stock-kpi-card" id="kpi-card-opening" title="Opening physical safe room count at shift start">
+                    <div class="stock-kpi-header">
+                        <span class="stock-kpi-icon">🌅</span>
+                        <span class="stock-kpi-label">Opening</span>
+                    </div>
+                    <div class="stock-kpi-val" id="kpi-val-opening">0</div>
+                    <div class="stock-kpi-sub" id="kpi-sub-opening">Start of Shift</div>
+                </div>
+                <div class="stock-kpi-card" id="kpi-card-received" title="Inbound delivery intake received from central depot">
+                    <div class="stock-kpi-header">
+                        <span class="stock-kpi-icon">📦</span>
+                        <span class="stock-kpi-label">Received</span>
+                    </div>
+                    <div class="stock-kpi-val" id="kpi-val-received">0</div>
+                    <div class="stock-kpi-sub" id="kpi-sub-received">Inbound Intake</div>
+                </div>
+                <div class="stock-kpi-card" id="kpi-card-dispatched" title="Kits scanned out to the installation line">
+                    <div class="stock-kpi-header">
+                        <span class="stock-kpi-icon">🚀</span>
+                        <span class="stock-kpi-label">Dispatched</span>
+                    </div>
+                    <div class="stock-kpi-val" id="kpi-val-dispatched">0</div>
+                    <div class="stock-kpi-sub" id="kpi-sub-dispatched">Taken to Line</div>
+                </div>
+                <div class="stock-kpi-card" id="kpi-card-installed" title="Confirmed completed vehicle installations in ITMS">
+                    <div class="stock-kpi-header">
+                        <span class="stock-kpi-icon">🏍️</span>
+                        <span class="stock-kpi-label">Installed</span>
+                    </div>
+                    <div class="stock-kpi-val" id="kpi-val-installed">0</div>
+                    <div class="stock-kpi-sub" id="kpi-sub-installed">Active on Bikes</div>
+                </div>
+                <div class="stock-kpi-card highlight-closing" id="kpi-card-closing" title="Calculated book balance: Opening + Received - Installed ± Transfers">
+                    <div class="stock-kpi-header">
+                        <span class="stock-kpi-icon">📊</span>
+                        <span class="stock-kpi-label">Closing Book</span>
+                    </div>
+                    <div class="stock-kpi-val" id="kpi-val-closing">0</div>
+                    <div class="stock-kpi-sub" id="kpi-sub-closing">Calculated Balance</div>
+                </div>
+                <div class="stock-kpi-card highlight-physical" id="kpi-card-physical" title="Audited safe room physical count and variance delta">
+                    <div class="stock-kpi-header">
+                        <span class="stock-kpi-icon">🔍</span>
+                        <span class="stock-kpi-label">Physical Count</span>
+                    </div>
+                    <div class="stock-kpi-val" id="kpi-val-physical">0</div>
+                    <div class="stock-kpi-sub" id="kpi-sub-physical">Variance: 0</div>
+                </div>
+                <div class="stock-kpi-card highlight-unallocated" id="kpi-card-unallocated" title="New kits in stock ready for vehicle allocation">
+                    <div class="stock-kpi-header">
+                        <span class="stock-kpi-icon">✨</span>
+                        <span class="stock-kpi-label">Unallocated</span>
+                    </div>
+                    <div class="stock-kpi-val" id="kpi-val-unallocated">0</div>
+                    <div class="stock-kpi-sub" id="kpi-sub-unallocated">Ready for Line</div>
+                </div>
             </div>
+
+            <!-- Mirrored Compatibility Container -->
+            <div id="stock-status-strip" class="stock-status-pills" style="display:none;"></div>
 
             <!-- Instant Verification & Status Feedback Strip -->
             <div id="stock-feedback-alert" class="alert alert-success" style="margin-bottom: 12px; font-size: 0.95rem; font-weight: 700; padding: 10px 14px;">
@@ -223,11 +275,12 @@
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; gap: 8px;">
                     <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                         <div class="inspector-plate-hero" id="ins-plate">SCAN PLATE</div>
+                        <button type="button" class="btn-copy-small" onclick="copyCurrentInspectorPlate()" title="Copy Plate Number" style="background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:4px; color:#ffffff; cursor:pointer; font-size:0.82rem; padding:3px 7px;">📋</button>
                         <span id="ins-cat-badge" class="badge badge-muted" style="display: none;">PSV</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <span id="ins-status" class="badge badge-green" style="display: none;">✓ ON STOCK</span>
-                        <button class="btn btn-secondary mobile-only-btn" onclick="closeStockMobileInspector()" style="display:none; padding:4px 12px; font-size:0.8rem; border-color:var(--ug-yellow); color:var(--ug-yellow);">◀ Back</button>
+                        <button type="button" class="btn btn-secondary mobile-only-btn" id="btn-close-stock-inspector" onclick="closeStockMobileInspector()" title="Close Inspector" style="display:none; padding:6px 14px; font-size:0.82rem; font-weight:700; color:#ffffff !important; border:1px solid rgba(255,255,255,0.25); background:#1e293b; border-radius:var(--radius-sm);">✕ Close</button>
                     </div>
                 </div>
                 <div class="inspector-order-num" id="ins-desc" style="margin-top: 5px;">Scan barcode or click a plate to inspect hardware profile & stock status.</div>
@@ -245,7 +298,10 @@
                     <div class="hardware-box">
                         <div class="hw-row">
                             <span class="hw-label">Kit Code:</span>
-                            <span class="hw-val" id="ins-kit-code">---</span>
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <span class="hw-val" id="ins-kit-code">---</span>
+                                <button type="button" onclick="copyTextToClipboard(document.getElementById('ins-kit-code').innerText, 'Kit Code')" title="Copy Kit Code" style="background:none; border:none; color:rgba(255,255,255,0.6); cursor:pointer; font-size:0.75rem; padding:0 2px;">📋</button>
+                            </div>
                         </div>
                         <div class="hw-row">
                             <span class="hw-label">Warehouse:</span>
@@ -253,7 +309,10 @@
                         </div>
                         <div class="hw-row">
                             <span class="hw-label">GPS Tracker:</span>
-                            <span class="hw-val" id="ins-gps">---</span>
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <span class="hw-val" id="ins-gps">---</span>
+                                <button type="button" onclick="copyTextToClipboard(document.getElementById('ins-gps').innerText, 'GPS Tracker')" title="Copy GPS Tracker" style="background:none; border:none; color:rgba(255,255,255,0.6); cursor:pointer; font-size:0.75rem; padding:0 2px;">📋</button>
+                            </div>
                         </div>
                         <div class="hw-row">
                             <span class="hw-label">Front BLE:</span>
@@ -316,6 +375,20 @@
                             <span class="hw-label">Category:</span>
                             <span class="hw-val" id="ins-disp-cat">---</span>
                         </div>
+
+                <!-- Quick Action Buttons -->
+                <div style="display:flex; flex-direction:column; gap:8px; margin-top:6px;">
+                    <a href="#" id="link-ins-itms-web" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="display:none; font-size:0.8rem; padding:8px 12px; text-decoration:none; color:#ffffff !important; font-weight:700; justify-content:center; gap:6px; background:#1e293b; border:1px solid rgba(255,255,255,0.2); border-radius:var(--radius-sm);">
+                        🌐 Open Order on ITMS Portal &rarr;
+                    </a>
+                </div>
+
+                <!-- Mobile Sticky Bottom Bar -->
+                <div class="mobile-inspector-bottom-bar" style="margin-top:auto; padding-top:14px; position:sticky; bottom:0; background:linear-gradient(to top, var(--ug-black-card) 85%, transparent); z-index:10;">
+                    <button type="button" class="btn btn-secondary mobile-only-btn" onclick="closeStockMobileInspector()" style="display:none; width:100%; min-height:44px; font-size:0.9rem; font-weight:800; color:#ffffff !important; background:#1e293b; border:1px solid rgba(255,255,255,0.25); border-radius:var(--radius-md); justify-content:center;">
+                        ✕ Close Inspector
+                    </button>
+                </div>
                         <div class="hw-row">
                             <span class="hw-label">Shift Suffix:</span>
                             <span class="hw-val" id="ins-disp-suffix">---</span>

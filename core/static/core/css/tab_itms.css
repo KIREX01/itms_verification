@@ -155,14 +155,68 @@
 }
 
 .itms-action-btn {
-    min-height: 36px;
-    padding: 6px 14px;
-    font-size: 0.8rem;
+    min-height: 38px;
+    padding: 8px 16px;
+    font-size: 0.82rem;
     font-weight: 700;
     color: #ffffff !important;
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-decoration: none;
+}
+
+#btn-itms-sync-shift {
+    background-color: #9a3412 !important;
+    border: 1px solid #ea580c !important;
+    color: #ffffff !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+#btn-itms-sync-shift:hover {
+    background-color: #c2410c !important;
+    border-color: #f97316 !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 10px rgba(249, 115, 22, 0.35);
+}
+
+#btn-itms-auto-sync-kits {
+    background-color: #7c2d12 !important;
+    border: 1px solid #c2410c !important;
+    color: #ffffff !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+#btn-itms-auto-sync-kits:hover {
+    background-color: #9a3412 !important;
+    border-color: #ea580c !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 10px rgba(234, 88, 12, 0.35);
+}
+
+#btn-itms-sync-page {
+    background-color: #1e3a8a !important;
+    border: 1px solid #3b82f6 !important;
+    color: #ffffff !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+#btn-itms-sync-page:hover {
+    background-color: #1d4ed8 !important;
+    border-color: #60a5fa !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.35);
+}
+
+.itms-action-btn.btn-secondary {
+    background-color: #1e293b !important;
+    border: 1px solid rgba(255, 255, 255, 0.18) !important;
+    color: #ffffff !important;
+}
+.itms-action-btn.btn-secondary:hover {
+    background-color: #334155 !important;
+    border-color: rgba(255, 255, 255, 0.3) !important;
+    color: #ffffff !important;
 }
 
 /* SUBVIEW 1: Connect to Account */

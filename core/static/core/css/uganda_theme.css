@@ -136,6 +136,19 @@ body {
     box-shadow: 0 2px 6px var(--ug-red-glow);
 }
 
+.btn-warning {
+    background-color: #9a3412;
+    color: #ffffff !important;
+    border: 1px solid #ea580c;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.btn-warning:hover:not(:disabled) {
+    background-color: #c2410c;
+    border-color: #f97316;
+    color: #ffffff !important;
+    box-shadow: 0 0 10px rgba(249, 115, 22, 0.35);
+}
+
 .btn-gold {
     background-color: var(--ug-gold);
     color: #000000;

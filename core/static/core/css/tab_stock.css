@@ -2,22 +2,62 @@
    TAB 8: STOCK & BOND LOGISTICS (TUI MIRRORED WORKSPACE)
    ============================================================================ */
 
+/* Stock 4-Mode Navigation Bar */
 .stock-mode-nav {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 8px;
     margin-bottom: 12px;
-    border-bottom: 2px solid var(--ug-border);
-    padding-bottom: 8px;
+    background: #0c1017;
+    padding: 6px;
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+.stock-mode-nav .stock-mode-btn,
 .stock-mode-nav .btn {
     flex: 1;
-    min-width: 110px;
+    min-width: 120px;
+    min-height: 40px;
     text-align: center;
     font-weight: 700;
     font-size: 0.85rem;
-    padding: 8px 12px;
+    padding: 8px 14px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.75) !important;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.stock-mode-nav .stock-mode-btn:hover,
+.stock-mode-nav .btn:hover:not(:disabled) {
+    background-color: rgba(255, 255, 255, 0.08);
+    color: #ffffff !important;
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.stock-mode-nav .stock-mode-btn.active,
+.stock-mode-nav .btn.active {
+    background-color: #1e293b !important;
+    border: 2px solid var(--ug-yellow) !important;
+    color: #ffffff !important;
+    font-weight: 800;
+    box-shadow: 0 0 10px rgba(252, 220, 4, 0.25);
+}
+
+.stock-mode-nav .hotkey {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff !important;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-family: var(--font-mono);
 }
 
 .stock-mode-container {
@@ -27,23 +67,131 @@
     min-height: 0;
 }
 
+/* Universal Command Bar */
 .stock-command-bar {
     display: flex;
     gap: 8px;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
     align-items: center;
-    background: var(--ug-black-card);
-    padding: 10px 12px;
+    background: #111622;
+    padding: 10px 14px;
     border-radius: var(--radius-md);
-    border: 1px solid var(--ug-border);
+    border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .stock-command-bar-actions {
     display: flex;
-    gap: 6px;
+    gap: 8px;
     align-items: center;
+    flex-wrap: wrap;
 }
 
+.stock-command-bar-actions .btn {
+    min-height: 38px;
+    padding: 6px 14px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #ffffff !important;
+}
+
+/* Universal Scan input highlight */
+#stock-universal-scan {
+    background-color: #0c1017;
+    color: #ffffff !important;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    font-size: 0.9rem;
+    min-height: 40px;
+    padding: 8px 14px;
+    border-radius: var(--radius-sm);
+}
+
+#stock-universal-scan:focus {
+    border-color: var(--ug-yellow);
+    box-shadow: 0 0 0 2px rgba(252, 220, 4, 0.3);
+    outline: none;
+}
+
+/* Executive Stock KPI Metric Counter Grid */
+.stock-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.stock-kpi-card {
+    background: #111622;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+    min-width: 0;
+}
+
+.stock-kpi-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255, 255, 255, 0.22);
+}
+
+.stock-kpi-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 2px;
+}
+
+.stock-kpi-icon {
+    font-size: 0.85rem;
+    line-height: 1;
+}
+
+.stock-kpi-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.7) !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.stock-kpi-val {
+    font-size: 1.35rem;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    color: #ffffff !important;
+    line-height: 1.1;
+}
+
+.stock-kpi-sub {
+    font-size: 0.68rem;
+    color: rgba(255, 255, 255, 0.55) !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* KPI Card Accent Highlights */
+.stock-kpi-card.highlight-closing {
+    border-top: 3px solid #38bdf8;
+    background: linear-gradient(180deg, rgba(56, 189, 248, 0.08) 0%, #111622 100%);
+}
+
+.stock-kpi-card.highlight-physical {
+    border-top: 3px solid #f59e0b;
+    background: linear-gradient(180deg, rgba(245, 158, 11, 0.08) 0%, #111622 100%);
+}
+
+.stock-kpi-card.highlight-unallocated {
+    border-top: 3px solid #10b981;
+    background: linear-gradient(180deg, rgba(16, 185, 129, 0.08) 0%, #111622 100%);
+}
+
+/* Legacy pills container if queried */
 .stock-status-pills {
     display: flex;
     gap: 6px;
@@ -52,37 +200,95 @@
     margin-bottom: 10px;
 }
 
-.stock-status-pills .badge {
-    font-size: 0.78rem;
-    padding: 5px 9px;
-    font-weight: 700;
-}
-
-/* Badge variants if not defined globally */
+/* Badge variants */
 .badge-dark {
     background-color: rgba(255, 255, 255, 0.08);
-    color: #cbd5e1;
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #ffffff !important;
+    border: 1px solid rgba(255, 255, 255, 0.18);
 }
 
 .badge-blue {
-    background-color: rgba(14, 165, 233, 0.15);
-    color: #38bdf8;
-    border: 1px solid rgba(14, 165, 233, 0.4);
+    background-color: rgba(14, 165, 233, 0.18);
+    color: #ffffff !important;
+    border: 1px solid rgba(14, 165, 233, 0.45);
 }
 
-/* Universal Scan input highlight */
-#stock-universal-scan {
-    background-color: var(--ug-black-surface);
-    color: #ffffff;
-    border: 1px solid var(--ug-border);
-    font-size: 0.9rem;
+/* Kit Inspector Styling */
+.itms-inspector-panel {
+    background: #0f1420;
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
 }
 
-#stock-universal-scan:focus {
-    border-color: var(--ug-yellow);
-    box-shadow: 0 0 0 1px var(--ug-yellow);
-    outline: none;
+.inspector-plate-hero {
+    font-size: 1.4rem;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    color: #ffffff !important;
+    letter-spacing: 1px;
+}
+
+.inspector-section-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.8) !important;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.hardware-box {
+    background: #0c1017;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-md);
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.hw-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 0.82rem;
+}
+
+.hw-row:last-child {
+    border-bottom: none;
+}
+
+.hw-label {
+    color: rgba(255, 255, 255, 0.65) !important;
+    font-weight: 600;
+}
+
+.hw-val {
+    color: #ffffff !important;
+    font-weight: 700;
+    font-family: var(--font-mono);
+}
+
+/* Clickable table rows in dispatch/movements/audit */
+#table-stock-dispatch tbody tr,
+#table-stock-movements tbody tr,
+#table-stock-audit tbody tr {
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+}
+
+#table-stock-dispatch tbody tr:hover,
+#table-stock-movements tbody tr:hover,
+#table-stock-audit tbody tr:hover {
+    background-color: rgba(255, 255, 255, 0.06);
 }
 
 /* Flash Animations for Instant Feedback */
@@ -107,7 +313,13 @@
 }
 
 /* Responsive adjustments */
-@media (min-width: 769px) and (max-width: 900px) {
+@media (max-width: 1200px) {
+    .stock-kpi-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+@media (min-width: 769px) and (max-width: 992px) {
     #pane-stock .itms-split-view {
         flex-direction: column;
         overflow-y: auto;
@@ -157,6 +369,11 @@
         padding: 10px;
     }
 
+    .stock-kpi-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px;
+    }
+
     #stock-inspector-card {
         position: fixed !important;
         top: 0 !important;
@@ -167,9 +384,9 @@
         height: 100dvh !important;
         max-height: 100dvh !important;
         z-index: 9999 !important;
-        background-color: var(--ug-black-card) !important;
+        background-color: #0c1017 !important;
         display: none !important;
-        padding: 14px 14px 80px 14px !important;
+        padding: 16px 16px 85px 16px !important;
         box-sizing: border-box !important;
         overflow-y: auto !important;
         -webkit-overflow-scrolling: touch !important;
@@ -183,37 +400,36 @@
 
     #stock-inspector-card .mobile-only-btn {
         display: inline-flex !important;
-        align-items: center;
-        justify-content: center;
-        padding: 6px 14px;
-        font-size: 0.82rem;
-        font-weight: 700;
-        border-radius: var(--radius-md);
-        background: rgba(252, 220, 4, 0.12);
-        border: 1px solid var(--ug-yellow);
-        color: var(--ug-yellow);
     }
 
     .stock-command-bar {
         flex-direction: column;
         align-items: stretch;
-        gap: 6px;
+        gap: 8px;
     }
 
     .stock-command-bar-actions {
         width: 100%;
-        justify-content: space-between;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
     }
 
     .stock-command-bar-actions .btn {
-        flex: 1;
         justify-content: center;
+        min-height: 40px;
     }
 
+    .stock-mode-nav {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+    }
+
+    .stock-mode-nav .stock-mode-btn,
     .stock-mode-nav .btn {
-        flex: 1 1 calc(50% - 6px);
         min-width: auto;
-        padding: 6px 8px;
-        font-size: 0.78rem;
+        padding: 8px 10px;
+        font-size: 0.8rem;
     }
 }

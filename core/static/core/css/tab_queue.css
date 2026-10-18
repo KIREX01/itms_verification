@@ -47,25 +47,40 @@
 
 .queue-filter-pills {
     display: flex;
-    gap: 3px;
+    gap: 4px;
     background-color: var(--ug-black-card);
-    padding: 3px;
+    padding: 4px;
     border-radius: var(--radius-md);
+    border: 1px solid rgba(255, 255, 255, 0.08);
 }
 .queue-filter-pill {
     flex: 1;
     text-align: center;
-    padding: 4px 2px;
-    font-size: 0.72rem;
+    padding: 6px 4px;
+    font-size: 0.75rem;
     font-weight: 700;
-    color: var(--ug-text-muted);
+    color: rgba(255, 255, 255, 0.75) !important;
+    background: transparent;
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition: all 0.15s ease;
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.queue-filter-pill:hover {
+    color: #ffffff !important;
+    background-color: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
 }
 .queue-filter-pill.active {
-    background-color: var(--ug-yellow);
-    color: #000000;
+    background-color: #1e293b !important;
+    border: 1px solid var(--ug-yellow) !important;
+    color: #ffffff !important;
+    font-weight: 800;
+    box-shadow: 0 0 8px rgba(252, 220, 4, 0.25);
 }
 
 .queue-cards-list {

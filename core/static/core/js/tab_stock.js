@@ -332,6 +332,25 @@ async function inspectPlate(plate, fallbackError = null) {
                 if (unallocBox) unallocBox.style.display = 'block';
             }
 
+            // ITMS Web Portal Quick Link
+            const itmsLink = document.getElementById('link-ins-itms-web');
+            if (itmsLink) {
+                if (order.has_order) {
+                    const detailUrl = order.detail_url || (order.kit_uuid ? `https://stock.itms.ug/installation-kit/${order.kit_uuid}/main/information` : (data.plate ? `https://stock.itms.ug/installation-order/index?InstallationOrderSearchFieldSearch%5Bsearch%5D=${encodeURIComponent(data.plate)}` : ''));
+                    if (detailUrl) {
+                        itmsLink.href = detailUrl;
+                        itmsLink.style.display = 'inline-flex';
+                    } else {
+                        itmsLink.style.display = 'none';
+                    }
+                } else if (data.plate) {
+                    itmsLink.href = `https://stock.itms.ug/installation-kits/index?InstallationKitSearchFieldSearch%5Bsearch%5D=${encodeURIComponent(data.plate)}`;
+                    itmsLink.style.display = 'inline-flex';
+                } else {
+                    itmsLink.style.display = 'none';
+                }
+            }
+
             // Line Dispatch Record
             const disp = data.dispatch_record;
             const dispSection = document.getElementById('ins-dispatch-section');
@@ -1341,14 +1360,44 @@ function updateDashboard(recon) {
 
     const tot = recon.total || {};
     const unallocCount = (recon.unallocated_plates || []).length;
+    const physCount = tot.physical_count !== undefined ? tot.physical_count : (recon.physical_count || 0);
+    const variance = recon.variance !== undefined ? recon.variance : 0;
+    const varText = variance > 0 ? `+${variance}` : `${variance}`;
 
+    // 1. Populate Executive Stock KPI Counter Cards
+    setTextSafe('kpi-val-opening', (tot.opening || 0).toLocaleString());
+    setTextSafe('kpi-val-received', (tot.received || 0).toLocaleString());
+    setTextSafe('kpi-val-dispatched', (tot.dispatched || 0).toLocaleString());
+    setTextSafe('kpi-val-installed', (tot.installed || 0).toLocaleString());
+    setTextSafe('kpi-val-closing', (tot.closing_stock || 0).toLocaleString());
+    setTextSafe('kpi-val-physical', physCount.toLocaleString());
+    setTextSafe('kpi-sub-physical', `Variance: ${varText}`);
+    setTextSafe('kpi-val-unallocated', unallocCount.toLocaleString());
+
+    // Contextual Category Breakdown Subtitles
+    const rep = recon.report_table || {};
+    const rows = rep.rows || [];
+    const openRow = rows.find(r => (r.metric || '').toLowerCase().includes('opening')) || {};
+    if (openRow.pmo !== undefined && openRow.psv !== undefined) {
+        setTextSafe('kpi-sub-opening', `PMO: ${openRow.pmo} | PSV: ${openRow.psv}`);
+    }
+    const rcvRow = rows.find(r => (r.metric || '').toLowerCase().includes('received')) || {};
+    if (rcvRow.pmo !== undefined && rcvRow.psv !== undefined) {
+        setTextSafe('kpi-sub-received', `PMO: ${rcvRow.pmo} | PSV: ${rcvRow.psv}`);
+    }
+    const instRow = rows.find(r => (r.metric || '').toLowerCase().includes('installed')) || {};
+    if (instRow.pmo !== undefined && instRow.psv !== undefined) {
+        setTextSafe('kpi-sub-installed', `PMO: ${instRow.pmo} | PSV: ${instRow.psv}`);
+    }
+
+    // 2. Mirrored Legacy Strip for backward compatibility
     const stripHtml = `
         <span class="badge badge-muted">Opening: ${tot.opening || 0}</span>
         <span class="badge badge-muted">Received: ${tot.received || 0}</span>
         <span class="badge badge-muted">Dispatched: ${tot.dispatched || 0}</span>
         <span class="badge badge-muted">Installed: ${tot.installed || 0}</span>
         <span class="badge badge-cyan">Closing: ${tot.closing_stock || 0}</span>
-        <span class="badge badge-yellow">Physical: ${tot.physical_count || 0}</span>
+        <span class="badge badge-yellow">Physical: ${physCount} (${varText})</span>
         <span class="badge ${unallocCount > 0 ? 'badge-red' : 'badge-green'}">Unallocated: ${unallocCount}</span>
     `;
 
@@ -1944,5 +1993,46 @@ async function submitEmailStockReport() {
             submitBtn.disabled = false;
             submitBtn.innerText = '📤 Send Report Email';
         }
+    }
+}
+
+
+// -----------------------------------------------------------------------------
+// Clipboard & Inspection Helpers
+// -----------------------------------------------------------------------------
+
+function copyCurrentInspectorPlate() {
+    const el = document.getElementById('ins-plate');
+    if (el && el.innerText && el.innerText !== 'SCAN PLATE') {
+        copyTextToClipboard(el.innerText.trim(), 'Plate Number');
+    }
+}
+
+function copyTextToClipboard(text, label = 'Text') {
+    if (!text || text === '-' || text === '---') return;
+    if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+            if (typeof notify === 'function') notify(`📋 ${label} copied to clipboard!`, 'info');
+        }).catch(() => {
+            fallbackCopy(text, label);
+        });
+    } else {
+        fallbackCopy(text, label);
+    }
+}
+
+function fallbackCopy(text, label) {
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        if (typeof notify === 'function') notify(`📋 ${label} copied to clipboard!`, 'info');
+    } catch (e) {
+        console.error('Copy fallback failed:', e);
     }
 }

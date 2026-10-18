@@ -319,21 +319,26 @@ footer.app-footer {
     background-color: var(--ug-black-card-hover);
 }
 .scope-pill-btn.active {
-    background-color: var(--ug-yellow);
-    color: #000000;
+    background-color: #1e293b !important;
+    border: 1px solid var(--ug-yellow) !important;
+    color: #ffffff !important;
     font-weight: 800;
+    box-shadow: 0 0 8px rgba(252, 220, 4, 0.25);
 }
 .scope-pill-btn.active.scope-carryover {
-    background-color: #f59e0b;
-    color: #000000;
+    background-color: #78350f !important;
+    border: 1px solid #f59e0b !important;
+    color: #ffffff !important;
 }
 .scope-pill-btn.active.scope-active-batch {
-    background-color: var(--ug-green);
-    color: #ffffff;
+    background-color: #064e3b !important;
+    border: 1px solid var(--ug-green) !important;
+    color: #ffffff !important;
 }
 .scope-pill-btn.active.scope-all {
-    background-color: var(--ug-cyan);
-    color: #000000;
+    background-color: #0c4a6e !important;
+    border: 1px solid var(--ug-cyan) !important;
+    color: #ffffff !important;
 }
 .scope-summary-tag {
     font-size: 0.7rem;

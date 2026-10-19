@@ -704,3 +704,29 @@ This transition aligns with our domain `close.kirex.online`, insulates operation
      - Django check: `System check identified no issues (0 silenced)`.
      - Static collection: `6 static files copied to 'staticfiles', 163 unmodified`.
      - Automated test suite: `Ran 55 tests in 84.029s, OK (skipped=1)`.
+
+
+---
+
+## 13. Mobile Companion Blocked ("Not on Stock") Tray Sync & Persistence
+
+- **Date**: Mon Oct 19, 2026
+- **Status**: ✅ **RESOLVED & VERIFIED**
+
+### 13.1 Backend Capabilities Delivered
+1. **Two-Tier Live ITMS Lookup on Every Scan (`GET /api/stock/inspect/`)**:
+   - Tier 1 checks local synced `InstallationKit` records.
+   - Tier 2 automatically looks up missing plates on the live ITMS app (`/installation-kits/index`) and syncs them into the local DB if found (`synced_from_itms: true`, `is_blocked: false`).
+   - If the kit does not exist on the ITMS app either, it marks `status_code: "NOT_ON_STOCK"`, `is_blocked: true` ("Set physical box aside!") **and automatically persists the plate on the server** in the `StockBlockedScan` database table + shift docket.
+   - Response now includes `"blocked_plates": [...]`, `"blocked_count": N`, `"date_suffix": "..."`, and `"synced_from_itms": bool`.
+2. **Two-Way Blocked Plates Endpoint (`GET / POST /api/stock/blocked-plates/`)**:
+   - `GET /api/stock/blocked-plates/?date_suffix=<suffix>` returns `{"success": true, "date_suffix": "...", "blocked_plates": [...], "count": N, "docket": {...}}`.
+   - `POST /api/stock/blocked-plates/` accepts `{"plates": [...], "date_suffix": "...", "operator_name": "...", "action": "add" | "clear"}` to merge or clear blocked plates across devices.
+
+### 13.2 Frontend Integration Completed (`mobile_companion.js`, `tab_stock.js`, `mobile_companion.html`)
+1. **Two-Way Blocked Plates Hydration & `localStorage` Persistence (`mobile_companion.js`)**:
+   - `handleStockBarcodeDetected` merges `inspectData.blocked_plates` directly into `MobileState.stock.blockedPlates`, saves to `localStorage` (`itms_mobile_blocked_plates` + `itms_mobile_blocked_shift`), and renders the tray immediately.
+   - Added `syncBlockedPlatesWithServer()` which pushes any existing phone-only blocked plates to `POST /api/stock/blocked-plates/` (or pulls via `GET /api/stock/blocked-plates/?date_suffix=...`), merges the server list, persists to `localStorage`, and refreshes `renderBlockedPlatesTray()`.
+   - Enabled `check_itms_live: true` in `syncStockScansToServer()` so queued batch dispatches also execute the 2-tier lookup.
+2. **Web Dashboard Fresh Sync (`tab_stock.js`)**:
+   - Updated `openNotOnStockModal()` to always fetch fresh `/api/stock/blocked-plates/?date_suffix=${currentStockDateSuffix}` when opened so blocked kits scanned on the phone appear immediately on the web dashboard (`close.kirex.online`).

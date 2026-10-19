@@ -33,7 +33,7 @@ def api_stock_shift_dates(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
-@require_itms_envelope
+@require_itms_envelope(allow_expired=True)
 def api_stock_reconciliation(request: HttpRequest) -> JsonResponse:
     """
     Returns live daily stock reconciliation metrics, opening/closing balance,
@@ -55,7 +55,7 @@ def api_stock_reconciliation(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
-@require_itms_envelope
+@require_itms_envelope(allow_expired=True)
 def api_stock_dispatch(request: HttpRequest) -> JsonResponse:
     """
     Records plates scanned when taken out of stock and issued to the
@@ -71,7 +71,7 @@ def api_stock_dispatch(request: HttpRequest) -> JsonResponse:
 
     auto_create_kits = False
     require_stock_verification = None
-    check_itms_live = False
+    check_itms_live = True
 
     if request.content_type == "application/json" and request.body:
         try:
@@ -109,6 +109,11 @@ def api_stock_dispatch(request: HttpRequest) -> JsonResponse:
 
     if not plates_raw:
         return JsonResponse({"success": False, "error": "No plate numbers provided in 'plates'."}, status=400)
+
+    # Ensure live floor scans from UI / Mobile Companion (which pass auto_create_kits=True)
+    # always verify missing plates against the live ITMS app before rejecting as NOT_ON_STOCK.
+    if auto_create_kits:
+        check_itms_live = True
 
     try:
         user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
@@ -602,27 +607,89 @@ def api_stock_mvr_docket(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
-@require_GET
-@require_itms_envelope
+@require_itms_envelope(allow_expired=True)
 def api_stock_blocked_plates(request: HttpRequest) -> JsonResponse:
-    """Returns the list of plates not on stock and the ITMS Transfer Manager request docket."""
+    """
+    GET: Returns the unified list of plates not on stock and the ITMS Transfer Manager request docket.
+    POST: Records or clears blocked plates from Mobile Companion or Web UI and returns the updated docket.
+    """
     from core.services import stock_monitoring_service
+
+    if request.method not in ("GET", "POST"):
+        return JsonResponse({"success": False, "error": "Method not allowed"}, status=405)
+
     date_suffix = (
         request.GET.get("date")
         or request.GET.get("date_suffix")
         or request.GET.get("suffix")
         or None
     )
+
     try:
+        user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
+        if request.method == "POST":
+            plates_raw = None
+            reason = "NOT ON ITMS STOCK"
+            operator_name = getattr(user, "username", "") or "Operator"
+            action = "add"
+            if request.content_type == "application/json" and request.body:
+                try:
+                    body = json.loads(request.body.decode("utf-8"))
+                    plates_raw = body.get("plates") or body.get("blocked_plates")
+                    date_suffix = body.get("date") or body.get("date_suffix") or body.get("suffix") or date_suffix
+                    reason = body.get("reason") or reason
+                    operator_name = body.get("operator_name") or operator_name
+                    action = (body.get("action") or "add").strip().lower()
+                except Exception:
+                    pass
+            if not plates_raw:
+                plates_raw = request.POST.get("plates") or request.POST.get("blocked_plates")
+                date_suffix = (
+                    request.POST.get("date")
+                    or request.POST.get("date_suffix")
+                    or request.POST.get("suffix")
+                    or date_suffix
+                )
+                reason = request.POST.get("reason", reason)
+                operator_name = request.POST.get("operator_name", operator_name)
+                action = (request.POST.get("action") or action).strip().lower()
+
+            if action == "clear":
+                cleared = stock_monitoring_service.clear_blocked_plates_for_date(date_suffix)
+                docket = stock_monitoring_service.get_stock_transfer_request_docket(date_suffix)
+                return JsonResponse({
+                    "success": True,
+                    "cleared_count": cleared,
+                    "date_suffix": docket.get("work_date_suffix"),
+                    "blocked_plates": docket.get("plates", []),
+                    "count": docket.get("count", 0),
+                    "docket": docket,
+                })
+
+            if plates_raw:
+                stock_monitoring_service.record_blocked_plates(
+                    plates_raw,
+                    target_date_suffix=date_suffix,
+                    reason=reason,
+                    operator_name=operator_name,
+                    scanned_by=user,
+                )
+
         docket = stock_monitoring_service.get_stock_transfer_request_docket(date_suffix)
-        return JsonResponse({"success": True, "docket": docket})
+        return JsonResponse({
+            "success": True,
+            "date_suffix": docket.get("work_date_suffix"),
+            "blocked_plates": docket.get("plates", []),
+            "count": docket.get("count", 0),
+            "docket": docket,
+        })
     except Exception as exc:
         logger.exception("api_stock_blocked_plates error: %s", exc)
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
 @require_POST
-@require_itms_envelope
+@require_itms_envelope(allow_expired=True)
 def api_stock_verify_batch(request: HttpRequest) -> JsonResponse:
     """
     Verifies a pasted batch of license plates against stock without creating dispatches.
@@ -662,6 +729,7 @@ def api_stock_verify_batch(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": "No valid license plates found."}, status=400)
 
     try:
+        user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
         active_bond = bond_service.get_active_bond()
         verify_res = kit_provisioning_service.verify_scanned_kits_stock(
             clean_plates,
@@ -675,7 +743,12 @@ def api_stock_verify_batch(request: HttpRequest) -> JsonResponse:
         blocked = rejected_not_on_stock + already_installed
 
         if blocked:
-            stock_monitoring_service.record_blocked_plates(blocked, date_suffix)
+            stock_monitoring_service.record_blocked_plates(
+                blocked,
+                date_suffix,
+                scanned_by=user,
+                operator_name=getattr(user, "username", "") or "Operator",
+            )
 
         docket = stock_monitoring_service.get_stock_transfer_request_docket(date_suffix, blocked_plates=blocked)
 
@@ -921,7 +994,7 @@ def api_stock_kits_readiness(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
-@require_itms_envelope
+@require_itms_envelope(allow_expired=True)
 def api_stock_shift_details(request: HttpRequest) -> JsonResponse:
     """Returns detailed lists of dispatches, movements, and audits for the web UI."""
     from django.utils import timezone
@@ -935,10 +1008,18 @@ def api_stock_shift_details(request: HttpRequest) -> JsonResponse:
     )
     _, suffix = stock_monitoring_service.resolve_date_and_suffix(date_suffix)
 
-    # 1. Dispatches
-    dispatches = list(StockDispatchScan.objects.filter(work_date_suffix=suffix).order_by("-dispatched_at")[:150].values(
+    # 1. Dispatches (up to 2000 rows so large 500+ kit shifts are never truncated at 150)
+    dispatches = list(StockDispatchScan.objects.filter(work_date_suffix=suffix).order_by("-dispatched_at")[:2000].values(
         "id", "registration_number", "plate_category", "dispatched_at", "status", "operator_name"
     ))
+    if dispatches:
+        disp_plates = [d["registration_number"] for d in dispatches if d.get("registration_number")]
+        disp_kit_map = {
+            k.registration_number: (getattr(k, "gps_tracker", "") or getattr(k, "gps_tracker_id", "") or "-")
+            for k in InstallationKit.objects.filter(registration_number__in=disp_plates)
+        }
+        for d in dispatches:
+            d["gps_tracker"] = disp_kit_map.get(d["registration_number"], "-")
     
     # 2. Movements
     movements = []
@@ -1014,6 +1095,7 @@ def api_stock_shift_details(request: HttpRequest) -> JsonResponse:
     total_dispatched = StockDispatchScan.objects.filter(work_date_suffix=suffix).count()
     psv_dispatched = StockDispatchScan.objects.filter(work_date_suffix=suffix, plate_category="PSV").count()
     pmo_dispatched = StockDispatchScan.objects.filter(work_date_suffix=suffix, plate_category="PMO").count()
+    blocked_plates = stock_monitoring_service.get_blocked_plates_for_date(suffix)
 
     return JsonResponse({
         "success": True,
@@ -1021,6 +1103,8 @@ def api_stock_shift_details(request: HttpRequest) -> JsonResponse:
         "dispatches": dispatches,
         "movements": movements,
         "audits": audits,
+        "blocked_plates": blocked_plates,
+        "blocked_count": len(blocked_plates),
         "dispatch_summary": {
             "total": total_dispatched,
             "psv": psv_dispatched,
@@ -1039,7 +1123,7 @@ def api_stock_inspect(request: HttpRequest) -> JsonResponse:
     """
     from core.vision import normalizer
     from core.models import InstallationKit, StockDispatchScan, InstallationOrder
-    from core.services import stock_monitoring_service
+    from core.services import stock_monitoring_service, kit_provisioning_service
     from django.db.models import Q
 
     raw_plate = request.GET.get("plate", "").strip()
@@ -1049,6 +1133,7 @@ def api_stock_inspect(request: HttpRequest) -> JsonResponse:
     clean_p = normalizer.canonicalize(raw_plate) or raw_plate.upper().replace(" ", "")
     display_p = stock_monitoring_service.extract_single_plate(raw_plate) or clean_p
     date_suffix = request.GET.get("date_suffix") or request.GET.get("suffix")
+    _, resolved_suffix = stock_monitoring_service.resolve_date_and_suffix(date_suffix)
 
     target_codes = [f"IK-{clean_p}", f"IK-{display_p}"]
     kit = InstallationKit.objects.filter(
@@ -1061,14 +1146,38 @@ def api_stock_inspect(request: HttpRequest) -> JsonResponse:
         Q(registration_number__iexact=clean_p) | Q(registration_number__iexact=display_p)
     )
     if date_suffix:
-        _, suffix = stock_monitoring_service.resolve_date_and_suffix(date_suffix)
-        scan = scan_qs.filter(work_date_suffix=suffix).order_by("-dispatched_at").first() or scan_qs.order_by("-dispatched_at").first()
+        scan = scan_qs.filter(work_date_suffix=resolved_suffix).order_by("-dispatched_at").first() or scan_qs.order_by("-dispatched_at").first()
     else:
         scan = scan_qs.order_by("-dispatched_at").first()
 
     order = InstallationOrder.objects.filter(
         Q(registration_number__iexact=clean_p) | Q(registration_number__iexact=display_p)
     ).first()
+
+    # Tier 2: If kit is not in local synced InstallationKit records and not already dispatched/installed,
+    # look it up live on the ITMS app (/installation-kits) and sync into local DB if it exists.
+    synced_from_itms = False
+    order_already_installed = bool(
+        order and (order.is_archived or (order.order_status or "").strip().lower() == "installed")
+    )
+    if kit is None and scan is None and not order_already_installed:
+        check_live_param = request.GET.get("check_itms_live", "true").strip().lower()
+        check_itms_live = check_live_param not in ("0", "false", "no")
+        if check_itms_live:
+            try:
+                verify_res = kit_provisioning_service.verify_scanned_kit_stock(
+                    clean_p,
+                    check_itms_live=True,
+                )
+                kit = InstallationKit.objects.filter(
+                    Q(registration_number__iexact=clean_p) |
+                    Q(registration_number__iexact=display_p) |
+                    Q(kit_code__in=target_codes)
+                ).first()
+                if kit is not None or verify_res.get("source") == "itms_live":
+                    synced_from_itms = True
+            except Exception as exc:
+                logger.debug("Live ITMS lookup during api_stock_inspect failed for %s: %s", clean_p, exc)
 
     category = "PSV"
     if scan and getattr(scan, "plate_category", "") == "PMO":
@@ -1119,8 +1228,27 @@ def api_stock_inspect(request: HttpRequest) -> JsonResponse:
         status_code = "NOT_ON_STOCK"
         status_badge = "⛔ NOT ON STOCK"
         status_badge_class = "badge-red"
-        status_desc = "Plate not found in local warehouse inventory."
+        status_desc = "Not found in synced kits or live ITMS app. Set physical box aside!"
         is_blocked = True
+
+    if status_code == "ALREADY_INSTALLED":
+        is_blocked = True
+
+    # Persist blocked / not-on-stock plate to server immediately so Mobile Companion & Web UI match
+    record_blocked_param = request.GET.get("record_blocked", "true").strip().lower()
+    should_record_blocked = record_blocked_param not in ("0", "false", "no")
+    user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
+    if is_blocked and should_record_blocked:
+        blocked_plates = stock_monitoring_service.record_blocked_plates(
+            [clean_p],
+            target_date_suffix=resolved_suffix,
+            reason=status_code,
+            operator_name=getattr(user, "username", "") or "Operator",
+            scanned_by=user,
+            plate_category=category,
+        )
+    else:
+        blocked_plates = stock_monitoring_service.get_blocked_plates_for_date(resolved_suffix)
 
     has_telematics = bool(kit and (getattr(kit, "gps_tracker", None) or getattr(kit, "gps_tracker_id", None)))
     if not has_telematics:
@@ -1181,6 +1309,10 @@ def api_stock_inspect(request: HttpRequest) -> JsonResponse:
         "canonical_plate": clean_p,
         "category": category,
         "is_blocked": is_blocked,
+        "synced_from_itms": synced_from_itms,
+        "date_suffix": resolved_suffix,
+        "blocked_plates": blocked_plates,
+        "blocked_count": len(blocked_plates),
         "stock_status": {
             "code": status_code,
             "badge": status_badge,

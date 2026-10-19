@@ -37,6 +37,7 @@ from core.models import (
     InstallationOrder,
     PlateCategory,
     SafeAuditScan,
+    StockBlockedScan,
     StockBondTransfer,
     StockDelivery,
     StockDeliveryItem,
@@ -489,7 +490,14 @@ def record_dispatch_scans(
             err_msg = f"Kits not on stock cannot be taken out! {'; '.join(reasons)}"
             blocked_all = rejected_not_on_stock + already_installed
             if blocked_all:
-                record_blocked_plates(blocked_all, suffix)
+                record_blocked_plates(
+                    blocked_all,
+                    suffix,
+                    operator_name=operator_name or "Operator",
+                    scanned_by=dispatched_by,
+                    plate_category=category,
+                    bond_code=b_code,
+                )
             docket = get_stock_transfer_request_docket(suffix, blocked_plates=blocked_all)
             return {
                 "success": False,
@@ -585,7 +593,14 @@ def record_dispatch_scans(
 
     blocked_all = rejected_not_on_stock + already_installed
     if blocked_all:
-        record_blocked_plates(blocked_all, suffix)
+        record_blocked_plates(
+            blocked_all,
+            suffix,
+            operator_name=operator_name or "Operator",
+            scanned_by=dispatched_by,
+            plate_category=category,
+            bond_code=b_code,
+        )
         res_payload["blocked_plates"] = blocked_all
         res_payload["docket"] = get_stock_transfer_request_docket(suffix, blocked_plates=blocked_all)
         warn_parts = []
@@ -1649,6 +1664,8 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         "unallocated_plates": unresolved_discrepancy,
         "spiked_undispatched_count": spiked_undispatched_count,
         "spiked_undispatched_plates": spiked_undispatched_plates,
+        "blocked_plates": get_blocked_plates_for_date(suffix),
+        "blocked_count": len(get_blocked_plates_for_date(suffix)),
         "physical_count": ledger.physical_count or 0,
         "variance": ledger.variance or 0,
         "has_physical_count": bool(ledger.physical_count is not None and ledger.physical_count > 0),
@@ -1917,29 +1934,73 @@ def record_blocked_plates(
     plates: Iterable[str],
     target_date_suffix: Optional[str] = None,
     reason: str = "NOT ON ITMS STOCK",
+    operator_name: str = "Operator",
+    scanned_by: Optional[Any] = None,
+    plate_category: str = PlateCategory.PSV,
+    bond_code: Optional[str] = None,
 ) -> List[str]:
     """
-    Persistently records plates that were blocked at dispatch for a shift.
-    Merges with previously recorded blocked plates so that end-of-day reports
-    retain all non-stock plates from both single barcode scans and Excel batch pastes.
+    Persistently records plates that were blocked at dispatch or inspection for a shift.
+    Saves atomically to both the StockBlockedScan database table and the export JSON cache
+    so all logged-in devices (Mobile Companion, Desktop Web UI, TUI) and end-of-day reports
+    share the exact same list of non-stock plates set aside.
     """
-    _, suffix = resolve_date_and_suffix(target_date_suffix)
+    work_d, suffix = resolve_date_and_suffix(target_date_suffix)
     new_clean = parse_plate_input(plates)
     cache_file = get_blocked_plates_cache_file(suffix)
 
-    existing: List[str] = []
+    existing_file: List[str] = []
     if cache_file.exists():
         try:
             with open(cache_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, list):
-                    existing = [p for p in data if isinstance(p, str)]
+                    existing_file = [p for p in data if isinstance(p, str)]
                 elif isinstance(data, dict):
-                    existing = data.get("plates", [])
+                    existing_file = data.get("plates", [])
         except Exception as exc:
             logger.warning("Error reading blocked plates cache: %s", exc)
 
-    combined = parse_plate_input(existing + new_clean)
+    active_bond = bond_service.get_active_bond()
+    b_code = (bond_code or active_bond.get("code", "AGM")).strip().upper()
+    cat = PlateCategory.PMO if str(plate_category).strip().upper() == "PMO" else PlateCategory.PSV
+
+    existing_db: List[str] = []
+    try:
+        all_to_ensure = parse_plate_input(existing_file + new_clean)
+        if all_to_ensure:
+            with transaction.atomic():
+                already_in_db = set(
+                    StockBlockedScan.objects.filter(
+                        work_date_suffix=suffix,
+                        registration_number__in=all_to_ensure,
+                    ).values_list("registration_number", flat=True)
+                )
+                rows = [
+                    StockBlockedScan(
+                        registration_number=p,
+                        plate_category=PlateCategory.PMO if "PMO" in p.upper() else cat,
+                        work_date=work_d,
+                        work_date_suffix=suffix,
+                        bond_code=b_code,
+                        reason=reason or "NOT ON ITMS STOCK",
+                        scanned_by=scanned_by,
+                        operator_name=operator_name or "Operator",
+                    )
+                    for p in all_to_ensure
+                    if p not in already_in_db
+                ]
+                if rows:
+                    StockBlockedScan.objects.bulk_create(rows, ignore_conflicts=True)
+        existing_db = list(
+            StockBlockedScan.objects.filter(work_date_suffix=suffix)
+            .order_by("scanned_at", "id")
+            .values_list("registration_number", flat=True)
+        )
+    except Exception as db_exc:
+        logger.warning("Error persisting blocked plates to database: %s", db_exc)
+
+    combined = parse_plate_input(existing_db + existing_file + new_clean)
     try:
         with open(cache_file, "w", encoding="utf-8") as f:
             json.dump({
@@ -1955,20 +2016,75 @@ def record_blocked_plates(
 
 
 def get_blocked_plates_for_date(target_date_suffix: Optional[str] = None) -> List[str]:
-    """Returns all accumulated plates blocked at dispatch for the target date."""
-    _, suffix = resolve_date_and_suffix(target_date_suffix)
+    """Returns all accumulated plates blocked at dispatch or inspection for the target date."""
+    work_d, suffix = resolve_date_and_suffix(target_date_suffix)
+    db_plates: List[str] = []
+    try:
+        db_plates = list(
+            StockBlockedScan.objects.filter(work_date_suffix=suffix)
+            .order_by("scanned_at", "id")
+            .values_list("registration_number", flat=True)
+        )
+    except Exception as db_exc:
+        logger.debug("Database blocked plates query notice: %s", db_exc)
+
+    file_plates: List[str] = []
     cache_file = get_blocked_plates_cache_file(suffix)
     if cache_file.exists():
         try:
             with open(cache_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, list):
-                    return [p for p in data if isinstance(p, str)]
+                    file_plates = [p for p in data if isinstance(p, str)]
                 elif isinstance(data, dict):
-                    return data.get("plates", [])
+                    file_plates = data.get("plates", [])
         except Exception as exc:
             logger.warning("Error reading blocked plates cache: %s", exc)
-    return []
+
+    # Backfill any file-only blocked plates into StockBlockedScan so DB stays authoritative
+    if file_plates:
+        missing_in_db = [p for p in parse_plate_input(file_plates) if p not in set(db_plates)]
+        if missing_in_db:
+            try:
+                active_bond = bond_service.get_active_bond()
+                b_code = active_bond.get("code", "AGM").strip().upper()
+                StockBlockedScan.objects.bulk_create(
+                    [
+                        StockBlockedScan(
+                            registration_number=p,
+                            plate_category=PlateCategory.PMO if "PMO" in p.upper() else PlateCategory.PSV,
+                            work_date=work_d,
+                            work_date_suffix=suffix,
+                            bond_code=b_code,
+                            reason="NOT ON ITMS STOCK",
+                        )
+                        for p in missing_in_db
+                    ],
+                    ignore_conflicts=True,
+                )
+            except Exception:
+                pass
+
+    return parse_plate_input(db_plates + file_plates)
+
+
+def clear_blocked_plates_for_date(target_date_suffix: Optional[str] = None) -> int:
+    """Clears accumulated blocked plates for the given shift from both DB and cache file."""
+    _, suffix = resolve_date_and_suffix(target_date_suffix)
+    deleted_count = 0
+    try:
+        deleted_count, _ = StockBlockedScan.objects.filter(work_date_suffix=suffix).delete()
+    except Exception as exc:
+        logger.warning("Error clearing blocked plates from DB: %s", exc)
+
+    cache_file = get_blocked_plates_cache_file(suffix)
+    if cache_file.exists():
+        try:
+            cache_file.unlink()
+        except Exception as exc:
+            logger.warning("Error removing blocked plates cache file: %s", exc)
+
+    return deleted_count
 
 
 def export_blocked_kits_csv(

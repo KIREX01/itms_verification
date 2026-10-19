@@ -830,18 +830,17 @@ async function checkShiftBlockedPlates() {
 
 async function openNotOnStockModal(data) {
     if (!data) {
-        if (lastNotOnStockData) {
-            data = lastNotOnStockData;
-        } else {
-            try {
-                const res = await fetch(`/api/stock/blocked-plates/?date_suffix=${currentStockDateSuffix}`);
-                const resData = await res.json();
-                if (resData.success && resData.docket) {
-                    data = resData.docket;
-                }
-            } catch (e) {
-                console.error(e);
+        try {
+            const res = await fetch(`/api/stock/blocked-plates/?date_suffix=${currentStockDateSuffix}`);
+            const resData = await res.json();
+            if (resData.success && resData.docket) {
+                data = resData.docket;
             }
+        } catch (e) {
+            console.error(e);
+        }
+        if (!data && lastNotOnStockData) {
+            data = lastNotOnStockData;
         }
     }
 

@@ -1023,6 +1023,57 @@ class SafeAuditScan(models.Model):
         return f"{self.registration_number} ({self.plate_category}) Safe Audit {self.work_date_suffix}"
 
 
+class StockBlockedScan(models.Model):
+    """
+    Persistent database log of plates scanned at dispatch or inspection that were
+    NOT on stock (or already installed) and set aside for the shift.
+    Ensures all logged-in devices (Mobile Companion, Desktop Web UI, TUI) share
+    a unified, durable 'Not on Stock / Set Aside' list across workers.
+    """
+    registration_number = models.CharField(max_length=32, db_index=True)
+    plate_category = models.CharField(
+        max_length=8,
+        choices=PlateCategory.choices,
+        default=PlateCategory.PSV,
+        db_index=True,
+    )
+    work_date = models.DateField(default=timezone.localdate, db_index=True)
+    work_date_suffix = models.CharField(
+        max_length=16,
+        db_index=True,
+        help_text="6-digit date suffix, e.g. 260926",
+    )
+    bond_code = models.CharField(max_length=32, blank=True, default="AGM", db_index=True)
+    reason = models.CharField(max_length=255, blank=True, default="NOT ON ITMS STOCK")
+    scanned_at = models.DateTimeField(default=timezone.now, db_index=True)
+    scanned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="blocked_scans",
+    )
+    operator_name = models.CharField(max_length=150, blank=True, default="Operator")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["scanned_at", "id"]
+        verbose_name_plural = "Stock blocked scans"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["work_date_suffix", "registration_number"],
+                name="unique_blocked_scan_per_shift",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["work_date_suffix", "registration_number"]),
+            models.Index(fields=["work_date", "plate_category"]),
+        ]
+
+    def __str__(self):
+        return f"{self.registration_number} ({self.plate_category}) Blocked {self.work_date_suffix}: {self.reason}"
+
+
 class DailyStockLedger(models.Model):
     """
     Daily stock reconciliation snapshot and accounting ledger per work date.

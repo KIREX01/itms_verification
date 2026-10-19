@@ -15,6 +15,7 @@ from core.models import (
     OperatorITMSSession,
     OperatorProfile,
     SafeAuditScan,
+    StockBlockedScan,
     StockBondTransfer,
     StockDelivery,
     StockDeliveryItem,
@@ -228,6 +229,17 @@ class SafeAuditScanAdmin(admin.ModelAdmin):
     )
     list_filter = ("plate_category", "bond_code", "work_date")
     search_fields = ("registration_number", "bond_code", "scanned_by", "operator_name")
+    readonly_fields = ("created_at",)
+
+
+@admin.register(StockBlockedScan)
+class StockBlockedScanAdmin(admin.ModelAdmin):
+    list_display = (
+        "registration_number", "plate_category", "bond_code",
+        "reason", "scanned_by", "scanned_at", "work_date",
+    )
+    list_filter = ("plate_category", "bond_code", "reason", "work_date")
+    search_fields = ("registration_number", "bond_code", "reason", "operator_name")
     readonly_fields = ("created_at",)
 
 

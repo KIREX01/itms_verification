@@ -1981,3 +1981,98 @@ class StockMonitoringTests(TestCase):
         self.assertEqual(item["result"], "FAILURE")
         self.assertIn("Rate limit exceeded", item["message"])
 
+    @patch("core.services.kit_provisioning_service.get_web_client")
+    def test_api_stock_inspect_two_tier_itms_lookup_and_blocked_sync(self, mock_get_client):
+        """
+        Verifies:
+        1. When a scanned plate is not in local synced InstallationKit records, /api/stock/inspect/
+           looks it up live on the ITMS app and syncs it into local DB if found (ON_STOCK).
+        2. If the plate does not exist on the ITMS app either, /api/stock/inspect/ marks it
+           NOT_ON_STOCK (put aside) AND automatically persists it to the server's StockBlockedScan
+           table so the web app (/api/stock/blocked-plates/) has the exact same Not-on-Stock list.
+        """
+        from core.models import StockBlockedScan
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        # Case 1: Plate UMA701IT is missing locally, but exists on live ITMS -> synced & ON_STOCK
+        def side_effect_fetch_kits(page=1, search_params=None, allow_local_fallback=False):
+            q = str(search_params or "").replace(" ", "").upper()
+            if "UMA701IT" in q:
+                return {
+                    "success": True,
+                    "count": 1,
+                    "kits": [{
+                        "kit_code": "IK-UMA701IT",
+                        "registration_number": "UMA701IT",
+                        "status": "New",
+                        "warehouse": "AGM SPIRO",
+                        "gps_tracker": "IMEI-701701",
+                    }],
+                }
+            return {"success": True, "count": 0, "kits": []}
+
+        mock_client.fetch_installation_kits.side_effect = side_effect_fetch_kits
+        mock_client.sync_kits_to_local_db.side_effect = lambda kits: [
+            InstallationKit.objects.update_or_create(
+                registration_number=k["registration_number"],
+                defaults={
+                    "kit_code": k["kit_code"],
+                    "status": k["status"],
+                    "warehouse": k["warehouse"],
+                    "gps_tracker": k.get("gps_tracker", ""),
+                },
+            )
+            for k in kits
+        ]
+
+        resp_found = self.client.get(f"/api/stock/inspect/?plate=UMA701IT&date_suffix={self.test_suffix}")
+        self.assertEqual(resp_found.status_code, 200)
+        data_found = resp_found.json()
+        self.assertTrue(data_found["success"])
+        self.assertFalse(data_found["is_blocked"])
+        self.assertTrue(data_found["synced_from_itms"])
+        self.assertEqual(data_found["stock_status"]["code"], "ON_STOCK")
+        self.assertTrue(InstallationKit.objects.filter(registration_number="UMA701IT").exists())
+
+        # Case 2: Plate UZZ404NS does not exist locally OR on live ITMS -> NOT_ON_STOCK & persisted on server
+        resp_missing = self.client.get(f"/api/stock/inspect/?plate=UZZ404NS&date_suffix={self.test_suffix}")
+        self.assertEqual(resp_missing.status_code, 200)
+        data_missing = resp_missing.json()
+        self.assertTrue(data_missing["success"])
+        self.assertTrue(data_missing["is_blocked"])
+        self.assertEqual(data_missing["stock_status"]["code"], "NOT_ON_STOCK")
+        self.assertIn("UZZ404NS", data_missing["blocked_plates"])
+
+        # Verify DB table StockBlockedScan and web app endpoint /api/stock/blocked-plates/ both have UZZ404NS
+        self.assertTrue(
+            StockBlockedScan.objects.filter(
+                work_date_suffix=self.test_suffix,
+                registration_number="UZZ404NS",
+            ).exists()
+        )
+        web_blocked_resp = self.client.get(f"/api/stock/blocked-plates/?date_suffix={self.test_suffix}")
+        self.assertEqual(web_blocked_resp.status_code, 200)
+        web_blocked_data = web_blocked_resp.json()
+        self.assertIn("UZZ404NS", web_blocked_data["blocked_plates"])
+        self.assertIn("UZZ404NS", web_blocked_data["docket"]["plates"])
+
+        # Case 3: Phone or web UI can also POST additional blocked plates to /api/stock/blocked-plates/
+        post_blocked = self.client.post(
+            "/api/stock/blocked-plates/",
+            data=json.dumps({
+                "plates": ["UZZ405NS", "UZZ406NS"],
+                "date_suffix": self.test_suffix,
+                "operator_name": "Mobile Scanner 1",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(post_blocked.status_code, 200)
+        post_data = post_blocked.json()
+        self.assertEqual(post_data["count"], 3)
+        self.assertIn("UZZ404NS", post_data["blocked_plates"])
+        self.assertIn("UZZ405NS", post_data["blocked_plates"])
+        self.assertIn("UZZ406NS", post_data["blocked_plates"])
+
+

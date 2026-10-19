@@ -776,12 +776,32 @@ class OrderSyncService:
         except Exception as prov_err:
             logger.debug("Automatic kit provisioning notice during shift sync: %s", prov_err)
 
+        # Step 4: Auto-resolve transferred blocked plates & reconcile shift reports
+        reconcile_res: Dict[str, Any] = {}
+        blocked_res: Dict[str, Any] = {}
+        try:
+            from core.services import stock_monitoring_service
+            blocked_res = stock_monitoring_service.resolve_transferred_blocked_plates(
+                target_date_suffix=resolved_target,
+                check_itms_live=False,
+            )
+            reconcile_res = stock_monitoring_service.reconcile_and_update_shift(
+                target_date_suffix=resolved_target,
+                operator_name="Background Sync Worker",
+                auto_create_kits=False,
+                export_csvs=True,
+            )
+        except Exception as rec_err:
+            logger.debug("Automatic shift reconciliation notice during shift sync: %s", rec_err)
+
         date_label = archive_res.get("target_date") or "today"
         return {
             "success": True,
             "active": active_res,
             "archive": archive_res,
             "kits": kits_res,
+            "blocked_resolution": blocked_res,
+            "reconciliation": reconcile_res.get("summary", {}),
             "target_date": date_label,
             "message": (
                 f"Shift Sync Complete: {active_res.get('total_active_seen', 0)} active orders, "
@@ -828,35 +848,65 @@ class OrderSyncService:
 
 class ShiftOrderSyncDaemon:
     """
-    Thread-safe background daemon worker for recurring ITMS shift order synchronization.
+    Smart Multi-Cadence & Event-Triggered Background Sync Worker.
 
-    Continuously synchronizes:
-    1. Active installation orders from stock.itms.ug/installation-orders/index
-    2. Completed shift archive from stock.itms.ug/installation-orders/archive
-    3. Installation kits stock readiness
+    Heartbeat Schedule:
+    - Wakes up every 3 minutes (180s) during active hours (06:00–22:00 local time)
+      and every 15 minutes (900s) overnight (22:00–06:00).
 
-    Ensures local database and Reports hub are 100% accurate without manual operator clicks.
+    Tiered Task Cadences & Reactive Triggers:
+    1. Active Orders Check (every 10 mins / 600s):
+       Fetches active installation orders from /installation-orders/index.
+       - NEW-DAY / NEW-ORDER TRIGGER: When a new day's order suffix or newly created
+         orders are detected, immediately triggers Installation Kits provisioning
+         (bypassing the 3-hour timer) and Archive + Shift Reconciliation.
+       - DISAPPEARANCE TRIGGER: When orders disappear from the active index (completed),
+         immediately triggers the Archive check and Shift Reconciliation.
+    2. Archive Check (every 20 mins / 1200s, or on trigger):
+       Syncs /installation-orders/archive for the active shift and today.
+    3. Installation Kits & Blocked Plates Check (every 3 hours / 10800s, or on new-day trigger):
+       Syncs /installation-kits/index, provisions warehouse kits for active orders,
+       and re-validates 'Not on Stock' blocked plates (auto-clearing any that were transferred).
+    4. Automatic Shift Reconciliation & Reports Refresh:
+       Automatically updates DailyStockLedger, StockDispatchScan statuses, and CSV exports
+       after any sync pass so Reports, Dashboard, and Stock are always up-to-date.
     """
 
     _instance: Optional["ShiftOrderSyncDaemon"] = None
     _lock = threading.Lock()
+
+    DEFAULT_ORDERS_INTERVAL = 600       # 10 minutes
+    DEFAULT_ARCHIVE_INTERVAL = 1200     # 20 minutes
+    DEFAULT_KITS_INTERVAL = 10800       # 3 hours
+    ACTIVE_TICK_SECONDS = 180           # 3 minutes (06:00–22:00)
+    OVERNIGHT_TICK_SECONDS = 900        # 15 minutes (22:00–06:00)
 
     def __init__(self, interval_seconds: Optional[int] = None):
         if interval_seconds is None:
             try:
                 from core.services import config_service
                 interval_seconds = int(
-                    config_service.get_setting("sync.order_sync_interval_seconds", 600)
+                    config_service.get_setting("sync.order_sync_interval_seconds", self.DEFAULT_ORDERS_INTERVAL)
                 )
             except Exception:
-                interval_seconds = 600
-        self.interval = max(int(interval_seconds or 600), 60)
+                interval_seconds = self.DEFAULT_ORDERS_INTERVAL
+        self.interval = max(int(interval_seconds or self.DEFAULT_ORDERS_INTERVAL), 60)
+        self.orders_interval = self.interval
+        self.archive_interval = max(int(self.DEFAULT_ARCHIVE_INTERVAL), 120)
+        self.kits_interval = max(int(self.DEFAULT_KITS_INTERVAL), 600)
+
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        self._wake_event = threading.Event()
         self._is_running = False
         self._last_run_time: Optional[datetime] = None
         self._last_result: Optional[Dict[str, Any]] = None
         self._last_sync_timestamp: float = 0.0
+        self._last_orders_sync_ts: float = 0.0
+        self._last_archive_sync_ts: float = 0.0
+        self._last_kits_sync_ts: float = 0.0
+        self._known_order_suffixes: Set[str] = set()
+        self._pending_day_triggers: Set[str] = set()
         self._run_count = 0
 
     @classmethod
@@ -866,13 +916,34 @@ class ShiftOrderSyncDaemon:
                 cls._instance = cls(interval_seconds=interval_seconds)
             elif interval_seconds is not None:
                 cls._instance.interval = max(int(interval_seconds), 60)
+                cls._instance.orders_interval = cls._instance.interval
             return cls._instance
+
+    @classmethod
+    def get_tick_interval_seconds(cls, now_dt: Optional[datetime] = None) -> int:
+        """Returns 180s (3m) during active shift hours (06:00–22:00) and 900s (15m) overnight."""
+        local_dt = timezone.localtime(now_dt) if now_dt else timezone.localtime()
+        if 6 <= local_dt.hour < 22:
+            return cls.ACTIVE_TICK_SECONDS
+        return cls.OVERNIGHT_TICK_SECONDS
+
+    def notify_day_orders_detected(self, date_suffix: Optional[str] = None) -> None:
+        """
+        External or internal trigger: notifies the background worker that a day's orders
+        have been detected or selected, waking the worker immediately.
+        """
+        if date_suffix:
+            clean_sfx = str(date_suffix).strip()
+            if len(clean_sfx) == 6 and clean_sfx.isdigit():
+                self._pending_day_triggers.add(clean_sfx)
+        self._wake_event.set()
 
     def start(self) -> bool:
         with self._lock:
             if self._is_running and self._thread and self._thread.is_alive():
                 return True
             self._stop_event.clear()
+            self._wake_event.clear()
             self._thread = threading.Thread(
                 target=self._run_loop,
                 daemon=True,
@@ -880,7 +951,12 @@ class ShiftOrderSyncDaemon:
             )
             self._is_running = True
             self._thread.start()
-            logger.info("ShiftOrderSyncDaemon started in background (interval: %ds / %.1fm).", self.interval, self.interval / 60.0)
+            logger.info(
+                "ShiftOrderSyncDaemon started (heartbeat: 3m active / 15m overnight | orders: %ds, archive: %ds, kits: %ds).",
+                self.orders_interval,
+                self.archive_interval,
+                self.kits_interval,
+            )
             return True
 
     def stop(self) -> None:
@@ -888,8 +964,185 @@ class ShiftOrderSyncDaemon:
             if not self._is_running:
                 return
             self._stop_event.set()
+            self._wake_event.set()
             self._is_running = False
             logger.info("ShiftOrderSyncDaemon stopping...")
+
+    def _collect_active_order_suffixes(self) -> Set[str]:
+        """Extracts 6-digit DDMMYY suffixes from currently active orders in the local DB."""
+        suffixes: Set[str] = set()
+        try:
+            order_nums = InstallationOrder.objects.filter(
+                is_active_on_itms=True,
+                is_archived=False,
+            ).values_list("order_number", flat=True)[:1000]
+            for onum in order_nums:
+                if onum:
+                    m = re.search(r"-(\d{6})$", str(onum).strip())
+                    if m:
+                        suffixes.add(m.group(1))
+        except Exception:
+            pass
+        return suffixes
+
+    def run_scheduled_cycle(self, force: bool = False) -> Dict[str, Any]:
+        """
+        Executes one intelligent background cycle:
+        - Checks Active Orders every 10 mins (or on forced/day trigger).
+        - Detects new day's orders or newly created orders -> immediately triggers Kits + Archive + Reconcile.
+        - Detects disappeared active orders -> immediately triggers Archive + Reconcile.
+        - Checks Archive every 20 mins.
+        - Checks Kits & resolves 'Not on Stock' blocked plates every 3 hours (or on new-day trigger).
+        - Auto-reconciles shift ledger & exports CSV reports whenever data updates.
+        """
+        from core.services import config_service, date_service, kit_provisioning_service, stock_monitoring_service
+
+        if not config_service.is_itms_enabled():
+            return {
+                "success": False,
+                "paused": True,
+                "message": "ITMS Master Switch is PAUSED.",
+            }
+
+        now_ts = time.time()
+        pending_triggers = set(self._pending_day_triggers)
+        self._pending_day_triggers.clear()
+
+        orders_due = force or bool(pending_triggers) or (self._last_orders_sync_ts == 0.0) or ((now_ts - self._last_orders_sync_ts) >= self.orders_interval)
+        archive_due = force or (self._last_archive_sync_ts == 0.0) or ((now_ts - self._last_archive_sync_ts) >= self.archive_interval)
+        kits_due = force or (self._last_kits_sync_ts == 0.0) or ((now_ts - self._last_kits_sync_ts) >= self.kits_interval)
+
+        if not (orders_due or archive_due or kits_due):
+            return {
+                "success": True,
+                "status": "idle_tick",
+                "message": "No scheduled sync tasks due on this heartbeat tick.",
+            }
+
+        sync_svc = OrderSyncService()
+        active_sfx = date_service.get_active_shift_suffix()
+        today_sfx = date_service.format_date_suffix(timezone.localdate())
+        target_suffixes: Set[str] = {s for s in (active_sfx, today_sfx) if s}
+        target_suffixes.update(pending_triggers)
+
+        cycle_summary: Dict[str, Any] = {
+            "success": True,
+            "triggered_events": [],
+            "tasks_executed": [],
+        }
+        if pending_triggers:
+            cycle_summary["triggered_events"].append(f"manual_or_day_trigger:{','.join(sorted(pending_triggers))}")
+
+        # Seed known suffixes before syncing if first run
+        if not self._known_order_suffixes:
+            self._known_order_suffixes = self._collect_active_order_suffixes()
+
+        # 1. Active Orders Sync (10-min cadence)
+        active_res: Dict[str, Any] = {}
+        if orders_due:
+            active_res = sync_svc.sync_active_orders(force=True, max_pages=25)
+            self._last_orders_sync_ts = time.time()
+            cycle_summary["active"] = active_res
+            cycle_summary["tasks_executed"].append("active_orders")
+
+            current_suffixes = self._collect_active_order_suffixes()
+            new_suffixes = current_suffixes - self._known_order_suffixes
+            self._known_order_suffixes.update(current_suffixes)
+
+            created_orders = int(active_res.get("created", 0) or 0)
+            disappeared_orders = int(active_res.get("disappeared_to_archive", 0) or 0)
+
+            if new_suffixes or created_orders > 0 or pending_triggers:
+                kits_due = True
+                archive_due = True
+                target_suffixes.update(new_suffixes)
+                cycle_summary["triggered_events"].append(
+                    f"new_day_orders_detected(created={created_orders},new_shifts={sorted(new_suffixes)})"
+                )
+                logger.info(
+                    "ShiftOrderSyncDaemon: Detected new orders (created=%d, new_shifts=%s) -> triggering immediate Kits & Archive sync.",
+                    created_orders,
+                    sorted(new_suffixes),
+                )
+
+            if disappeared_orders > 0:
+                archive_due = True
+                cycle_summary["triggered_events"].append(
+                    f"orders_completed_to_archive(count={disappeared_orders})"
+                )
+                logger.info(
+                    "ShiftOrderSyncDaemon: Detected %d order(s) moved to archive -> triggering immediate Archive sync.",
+                    disappeared_orders,
+                )
+
+        # 2. Archive Sync (20-min cadence or triggered)
+        archive_res: Dict[str, Any] = {}
+        if archive_due:
+            for sfx in sorted(target_suffixes):
+                archive_res = sync_svc.sync_archive_today(
+                    target_date=sfx,
+                    force=True,
+                    max_pages=25,
+                )
+            self._last_archive_sync_ts = time.time()
+            cycle_summary["archive"] = archive_res
+            cycle_summary["tasks_executed"].append("archive_orders")
+
+        # 3. Installation Kits & Blocked Plates Resolution (3-hour cadence or triggered by new day's orders)
+        kits_res: Dict[str, Any] = {}
+        if kits_due:
+            kits_res = sync_svc.sync_installation_kits_scoped(max_pages=10, force=True)
+            for sfx in sorted(target_suffixes):
+                try:
+                    prov_res = kit_provisioning_service.sync_and_provision_warehouse_kits(
+                        target_date_suffix=sfx,
+                        sync_itms=False,
+                    )
+                    kits_res["provisioning"] = prov_res
+                except Exception as prov_err:
+                    logger.debug("Kit provisioning notice for shift %s: %s", sfx, prov_err)
+            self._last_kits_sync_ts = time.time()
+            cycle_summary["kits"] = kits_res
+            cycle_summary["tasks_executed"].append("installation_kits")
+
+        # 4. Always re-check blocked ('Not on Stock') plates & auto-reconcile shift reports after any task execution
+        reconciled_shifts: Dict[str, Any] = {}
+        resolved_blocked: Dict[str, Any] = {}
+        for sfx in sorted(target_suffixes):
+            try:
+                b_res = stock_monitoring_service.resolve_transferred_blocked_plates(
+                    target_date_suffix=sfx,
+                    check_itms_live=kits_due,
+                )
+                if b_res.get("resolved_count", 0) > 0:
+                    resolved_blocked[sfx] = b_res
+            except Exception as b_err:
+                logger.debug("Blocked plates auto-resolution notice for %s: %s", sfx, b_err)
+
+            try:
+                rec_res = stock_monitoring_service.reconcile_and_update_shift(
+                    target_date_suffix=sfx,
+                    operator_name="Background Sync Worker",
+                    auto_create_kits=False,
+                    export_csvs=True,
+                )
+                reconciled_shifts[sfx] = rec_res.get("summary", {})
+            except Exception as rec_err:
+                logger.debug("Auto-reconcile notice for shift %s: %s", sfx, rec_err)
+
+        cycle_summary["resolved_blocked"] = resolved_blocked
+        cycle_summary["reconciled_shifts"] = reconciled_shifts
+        cycle_summary["tasks_executed"].append("shift_reconciliation")
+        cycle_summary["message"] = (
+            f"Background cycle complete: executed {', '.join(cycle_summary['tasks_executed'])} "
+            f"for shift(s) {', '.join(sorted(target_suffixes))}."
+        )
+
+        self._last_run_time = timezone.now()
+        self._last_sync_timestamp = time.time()
+        self._last_result = cycle_summary
+        self._run_count += 1
+        return cycle_summary
 
     def trigger_sync(
         self,
@@ -915,17 +1168,29 @@ class ShiftOrderSyncDaemon:
 
         sync_svc = OrderSyncService()
         res = sync_svc.sync_shift_scoped(target_date=target_date, force=force)
+        now_done = time.time()
         self._last_run_time = timezone.now()
-        self._last_sync_timestamp = time.time()
+        self._last_sync_timestamp = now_done
+        self._last_orders_sync_ts = now_done
+        self._last_archive_sync_ts = now_done
+        self._last_kits_sync_ts = now_done
         self._last_result = res
         self._run_count += 1
         return res
 
     def get_status(self) -> Dict[str, Any]:
+        tick_sec = self.get_tick_interval_seconds()
         return {
             "is_running": self._is_running,
             "interval_seconds": self.interval,
             "interval_minutes": round(self.interval / 60.0, 1),
+            "heartbeat_tick_seconds": tick_sec,
+            "orders_interval_seconds": self.orders_interval,
+            "archive_interval_seconds": self.archive_interval,
+            "kits_interval_seconds": self.kits_interval,
+            "last_orders_sync_ts": self._last_orders_sync_ts or None,
+            "last_archive_sync_ts": self._last_archive_sync_ts or None,
+            "last_kits_sync_ts": self._last_kits_sync_ts or None,
             "run_count": self._run_count,
             "last_run_time": self._last_run_time.isoformat() if self._last_run_time else None,
             "last_result": self._last_result,
@@ -937,18 +1202,21 @@ class ShiftOrderSyncDaemon:
         if not self._stop_event.wait(timeout=5.0):
             try:
                 close_old_connections()
-                self.trigger_sync(force=False)
+                self.run_scheduled_cycle(force=False)
             except Exception as exc:
                 logger.debug("Initial ShiftOrderSyncDaemon pass notice: %s", exc)
             finally:
                 close_old_connections()
 
         while not self._stop_event.is_set():
-            if self._stop_event.wait(timeout=float(self.interval)):
+            wait_sec = float(self.get_tick_interval_seconds())
+            self._wake_event.wait(timeout=wait_sec)
+            self._wake_event.clear()
+            if self._stop_event.is_set():
                 break
             try:
                 close_old_connections()
-                self.trigger_sync(force=False)
+                self.run_scheduled_cycle(force=False)
             except Exception as exc:
                 logger.warning("Periodic ShiftOrderSyncDaemon pass encountered error: %s", exc)
             finally:

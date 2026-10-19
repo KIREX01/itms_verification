@@ -2087,6 +2087,84 @@ def clear_blocked_plates_for_date(target_date_suffix: Optional[str] = None) -> i
     return deleted_count
 
 
+def resolve_transferred_blocked_plates(
+    target_date_suffix: Optional[str] = None,
+    check_itms_live: bool = False,
+) -> Dict[str, Any]:
+    """
+    Re-checks plates currently recorded in StockBlockedScan ('Not on Stock') for a shift.
+    If any blocked plate has since been transferred into ITMS warehouse stock (found in
+    InstallationKit with status 'New' / verified on stock), removes it from the blocked list.
+    """
+    _, suffix = resolve_date_and_suffix(target_date_suffix)
+    current_blocked = get_blocked_plates_for_date(suffix)
+    if not current_blocked:
+        return {
+            "work_date_suffix": suffix,
+            "resolved_plates": [],
+            "remaining_plates": [],
+            "resolved_count": 0,
+        }
+
+    from core.services import kit_provisioning_service
+    allow_live = bool(check_itms_live and len(current_blocked) <= 40)
+    verify_res = kit_provisioning_service.verify_scanned_kits_stock(
+        current_blocked,
+        check_itms_live=allow_live,
+    )
+    now_in_stock = set(parse_plate_input(verify_res.get("verified_plates", [])))
+    if not now_in_stock:
+        return {
+            "work_date_suffix": suffix,
+            "resolved_plates": [],
+            "remaining_plates": current_blocked,
+            "resolved_count": 0,
+        }
+
+    resolved = [p for p in current_blocked if p in now_in_stock]
+    remaining = [p for p in current_blocked if p not in now_in_stock]
+
+    try:
+        StockBlockedScan.objects.filter(
+            work_date_suffix=suffix,
+            registration_number__in=resolved,
+        ).delete()
+    except Exception as exc:
+        logger.warning("Error deleting resolved blocked plates from DB: %s", exc)
+
+    cache_file = get_blocked_plates_cache_file(suffix)
+    try:
+        if remaining:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "work_date_suffix": suffix,
+                        "count": len(remaining),
+                        "updated_at": timezone.now().isoformat(),
+                        "plates": remaining,
+                    },
+                    f,
+                    indent=2,
+                )
+        elif cache_file.exists():
+            cache_file.unlink()
+    except Exception as exc:
+        logger.warning("Error updating blocked plates cache file after resolution: %s", exc)
+
+    logger.info(
+        "Auto-resolved %d previously blocked plate(s) now found in ITMS stock for shift %s: %s",
+        len(resolved),
+        suffix,
+        ", ".join(resolved),
+    )
+    return {
+        "work_date_suffix": suffix,
+        "resolved_plates": resolved,
+        "remaining_plates": remaining,
+        "resolved_count": len(resolved),
+    }
+
+
 def export_blocked_kits_csv(
     blocked_plates: Optional[Iterable[str]] = None,
     reason: str = "Awaiting ITMS Stock Transfer Officer",

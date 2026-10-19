@@ -547,3 +547,98 @@ class ShiftOrderSyncDaemonTests(TestCase):
             res2 = daemon.trigger_sync(force=False)
             self.assertEqual(res2.get("status"), "cooldown_active")
             self.assertTrue(res2.get("cooldown_remaining_seconds", 0) > 0)
+
+    def test_scheduled_cycle_multi_cadence_and_day_order_trigger(self):
+        """
+        Verifies:
+        1. 3-minute active tick (06:00-22:00) vs 15-minute overnight tick.
+        2. 10m orders, 20m archive, and 3h kits cadences.
+        3. When new day's orders are detected during the 10m active orders check,
+           it immediately triggers kits provisioning, archive check, and shift reconciliation.
+        """
+        from datetime import datetime
+        from django.utils import timezone
+        from core.services.order_sync import ShiftOrderSyncDaemon
+
+        daemon = ShiftOrderSyncDaemon(interval_seconds=600)
+        tz = timezone.get_current_timezone()
+        day_dt = datetime(2026, 10, 20, 10, 0, 0, tzinfo=tz)
+        night_dt = datetime(2026, 10, 20, 23, 30, 0, tzinfo=tz)
+
+        self.assertEqual(daemon.get_tick_interval_seconds(day_dt), 180)
+        self.assertEqual(daemon.get_tick_interval_seconds(night_dt), 900)
+
+        # Simulate that archive and kits ran recently (5 mins ago), while orders is due (11 mins ago)
+        import time
+        now = time.time()
+        daemon._last_orders_sync_ts = now - 660
+        daemon._last_archive_sync_ts = now - 300
+        daemon._last_kits_sync_ts = now - 300
+
+        with patch("core.services.order_sync.OrderSyncService") as MockSvc, \
+             patch("core.services.kit_provisioning_service.sync_and_provision_warehouse_kits") as mock_prov, \
+             patch("core.services.stock_monitoring_service.reconcile_and_update_shift") as mock_rec, \
+             patch("core.services.stock_monitoring_service.resolve_transferred_blocked_plates") as mock_resolve:
+            mock_inst = MagicMock()
+            # Simulate 4 new orders created for the day -> should trigger immediate kits & archive sync!
+            mock_inst.sync_active_orders.return_value = {
+                "success": True,
+                "created": 4,
+                "updated": 0,
+                "disappeared_to_archive": 0,
+                "total_active_seen": 4,
+            }
+            mock_inst.sync_archive_today.return_value = {"success": True, "total_fetched": 2}
+            mock_inst.sync_installation_kits_scoped.return_value = {"success": True, "total_fetched": 20}
+            MockSvc.return_value = mock_inst
+            mock_prov.return_value = {"success": True}
+            mock_rec.return_value = {"summary": {"dispatched_count": 10}}
+            mock_resolve.return_value = {"resolved_count": 0, "resolved_plates": []}
+
+            cycle_res = daemon.run_scheduled_cycle(force=False)
+            self.assertTrue(cycle_res["success"])
+            self.assertIn("active_orders", cycle_res["tasks_executed"])
+            self.assertIn("archive_orders", cycle_res["tasks_executed"])
+            self.assertIn("installation_kits", cycle_res["tasks_executed"])
+            self.assertIn("shift_reconciliation", cycle_res["tasks_executed"])
+            self.assertTrue(any("new_day_orders_detected" in ev for ev in cycle_res["triggered_events"]))
+
+    def test_resolve_transferred_blocked_plates(self):
+        """
+        Verifies that plates recorded in StockBlockedScan ('Not on Stock') are automatically
+        cleared when they subsequently appear in InstallationKit as 'New' (transferred to stock).
+        """
+        from core.models import InstallationKit, StockBlockedScan
+        from core.services import stock_monitoring_service
+
+        suffix = "201026"
+        stock_monitoring_service.clear_blocked_plates_for_date(suffix)
+        stock_monitoring_service.record_blocked_plates(["UMA901AA", "UMA902BB"], target_date_suffix=suffix)
+        self.assertEqual(
+            set(stock_monitoring_service.get_blocked_plates_for_date(suffix)),
+            {"UMA901AA", "UMA902BB"},
+        )
+
+        # Warehouse officer transfers UMA901AA into ITMS stock -> synced into InstallationKit
+        InstallationKit.objects.create(
+            kit_code="IK-UMA901AA",
+            registration_number="UMA901AA",
+            status="New",
+            warehouse="AGM SPIRO",
+        )
+
+        res = stock_monitoring_service.resolve_transferred_blocked_plates(
+            target_date_suffix=suffix,
+            check_itms_live=False,
+        )
+        self.assertEqual(res["resolved_count"], 1)
+        self.assertEqual(res["resolved_plates"], ["UMA901AA"])
+        self.assertEqual(res["remaining_plates"], ["UMA902BB"])
+        self.assertEqual(
+            stock_monitoring_service.get_blocked_plates_for_date(suffix),
+            ["UMA902BB"],
+        )
+        self.assertFalse(
+            StockBlockedScan.objects.filter(work_date_suffix=suffix, registration_number="UMA901AA").exists()
+        )
+        stock_monitoring_service.clear_blocked_plates_for_date(suffix)

@@ -825,6 +825,13 @@ def api_shift_date(request: HttpRequest) -> JsonResponse:
                 return JsonResponse({"success": False, "error": f"Invalid date: '{target_str}'"}, status=400)
 
         active_shift = date_service.get_active_shift_info()
+        try:
+            from core.services.order_sync import ShiftOrderSyncDaemon
+            ShiftOrderSyncDaemon.get_instance().notify_day_orders_detected(
+                active_shift.get("suffix")
+            )
+        except Exception:
+            pass
         return JsonResponse({
             "success": True,
             "message": f"Active operating shift date set to {active_shift['display']}",

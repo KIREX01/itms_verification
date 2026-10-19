@@ -513,6 +513,10 @@ function updateUturnBatchIndicator() {
 // Mode Switching (Conveyor vs U-Turn vs Stock)
 // ============================================================================
 function switchMobileMode(mode) {
+    const batchBar = document.getElementById("batch-capacity-bar");
+    if (batchBar) {
+        batchBar.style.display = (mode === "stock" || mode === "order") ? "none" : "";
+    }
     if (mode !== "stock" && MobileState.stock && MobileState.stock.isScanning) {
         stopStockCameraScanner();
     }

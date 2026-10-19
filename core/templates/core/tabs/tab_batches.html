@@ -51,12 +51,19 @@
                             📷 + Upload Batch
                         </button>
                     </div>
+                    <!-- Mobile Date Scope Pills (Collapsed inside Drawer on Phone) -->
+                    <div class="scope-pills-group hide-desktop" style="display:flex; flex-wrap:wrap; gap:4px; width:100%; padding-top:4px; border-top:1px solid rgba(255,255,255,0.08);">
+                        <button type="button" class="scope-pill-btn active" onclick="setBatchesDateScope('TODAY')" style="flex:1; text-align:center; font-size:0.72rem; padding:5px 4px;">📅 Today</button>
+                        <button type="button" class="scope-pill-btn" onclick="setBatchesDateScope('ACTIVE_BATCH')" style="flex:1; text-align:center; font-size:0.72rem; padding:5px 4px;">⚡ Active</button>
+                        <button type="button" class="scope-pill-btn" onclick="setBatchesDateScope('CARRYOVER')" style="flex:1; text-align:center; font-size:0.72rem; padding:5px 4px;">⏳ Prior</button>
+                        <button type="button" class="scope-pill-btn" onclick="setBatchesDateScope('ALL')" style="flex:1; text-align:center; font-size:0.72rem; padding:5px 4px;">🌐 All</button>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- Batches Date Scope Bar (TUI Mirror) -->
-        <div class="scope-filter-bar">
+        <!-- Batches Date Scope Bar (TUI Mirror - Desktop; Mobile inside drawer) -->
+        <div class="scope-filter-bar hide-mobile">
             <div class="scope-filter-bar-left">
                 <span class="scope-filter-label" style="color:#ffffff !important; font-weight:800;">📅 SCOPE:</span>
                 <div class="scope-pills-group">

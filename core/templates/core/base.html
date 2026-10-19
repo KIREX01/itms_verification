@@ -32,18 +32,27 @@
     <meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'core/logos/android-chrome-512x512.png' %}">
     
     <!-- Dedicated Modular Stylesheets (Uganda National Flag Design System) -->
-    <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}?v=15">
-    <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}?v=15">
-    <link rel="stylesheet" href="{% static 'core/css/tab_dashboard.css' %}?v=14">
-    <link rel="stylesheet" href="{% static 'core/css/tab_itms.css' %}?v=12">
-    <link rel="stylesheet" href="{% static 'core/css/tab_batches.css' %}?v=14">
-    <link rel="stylesheet" href="{% static 'core/css/tab_queue.css' %}?v=11">
-    <link rel="stylesheet" href="{% static 'core/css/tab_history.css' %}?v=14">
-    <link rel="stylesheet" href="{% static 'core/css/tab_settings.css' %}?v=12">
-    <link rel="stylesheet" href="{% static 'core/css/tab_reports.css' %}?v=15">
-    <link rel="stylesheet" href="{% static 'core/css/tab_stock.css' %}?v=13">
-    <link rel="stylesheet" href="{% static 'core/css/modals.css' %}?v=13">
+    <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}?v=20">
+    <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}?v=20">
+    <link rel="stylesheet" href="{% static 'core/css/tab_dashboard.css' %}?v=20">
+    <link rel="stylesheet" href="{% static 'core/css/tab_itms.css' %}?v=20">
+    <link rel="stylesheet" href="{% static 'core/css/tab_batches.css' %}?v=20">
+    <link rel="stylesheet" href="{% static 'core/css/tab_queue.css' %}?v=20">
+    <link rel="stylesheet" href="{% static 'core/css/tab_history.css' %}?v=20">
+    <link rel="stylesheet" href="{% static 'core/css/tab_settings.css' %}?v=20">
+    <link rel="stylesheet" href="{% static 'core/css/tab_reports.css' %}?v=20">
+    <link rel="stylesheet" href="{% static 'core/css/tab_stock.css' %}?v=20">
+    <link rel="stylesheet" href="{% static 'core/css/modals.css' %}?v=20">
     <meta name="csrf-token" content="{{ csrf_token }}">
+    <style>
+        @media (min-width: 769px) {
+            .mobile-filter-funnel-btn, .hide-desktop { display: none !important; }
+        }
+        @media (max-width: 768px) {
+            .hide-mobile { display: none !important; }
+            .collapsible-filter-drawer:not(.is-open) { display: none !important; }
+        }
+    </style>
     {% block extra_css %}{% endblock %}
     <script>
         // Automatic CSRF token injection for state-mutating requests
@@ -82,16 +91,13 @@
 
     {% if is_mobile_device %}
     <!-- Mobile Device Station Switch Banner (Shown when a smartphone is viewing Desktop Supervisor Console) -->
-    <div class="mobile-switch-station-banner" id="mobile-switch-station-banner" style="background:#0f172a; border-bottom:2px solid #eab308; padding:8px 16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; font-size:0.8rem; color:#f1f5f9; z-index:999;">
-        <div style="display:flex; align-items:center; gap:8px;">
-            <span style="font-size:1.15rem;">📱</span>
-            <span><strong>Smartphone Detected:</strong> Ready to take photos or scan barcodes on ground?</span>
-        </div>
-        <div style="display:flex; align-items:center; gap:8px;">
-            <a href="{% url 'core:mobile_companion' %}?view=mobile" style="background:#eab308; color:#0f172a; font-weight:800; font-size:0.75rem; padding:5px 14px; border-radius:14px; text-decoration:none; display:inline-flex; align-items:center; gap:5px; box-shadow:0 2px 6px rgba(0,0,0,0.3);">
-                📷 Open Mobile Capture Station ➔
+    <div class="mobile-switch-station-banner" id="mobile-switch-station-banner" style="background:#0f172a; border-bottom:1px solid #eab308; padding:4px 10px; display:flex; justify-content:space-between; align-items:center; gap:6px; font-size:0.75rem; color:#f1f5f9; z-index:999;">
+        <span style="font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">📱 Ground Scanner Mode</span>
+        <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+            <a href="{% url 'core:mobile_companion' %}?view=mobile" style="background:#eab308; color:#0f172a; font-weight:800; font-size:0.72rem; padding:3px 10px; border-radius:12px; text-decoration:none;">
+                📷 Open Scanner ➔
             </a>
-            <button onclick="document.getElementById('mobile-switch-station-banner').style.display='none'" style="background:transparent; border:none; color:#94a3b8; font-size:1.1rem; cursor:pointer; padding:2px 6px;" title="Dismiss">&times;</button>
+            <button onclick="document.getElementById('mobile-switch-station-banner').style.display='none'" style="background:transparent; border:none; color:#94a3b8; font-size:1rem; cursor:pointer; padding:0 4px; line-height:1;" title="Dismiss">&times;</button>
         </div>
     </div>
     {% endif %}
@@ -107,7 +113,6 @@
                     <img src="{% static 'core/logos/favicon-32x32.png' %}" alt="Logo" class="brand-logo-img" style="width:28px; height:28px; border-radius:6px; object-fit:contain; margin-right:8px; display:inline-block; vertical-align:middle;">
                     <div class="brand-titles">
                         <span class="brand-name">CLOSE <span class="accent">COPILOT</span></span>
-                        <span class="brand-sub">Focus on plate audit, inspection, and inventory</span>
                     </div>
                 </div>
 
@@ -160,7 +165,6 @@
                     <img src="{% static 'core/logos/favicon-32x32.png' %}" alt="Logo" style="width:32px; height:32px; border-radius:6px; object-fit:contain; margin-right:8px; display:inline-block; vertical-align:middle;">
                     <div class="drawer-titles">
                         <span class="drawer-app-name">CLOSE COPILOT</span>
-                        <span class="drawer-sub">Plate Audit &amp; Inspection</span>
                     </div>
                 </div>
                 <button type="button" class="btn-close-mobile-nav" onclick="closeMobileMenu()" aria-label="Close Navigation" title="Close Menu">
@@ -263,21 +267,21 @@
     {% include "core/modals.html" %}
 
     <!-- Client Application Modular JavaScript -->
-    <script src="{% static 'core/js/vendor/qrcode.min.js' %}?v=12"></script>
-    <script src="{% static 'core/js/state.js' %}?v=12"></script>
-    <script src="{% static 'core/js/utils.js' %}?v=12"></script>
-    <script src="{% static 'core/js/navigation.js' %}?v=15"></script>
-    <script src="{% static 'core/js/tab_dashboard.js' %}?v=13"></script>
-    <script src="{% static 'core/js/tab_itms.js' %}?v=14"></script>
-    <script src="{% static 'core/js/tab_orders.js' %}?v=2"></script>
-    <script src="{% static 'core/js/tab_batches.js' %}?v=12"></script>
-    <script src="{% static 'core/js/tab_queue.js' %}?v=13"></script>
-    <script src="{% static 'core/js/tab_history.js' %}?v=14"></script>
-    <script src="{% static 'core/js/tab_settings.js' %}?v=13"></script>
-    <script src="{% static 'core/js/tab_reports.js' %}?v=16"></script>
-    <script src="{% static 'core/js/tab_stock.js' %}?v=18"></script>
-    <script src="{% static 'core/js/pipeline.js' %}?v=14"></script>
-    <script src="{% static 'core/js/app.js' %}?v=14"></script>
+    <script src="{% static 'core/js/vendor/qrcode.min.js' %}?v=20"></script>
+    <script src="{% static 'core/js/state.js' %}?v=20"></script>
+    <script src="{% static 'core/js/utils.js' %}?v=20"></script>
+    <script src="{% static 'core/js/navigation.js' %}?v=20"></script>
+    <script src="{% static 'core/js/tab_dashboard.js' %}?v=20"></script>
+    <script src="{% static 'core/js/tab_itms.js' %}?v=20"></script>
+    <script src="{% static 'core/js/tab_orders.js' %}?v=20"></script>
+    <script src="{% static 'core/js/tab_batches.js' %}?v=20"></script>
+    <script src="{% static 'core/js/tab_queue.js' %}?v=20"></script>
+    <script src="{% static 'core/js/tab_history.js' %}?v=20"></script>
+    <script src="{% static 'core/js/tab_settings.js' %}?v=20"></script>
+    <script src="{% static 'core/js/tab_reports.js' %}?v=20"></script>
+    <script src="{% static 'core/js/tab_stock.js' %}?v=20"></script>
+    <script src="{% static 'core/js/pipeline.js' %}?v=20"></script>
+    <script src="{% static 'core/js/app.js' %}?v=20"></script>
 
     {% block extra_js %}{% endblock %}
 </body>

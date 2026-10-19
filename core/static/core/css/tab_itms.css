@@ -724,9 +724,15 @@ table.itms-grid-table tbody tr.selected {
 
 @media (max-width: 480px) {
     .itms-subview-tabs {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
+        display: flex;
+        overflow-x: auto;
+        white-space: nowrap;
         gap: 4px;
+    }
+    .itms-subview-btn {
+        padding: 5px 8px;
+        min-height: 32px;
+        font-size: 0.74rem;
     }
 
     .itms-sync-actions-group {

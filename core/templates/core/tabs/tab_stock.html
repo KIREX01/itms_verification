@@ -96,7 +96,7 @@
     <div class="itms-split-view active">
         <!-- LEFT PANE: Main Operations (65%) -->
         <div class="itms-table-panel" style="padding: 14px;">
-            <div class="pane-header">
+            <div class="pane-header hide-mobile">
                 <h2>🏭 Bond Stock & Logistics</h2>
                 <div class="header-actions" style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                     <button class="btn btn-secondary" onclick="stockPrevDay()" title="Previous Shift">◀</button>
@@ -136,6 +136,14 @@
 
             <!-- Universal Command Bar (Collapsible Filter Drawer on Mobile) -->
             <div class="collapsible-filter-drawer" id="stock-filter-drawer">
+                <div class="hide-desktop" style="display:flex; align-items:center; justify-content:space-between; gap:6px; width:100%; padding-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.08);">
+                    <span style="font-size:0.75rem; font-weight:700; color:#38bdf8;">📅 Shift Navigation:</span>
+                    <div style="display:flex; gap:4px;">
+                        <button class="btn btn-secondary btn-sm" onclick="stockPrevDay()">◀ Prev</button>
+                        <button class="btn btn-primary btn-sm" onclick="stockToday()">Today</button>
+                        <button class="btn btn-secondary btn-sm" onclick="stockNextDay()">Next ▶</button>
+                    </div>
+                </div>
                 <div class="stock-command-bar" style="width:100%; margin-bottom:0;">
                     <select id="stock-category-select" class="form-control" style="width: 130px; font-weight: 600;" aria-label="Stock Category">
                         <option value="PSV">PSV White</option>

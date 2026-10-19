@@ -380,13 +380,26 @@ footer.app-footer {
 }
 
 @media (min-width: 769px) {
+    .mobile-filter-funnel-btn,
+    .hide-desktop {
+        display: none !important;
+    }
     .collapsible-filter-drawer {
-        display: contents !important;
+        display: flex !important;
+        align-items: center;
+        gap: 8px;
+    }
+    #queue-filter-drawer {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 6px !important;
+        width: 100% !important;
+    }
+    #stock-filter-drawer {
+        width: 100% !important;
     }
     .history-subnav-strip,
-    .reports-subnav-strip,
     .itms-subnav-strip,
-    .stock-subnav-strip,
     .batches-header-title-block,
     .batches-toolbar-controls,
     .reports-header-actions,
@@ -778,6 +791,42 @@ footer.app-footer {
             opacity: 1;
             transform: translateY(0);
         }
+    }
+
+
+    .hide-mobile {
+        display: none !important;
+    }
+
+    /* Keep subnav filter strips to 1 compact 38px row on phones */
+    .queue-subnav-strip,
+    .history-subnav-strip,
+    .stock-subnav-strip,
+    .itms-subnav-strip,
+    .batches-header-title-block {
+        width: 100% !important;
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        gap: 6px !important;
+        flex-wrap: nowrap !important;
+    }
+
+    .history-filter-chips {
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        white-space: nowrap !important;
+        scrollbar-width: none;
+    }
+    .history-filter-chips::-webkit-scrollbar {
+        display: none;
+    }
+    .history-filter-chips .history-chip {
+        flex: 0 0 auto !important;
+        white-space: nowrap !important;
+        padding: 4px 9px !important;
+        font-size: 0.74rem !important;
     }
 
     /* Subnav Strips on Mobile */

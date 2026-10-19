@@ -374,8 +374,33 @@
     }
 
     .stock-kpi-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-        gap: 6px;
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        gap: 6px !important;
+        margin-bottom: 8px !important;
+        padding-bottom: 4px !important;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+    .stock-kpi-grid::-webkit-scrollbar {
+        display: none;
+    }
+    .stock-kpi-card {
+        flex: 0 0 auto !important;
+        width: auto !important;
+        min-width: 105px !important;
+        padding: 5px 8px !important;
+        gap: 1px !important;
+    }
+    .stock-kpi-val {
+        font-size: 1rem !important;
+    }
+    .stock-kpi-sub {
+        display: none !important;
+    }
+    .stock-subnav-strip {
+        margin-bottom: 6px !important;
     }
 
     #stock-inspector-card {

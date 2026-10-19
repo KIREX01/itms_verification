@@ -27,7 +27,7 @@
     <meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'core/logos/android-chrome-512x512.png' %}">
     <meta property="og:type" content="website">
 
-    <link rel="stylesheet" href="{% static 'core/css/mobile_companion.css' %}?v=17">
+    <link rel="stylesheet" href="{% static 'core/css/mobile_companion.css' %}?v=20">
 </head>
 <body>
     <!-- Top National Flag Ribbon -->
@@ -37,25 +37,15 @@
         <!-- App Header Bar -->
         <header class="mobile-header">
             <div class="header-branding">
-                <img src="{% static 'core/logos/favicon-32x32.png' %}" alt="Logo" style="width:28px; height:28px; border-radius:6px; object-fit:contain; margin-right:8px; display:inline-block; vertical-align:middle;">
-                <div>
-                    <h1 class="brand-title">CLOSE MOBILE SCANNER</h1>
-                    <div class="brand-subtitle">
-                        PLATE AUDIT &amp; INSPECTION COMPANION
-                        {% if is_cloud_sync %}<span style="color:#10b981; font-weight:800; font-size:0.68rem; margin-left:4px;">• ☁️ CLOUD SYNCED</span>{% endif %}
-                    </div>
-                </div>
+                <img src="{% static 'core/logos/favicon-32x32.png' %}" alt="Logo" style="width:26px; height:26px; border-radius:6px; object-fit:contain; margin-right:8px; display:inline-block; vertical-align:middle;">
+                <h1 class="brand-title">CLOSE MOBILE SCANNER</h1>
             </div>
 
-            <!-- Header Controls: Device Lease Info, Console Switch, Signal Pill & Disconnect Button -->
+            <!-- Header Controls: Console Switch & Disconnect Button -->
             <div class="header-actions">
                 <a href="/?view=desktop" class="btn-switch-supervisor" id="btn-switch-supervisor" title="Open Desktop Supervisor Console">
                     💻 Console
                 </a>
-                <div class="signal-pill" id="signal-pill" onclick="toggleOutboxDrawer()">
-                    <span class="signal-dot" id="signal-dot">●</span>
-                    <span class="signal-text" id="signal-text">Connecting...</span>
-                </div>
                 <button class="btn-disconnect-session" id="btn-disconnect-session" title="Release connection slot for another phone" onclick="disconnectDeviceSession()">
                     ✕ Disconnect
                 </button>
@@ -69,15 +59,6 @@
                 <strong id="https-alert-title" style="color:#fde047; font-size:0.82rem;">Switch to HTTPS for Live Camera Scanner</strong>
                 <span id="https-alert-desc" style="display:block; font-size:0.75rem; color:#94a3b8; margin:2px 0 6px 0;">Mobile browsers disable live camera streaming on plain HTTP. Tap to switch to secure port 443:</span>
                 <a href="#" id="btn-switch-to-https" style="display:inline-block; padding:5px 12px; background:#eab308; color:#0f172a; font-weight:bold; font-size:0.75rem; border-radius:6px; text-decoration:none;">Switch to Secure HTTPS (Port 443) ➔</a>
-            </div>
-        </div>
-
-        <!-- Network / Signal Offline Alert Banner -->
-        <div class="network-alert-banner" id="network-alert-banner" style="display:none;">
-            <span class="alert-icon">📶</span>
-            <div class="alert-content">
-                <strong id="alert-title">Offline Buffering Active</strong>
-                <span id="alert-desc">Photos are saved locally on phone and will auto-sync when back in range.</span>
             </div>
         </div>
 
@@ -129,7 +110,6 @@
             <div class="bike-status-card">
                 <div class="bike-status-header">
                     <div>
-                        <span class="card-eyebrow">ASSEMBLY CONVEYOR INSPECTION</span>
                         <h2 class="bike-target-title" id="conveyor-bike-label">Motorcycle #1</h2>
                     </div>
                     <div class="bike-pair-state" id="conveyor-pair-badge">
@@ -347,7 +327,6 @@
             <div class="bike-status-card">
                 <div class="bike-status-header">
                     <div>
-                        <span class="card-eyebrow">BONDED WAREHOUSE STOCK SCANNER</span>
                         <h2 class="bike-target-title" id="stock-target-title">Dispatch to Line (Line Out)</h2>
                     </div>
                     <div class="bike-pair-state" id="stock-pair-badge">
@@ -515,7 +494,6 @@
             <div class="bike-status-card">
                 <div class="bike-status-header">
                     <div>
-                        <span class="card-eyebrow">WALK-IN QUICK INSTALLATION</span>
                         <h2 class="bike-target-title" style="font-size:1.1rem; color:#ffffff;">Order Lookup &amp; Verify</h2>
                     </div>
                     <span class="badge badge-yellow" id="m-order-stage-badge">Enter Order</span>
@@ -745,6 +723,6 @@
     </div>
 
     <!-- Client-Side Engine -->
-    <script src="{% static 'core/js/mobile_companion.js' %}?v=18"></script>
+    <script src="{% static 'core/js/mobile_companion.js' %}?v=20"></script>
 </body>
 </html>

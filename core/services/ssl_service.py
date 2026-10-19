@@ -127,6 +127,8 @@ def _generate_via_powershell_net(
     powershell_bin = shutil.which("powershell.exe") or "powershell.exe"
     all_sans = list(san_dns) + list(san_ips)
     sans_ps_list = ",".join(f'"{s}"' for s in all_sans)
+    cert_path_escaped = str(cert_path).replace("\\", "\\\\")
+    key_path_escaped = str(key_path).replace("\\", "\\\\")
 
     ps_code = f"""
 Add-Type -TypeDefinition @"
@@ -191,7 +193,7 @@ public class PemGen
     }}
 }}
 "@ -Language CSharp
-[PemGen]::Gen('{str(cert_path).replace("\\", "\\\\")}', '{str(key_path).replace("\\", "\\\\")}', @({sans_ps_list}))
+[PemGen]::Gen('{cert_path_escaped}', '{key_path_escaped}', @({sans_ps_list}))
 """
     try:
         cert_path.parent.mkdir(parents=True, exist_ok=True)

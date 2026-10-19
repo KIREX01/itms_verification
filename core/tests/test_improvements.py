@@ -837,7 +837,7 @@ class DryRunSafetyConfigurationAndLiveSubmissionTests(TestCase):
         }
 
         with self.settings(TESTING=True), \
-             patch.object(config_service, "get_setting", side_effect=lambda key, default=None: False if key == "submission.dry_run_mode" else True), \
+             patch.object(config_service, "get_setting", side_effect=lambda key, default=None, **kwargs: False if key == "submission.dry_run_mode" else True), \
              patch("core.services.itms_web_client.get_web_client", return_value=mock_client):
             # When dry_run is not explicitly provided, it must query config_service -> False
             outcome = submit_pair(self.pair, backend="web")
@@ -870,7 +870,7 @@ class DryRunSafetyConfigurationAndLiveSubmissionTests(TestCase):
             "is_finalized": True,
         }
 
-        with patch.object(config_service, "get_setting", side_effect=lambda key, default=None: True if key == "submission.dry_run_mode" else True):
+        with patch.object(config_service, "get_setting", side_effect=lambda key, default=None, **kwargs: True if key == "submission.dry_run_mode" else True):
             with patch("core.services.itms_web_client.get_web_client", return_value=mock_client):
                 outcome = submit_pair(self.pair, backend="web")
                 self.assertTrue(outcome.success)
@@ -1224,7 +1224,7 @@ class SmartCompressionAndOfflineOutboxTests(TestCase):
             "error": "Connection timed out (WinError 10054 Connection reset by peer)",
         }
 
-        def mock_get_setting(key, default=None):
+        def mock_get_setting(key, default=None, **kwargs):
             if key == "outbox.enabled":
                 return True
             return default if default is not None else True

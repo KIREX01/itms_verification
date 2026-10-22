@@ -14,6 +14,7 @@ matching against InstallationOrder is handled separately in
 core/matcher/order_matcher.py so the two concerns stay independently
 testable.
 """
+import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -22,6 +23,8 @@ from django.db import transaction
 
 from core.models import EvidenceImage, VehicleInstallationPair
 from core.services.camera_naming import extract_chronological_sort_key, parse_camera_filename
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -594,7 +597,11 @@ def _associate_batch_sequences(
     is_uturn_walk = (
         "uturn" in batch_label_lower
         or "u-turn" in batch_label_lower
-        or is_uturn_context
+        or any(
+            ("uturn" in (img.original_source_path or img.vault_file or "").lower()
+             or "u-turn" in (img.original_source_path or img.vault_file or "").lower())
+            for img in all_imgs
+        )
     )
     if is_uturn_walk and (total_batch_fronts == 0 or total_batch_rears == 0):
         logger.info(

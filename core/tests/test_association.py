@@ -57,6 +57,34 @@ class AssociationEngineTests(TestCase):
 
         self.assertEqual(summary.groups_processed, 0)
 
+    def test_batch_sequence_association_with_surplus_and_uturn(self):
+        from core.models import IngestionBatch
+        batch = IngestionBatch.objects.create(
+            batch_id="BATCH-UTURN-TEST-01",
+            source_label="U-Turn Yard Walk",
+        )
+        img_r1 = _make_image("UMA101A", EvidenceImage.Orientation.REAR, batch=batch)
+        img_r2 = _make_image("UMA102B", EvidenceImage.Orientation.REAR, batch=batch)
+        img_f1 = _make_image("UMA101A", EvidenceImage.Orientation.FRONT, batch=batch)
+
+        # Run association for this batch - must not raise NameError: is_uturn_context
+        summary = association.run_association(batch_id=batch.batch_id)
+        self.assertGreaterEqual(summary.complete_pairs, 1)
+
+    def test_uturn_single_orientation_skips_premature_incomplete_pairs(self):
+        from core.models import IngestionBatch
+        batch = IngestionBatch.objects.create(
+            batch_id="BATCH-UTURN-SINGLE-01",
+            source_label="Mobile Companion U-Turn Walk",
+        )
+        # Only rears taken so far (front walk leg not completed)
+        _make_image("UMA201X", EvidenceImage.Orientation.REAR, batch=batch)
+        _make_image("UMA202Y", EvidenceImage.Orientation.REAR, batch=batch)
+
+        summary = association.run_association(batch_id=batch.batch_id)
+        # Should cleanly return without crashing on is_uturn_context and not create incomplete pairs prematurely
+        self.assertEqual(summary.complete_pairs, 0)
+
 
 class OrderMatcherTests(TestCase):
     def setUp(self):

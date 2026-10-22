@@ -112,8 +112,25 @@ def api_stock_dispatch(request: HttpRequest) -> JsonResponse:
 
     # Ensure live floor scans from UI / Mobile Companion (which pass auto_create_kits=True)
     # always verify missing plates against the live ITMS app before rejecting as NOT_ON_STOCK.
+    referer = (request.META.get("HTTP_REFERER") or "").lower()
+    is_mobile_or_floor = auto_create_kits or ("/mobile" in referer)
     if auto_create_kits:
         check_itms_live = True
+
+    # Auto-align live floor dispatches to active shift date to prevent stale client suffix leakage
+    if is_mobile_or_floor:
+        from core.services import date_service
+        active_shift_suffix = date_service.get_active_shift_suffix()
+        if target_date:
+            _, td_sfx = date_service.resolve_date_and_suffix(target_date)
+            if td_sfx != active_shift_suffix:
+                logger.warning(
+                    "Auto-aligning live floor stock dispatch from stale suffix %s to active shift %s",
+                    td_sfx, active_shift_suffix,
+                )
+                target_date = active_shift_suffix
+        else:
+            target_date = active_shift_suffix
 
     try:
         user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None

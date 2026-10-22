@@ -322,3 +322,22 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
   4. **Automated Verification**:
      - Unit test suite implemented in `core/tests/test_direct_order_install.py` with 100% pass rate (6/6 tests passing).
 
+
+
+## 12. Feature: Mobile Companion Off-Conveyor (U-Turn Yard Walk) Session Resilience & Pair Protection - [COMPLETED]
+- **Core Requirements Implemented**:
+  1. **U-Turn Session Status API (`GET /api/mobile/uturn/session_status/`)**:
+     - Accepts `session_id` (`uturn_session_id`).
+     - Returns verified photo counts (`rear_count`, `front_count`, `total_photos`), matched pair counts, and batch existence so the mobile companion can reconcile and restore active walks seamlessly upon browser reload.
+  2. **U-Turn Walk Discard & Abort API (`POST /api/mobile/uturn/abort_session/`)**:
+     - Safely deletes unsubmitted incomplete pairs and unsubmitted evidence images associated with an aborted session.
+     - Relabels batch as `[ABORTED]` or cleans up empty batches, guaranteeing zero orphaned or corrupt pairs remain in the database.
+  3. **Batch Completeness Validation on `POST /api/mobile/uturn/finish_batch/`**:
+     - Prevents sealing an incomplete batch if only REAR photos (0 FRONTS) or only FRONT photos (0 REARS) were uploaded, returning `400 Bad Request` with `MISSING_FRONT_PHOTOS` / `MISSING_REAR_PHOTOS`.
+     - Supports explicit `allow_incomplete: true` flag for administrative single-orientation batch sealing.
+     - Triggers reverse-trajectory U-turn association and starts the vision pipeline.
+  4. **Premature Incomplete Pair Protection in Association Engine (`core/matcher/association.py`)**:
+     - In `_associate_batch_sequences`: If a batch is an Off-Conveyor U-Turn walk (`is_uturn_walk`) and has photos from only a single orientation (`total_batch_fronts == 0` or `total_batch_rears == 0`), skips creating incomplete `VehicleInstallationPair` records.
+     - Preserves evidence images as unassociated candidates until the companion return walk completes.
+  5. **Automated Verification**:
+     - Unit test suite in `core/tests/test_mobile_companion.py` updated with tests for status check, session abort, and single-orientation finish blocking with 100% pass rate (19/19 tests passing).

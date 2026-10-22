@@ -2029,12 +2029,10 @@ function advanceToNextBike() {
 
 
 // ============================================================================
-// MODE 2: Off-Conveyor (U-Turn Yard Walk) Actions
+// MODE 2: Off-Conveyor (U-Turn Yard Walk) Actions & State Management
 // ============================================================================
-function toggleUturnTurnaround() {
-    const isRear = (MobileState.uturn.phase === "REAR");
-    MobileState.uturn.phase = isRear ? "FRONT" : "REAR";
 
+function applyUturnPhaseUI(phase) {
     const roadRear = document.getElementById("road-step-rear");
     const roadFront = document.getElementById("road-step-front");
     const guidanceBar = document.getElementById("uturn-guidance-bar");
@@ -2046,7 +2044,7 @@ function toggleUturnTurnaround() {
     const turnaroundCallout = document.getElementById("turnaround-callout");
     const returnMatchBanner = document.getElementById("return-match-banner");
 
-    if (MobileState.uturn.phase === "FRONT") {
+    if (phase === "FRONT") {
         if (roadRear) { roadRear.classList.remove("active"); roadRear.classList.add("completed"); }
         if (roadFront) { roadFront.classList.add("active"); roadFront.classList.remove("completed"); }
 
@@ -2065,7 +2063,7 @@ function toggleUturnTurnaround() {
         if (returnMatchBanner) returnMatchBanner.style.display = "flex";
     } else {
         if (roadRear) { roadRear.classList.add("active"); roadRear.classList.remove("completed"); }
-        if (roadFront) { roadFront.classList.remove("active"); }
+        if (roadFront) { roadFront.classList.remove("active", "completed"); }
 
         if (guidanceBar) guidanceBar.className = "uturn-guidance-bar";
         if (guidanceIcon) guidanceIcon.textContent = "🚶";
@@ -2079,14 +2077,119 @@ function toggleUturnTurnaround() {
         if (shutterText) shutterText.textContent = "Capture REAR";
 
         if (returnMatchBanner) returnMatchBanner.style.display = "none";
-        if (turnaroundCallout && MobileState.uturn.rearCount > 0) {
-            turnaroundCallout.style.display = "flex";
-        } else if (turnaroundCallout) {
-            turnaroundCallout.style.display = "none";
+        if (turnaroundCallout) {
+            turnaroundCallout.style.display = (MobileState.uturn.rearCount > 0) ? "flex" : "none";
         }
     }
+}
 
+function saveUturnSessionState() {
+    try {
+        const state = {
+            active: MobileState.uturn.totalPhotos > 0,
+            walkSessionId: MobileState.uturn.walkSessionId,
+            batchIndex: MobileState.uturn.batchIndex,
+            phase: MobileState.uturn.phase,
+            rearCount: MobileState.uturn.rearCount,
+            frontCount: MobileState.uturn.frontCount,
+            totalPhotos: MobileState.uturn.totalPhotos,
+            recentTiles: (MobileState.uturn.recentTiles || []).map(t => ({
+                id: t.id,
+                orientation: t.orientation,
+                seqNum: t.seqNum,
+            })),
+            lastUpdated: new Date().toISOString(),
+        };
+        localStorage.setItem("itms_uturn_session_state", JSON.stringify(state));
+    } catch (e) {
+        console.warn("Could not save uturn session state to localStorage:", e);
+    }
+}
+
+async function loadUturnSessionFromStorage() {
+    try {
+        const raw = localStorage.getItem("itms_uturn_session_state");
+        if (!raw) return false;
+        const saved = JSON.parse(raw);
+        if (!saved || !saved.active || !saved.walkSessionId || saved.totalPhotos <= 0) {
+            return false;
+        }
+
+        MobileState.uturn.walkSessionId = saved.walkSessionId;
+        MobileState.uturn.batchIndex = saved.batchIndex || getInitialUturnBatchIndex();
+        MobileState.uturn.phase = saved.phase || "REAR";
+        MobileState.uturn.rearCount = saved.rearCount || 0;
+        MobileState.uturn.frontCount = saved.frontCount || 0;
+        MobileState.uturn.totalPhotos = saved.totalPhotos || 0;
+        MobileState.uturn.recentTiles = saved.recentTiles || [];
+
+        // Apply visual phase UI & counters
+        applyUturnPhaseUI(MobileState.uturn.phase);
+        updateUturnBatchIndicator();
+        updateUturnShutterCounter();
+
+        // Restore preview tiles
+        restoreUturnPreviewTiles(saved.recentTiles);
+
+        // Notify user of seamless session restoration
+        showMobileToast(`↩️ Resumed Walk: Batch #${MobileState.uturn.batchIndex} (${MobileState.uturn.rearCount} Rears, ${MobileState.uturn.frontCount} Fronts)`);
+
+        // Verify with server in background
+        void verifyUturnSessionWithServer(saved.walkSessionId);
+        return true;
+    } catch (e) {
+        console.warn("Error loading uturn session from storage:", e);
+        return false;
+    }
+}
+
+function restoreUturnPreviewTiles(tiles) {
+    const strip = document.getElementById("uturn-recent-strip");
+    if (!strip || !Array.isArray(tiles) || tiles.length === 0) return;
+
+    const emptyMsg = strip.querySelector(".empty-strip-msg");
+    if (emptyMsg) emptyMsg.remove();
+
+    strip.innerHTML = "";
+    const slice = tiles.slice(-20).reverse();
+    slice.forEach(t => {
+        const tile = document.createElement("div");
+        tile.className = "mini-tile";
+        tile.innerHTML = `
+            <div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#1e293b; color:#94a3b8; font-size:0.75rem; font-weight:700;">
+                ${t.orientation === 'FRONT' ? '🚙 FRONT' : '🏍️ REAR'}
+            </div>
+            <span class="mini-tile-badge" style="background:${t.orientation === 'FRONT' ? '#0284c7' : '#10b981'}">${t.orientation[0]}${t.seqNum}</span>
+        `;
+        strip.appendChild(tile);
+    });
+
+    const btnUndo = document.getElementById("btn-undo-snap");
+    if (btnUndo) btnUndo.style.display = tiles.length > 0 ? "inline-flex" : "none";
+}
+
+async function verifyUturnSessionWithServer(sessionId) {
+    if (!sessionId) return;
+    try {
+        const resp = await fetch(`/api/mobile/uturn/session_status/?session_id=${encodeURIComponent(sessionId)}`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (data && data.success && data.exists) {
+            console.log(`[U-Turn] Server verified: ${data.total_photos} photos (${data.rear_count} rears, ${data.front_count} fronts)`);
+        }
+    } catch (e) {
+        console.warn("[U-Turn] Server session verification notice:", e);
+    }
+}
+
+function toggleUturnTurnaround() {
+    const isRear = (MobileState.uturn.phase === "REAR");
+    MobileState.uturn.phase = isRear ? "FRONT" : "REAR";
+
+    applyUturnPhaseUI(MobileState.uturn.phase);
     updateUturnShutterCounter();
+    saveUturnSessionState();
+
     if (navigator.vibrate) navigator.vibrate([80, 40, 80]);
 }
 
@@ -2099,6 +2202,7 @@ function updateUturnShutterCounter() {
     const matchPercent = document.getElementById("return-match-percent");
     const matchFill = document.getElementById("match-progress-fill");
     const btnFinish = document.getElementById("btn-finish-uturn");
+    const btnAbort = document.getElementById("btn-abort-uturn");
 
     const rears = MobileState.uturn.rearCount;
     const fronts = MobileState.uturn.frontCount;
@@ -2107,6 +2211,10 @@ function updateUturnShutterCounter() {
     if (badgeRear) badgeRear.textContent = `${rears} Rears`;
     if (badgeFront) badgeFront.textContent = `${fronts} Fronts`;
     if (totalElem) totalElem.textContent = total;
+
+    if (btnAbort) {
+        btnAbort.style.display = (total > 0) ? "inline-flex" : "none";
+    }
 
     if (counterElem) {
         if (MobileState.uturn.phase === "REAR") {
@@ -2131,9 +2239,18 @@ function updateUturnShutterCounter() {
 
     if (btnFinish) {
         btnFinish.disabled = (total === 0);
-        if (rears > 0 && fronts === rears) {
+        if (rears > 0 && fronts === 0) {
+            btnFinish.classList.remove("ready");
+            btnFinish.innerHTML = `<span>⚠️ Need Fronts (${rears} Rears Taken)</span>`;
+        } else if (fronts > 0 && rears === 0) {
+            btnFinish.classList.remove("ready");
+            btnFinish.innerHTML = `<span>⚠️ Need Rears (${fronts} Fronts Taken)</span>`;
+        } else if (rears > 0 && fronts === rears) {
             btnFinish.classList.add("ready");
             btnFinish.innerHTML = `<span>✓ All ${rears} Pairs Matched ➔ Submit Batch</span>`;
+        } else if (rears > 0 && fronts > 0) {
+            btnFinish.classList.remove("ready");
+            btnFinish.innerHTML = `<span>🏁 Submit Batch (${Math.min(rears, fronts)} Pairs, ${Math.abs(rears - fronts)} Unpaired)</span>`;
         } else {
             btnFinish.classList.remove("ready");
             btnFinish.innerHTML = `<span>🏁 Complete U-Turn Batch (${total} photos)</span>`;
@@ -2188,6 +2305,8 @@ async function handleNativeUturnFileCaptured(inputElem) {
         seqNum: seqNum,
         file: file
     });
+
+    saveUturnSessionState();
 
     await savePhotoToOutbox(outboxItem);
     await refreshOutboxCount();
@@ -2279,23 +2398,138 @@ async function undoLastUturnSnap() {
         turnaroundCallout.style.display = "none";
     }
 
+    saveUturnSessionState();
     updateUturnShutterCounter();
     await refreshOutboxCount();
     if (navigator.vibrate) navigator.vibrate(50);
+}
+
+async function abortUturnBatch() {
+    const total = MobileState.uturn.totalPhotos;
+    const batchIdx = MobileState.uturn.batchIndex;
+    const sessionId = MobileState.uturn.walkSessionId;
+
+    if (!confirm(`Discard this U-Turn walk (Batch #${batchIdx} with ${total} photos)?\n\nThis will clear the active walk so no incomplete pairs are created.`)) {
+        return;
+    }
+
+    // Call server to abort session
+    try {
+        await fetch("/api/mobile/uturn/abort_session/", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                uturn_session_id: sessionId,
+                batch_index: batchIdx,
+                device_id: MobileState.deviceId
+            })
+        });
+    } catch (e) {
+        console.warn("Server abort call warning:", e);
+    }
+
+    // Clear local storage and IndexedDB outbox items for this session
+    try {
+        localStorage.removeItem("itms_uturn_session_state");
+        const db = await openOutboxDB();
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.getAll();
+        req.onsuccess = () => {
+            const items = req.result || [];
+            items.forEach(item => {
+                if (item.uturn_session_id === sessionId) {
+                    store.delete(item.id);
+                }
+            });
+        };
+    } catch (e) {
+        console.warn("Outbox cleanup error on abort:", e);
+    }
+
+    // Reset local state (keep batchIndex so user can retry Batch #N, or start clean)
+    MobileState.uturn.walkSessionId = generateUturnSessionId(MobileState.uturn.batchIndex);
+    MobileState.uturn.rearCount = 0;
+    MobileState.uturn.frontCount = 0;
+    MobileState.uturn.totalPhotos = 0;
+    MobileState.uturn.recentTiles = [];
+    MobileState.uturn.phase = "REAR";
+
+    const strip = document.getElementById("uturn-recent-strip");
+    if (strip) strip.innerHTML = '<div class="empty-strip-msg">Snapped photos will appear here</div>';
+    applyUturnPhaseUI("REAR");
+    updateUturnBatchIndicator();
+    updateUturnShutterCounter();
+    await refreshOutboxCount();
+
+    showMobileToast(`Walk session for Batch #${batchIdx} aborted. Ready for fresh walk.`);
 }
 
 async function finishUturnBatch() {
     const total = MobileState.uturn.totalPhotos;
     const rears = MobileState.uturn.rearCount;
     const fronts = MobileState.uturn.frontCount;
+    const btnFinish = document.getElementById("btn-finish-uturn");
 
     if (total === 0) {
         showMobileToast("No photos captured in this U-Turn walk yet.", true);
         return;
     }
 
+    // 1. Drain pending outbox uploads for this session first
+    const pending = await getPendingOutboxItems();
+    const sessionPending = pending.filter(i => i.uturn_session_id === MobileState.uturn.walkSessionId);
+    if (sessionPending.length > 0) {
+        showMobileToast(`Uploading ${sessionPending.length} remaining photo(s) to server... Please wait.`);
+        if (btnFinish) {
+            btnFinish.disabled = true;
+            btnFinish.innerHTML = `<span>Syncing outbox (${sessionPending.length} remaining)...</span>`;
+        }
+        await drainOutboxQueue();
+        const stillPending = await getPendingOutboxItems();
+        const stillSession = stillPending.filter(i => i.uturn_session_id === MobileState.uturn.walkSessionId);
+        if (stillSession.length > 0) {
+            if (btnFinish) {
+                btnFinish.disabled = false;
+                updateUturnShutterCounter();
+            }
+            showMobileToast(`Network issue: ${stillSession.length} photo(s) not yet synced. Check connection before completing.`, true);
+            return;
+        }
+    }
+
+    // 2. Completeness validation: Block single-orientation completion!
+    if (rears > 0 && fronts === 0) {
+        alert(
+            `Cannot complete batch:\n\n` +
+            `Only ${rears} REAR photo(s) were captured (0 FRONTS).\n\n` +
+            `A U-Turn walk requires FRONT photos walking back to pair each motorcycle.\n\n` +
+            `Tap "TURN AROUND" to take front photos walking back, or "Abort Walk" to discard.`
+        );
+        return;
+    }
+
+    if (fronts > 0 && rears === 0) {
+        alert(
+            `Cannot complete batch:\n\n` +
+            `Only ${fronts} FRONT photo(s) were captured (0 REARS).\n\n` +
+            `A U-Turn walk requires REAR photos to pair each motorcycle.`
+        );
+        return;
+    }
+
+    // 3. Count asymmetry confirmation
     if (rears !== fronts) {
-        if (!confirm(`Warning: Count asymmetry (${rears} Rears vs ${fronts} Fronts). Reverse trajectory matching will pair photos in reverse order. Proceed to submit batch anyway?`)) {
+        const matched = Math.min(rears, fronts);
+        const surplus = Math.abs(rears - fronts);
+        const surplusType = rears > fronts ? "Rears" : "Fronts";
+        if (!confirm(
+            `Count Asymmetry Warning:\n\n` +
+            `• ${rears} Rears vs ${fronts} Fronts\n` +
+            `• Only ${matched} motorcycle pairs will be created.\n` +
+            `• ${surplus} ${surplusType} will be surplus/unpaired.\n\n` +
+            `Do you want to proceed and submit this batch?`
+        )) {
             return;
         }
     } else {
@@ -2307,61 +2541,62 @@ async function finishUturnBatch() {
     const completedSessionId = MobileState.uturn.walkSessionId;
     const completedBatchIndex = MobileState.uturn.batchIndex;
 
-    // Advance batch index for next walk session
-    MobileState.uturn.batchIndex += 1;
-    MobileState.uturn.walkSessionId = generateUturnSessionId(MobileState.uturn.batchIndex);
-    try {
-        localStorage.setItem("itms_uturn_batch_index", String(MobileState.uturn.batchIndex));
-    } catch (e) {}
-
-    // Reset U-Turn state for next row
-    MobileState.uturn.rearCount = 0;
-    MobileState.uturn.frontCount = 0;
-    MobileState.uturn.totalPhotos = 0;
-    MobileState.uturn.recentTiles = [];
-    MobileState.uturn.phase = "REAR";
-
-    const strip = document.getElementById("uturn-recent-strip");
-    const turnaroundCallout = document.getElementById("turnaround-callout");
-    const returnMatchBanner = document.getElementById("return-match-banner");
-    const btnUndo = document.getElementById("btn-undo-snap");
-
-    if (strip) strip.innerHTML = '<div class="empty-strip-msg">Snapped photos will appear here</div>';
-    if (turnaroundCallout) turnaroundCallout.style.display = "none";
-    if (returnMatchBanner) returnMatchBanner.style.display = "none";
-    if (btnUndo) btnUndo.style.display = "none";
-
-    const roadRear = document.getElementById("road-step-rear");
-    const roadFront = document.getElementById("road-step-front");
-    if (roadRear) { roadRear.classList.add("active"); roadRear.classList.remove("completed"); }
-    if (roadFront) { roadFront.classList.remove("active", "completed"); }
-
-    const shutter = document.getElementById("btn-big-shutter");
-    const shutterText = document.getElementById("shutter-main-text");
-    if (shutter) {
-        shutter.classList.remove("shutter-front");
-        shutter.classList.add("shutter-rear");
+    if (btnFinish) {
+        btnFinish.disabled = true;
+        btnFinish.innerHTML = `<span>Sealing & Pairing Batch on Server...</span>`;
     }
-    if (shutterText) shutterText.textContent = "Capture REAR";
 
-    updateUturnBatchIndicator();
-    updateUturnShutterCounter();
-    drainOutboxQueue();
-
-    // Seal previous batch and trigger vision processing
     try {
-        fetch("/api/mobile/uturn/finish_batch/", {
+        const resp = await fetch("/api/mobile/uturn/finish_batch/", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 uturn_session_id: completedSessionId,
                 batch_index: completedBatchIndex,
-                device_id: MobileState.deviceId
+                device_id: MobileState.deviceId,
+                allow_incomplete: (rears !== fronts)
             })
-        }).catch(err => console.warn("Notice sealing uturn batch:", err));
-    } catch (e) {}
+        });
 
-    showMobileToast(`✓ Batch #${completedBatchIndex} queued for review! Now on Batch #${MobileState.uturn.batchIndex}.`);
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            throw new Error(data.error || "Server error sealing batch");
+        }
+
+        // Successfully sealed on server! Clean up local session state & advance batch index
+        localStorage.removeItem("itms_uturn_session_state");
+
+        MobileState.uturn.batchIndex += 1;
+        MobileState.uturn.walkSessionId = generateUturnSessionId(MobileState.uturn.batchIndex);
+        try {
+            localStorage.setItem("itms_uturn_batch_index", String(MobileState.uturn.batchIndex));
+        } catch (e) {}
+
+        // Reset counters for next walk
+        MobileState.uturn.rearCount = 0;
+        MobileState.uturn.frontCount = 0;
+        MobileState.uturn.totalPhotos = 0;
+        MobileState.uturn.recentTiles = [];
+        MobileState.uturn.phase = "REAR";
+
+        const strip = document.getElementById("uturn-recent-strip");
+        if (strip) strip.innerHTML = '<div class="empty-strip-msg">Snapped photos will appear here</div>';
+        applyUturnPhaseUI("REAR");
+        updateUturnBatchIndicator();
+        updateUturnShutterCounter();
+        await refreshOutboxCount();
+
+        const pairsCreated = data.pairs_count !== undefined ? data.pairs_count : Math.min(rears, fronts);
+        showMobileToast(`✓ Batch #${completedBatchIndex} completed! (${pairsCreated} pairs created). Now on Batch #${MobileState.uturn.batchIndex}.`);
+
+    } catch (finishErr) {
+        console.error("Error finishing uturn batch:", finishErr);
+        alert(`Failed to complete batch: ${finishErr.message}\n\nYour active photos and session state have been kept safe. Please try submitting again.`);
+        if (btnFinish) {
+            btnFinish.disabled = false;
+            updateUturnShutterCounter();
+        }
+    }
 }
 
 // ============================================================================
@@ -2449,6 +2684,11 @@ function initMobileCompanion() {
         loadStockQueueFromStorage();
     } catch (e) {
         console.error("Error in loadStockQueueFromStorage:", e);
+    }
+    try {
+        void loadUturnSessionFromStorage();
+    } catch (e) {
+        console.error("Error in loadUturnSessionFromStorage:", e);
     }
     try {
         startHeartbeat();

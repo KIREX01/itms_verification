@@ -586,6 +586,25 @@ def _associate_batch_sequences(
         summary.discrepancies.append(disc_msg)
         summary.details.append(f"⚠️  {disc_msg}")
 
+    # Guard for Off-Conveyor U-Turn batches:
+    # A U-Turn walk requires both directions (Rears outbound, Fronts return).
+    # If one full orientation is completely absent (0 fronts or 0 rears), the walk is either
+    # still in progress or incomplete. Do NOT create premature incomplete pairs!
+    batch_label_lower = (batch.source_label or "").lower() if batch else ""
+    is_uturn_walk = (
+        "uturn" in batch_label_lower
+        or "u-turn" in batch_label_lower
+        or is_uturn_context
+    )
+    if is_uturn_walk and (total_batch_fronts == 0 or total_batch_rears == 0):
+        logger.info(
+            "U-Turn batch %s has single orientation only (%d fronts, %d rears); skipping incomplete pair generation.",
+            batch.batch_id if batch else "UNKNOWN",
+            total_batch_fronts,
+            total_batch_rears,
+        )
+        return paired_image_ids
+
     # Commit incomplete pairs for final surplus photos
     base_idx = summary.complete_pairs
     for s_idx, f_img in enumerate(final_surplus_fronts, base_idx + 1):

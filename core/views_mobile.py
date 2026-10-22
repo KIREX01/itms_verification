@@ -13,11 +13,12 @@ from datetime import datetime
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
+from django.db.models import Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
 from core.models import EvidenceImage, IngestionBatch, VehicleInstallationPair
 from core.services import device_service, network_service, vault_service
@@ -396,55 +397,211 @@ def api_mobile_new_batch(request: HttpRequest) -> JsonResponse:
     })
 
 
+@require_http_methods(["GET", "POST"])
+def api_mobile_uturn_status(request: HttpRequest) -> JsonResponse:
+    """
+    Returns current sync status and photo counts for a specific U-Turn walk session.
+    Allows the mobile client to restore, verify, and reconcile state after browser reload.
+    """
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
+    uturn_session_id = request.GET.get("session_id", "").strip() or request.GET.get("uturn_session_id", "").strip()
+    if not uturn_session_id:
+        return JsonResponse({"success": False, "error": "session_id parameter required.", "code": "PARAM_REQUIRED"}, status=400)
+
+    batch = IngestionBatch.objects.filter(
+        source_type=IngestionBatch.SourceType.MOBILE,
+        source_label__contains=uturn_session_id,
+    ).first()
+
+    if not batch:
+        return JsonResponse({
+            "success": True,
+            "exists": False,
+            "uturn_session_id": uturn_session_id,
+            "rear_count": 0,
+            "front_count": 0,
+            "total_photos": 0,
+            "pairs_count": 0,
+        })
+
+    rear_count = batch.images.filter(orientation=EvidenceImage.Orientation.REAR).count()
+    front_count = batch.images.filter(orientation=EvidenceImage.Orientation.FRONT).count()
+    total_photos = batch.images.count()
+    pairs_count = VehicleInstallationPair.objects.filter(
+        Q(front_image__batch=batch) | Q(rear_image__batch=batch),
+        is_complete=True,
+    ).distinct().count()
+
+    return JsonResponse({
+        "success": True,
+        "exists": True,
+        "uturn_session_id": uturn_session_id,
+        "batch_id": batch.batch_id,
+        "batch_label": batch.source_label,
+        "rear_count": rear_count,
+        "front_count": front_count,
+        "total_photos": total_photos,
+        "pairs_count": pairs_count,
+        "created_at": batch.created_at.isoformat() if batch.created_at else None,
+    })
+
+
+@require_POST
+def api_mobile_uturn_abort(request: HttpRequest) -> JsonResponse:
+    """
+    Aborts / discards an in-progress U-Turn walk session.
+    Removes any unsubmitted incomplete pairs and unsubmitted evidence images associated
+    with this session so that aborted sessions do not pollute the database.
+    """
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
+    uturn_session_id = ""
+    if request.content_type == "application/json" and request.body:
+        try:
+            body = json.loads(request.body.decode("utf-8"))
+            uturn_session_id = body.get("uturn_session_id", "").strip() or body.get("session_id", "").strip()
+        except Exception:
+            pass
+    if not uturn_session_id:
+        uturn_session_id = request.POST.get("uturn_session_id", "").strip() or request.POST.get("session_id", "").strip()
+
+    if not uturn_session_id:
+        return JsonResponse({"success": False, "error": "uturn_session_id parameter required.", "code": "PARAM_REQUIRED"}, status=400)
+
+    batch = IngestionBatch.objects.filter(
+        source_type=IngestionBatch.SourceType.MOBILE,
+        source_label__contains=uturn_session_id,
+    ).first()
+
+    if not batch:
+        return JsonResponse({"success": True, "message": "No active batch found for session; nothing to discard."})
+
+    # Delete any unsubmitted pairs attached to this batch
+    deleted_pairs, _ = VehicleInstallationPair.objects.filter(
+        Q(front_image__batch=batch) | Q(rear_image__batch=batch)
+    ).exclude(verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED).delete()
+
+    # Delete unsubmitted evidence images
+    deleted_images, _ = EvidenceImage.objects.filter(
+        batch=batch
+    ).exclude(status=EvidenceImage.Status.SUBMITTED).delete()
+
+    # Relabel batch or remove if completely empty
+    remaining_images = batch.images.count()
+    if remaining_images == 0:
+        batch.delete()
+        logger.info("Discarded empty U-Turn walk batch for session %s", uturn_session_id)
+    else:
+        batch.source_label = f"[ABORTED] {batch.source_label}"
+        batch.save(update_fields=["source_label"])
+
+    return JsonResponse({
+        "success": True,
+        "message": f"U-Turn walk session {uturn_session_id} aborted successfully.",
+        "deleted_pairs": deleted_pairs,
+        "deleted_images": deleted_images,
+    })
+
+
 @require_POST
 def api_mobile_uturn_finish(request: HttpRequest) -> JsonResponse:
     """
     Completes / seals an Off-Conveyor U-Turn batch and triggers final association & vision processing.
+    Validates batch completeness: rejects single-orientation submissions (0 fronts) unless explicitly permitted.
     """
     if not (request.user and getattr(request.user, "is_authenticated", False)):
         return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
 
     uturn_session_id = ""
     batch_index = None
+    allow_incomplete = False
 
     if request.content_type == "application/json" and request.body:
         try:
             body = json.loads(request.body.decode("utf-8"))
             uturn_session_id = body.get("uturn_session_id", "").strip()
             batch_index = body.get("batch_index")
+            allow_incomplete = bool(body.get("allow_incomplete", False))
         except Exception:
             pass
     if not uturn_session_id:
         uturn_session_id = request.POST.get("uturn_session_id", "").strip()
+        allow_incomplete = request.POST.get("allow_incomplete", "").lower() in ("true", "1")
 
-    batch = None
-    if uturn_session_id:
-        batch = IngestionBatch.objects.filter(
-            source_type=IngestionBatch.SourceType.MOBILE,
-            source_label__contains=uturn_session_id,
-        ).first()
+    if not uturn_session_id:
+        return JsonResponse({"success": False, "error": "uturn_session_id is required to seal a batch.", "code": "PARAM_REQUIRED"}, status=400)
 
-    if not batch and uturn_session_id:
-        batch = vault_service.get_or_create_uturn_batch(
-            uturn_session_id=uturn_session_id,
-            batch_index=int(batch_index) if batch_index and str(batch_index).isdigit() else None,
-        )
+    batch = IngestionBatch.objects.filter(
+        source_type=IngestionBatch.SourceType.MOBILE,
+        source_label__contains=uturn_session_id,
+    ).first()
 
-    if batch:
-        try:
-            from core.matcher import association
-            association.run_association(batch_id=batch.batch_id)
-        except Exception as e:
-            logger.warning("U-turn finish association notice: %s", e)
+    if not batch:
+        return JsonResponse({
+            "success": False,
+            "error": f"No active U-Turn batch found for session '{uturn_session_id}'.",
+            "code": "BATCH_NOT_FOUND",
+        }, status=404)
 
-        try:
-            from core.services.pipeline_runner import runner as pipeline_runner
-            pipeline_runner.start_pipeline("vision", batch_id=batch.batch_id)
-        except Exception:
-            pass
+    r_count = batch.images.filter(orientation=EvidenceImage.Orientation.REAR).count()
+    f_count = batch.images.filter(orientation=EvidenceImage.Orientation.FRONT).count()
+    total_count = batch.images.count()
+
+    if total_count == 0:
+        return JsonResponse({
+            "success": False,
+            "error": "Cannot complete an empty batch. No photos have been uploaded for this session.",
+            "code": "EMPTY_BATCH",
+        }, status=400)
+
+    # Completeness guard: A U-Turn yard walk inherently requires both Front and Rear photos.
+    if not allow_incomplete:
+        if r_count > 0 and f_count == 0:
+            return JsonResponse({
+                "success": False,
+                "code": "MISSING_FRONT_PHOTOS",
+                "error": f"Cannot complete batch: Only {r_count} REAR photo(s) captured. A U-Turn walk requires FRONT photos walking back to pair motorcycles.",
+                "rear_count": r_count,
+                "front_count": f_count,
+            }, status=400)
+
+        if f_count > 0 and r_count == 0:
+            return JsonResponse({
+                "success": False,
+                "code": "MISSING_REAR_PHOTOS",
+                "error": f"Cannot complete batch: Only {f_count} FRONT photo(s) captured. A U-Turn walk requires REAR photos to pair motorcycles.",
+                "rear_count": r_count,
+                "front_count": f_count,
+            }, status=400)
+
+    pairs_count = 0
+    assoc_summary = None
+    try:
+        from core.matcher import association
+        assoc_summary = association.run_association(batch_id=batch.batch_id)
+        pairs_count = VehicleInstallationPair.objects.filter(
+            Q(front_image__batch=batch) | Q(rear_image__batch=batch),
+            is_complete=True,
+        ).distinct().count()
+    except Exception as e:
+        logger.warning("U-turn finish association notice: %s", e)
+
+    try:
+        from core.services.pipeline_runner import runner as pipeline_runner
+        pipeline_runner.start_pipeline("vision", batch_id=batch.batch_id)
+    except Exception:
+        pass
 
     return JsonResponse({
         "success": True,
-        "batch_id": batch.batch_id if batch else None,
-        "batch_label": batch.source_label if batch else None,
+        "batch_id": batch.batch_id,
+        "batch_label": batch.source_label,
+        "rear_count": r_count,
+        "front_count": f_count,
+        "total_photos": total_count,
+        "pairs_count": pairs_count,
+        "incomplete_count": getattr(assoc_summary, "incomplete", 0) if assoc_summary else 0,
     })

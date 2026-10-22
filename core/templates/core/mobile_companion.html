@@ -311,9 +311,12 @@
                 </div>
             </div>
 
-            <!-- Finish U-Turn Batch Button -->
-            <div class="uturn-footer-actions">
-                <button class="finish-batch-btn" id="btn-finish-uturn" onclick="finishUturnBatch()" disabled>
+            <!-- Finish U-Turn Batch Button & Abort Action -->
+            <div class="uturn-footer-actions" style="display:flex; gap:10px;">
+                <button class="btn-abort-uturn" id="btn-abort-uturn" onclick="abortUturnBatch()" style="display:none; flex:1; background:rgba(239,68,68,0.15); color:#ef4444; border:1px solid rgba(239,68,68,0.4); border-radius:10px; padding:12px; font-weight:700; font-size:0.85rem; cursor:pointer;" title="Discard current walk session and reset photos">
+                    <span>✕ Abort Walk</span>
+                </button>
+                <button class="finish-batch-btn" id="btn-finish-uturn" onclick="finishUturnBatch()" disabled style="flex:2;">
                     <span>🏁 Complete U-Turn Batch</span>
                 </button>
             </div>

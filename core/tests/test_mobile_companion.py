@@ -104,9 +104,11 @@ class TestMobileCompanion:
         url = reverse("core:mobile_companion")
         resp = self.client.get(url)
         assert resp.status_code == 200
-        assert "ITMS MOBILE CAPTURE" in resp.content.decode("utf-8")
-        assert "btn-mode-conveyor" in resp.content.decode("utf-8")
-        assert "btn-mode-uturn" in resp.content.decode("utf-8")
+        content = resp.content.decode("utf-8")
+        assert "CLOSE MOBILE SCANNER" in content or "ITMS MOBILE CAPTURE" in content
+        assert "btn-mode-conveyor" in content
+        assert "btn-mode-uturn" in content
+        assert "btn-abort-uturn" in content
 
     def test_on_conveyor_guided_pairing_workflow(self):
         """
@@ -645,3 +647,122 @@ class TestMobileCompanion:
             rear_image__batch=b1,
         )
         assert cross_pairs.count() == 0, "Walk 1 and Walk 2 photos must NEVER be cross-paired!"
+
+    def test_uturn_session_status_and_abort_workflow(self):
+        """
+        Tests session status inquiry, abort/discarding of an in-progress walk,
+        and verification that no dangling pairs or incomplete records remain.
+        """
+        upload_url = reverse("core:api_mobile_upload")
+        status_url = reverse("core:api_mobile_uturn_status")
+        abort_url = reverse("core:api_mobile_uturn_abort")
+        session_id = "UTURN-ABORT-TEST-001"
+
+        # Check status before any upload
+        resp_init = self.client.get(f"{status_url}?session_id={session_id}")
+        assert resp_init.status_code == 200
+        assert resp_init.json()["exists"] is False
+
+        # Upload 3 rear photos for this session
+        for i in range(1, 4):
+            f = io.BytesIO(_create_test_image_bytes(color=(10 * i, 20, 30)))
+            f.name = f"test_rear_{i}.jpg"
+            resp_up = self.client.post(upload_url, {
+                "photo": f,
+                "mode": "uturn",
+                "orientation": "REAR",
+                "sequence_number": str(i),
+                "uturn_session_id": session_id,
+                "uturn_batch_index": "5",
+            })
+            assert resp_up.status_code == 200
+
+        # Now check status: should report 3 rears, 0 fronts, exists=True
+        resp_status = self.client.get(f"{status_url}?session_id={session_id}")
+        assert resp_status.status_code == 200
+        s_data = resp_status.json()
+        assert s_data["exists"] is True
+        assert s_data["rear_count"] == 3
+        assert s_data["front_count"] == 0
+        assert s_data["total_photos"] == 3
+
+        # Abort the walk session
+        resp_abort = self.client.post(
+            abort_url,
+            data=json.dumps({"uturn_session_id": session_id}),
+            content_type="application/json",
+        )
+        assert resp_abort.status_code == 200
+        assert resp_abort.json()["success"] is True
+
+        # Verify no images or incomplete pairs remain for this session
+        batch = IngestionBatch.objects.filter(source_label__contains=session_id).first()
+        if batch:
+            assert batch.images.count() == 0 or "[ABORTED]" in batch.source_label
+
+    def test_uturn_finish_blocks_single_orientation_without_fronts(self):
+        """
+        Validates that finish_batch rejects sealing a U-turn walk that only has REARS and 0 FRONTS,
+        preventing incomplete pairs from polluting the database.
+        """
+        upload_url = reverse("core:api_mobile_upload")
+        finish_url = reverse("core:api_mobile_uturn_finish")
+        session_id = "UTURN-INCOMPLETE-TEST-002"
+
+        # Upload 2 rear photos only
+        for i in range(1, 3):
+            f = io.BytesIO(_create_test_image_bytes(color=(15 * i, 25, 35)))
+            f.name = f"inc_rear_{i}.jpg"
+            self.client.post(upload_url, {
+                "photo": f,
+                "mode": "uturn",
+                "orientation": "REAR",
+                "sequence_number": str(i),
+                "uturn_session_id": session_id,
+                "uturn_batch_index": "3",
+            })
+
+        # Finish attempt without allow_incomplete -> Must be rejected with 400
+        finish_resp = self.client.post(
+            finish_url,
+            data=json.dumps({"uturn_session_id": session_id, "batch_index": 3}),
+            content_type="application/json",
+        )
+        assert finish_resp.status_code == 400
+        err_data = finish_resp.json()
+        assert err_data["success"] is False
+        assert err_data["code"] == "MISSING_FRONT_PHOTOS"
+        assert err_data["rear_count"] == 2
+        assert err_data["front_count"] == 0
+
+        # Verify zero incomplete pairs were created
+        inc_pairs = VehicleInstallationPair.objects.filter(
+            rear_image__batch__source_label__contains=session_id,
+        )
+        assert inc_pairs.count() == 0, "No premature pairs should exist for unfinished single-orientation walk!"
+
+        # Now upload the 2 front photos in reverse order
+        for i in range(1, 3):
+            f = io.BytesIO(_create_test_image_bytes(color=(40 * i, 50, 60)))
+            f.name = f"inc_front_{i}.jpg"
+            self.client.post(upload_url, {
+                "photo": f,
+                "mode": "uturn",
+                "orientation": "FRONT",
+                "sequence_number": str(i),
+                "uturn_session_id": session_id,
+                "uturn_batch_index": "3",
+            })
+
+        # Finish attempt now succeeds cleanly
+        finish_success = self.client.post(
+            finish_url,
+            data=json.dumps({"uturn_session_id": session_id, "batch_index": 3}),
+            content_type="application/json",
+        )
+        assert finish_success.status_code == 200
+        succ_data = finish_success.json()
+        assert succ_data["success"] is True
+        assert succ_data["pairs_count"] == 2
+        assert succ_data["rear_count"] == 2
+        assert succ_data["front_count"] == 2

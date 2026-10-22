@@ -766,3 +766,34 @@ This transition aligns with our domain `close.kirex.online`, insulates operation
    - Include `&sub_mode=${encodeURIComponent(MobileState.stock.subMode)}` in the `fetch('/api/stock/inspect/?...')` URL so `GET /api/stock/inspect/` knows whether the phone is in `DISPATCH`, `DELIVERY`, `RETURN`, or `AUDIT` mode.
 3. **Display Live Server Dispatched Total Counter (`mobile_companion.js` & `tab_stock.js`)**:
    - Bind `data.dispatch_summary.total` (returned by both `/api/stock/inspect/` and `/api/stock/dispatch/`) to the Dispatched counter badge so operators see the exact database-confirmed count of kits dispatched to the line (`300 Dispatched • 10 Set Aside`) in real time after every scan.
+
+
+---
+
+## 15. Feature: Mobile Companion Off-Conveyor (Mode 2: U-Turn Yard Walk) Session Resilience & Recovery - [COMPLETED]
+
+- **Date**: Thu Oct 22, 2026
+- **Status**: 🟢 **Completed & Verified**
+
+### 15.1 Summary of Changes Implemented in Companion (`mobile_companion.js` & `mobile_companion.html`)
+1. **Persistent Session State (`localStorage['itms_uturn_session_state']`)**:
+   - `saveUturnSessionState()` records the active walk state on every capture, undo, or phase switch:
+     - `walkSessionId`: Dedicated session UUID ensuring consistent batch affinity across reloads.
+     - `batchIndex`: Current yard walk batch sequence index.
+     - `phase`: Active walk leg (`"REAR"` vs `"FRONT"`).
+     - `rearCount`, `frontCount`, `totalPhotos`: Accurate real-time photo counts.
+     - `recentTiles`: Metadata list of recent photos for inspection and undo.
+2. **Seamless Session Restoration on Page Reload (`loadUturnSessionFromStorage`)**:
+   - Automatically executed on `DOMContentLoaded`.
+   - Restores the active `walkSessionId`, counters, and active phase (`FRONT` or `REAR`).
+   - Automatically re-activates the correct shutter button color and label (`Capture FRONT` vs `Capture REAR`), guidance bar, road steps, return match progress bar, and recent capture tiles.
+   - Re-checks and verifies photo counts against the backend via `/api/mobile/uturn/session_status/?session_id=...`.
+3. **Explicit Walk Discard / Abort Action (`abortUturnBatch`)**:
+   - Added `[ ✕ Abort Walk ]` red action button (`btn-abort-uturn`) alongside Complete Batch.
+   - Prompts confirmation: *"Discard this U-Turn walk (Batch #N with X photos)?"*.
+   - Sends `POST /api/mobile/uturn/abort_session/` to server to delete unsubmitted photos, clears outbox queue in IndexedDB, removes local session state, and cleanly resets UI without generating incomplete pairs.
+4. **Outbox Synchronization & Completion Guard (`finishUturnBatch`)**:
+   - Checks if any photos for the session are still uploading in IndexedDB; drains outbox queue before attempting batch completion.
+   - **Blocks Single-Orientation Completion**: If only REAR photos (0 FRONTS) were captured, completion is blocked with a clear warning instructing the operator to turn around and capture fronts.
+   - **Count Asymmetry Confirmation**: If `rears != fronts`, prompts explicit confirmation detailing how many pairs will match and how many surplus will remain.
+   - **Safe State Clearance**: Only advances `batchIndex` and resets counters AFTER the server returns `{"success": true}` from `POST /api/mobile/uturn/finish_batch/`.

@@ -735,6 +735,8 @@ def api_stock_verify_batch(request: HttpRequest) -> JsonResponse:
             clean_plates,
             check_itms_live=check_itms_live,
             facility_name=active_bond.get("name"),
+            max_live_itms_queries=500,
+            user=user,
         )
 
         verified_plates = verify_res.get("verified_plates", [])
@@ -1014,12 +1016,11 @@ def api_stock_shift_details(request: HttpRequest) -> JsonResponse:
     ))
     if dispatches:
         disp_plates = [d["registration_number"] for d in dispatches if d.get("registration_number")]
-        disp_kit_map = {
-            k.registration_number: (getattr(k, "gps_tracker", "") or getattr(k, "gps_tracker_id", "") or "-")
-            for k in InstallationKit.objects.filter(registration_number__in=disp_plates)
-        }
+        disp_kits_lookup = stock_monitoring_service.build_kit_lookup_map(disp_plates)
         for d in dispatches:
-            d["gps_tracker"] = disp_kit_map.get(d["registration_number"], "-")
+            reg = d.get("registration_number", "")
+            matched_k = disp_kits_lookup.get(reg)
+            d["gps_tracker"] = (getattr(matched_k, "gps_tracker", "") or getattr(matched_k, "gps_tracker_id", "") or "-") if matched_k else "-" 
     
     # 2. Movements
     movements = []
@@ -1070,10 +1071,7 @@ def api_stock_shift_details(request: HttpRequest) -> JsonResponse:
     # 3. Audits
     audits_qs = SafeAuditScan.objects.filter(work_date_suffix=suffix).order_by("-scanned_at")[:150]
     audit_plates = [a.registration_number for a in audits_qs]
-    kit_map = {
-        k.registration_number: k
-        for k in InstallationKit.objects.filter(registration_number__in=audit_plates)
-    }
+    kit_map = stock_monitoring_service.build_kit_lookup_map(audit_plates)
     audits = []
     for a in audits_qs:
         p = a.registration_number
@@ -1130,20 +1128,27 @@ def api_stock_inspect(request: HttpRequest) -> JsonResponse:
     if not raw_plate:
         return JsonResponse({"success": False, "error": "Plate parameter required"}, status=400)
 
-    clean_p = normalizer.canonicalize(raw_plate) or raw_plate.upper().replace(" ", "")
-    display_p = stock_monitoring_service.extract_single_plate(raw_plate) or clean_p
+    from core.services.plate_lifecycle_service import format_display_plate
+    extracted_p = stock_monitoring_service.extract_single_plate(raw_plate)
+    clean_p = extracted_p or normalizer.canonicalize(raw_plate) or raw_plate.upper().replace(" ", "")
+    display_p = extracted_p or clean_p
+    spaced_p = format_display_plate(clean_p)
     date_suffix = request.GET.get("date_suffix") or request.GET.get("suffix")
-    _, resolved_suffix = stock_monitoring_service.resolve_date_and_suffix(date_suffix)
+    work_d, resolved_suffix = stock_monitoring_service.resolve_date_and_suffix(date_suffix)
+    user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
 
-    target_codes = [f"IK-{clean_p}", f"IK-{display_p}"]
+    target_codes = list(dict.fromkeys([f"IK-{clean_p}", f"IK-{display_p}", f"IK-{spaced_p}"]))
     kit = InstallationKit.objects.filter(
         Q(registration_number__iexact=clean_p) |
         Q(registration_number__iexact=display_p) |
+        Q(registration_number__iexact=spaced_p) |
         Q(kit_code__in=target_codes)
     ).first()
 
     scan_qs = StockDispatchScan.objects.filter(
-        Q(registration_number__iexact=clean_p) | Q(registration_number__iexact=display_p)
+        Q(registration_number__iexact=clean_p) |
+        Q(registration_number__iexact=display_p) |
+        Q(registration_number__iexact=spaced_p)
     )
     if date_suffix:
         scan = scan_qs.filter(work_date_suffix=resolved_suffix).order_by("-dispatched_at").first() or scan_qs.order_by("-dispatched_at").first()
@@ -1151,7 +1156,9 @@ def api_stock_inspect(request: HttpRequest) -> JsonResponse:
         scan = scan_qs.order_by("-dispatched_at").first()
 
     order = InstallationOrder.objects.filter(
-        Q(registration_number__iexact=clean_p) | Q(registration_number__iexact=display_p)
+        Q(registration_number__iexact=clean_p) |
+        Q(registration_number__iexact=display_p) |
+        Q(registration_number__iexact=spaced_p)
     ).first()
 
     # Tier 2: If kit is not in local synced InstallationKit records and not already dispatched/installed,
@@ -1168,10 +1175,12 @@ def api_stock_inspect(request: HttpRequest) -> JsonResponse:
                 verify_res = kit_provisioning_service.verify_scanned_kit_stock(
                     clean_p,
                     check_itms_live=True,
+                    user=user,
                 )
-                kit = InstallationKit.objects.filter(
+                kit = verify_res.kit or InstallationKit.objects.filter(
                     Q(registration_number__iexact=clean_p) |
                     Q(registration_number__iexact=display_p) |
+                    Q(registration_number__iexact=spaced_p) |
                     Q(kit_code__in=target_codes)
                 ).first()
                 if kit is not None or verify_res.get("source") == "itms_live":
@@ -1237,7 +1246,6 @@ def api_stock_inspect(request: HttpRequest) -> JsonResponse:
     # Persist blocked / not-on-stock plate to server immediately so Mobile Companion & Web UI match
     record_blocked_param = request.GET.get("record_blocked", "true").strip().lower()
     should_record_blocked = record_blocked_param not in ("0", "false", "no")
-    user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
     if is_blocked and should_record_blocked:
         blocked_plates = stock_monitoring_service.record_blocked_plates(
             [clean_p],
@@ -1250,8 +1258,48 @@ def api_stock_inspect(request: HttpRequest) -> JsonResponse:
     else:
         blocked_plates = stock_monitoring_service.get_blocked_plates_for_date(resolved_suffix)
 
+    # Symmetric persistence for Mobile Companion dispatch scans:
+    # When a kit is ON_STOCK and scanned from Mobile Companion (or with auto_dispatch=1),
+    # immediately stage the StockDispatchScan row in the DB so zero scans are ever lost
+    # even if the secondary POST /api/stock/dispatch/ is delayed or skipped by client-side queueing.
+    referer = (request.META.get("HTTP_REFERER") or "").lower()
+    sub_mode = (request.GET.get("sub_mode") or "DISPATCH").strip().upper()
+    auto_dispatch_param = (request.GET.get("auto_dispatch") or "").strip().lower()
+    should_auto_stage_dispatch = (
+        status_code == "ON_STOCK"
+        and scan is None
+        and not is_blocked
+        and (
+            auto_dispatch_param in ("1", "true", "yes")
+            or ("/mobile" in referer and sub_mode == "DISPATCH")
+        )
+    )
+    if should_auto_stage_dispatch:
+        try:
+            active_bond = bond_service.get_active_bond()
+            b_code = (active_bond.get("code") or "AGM").strip().upper()
+            op_name = getattr(user, "username", "") or "Mobile Scanner"
+            scan, _ = StockDispatchScan.objects.get_or_create(
+                work_date_suffix=resolved_suffix,
+                registration_number=clean_p,
+                defaults={
+                    "plate_category": category,
+                    "work_date": work_d,
+                    "bond_code": b_code,
+                    "dispatched_by": user,
+                    "operator_name": op_name,
+                    "status": StockDispatchScan.Status.ON_LINE_ACTIVE,
+                    "notes": stock_monitoring_service.AUTO_INSPECT_STAGED_NOTE,
+                },
+            )
+            if kit and getattr(kit, "status", "") != "Dispatched":
+                kit.status = "Dispatched"
+                kit.save(update_fields=["status"])
+        except Exception as stage_err:
+            logger.debug("Auto-stage dispatch during api_stock_inspect notice for %s: %s", clean_p, stage_err)
+
     has_telematics = bool(kit and (getattr(kit, "gps_tracker", None) or getattr(kit, "gps_tracker_id", None)))
-    if not has_telematics:
+    if kit is not None and not is_blocked and not has_telematics and not synced_from_itms:
         import sys
         from django.conf import settings
         is_testing = getattr(settings, "TESTING", False) or any("test" in arg for arg in sys.argv)
@@ -1303,6 +1351,36 @@ def api_stock_inspect(request: HttpRequest) -> JsonResponse:
             "notes": getattr(scan, "notes", "") or "",
         }
 
+    total_dispatched = StockDispatchScan.objects.filter(work_date_suffix=resolved_suffix).count()
+    psv_dispatched = StockDispatchScan.objects.filter(work_date_suffix=resolved_suffix, plate_category="PSV").count()
+    pmo_dispatched = StockDispatchScan.objects.filter(work_date_suffix=resolved_suffix, plate_category="PMO").count()
+    blocked_total = len(blocked_plates)
+
+    if should_auto_stage_dispatch and status_code == "ON_STOCK":
+        status_badge = f"✓ ON STOCK → LINE (#{total_dispatched})"
+        status_desc = (
+            f"Dispatched to Line! Total Dispatched: {total_dispatched} "
+            f"({psv_dispatched} PSV, {pmo_dispatched} PMO) • {blocked_total} Set Aside."
+        )
+    elif status_code == "ON_STOCK":
+        status_badge = f"✓ ON STOCK (Safe Room • {total_dispatched} Dispatched)"
+        status_desc = (
+            f"Ready in warehouse stock ({getattr(kit, 'warehouse', '') or 'Safe Room'}). "
+            f"Shift Dispatched: {total_dispatched} • Set Aside: {blocked_total}."
+        )
+    elif status_code == "DISPATCHED":
+        status_badge = f"📤 DISPATCHED TO LINE (#{total_dispatched})"
+        status_desc = (
+            f"{status_desc} Shift Total: {total_dispatched} Dispatched "
+            f"({psv_dispatched} PSV, {pmo_dispatched} PMO) • {blocked_total} Set Aside."
+        )
+    elif is_blocked:
+        status_badge = f"⛔ NOT ON STOCK (SET ASIDE #{blocked_total})"
+        status_desc = (
+            f"Not on stock — SET PHYSICAL BOX ASIDE! "
+            f"Shift Total: {total_dispatched} Dispatched • {blocked_total} Set Aside."
+        )
+
     return JsonResponse({
         "success": True,
         "plate": display_p,
@@ -1313,6 +1391,11 @@ def api_stock_inspect(request: HttpRequest) -> JsonResponse:
         "date_suffix": resolved_suffix,
         "blocked_plates": blocked_plates,
         "blocked_count": len(blocked_plates),
+        "dispatch_summary": {
+            "total": total_dispatched,
+            "psv": psv_dispatched,
+            "pmo": pmo_dispatched,
+        },
         "stock_status": {
             "code": status_code,
             "badge": status_badge,

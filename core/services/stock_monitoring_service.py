@@ -22,6 +22,8 @@ import json
 import logging
 import os
 import re
+import threading
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
@@ -108,6 +110,8 @@ def extract_single_plate(text: Any) -> Optional[str]:
 
     # 5. Regex search for standard Ugandan plate (3 letters, 3 digits, 1-2 letters)
     m_std = re.search(r"\b(U[A-Z]{2})\s*(\d{3})\s*([A-Z]{1,2})\b", raw, re.IGNORECASE)
+    if not m_std:
+        m_std = re.search(r"(U[A-Z]{2})\s*(\d{3})\s*([A-Z]{1,2})\b", raw, re.IGNORECASE)
     if m_std:
         return f"{m_std.group(1).upper()}{m_std.group(2)}{m_std.group(3).upper()}"
 
@@ -122,6 +126,62 @@ def extract_single_plate(text: Any) -> Optional[str]:
     if canon and len(canon) in (7, 8) and canon.startswith("U"):
         return canon
     return None
+
+
+AUTO_INSPECT_STAGED_NOTE = "[AUTO_INSPECT_STAGED]"
+_ENRICH_LOCK = threading.Lock()
+
+
+def get_kits_matching_plates_q(plates: Iterable[str]) -> Q:
+    """
+    Builds a Django Q filter matching InstallationKit records across canonical
+    plates ('UMA711PW'), spaced ITMS display plates ('UMA 711PW'), and kit codes ('IK-UMA711PW').
+    """
+    from core.services.plate_lifecycle_service import format_display_plate
+    canon_list: List[str] = []
+    spaced_list: List[str] = []
+    code_list: List[str] = []
+    for raw_p in plates:
+        if not raw_p:
+            continue
+        c = normalizer.canonicalize(raw_p) or str(raw_p).strip().upper().replace(" ", "")
+        if not c:
+            continue
+        canon_list.append(c)
+        sp = format_display_plate(c)
+        if sp and sp != c:
+            spaced_list.append(sp)
+        code_list.append(f"IK-{c}")
+        if sp and sp != c:
+            code_list.append(f"IK-{sp}")
+    all_regs = list(dict.fromkeys(canon_list + spaced_list))
+    all_codes = list(dict.fromkeys(code_list))
+    if not all_regs:
+        return Q(pk__in=[])
+    return Q(registration_number__in=all_regs) | Q(kit_code__in=all_codes)
+
+
+def build_kit_lookup_map(plates: Iterable[str]) -> Dict[str, InstallationKit]:
+    """
+    Queries InstallationKit for the given plates (both canonical and spaced formats)
+    and returns a dictionary keyed by canonical plate, spaced plate, and kit_code.
+    """
+    from core.services.plate_lifecycle_service import format_display_plate
+    q_filter = get_kits_matching_plates_q(plates)
+    kit_map: Dict[str, InstallationKit] = {}
+    for k in InstallationKit.objects.filter(q_filter):
+        if k.registration_number:
+            raw_reg = k.registration_number.strip().upper()
+            kit_map[raw_reg] = k
+            c_reg = normalizer.canonicalize(raw_reg)
+            if c_reg:
+                kit_map[c_reg] = k
+                sp_reg = format_display_plate(c_reg)
+                if sp_reg:
+                    kit_map[sp_reg] = k
+        if k.kit_code:
+            kit_map[k.kit_code.strip().upper()] = k
+    return kit_map
 
 
 def parse_plate_input_with_stats(raw_input: Any) -> Tuple[List[str], int, List[str]]:
@@ -281,6 +341,11 @@ def record_delivery(
 
         created_kits_count = 0
         if clean_plates:
+            StockDispatchScan.objects.filter(
+                work_date_suffix=suffix,
+                registration_number__in=clean_plates,
+                notes=AUTO_INSPECT_STAGED_NOTE,
+            ).delete()
             items = [
                 StockDeliveryItem(
                     delivery=delivery,
@@ -449,7 +514,7 @@ def record_dispatch_scans(
     if require_stock_verification is None:
         import sys
         is_test_runner = any("test" in arg for arg in sys.argv)
-        if (is_test_runner or getattr(settings, "TESTING", False)) and not InstallationKit.objects.filter(registration_number__in=clean_plates).exists():
+        if (is_test_runner or getattr(settings, "TESTING", False)) and not InstallationKit.objects.filter(get_kits_matching_plates_q(clean_plates)).exists():
             require_stock_verification = False
         else:
             require_stock_verification = config_service.get_setting("stock.verify_kits_before_dispatch", True)
@@ -466,6 +531,8 @@ def record_dispatch_scans(
             clean_plates,
             check_itms_live=check_itms_live,
             facility_name=active_bond.get("name"),
+            max_live_itms_queries=500,
+            user=dispatched_by,
         )
         verified_plates = verify_res.get("verified_plates", [])
         rejected_not_on_stock = verify_res.get("rejected_not_on_stock", [])
@@ -516,41 +583,71 @@ def record_dispatch_scans(
                 "docket": docket,
             }
 
-    # Mark verified stock kits as Dispatched in local database
-    if verified_plates:
-        InstallationKit.objects.filter(
-            registration_number__in=verified_plates,
-        ).update(status="Dispatched")
+    # Commit dispatch scans with SQLite lock retry resilience before running reconciliation
+    from django.db import OperationalError
+    existing_dispatches: Set[str] = set()
+    new_scans: List[StockDispatchScan] = []
+    promoted_count = 0
 
-    with transaction.atomic():
-        existing_dispatches = set(
-            StockDispatchScan.objects.filter(
-                work_date_suffix=suffix,
-                registration_number__in=verified_plates,
-            ).values_list("registration_number", flat=True)
-        )
+    for attempt in range(4):
+        try:
+            with transaction.atomic():
+                if verified_plates:
+                    InstallationKit.objects.filter(
+                        get_kits_matching_plates_q(verified_plates),
+                    ).update(status="Dispatched")
 
-        new_scans = []
-        for p in verified_plates:
-            if p not in existing_dispatches:
-                new_scans.append(
-                    StockDispatchScan(
-                        registration_number=p,
-                        plate_category=category,
-                        work_date=work_d,
+                existing_rows = list(
+                    StockDispatchScan.objects.filter(
                         work_date_suffix=suffix,
-                        bond_code=b_code,
-                        dispatched_by=dispatched_by,
-                        operator_name=operator_name or "Operator",
-                        status=StockDispatchScan.Status.ON_LINE_ACTIVE,
-                        notes=notes or "",
+                        registration_number__in=verified_plates,
                     )
                 )
+                staged_rows = [r for r in existing_rows if r.notes == AUTO_INSPECT_STAGED_NOTE]
+                confirmed_existing = {
+                    r.registration_number for r in existing_rows if r.notes != AUTO_INSPECT_STAGED_NOTE
+                }
+                staged_plates = {r.registration_number for r in staged_rows}
 
-        if new_scans:
-            StockDispatchScan.objects.bulk_create(new_scans)
+                if staged_rows:
+                    StockDispatchScan.objects.filter(
+                        id__in=[r.id for r in staged_rows]
+                    ).update(
+                        plate_category=category,
+                        dispatched_by=dispatched_by,
+                        operator_name=operator_name or "Operator",
+                        notes=notes or "",
+                    )
+                    promoted_count = len(staged_rows)
 
-        recon = compute_daily_reconciliation(suffix)
+                existing_dispatches = confirmed_existing
+                new_scans = []
+                for p in verified_plates:
+                    if p not in confirmed_existing and p not in staged_plates:
+                        new_scans.append(
+                            StockDispatchScan(
+                                registration_number=p,
+                                plate_category=category,
+                                work_date=work_d,
+                                work_date_suffix=suffix,
+                                bond_code=b_code,
+                                dispatched_by=dispatched_by,
+                                operator_name=operator_name or "Operator",
+                                status=StockDispatchScan.Status.ON_LINE_ACTIVE,
+                                notes=notes or "",
+                            )
+                        )
+
+                if new_scans:
+                    StockDispatchScan.objects.bulk_create(new_scans, ignore_conflicts=True)
+            break
+        except OperationalError as db_err:
+            if attempt == 3:
+                raise
+            logger.warning("SQLite lock during record_dispatch_scans (attempt %d/4), retrying: %s", attempt + 1, db_err)
+            time.sleep(0.06 * (attempt + 1))
+
+    recon = compute_daily_reconciliation(suffix)
 
     # Spawn background daemon thread to enrich dispatch kits from ITMS asynchronously
     import sys
@@ -573,11 +670,16 @@ def record_dispatch_scans(
         import threading
         threading.Thread(target=_bg_enrich_dispatch, daemon=True).start()
 
+    newly_dispatched_total = len(new_scans) + promoted_count
+    total_dispatched_shift = StockDispatchScan.objects.filter(work_date_suffix=suffix).count()
+    psv_dispatched_shift = StockDispatchScan.objects.filter(work_date_suffix=suffix, plate_category=PlateCategory.PSV).count()
+    pmo_dispatched_shift = StockDispatchScan.objects.filter(work_date_suffix=suffix, plate_category=PlateCategory.PMO).count()
+
     res_payload = {
         "success": True,
         "total_submitted": len(clean_plates) + dup_count,
         "unique_plates_count": len(clean_plates),
-        "newly_dispatched": len(new_scans),
+        "newly_dispatched": newly_dispatched_total,
         "already_dispatched": len(existing_dispatches),
         "already_dispatched_plates": sorted(list(existing_dispatches)),
         "duplicate_scans_skipped": dup_count,
@@ -588,6 +690,11 @@ def record_dispatch_scans(
         "already_installed": already_installed,
         "stock_readiness": readiness,
         "reconciliation": recon,
+        "dispatch_summary": {
+            "total": total_dispatched_shift,
+            "psv": psv_dispatched_shift,
+            "pmo": pmo_dispatched_shift,
+        },
         "enriching_in_background": True,
     }
 
@@ -659,6 +766,13 @@ def record_return_scans(
 
         if new_returns:
             StockReturnScan.objects.bulk_create(new_returns)
+
+        # Remove tentative mobile inspect staging if scan was actually a return
+        StockDispatchScan.objects.filter(
+            work_date_suffix=suffix,
+            registration_number__in=clean_plates,
+            notes=AUTO_INSPECT_STAGED_NOTE,
+        ).delete()
 
         # Update matching dispatch scans for this shift to RETURNED_TO_SAFE
         StockDispatchScan.objects.filter(
@@ -908,37 +1022,40 @@ def enrich_physical_plates_with_itms(
     if not clean_plates:
         return {"success": True, "enriched": 0}
 
-    # Identify plates that already have complete hardware details in InstallationKit
-    existing_complete = set(
-        InstallationKit.objects.filter(
-            registration_number__in=clean_plates
-        ).exclude(
-            Q(gps_tracker="") | Q(gps_tracker__isnull=True)
-        ).values_list("registration_number", flat=True)
-    )
-    plates_to_enrich = [p for p in clean_plates if p not in existing_complete]
-    if not plates_to_enrich:
-        return {
-            "success": True,
-            "total_found": len(existing_complete),
-            "created": 0,
-            "updated": 0,
-            "message": "All physical plates already have hardware details linked.",
+    with _ENRICH_LOCK:
+        # Identify plates that already have complete hardware details in InstallationKit (both canonical & spaced)
+        existing_complete = {
+            normalizer.canonicalize(r) or r.strip().upper()
+            for r in InstallationKit.objects.filter(
+                get_kits_matching_plates_q(clean_plates)
+            ).exclude(
+                Q(gps_tracker="") | Q(gps_tracker__isnull=True)
+            ).values_list("registration_number", flat=True)
+            if r
         }
+        plates_to_enrich = [p for p in clean_plates if p not in existing_complete]
+        if not plates_to_enrich:
+            return {
+                "success": True,
+                "total_found": len(existing_complete),
+                "created": 0,
+                "updated": 0,
+                "message": "All physical plates already have hardware details linked.",
+            }
 
-    try:
-        client = get_web_client()
-        session = client.session_store.session
-        if session and session.is_cookie_valid():
-            if log_callback:
-                log_callback(f"Targeting ITMS for {len(plates_to_enrich)} physical bond plates...")
-            res = client.search_and_sync_kits_for_plates(plates_to_enrich, log_callback=log_callback)
-            return res
-        else:
-            return {"success": False, "error": "ITMS session not active; local hardware profiles used."}
-    except Exception as exc:
-        logger.warning("Error enriching physical plates with ITMS: %s", exc)
-        return {"success": False, "error": str(exc)}
+        try:
+            client = get_web_client()
+            session = client.session_store.session
+            if session and session.is_cookie_valid():
+                if log_callback:
+                    log_callback(f"Targeting ITMS for {len(plates_to_enrich)} physical bond plates...")
+                res = client.search_and_sync_kits_for_plates(plates_to_enrich, log_callback=log_callback)
+                return res
+            else:
+                return {"success": False, "error": "ITMS session not active; local hardware profiles used."}
+        except Exception as exc:
+            logger.warning("Error enriching physical plates with ITMS: %s", exc)
+            return {"success": False, "error": str(exc)}
 
 
 def record_stock_taking_audit(
@@ -988,13 +1105,7 @@ def record_stock_taking_audit(
             scanned_psv_count += 1
 
     # Separate physical plates into verified on-stock with hardware serials vs unregistered
-    target_codes = [f"IK-{p}" for p in clean_plates]
-    local_kits = {
-        k.registration_number: k
-        for k in InstallationKit.objects.filter(
-            Q(registration_number__in=clean_plates) | Q(kit_code__in=target_codes)
-        )
-    }
+    local_kits = build_kit_lookup_map(clean_plates)
 
     verified_plates: List[str] = []
     unregistered_plates: List[str] = []
@@ -1056,6 +1167,14 @@ def record_stock_taking_audit(
         ]
         if new_audits:
             SafeAuditScan.objects.bulk_create(new_audits, ignore_conflicts=True)
+
+        # Remove any tentative mobile inspect dispatch staging for plates that were actually audited in Safe Room
+        if clean_plates:
+            StockDispatchScan.objects.filter(
+                work_date_suffix=suffix,
+                registration_number__in=clean_plates,
+                notes=AUTO_INSPECT_STAGED_NOTE,
+            ).delete()
 
         # Auto-provision all scanned safe room plates into InstallationKit marked 'New'
         prov_res = kit_provisioning_service.sync_and_provision_warehouse_kits(
@@ -2192,13 +2311,7 @@ def export_blocked_kits_csv(
     out_dir = get_configured_export_dir(exports_dir)
     file_path = str(out_dir / filename)
 
-    target_codes = [f"IK-{p}" for p in clean_plates]
-    known_kits = {
-        k.registration_number: k
-        for k in InstallationKit.objects.filter(
-            Q(registration_number__in=clean_plates) | Q(kit_code__in=target_codes)
-        )
-    }
+    known_kits = build_kit_lookup_map(clean_plates)
 
     with open(file_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -2327,13 +2440,7 @@ def get_stock_transfer_request_docket(
     active_code = active_bond.get("code", "AGM")
     now_str = timezone.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    target_codes = [f"IK-{p}" for p in clean_plates]
-    known_kits = {
-        k.registration_number: k
-        for k in InstallationKit.objects.filter(
-            Q(registration_number__in=clean_plates) | Q(kit_code__in=target_codes)
-        )
-    }
+    known_kits = build_kit_lookup_map(clean_plates)
 
     installed_orders = set(
         InstallationOrder.objects.filter(
@@ -3209,14 +3316,7 @@ def reconcile_and_update_shift(
         kits_updated_count = 0
         if auto_create_kits and dispatches_qs:
             dispatch_plates = [normalizer.canonicalize(s.registration_number) for s in dispatches_qs if s.registration_number]
-            target_codes = [f"IK-{p}" for p in dispatch_plates if p]
-            existing_kits = InstallationKit.objects.filter(
-                Q(registration_number__in=dispatch_plates) | Q(kit_code__in=target_codes)
-            )
-            existing_kits_map = {
-                normalizer.canonicalize(k.registration_number): k
-                for k in existing_kits
-            }
+            existing_kits_map = build_kit_lookup_map(dispatch_plates)
             kits_to_create = []
             kits_to_update = []
 

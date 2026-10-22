@@ -139,9 +139,11 @@ def sync_and_provision_warehouse_kits(
                         log_callback(f"⚠️ ITMS Crawl Notice: {itms_error}")
 
                 # B. Targeted plate search for any delivery/audit candidate plates not yet in DB
-                existing_known_plates = set(
-                    InstallationKit.objects.exclude(registration_number="").values_list("registration_number", flat=True)
-                )
+                existing_known_plates = {
+                    normalizer.canonicalize(r) or r.strip().upper()
+                    for r in InstallationKit.objects.exclude(registration_number="").values_list("registration_number", flat=True)
+                    if r
+                }
                 missing_candidates = [p for p in candidate_plates if p not in existing_known_plates]
                 if missing_candidates:
                     if log_callback:
@@ -183,9 +185,10 @@ def sync_and_provision_warehouse_kits(
             active_pending_plates.add(c)
 
     # Fetch ONLY candidate InstallationKit records in-memory (prevents loading entire DB table into RAM)
+    spaced_candidates = [format_display_plate(p) for p in candidate_plates]
     target_codes = [f"IK-{p}" for p in candidate_plates]
     kits_qs = InstallationKit.objects.filter(
-        Q(registration_number__in=candidate_plates) | Q(kit_code__in=target_codes)
+        Q(registration_number__in=list(candidate_plates) + spaced_candidates) | Q(kit_code__in=target_codes)
     )
     existing_kits_map: Dict[str, InstallationKit] = {}
     for k in kits_qs:
@@ -283,10 +286,13 @@ def verify_scanned_kits_stock(
     scanned_plates: Iterable[str],
     check_itms_live: bool = True,
     facility_name: Optional[str] = None,
+    max_live_itms_queries: int = 3,
+    user: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Two-tier verification of plates scanned for dispatch/issuance:
-    - Tier 1: Search local synced InstallationKit table.
+    - Tier 1: Search local synced InstallationKit table (matching both canonical 'UMA711PW'
+      and spaced 'UMA 711PW' formats as well as 'IK-UMA711PW').
     - Tier 2: If missing locally and check_itms_live=True, query ITMS /installation-kits live.
       If matched on ITMS: auto-syncs the kit into the local database and approves dispatch.
       If not found on ITMS: rejects the kit (not on stock, cannot be taken out).
@@ -326,10 +332,12 @@ def verify_scanned_kits_stock(
             "message": "No valid license plates provided for stock verification.",
         }
 
-    # Step 1: Query local synced InstallationKit records
+    # Step 1: Query local synced InstallationKit records (both canonical and spaced formats)
+    spaced_plates = [format_display_plate(p) for p in clean_plates]
+    all_plate_variants = list(dict.fromkeys(clean_plates + spaced_plates))
     target_codes = [f"IK-{p}" for p in clean_plates]
     local_kits_qs = InstallationKit.objects.filter(
-        Q(registration_number__in=clean_plates) | Q(kit_code__in=target_codes)
+        Q(registration_number__in=all_plate_variants) | Q(kit_code__in=target_codes)
     )
 
     local_map: Dict[str, InstallationKit] = {}
@@ -337,13 +345,15 @@ def verify_scanned_kits_stock(
         c = normalizer.canonicalize(k.registration_number)
         if c:
             local_map[c] = k
+        if k.registration_number:
+            local_map[k.registration_number.strip().upper()] = k
         if k.kit_code:
             local_map[k.kit_code.strip().upper()] = k
 
     # Pre-check for orders that are already installed or archived
     installed_orders = set(
         InstallationOrder.objects.filter(
-            Q(registration_number__in=clean_plates),
+            Q(registration_number__in=all_plate_variants),
             Q(is_archived=True) | Q(order_status__iexact="Installed"),
         ).values_list("registration_number", flat=True)
     )
@@ -358,7 +368,7 @@ def verify_scanned_kits_stock(
     missing_locally: List[str] = []
 
     for p in clean_plates:
-        kit = local_map.get(p) or local_map.get(f"IK-{p}")
+        kit = local_map.get(p) or local_map.get(format_display_plate(p)) or local_map.get(f"IK-{p}")
         if p in installed_orders_canonical or (kit and (kit.status or "").strip().lower() in ("installed", "archived")):
             already_installed.append(p)
             details[p] = {
@@ -380,62 +390,82 @@ def verify_scanned_kits_stock(
             missing_locally.append(p)
 
     # Step 2: Live ITMS Check for Plates Missing Locally
-    # Fast Floor Protection: Only attempt live synchronous ITMS queries for small batches (<= 3 plates).
-    # In bulk Excel pastes (e.g. 50, 100, 1300 plates), NEVER block the UI thread with sequential HTTP requests.
-    # Instead, mark as NOT_ON_STOCK (Awaiting ITMS Stock Transfer) immediately.
-    if missing_locally and check_itms_live and len(missing_locally) <= 3:
+    if missing_locally and check_itms_live and len(missing_locally) <= max_live_itms_queries:
         try:
-            client = get_web_client()
-            for p in missing_locally:
-                found_match = False
+            client = get_web_client(user=user) if user is not None else get_web_client()
+
+            def _lookup_plate_on_itms(p: str) -> Optional[Dict[str, Any]]:
                 display_p = format_display_plate(p)
                 queries_to_try = [display_p] if display_p != p else [p]
                 if p not in queries_to_try:
                     queries_to_try.append(p)
-
                 for q_term in queries_to_try:
                     try:
                         res = client.fetch_installation_kits(page=1, search_params=q_term, allow_local_fallback=False)
                         if res.get("success"):
-                            kits = res.get("kits", [])
-                            for k in kits:
+                            for k in res.get("kits", []):
                                 k_reg = normalizer.canonicalize(k.get("registration_number", ""))
                                 k_code = (k.get("kit_code") or "").strip().upper()
                                 if k_reg == p or k_code == f"IK-{p}":
-                                    found_match = True
-                                    # Sync into local DB
-                                    client.sync_kits_to_local_db([k])
-                                    new_kit = InstallationKit.objects.filter(
-                                        Q(registration_number=p) | Q(kit_code=f"IK-{p}")
-                                    ).first()
-
-                                    k_st = (k.get("status") or "").strip().lower()
-                                    if k_st in ("installed", "archived"):
-                                        already_installed.append(p)
-                                        details[p] = {
-                                            "valid": False,
-                                            "status": "ALREADY_INSTALLED",
-                                            "kit": new_kit,
-                                            "reason": f"Kit {p} in ITMS is already marked as '{k.get('status')}'.",
-                                        }
-                                    else:
-                                        verified_plates.append(p)
-                                        synced_from_itms.append(p)
-                                        if new_kit:
-                                            verified_kits.append(new_kit)
-                                        details[p] = {
-                                            "valid": True,
-                                            "status": "VERIFIED_ITMS",
-                                            "kit": new_kit,
-                                            "reason": "Found on ITMS installation kits and synced to local database.",
-                                        }
-                                    break
-                        if found_match:
-                            break
+                                    return k
                     except Exception as itms_exc:
                         logger.debug("ITMS live query failed for %s (%s): %s", p, q_term, itms_exc)
+                return None
 
-                if not found_match:
+            matched_itms_kits: Dict[str, Dict[str, Any]] = {}
+            if len(missing_locally) == 1:
+                p0 = missing_locally[0]
+                k_match = _lookup_plate_on_itms(p0)
+                if k_match:
+                    matched_itms_kits[p0] = k_match
+            else:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=min(6, len(missing_locally))) as pool:
+                    futures = {p: pool.submit(_lookup_plate_on_itms, p) for p in missing_locally}
+                    for p, fut in futures.items():
+                        try:
+                            k_match = fut.result()
+                            if k_match:
+                                matched_itms_kits[p] = k_match
+                        except Exception as fut_exc:
+                            logger.debug("Parallel ITMS lookup failed for %s: %s", p, fut_exc)
+
+            if matched_itms_kits:
+                client.sync_kits_to_local_db(list(matched_itms_kits.values()))
+
+            for p in missing_locally:
+                k = matched_itms_kits.get(p)
+                if k is not None:
+                    display_p = format_display_plate(p)
+                    k_code = (k.get("kit_code") or "").strip()
+                    code_candidates = [f"IK-{p}"]
+                    if k_code:
+                        code_candidates.append(k_code)
+                    new_kit = InstallationKit.objects.filter(
+                        Q(registration_number__in=[p, display_p]) | Q(kit_code__in=code_candidates)
+                    ).first()
+
+                    k_st = (k.get("status") or "").strip().lower()
+                    if k_st in ("installed", "archived"):
+                        already_installed.append(p)
+                        details[p] = {
+                            "valid": False,
+                            "status": "ALREADY_INSTALLED",
+                            "kit": new_kit,
+                            "reason": f"Kit {p} in ITMS is already marked as '{k.get('status')}'.",
+                        }
+                    else:
+                        verified_plates.append(p)
+                        synced_from_itms.append(p)
+                        if new_kit:
+                            verified_kits.append(new_kit)
+                        details[p] = {
+                            "valid": True,
+                            "status": "VERIFIED_ITMS",
+                            "kit": new_kit,
+                            "reason": "Found on ITMS installation kits and synced to local database.",
+                        }
+                else:
                     rejected_not_on_stock.append(p)
                     details[p] = {
                         "valid": False,
@@ -529,6 +559,7 @@ def verify_scanned_kit_stock(
     plate: str,
     check_itms_live: bool = True,
     facility_name: Optional[str] = None,
+    user: Optional[Any] = None,
 ) -> KitVerificationResult:
     """
     Two-tier verification for a single scanned kit before dispatch/issuance:
@@ -538,11 +569,21 @@ def verify_scanned_kit_stock(
        If not found on ITMS: reject (kit is not on stock, cannot be taken out).
     Returns: KitVerificationResult(is_valid, kit_instance, reason)
     """
-    res = verify_scanned_kits_stock([plate], check_itms_live=check_itms_live, facility_name=facility_name)
+    res = verify_scanned_kits_stock(
+        [plate],
+        check_itms_live=check_itms_live,
+        facility_name=facility_name,
+        user=user,
+    )
     c = normalizer.canonicalize(plate)
     dt = res.get("details", {}).get(c, {})
     is_val = dt.get("valid", False)
     kit = dt.get("kit")
+    if kit is None and c:
+        display_c = format_display_plate(c)
+        kit = InstallationKit.objects.filter(
+            Q(registration_number__in=[c, display_c]) | Q(kit_code=f"IK-{c}")
+        ).first()
     status = dt.get("status", "")
     source = "itms_live" if status == "VERIFIED_ITMS" else "local_db"
     reason = dt.get("reason", "Verification failed")

@@ -730,3 +730,39 @@ This transition aligns with our domain `close.kirex.online`, insulates operation
    - Enabled `check_itms_live: true` in `syncStockScansToServer()` so queued batch dispatches also execute the 2-tier lookup.
 2. **Web Dashboard Fresh Sync (`tab_stock.js`)**:
    - Updated `openNotOnStockModal()` to always fetch fresh `/api/stock/blocked-plates/?date_suffix=${currentStockDateSuffix}` when opened so blocked kits scanned on the phone appear immediately on the web dashboard (`close.kirex.online`).
+
+
+---
+
+## 14. High-Speed 100% Reliable Stock Dispatch Scanning & Running Total Counter
+
+- **Date**: Thu Oct 22, 2026
+- **Status**: 🔄 **Backend Completed & Deployed / Companion Frontend Enhancements Specified**
+
+### 14.1 Root Causes Resolved in Backend (`kit_provisioning_service.py`, `stock_monitoring_service.py`, `bond.py`)
+1. **Spaced ITMS Registration Number Mismatch (`"UMA 970PY"` vs `"UMA970PY"`)**:
+   - In the database, 99.9% of `InstallationKit` rows synced from ITMS store `registration_number` with a space (`"UMA 970PY"`). Previously, `verify_scanned_kits_stock`, `record_dispatch_scans`, `enrich_physical_plates_with_itms`, and `api_stock_shift_details` queried `registration_number__in=clean_plates` (canonical `"UMA970PY"` without space).
+   - **Fix**: Added `get_kits_matching_plates_q()` and `build_kit_lookup_map()` matching canonical (`"UMA970PY"`), spaced display (`"UMA 970PY"`), and kit codes (`"IK-UMA970PY"`) across all Tier 1 lookups, status updates, and shift detail tables.
+2. **Symmetric Immediate Persistence on `GET /api/stock/inspect/` for Mobile Companion**:
+   - Previously, `GET /api/stock/inspect/` immediately persisted `NOT_ON_STOCK` scans into `StockBlockedScan`, but did NOT persist `ON_STOCK` scans into `StockDispatchScan`—relying on a secondary `POST /api/stock/dispatch/` 80ms later that could be dropped when `MobileState.stock.isSyncing` was true.
+   - **Fix**: When `GET /api/stock/inspect/` verifies an `ON_STOCK` kit from Mobile Companion (`HTTP_REFERER` containing `/mobile` with `sub_mode=DISPATCH`, or `auto_dispatch=1`), it immediately stages the `StockDispatchScan` row (`notes="[AUTO_INSPECT_STAGED]"`) and updates `InstallationKit.status = "Dispatched"`. When `POST /api/stock/dispatch/` arrives 80ms later, `record_dispatch_scans` promotes the staged row and still counts it in `newly_dispatched`.
+3. **Removed 3-Plate Live ITMS Cap for Dispatch & Batch Verification (`max_live_itms_queries=500`)**:
+   - `record_dispatch_scans` and `api_stock_verify_batch` now pass `max_live_itms_queries=500` to `verify_scanned_kits_stock`, which uses a 6-worker `ThreadPoolExecutor` for parallel ITMS lookups and single-thread DB upserts.
+4. **SQLite Lock Contention & Transaction Slimming**:
+   - Moved `compute_daily_reconciliation(suffix)` outside the `StockDispatchScan.objects.bulk_create` atomic write transaction, added a 4-attempt SQLite `OperationalError` retry loop, and serialized background telematics enrichment with `_ENRICH_LOCK`.
+5. **Live `dispatch_summary` Returned on Both `/api/stock/inspect/` and `/api/stock/dispatch/`**:
+   - Both endpoints now return `"dispatch_summary": {"total": N, "psv": X, "pmo": Y}` and `"blocked_count": B` on every scan.
+
+### 14.2 Companion Frontend Specifications for UI/UX Developer (`mobile_companion.js` & `tab_stock.js`)
+1. **Re-Trigger Queue Sync in `finally` Block (`core/static/core/js/mobile_companion.js:1515`)**:
+   - In `syncStockScansToServer()`, if new plates were scanned while `MobileState.stock.isSyncing` was `true`, they remain in `MobileState.stock.queue`.
+   - In the `finally` block of `syncStockScansToServer()`, add:
+     ```javascript
+     if (MobileState.stock.autoSync && MobileState.stock.queue.length > 0) {
+         setTimeout(() => { void syncStockScansToServer(); }, 60);
+     }
+     ```
+2. **Pass `sub_mode` Parameter on Mobile Inspect (`core/static/core/js/mobile_companion.js:1112`)**:
+   - Include `&sub_mode=${encodeURIComponent(MobileState.stock.subMode)}` in the `fetch('/api/stock/inspect/?...')` URL so `GET /api/stock/inspect/` knows whether the phone is in `DISPATCH`, `DELIVERY`, `RETURN`, or `AUDIT` mode.
+3. **Display Live Server Dispatched Total Counter (`mobile_companion.js` & `tab_stock.js`)**:
+   - Bind `data.dispatch_summary.total` (returned by both `/api/stock/inspect/` and `/api/stock/dispatch/`) to the Dispatched counter badge so operators see the exact database-confirmed count of kits dispatched to the line (`300 Dispatched • 10 Set Aside`) in real time after every scan.

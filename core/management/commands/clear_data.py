@@ -153,7 +153,10 @@ class Command(BaseCommand):
             non_admin_count = non_admins.count()
             non_admins.delete()
             OperatorProfile.objects.exclude(user__is_superuser=True).delete()
-            OperatorITMSSession.objects.exclude(user__is_superuser=True).delete()
+            if clear_itms_session:
+                OperatorITMSSession.objects.all().delete()
+            else:
+                OperatorITMSSession.objects.exclude(user__is_superuser=True).delete()
             Session.objects.all().delete()
             admin_users = list(User.objects.filter(is_superuser=True).values_list("username", flat=True))
             self.stdout.write(

@@ -2075,4 +2075,110 @@ class StockMonitoringTests(TestCase):
         self.assertIn("UZZ405NS", post_data["blocked_plates"])
         self.assertIn("UZZ406NS", post_data["blocked_plates"])
 
+    @patch("core.services.kit_provisioning_service.get_web_client")
+    def test_reliable_dispatch_spaced_regs_batch_itms_and_mobile_auto_stage(self, mock_get_client):
+        """
+        Verifies:
+        1. InstallationKit records with spaced ITMS registration_number ('UMA 970PY') and
+           numeric kit_code ('ITMS-K-00970') are matched locally in Tier 1 and marked Dispatched.
+        2. Mobile Companion GET /api/stock/inspect/ (with HTTP_REFERER containing /mobile)
+           immediately stages ON_STOCK kits into StockDispatchScan so zero scans are lost
+           even if the secondary POST /api/stock/dispatch/ is dropped, and promotes cleanly
+           when POST /api/stock/dispatch/ arrives.
+        3. Batch dispatch of > 3 locally missing plates queries live ITMS in parallel and
+           accurately separates ON_STOCK vs NOT_ON_STOCK.
+        """
+        # 1. Create kit with spaced registration_number and numeric ITMS kit_code
+        spaced_kit = InstallationKit.objects.create(
+            kit_code="ITMS-K-00970",
+            registration_number="UMA 970PY",
+            status="New",
+            warehouse="AGM SPIRO",
+            gps_tracker="864201000970",
+        )
+
+        # Mobile Companion inspect auto-stages ON_STOCK kit into StockDispatchScan immediately
+        resp_mob = self.client.get(
+            f"/api/stock/inspect/?plate=IKUMA970PY&date_suffix={self.test_suffix}",
+            HTTP_REFERER="http://localhost:8000/mobile/",
+        )
+        self.assertEqual(resp_mob.status_code, 200)
+        mob_data = resp_mob.json()
+        self.assertTrue(mob_data["success"])
+        self.assertEqual(mob_data["canonical_plate"], "UMA970PY")
+        self.assertEqual(mob_data["stock_status"]["code"], "ON_STOCK")
+        self.assertEqual(mob_data["dispatch_summary"]["total"], 1)
+        self.assertTrue(
+            StockDispatchScan.objects.filter(
+                work_date_suffix=self.test_suffix,
+                registration_number="UMA970PY",
+            ).exists()
+        )
+        spaced_kit.refresh_from_db()
+        self.assertEqual(spaced_kit.status, "Dispatched")
+
+        # When secondary POST /api/stock/dispatch/ arrives 80ms later from Mobile Companion,
+        # it promotes the staged scan and still reports newly_dispatched == 1 (not 0).
+        res_promote = stock_monitoring_service.record_dispatch_scans(
+            plates=["UMA970PY"],
+            target_date_suffix=self.test_suffix,
+            require_stock_verification=True,
+            check_itms_live=False,
+        )
+        self.assertTrue(res_promote["success"])
+        self.assertEqual(res_promote["newly_dispatched"], 1)
+        self.assertEqual(res_promote["already_dispatched"], 0)
+        self.assertEqual(res_promote["dispatch_summary"]["total"], 1)
+
+        # 2. Batch of 6 locally-missing plates (4 on live ITMS, 2 not on stock)
+        itms_live_plates = {"UMA601PY", "UMA602PY", "UMA603PY", "UMA604PY"}
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        def fake_fetch(page=1, search_params=None, allow_local_fallback=False):
+            q = str(search_params or "").replace(" ", "").upper()
+            for p_live in itms_live_plates:
+                if p_live in q:
+                    return {
+                        "success": True,
+                        "count": 1,
+                        "kits": [{
+                            "kit_code": f"ITMS-K-{p_live}",
+                            "registration_number": f"{p_live[:3]} {p_live[3:]}",
+                            "status": "New",
+                            "warehouse": "AGM SPIRO",
+                            "gps_tracker": f"IMEI-{p_live}",
+                        }],
+                    }
+            return {"success": True, "count": 0, "kits": []}
+
+        mock_client.fetch_installation_kits.side_effect = fake_fetch
+        mock_client.sync_kits_to_local_db.side_effect = lambda kits: [
+            InstallationKit.objects.update_or_create(
+                kit_code=k["kit_code"],
+                defaults={
+                    "registration_number": k["registration_number"],
+                    "status": k["status"],
+                    "warehouse": k["warehouse"],
+                    "gps_tracker": k.get("gps_tracker", ""),
+                },
+            )
+            for k in kits
+        ]
+
+        batch_plates = ["UMA601PY", "UMA602PY", "UMA603PY", "UMA604PY", "UZZ901NS", "UZZ902NS"]
+        res_batch = stock_monitoring_service.record_dispatch_scans(
+            plates=batch_plates,
+            target_date_suffix=self.test_suffix,
+            require_stock_verification=True,
+            check_itms_live=True,
+        )
+        self.assertTrue(res_batch["success"])
+        self.assertEqual(res_batch["newly_dispatched"], 4)
+        self.assertEqual(sorted(res_batch["rejected_not_on_stock"]), ["UZZ901NS", "UZZ902NS"])
+        self.assertEqual(res_batch["dispatch_summary"]["total"], 5)  # 1 + 4
+        stock_monitoring_service.clear_blocked_plates_for_date(self.test_suffix)
+        stock_monitoring_service.clear_blocked_plates_for_date(self.test_suffix)
+
+
 

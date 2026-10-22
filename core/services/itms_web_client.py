@@ -395,7 +395,25 @@ class ITMSWebSessionStore:
             ver_dt = datetime.fromtimestamp(session_data.last_verified_at, tz=dt_tz.utc) if session_data.last_verified_at > 0 else None
 
             target_user = self.user if (self.user and getattr(self.user, "is_authenticated", False)) else None
+            if not target_user and not getattr(settings, "TESTING", False):
+                existing_sess = OperatorITMSSession.objects.select_related("user").order_by("-saved_at").first()
+                if existing_sess and existing_sess.user:
+                    target_user = existing_sess.user
+                else:
+                    from django.contrib.auth import get_user_model
+                    User = get_user_model()
+                    target_user = (
+                        User.objects.filter(is_superuser=True).order_by("id").first()
+                        or User.objects.order_by("id").first()
+                    )
+
             if target_user:
+                from core.models import OperatorProfile
+                profile, _ = OperatorProfile.objects.get_or_create(
+                    user=target_user,
+                    defaults={"active_facility": "AGM", "allowed_facilities": ["AGM"]},
+                )
+                bond_code = (profile.active_facility or "AGM").strip().upper()
                 OperatorITMSSession.objects.update_or_create(
                     user=target_user,
                     defaults={
@@ -409,6 +427,7 @@ class ITMSWebSessionStore:
                         "expires_at": exp_dt,
                         "last_verified_at": ver_dt,
                         "last_status_message": session_data.last_status_message,
+                        "active_bond_code": bond_code,
                     },
                 )
             else:

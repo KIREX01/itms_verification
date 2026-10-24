@@ -50,6 +50,7 @@ urlpatterns = [
     path("api/pipeline/status/", views.api_pipeline_status, name="api_pipeline_status"),
     path("api/stream/events/", views.api_stream_events, name="api_stream_events"),
     path("api/submissions/batch/", views.api_batch_submit, name="api_batch_submit"),
+    path("api/pairs/batch-submit/", views.api_batch_submit, name="api_pairs_batch_submit"),
     path("api/export/report/", views.api_export_report, name="api_export_report"),
     path("api/history/export/", views.api_export_report, name="api_export_history_csv"),
     path("api/settings/", views.api_settings, name="api_settings"),

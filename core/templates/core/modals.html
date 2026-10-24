@@ -60,6 +60,18 @@
         <div id="sub-phase-confirm" style="display:flex; flex-direction:column; width:100%; height:100%; overflow:hidden;">
             <div class="modal-body" style="gap:16px;">
                 <!-- Target Summary Card -->
+                                <!-- Pre-Submission Physical Discrepancy Banner (Section 16.3 B) -->
+                <div id="sub-confirm-discrepancy-banner" style="display:none; background:rgba(245,158,11,0.12); border:1px solid #f59e0b; border-radius:var(--radius-md); padding:12px; color:#fde047; font-size:0.82rem; line-height:1.45;">
+                    <div style="font-weight:800; margin-bottom:4px; font-size:0.86rem; color:#fcd34d; display:flex; align-items:center; gap:6px;">
+                        <span>⚠️</span> <span>Partial Batch Submission Detected:</span>
+                    </div>
+                    <div>
+                        Only <strong id="sub-discrepancy-approved-count" style="color:#ffffff;">0</strong> of <strong id="sub-discrepancy-total-count" style="color:#ffffff;">0</strong> pairs in this scope are <strong>APPROVED</strong>.
+                        <br>
+                        <strong id="sub-discrepancy-unapproved-count" style="color:#f87171;">0</strong> pair(s) in <strong>CONFLICT / PENDING REVIEW</strong> will <strong>NOT</strong> be sent to ITMS until reviewed.
+                    </div>
+                </div>
+
                 <div style="background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:16px; display:flex; flex-direction:column; gap:10px;">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
                         <span style="font-size:0.75rem; color:var(--ug-text-dim); text-transform:uppercase; font-weight:700;" id="sub-confirm-scope-title">SUBMISSION TARGET SCOPE</span>
@@ -101,6 +113,9 @@
                     Cancel [Esc]
                 </button>
                 <div style="display:flex; gap:8px;">
+                    <button type="button" class="btn btn-warning" id="btn-sub-review-conflicts" onclick="reviewConflictsFromSubmitModal()" style="display:none; font-weight:700;">
+                        🔍 Review Conflicts First
+                    </button>
                     <button class="btn btn-primary" id="btn-sub-start-confirm" onclick="startSubmissionExecution()" style="background:var(--ug-green); border-color:var(--ug-green); font-weight:800; box-shadow:0 4px 14px rgba(16,185,129,0.35);">
                         🚀 Confirm &amp; Submit [Enter]
                     </button>
@@ -161,6 +176,14 @@
                     </div>
                 </div>
 
+                <!-- Truthful Exception Summary List (Section 16.3 C) -->
+                <div id="sub-exception-summary" style="display:none; background:rgba(239,68,68,0.12); border:1px solid var(--ug-red); border-radius:var(--radius-md); padding:10px 14px;">
+                    <div style="font-weight:800; font-size:0.82rem; color:#fca5a5; display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+                        <span>⚠️</span> <span>Submission Exceptions &amp; Failures Encountered:</span>
+                    </div>
+                    <div id="sub-exception-list" style="max-height:90px; overflow-y:auto; font-family:var(--font-mono); font-size:0.75rem; color:#ffffff; line-height:1.4;"></div>
+                </div>
+
                 <!-- Live Itemized Activity Stream -->
                 <div style="display:flex; flex-direction:column; gap:6px;">
                     <div style="font-size:0.75rem; font-weight:700; color:var(--ug-text-dim); text-transform:uppercase;">
@@ -179,6 +202,9 @@
                 <div style="display:flex; gap:8px;">
                     <button class="btn btn-secondary" id="btn-sub-minimize" onclick="minimizeSubmissionModal()">
                         🗕 Run in Background
+                    </button>
+                    <button type="button" class="btn btn-warning" id="btn-sub-jump-failed" onclick="jumpToFailedPairsInQueue()" style="display:none; font-weight:700;">
+                        🔍 Jump to Failed Pairs in Queue
                     </button>
                     <button class="btn btn-primary" id="btn-sub-done" onclick="closeSubmissionModal()" style="display:none;">
                         ✓ Done / Close

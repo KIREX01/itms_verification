@@ -1,3 +1,101 @@
+
+// ============================================================================
+// Concurrency Lock & Truthful Batch Submission Controllers (Section 16)
+// ============================================================================
+window.isGlobalSubmissionLocked = false;
+window.globalSubmissionLockInfo = null;
+window.lastBatchFailures = [];
+
+window.updateSubmissionLockState = function(isLocked, lockInfo) {
+    window.isGlobalSubmissionLocked = Boolean(isLocked);
+    window.globalSubmissionLockInfo = lockInfo || null;
+
+    const qAppBtn = document.getElementById("btn-queue-batch-submit");
+    const qActionBtn = document.getElementById("btn-submit-action");
+    const subConfirmBtn = document.getElementById("btn-sub-start-confirm");
+    const headerPill = document.getElementById("header-submission-indicator");
+    const headerText = document.getElementById("header-submission-text");
+
+    if (isLocked) {
+        const activePlate = lockInfo ? (lockInfo.registration_number || lockInfo.order_number || '') : '';
+        const activeOp = lockInfo ? (lockInfo.operator || 'operator') : 'operator';
+        const elapsed = lockInfo && lockInfo.elapsed_seconds ? Math.round(lockInfo.elapsed_seconds) : 0;
+        const lockMsg = `🔒 Submitting ${activePlate || 'order'} by ${activeOp} (${elapsed}s)...`;
+
+        if (!isBatchSubmitting) {
+            if (qAppBtn) {
+                qAppBtn.innerHTML = `🔒 Submitting ${activePlate || 'Order'} (${elapsed}s)...`;
+                qAppBtn.disabled = true;
+                qAppBtn.style.opacity = "0.7";
+                qAppBtn.style.cursor = "not-allowed";
+                qAppBtn.title = lockMsg;
+            }
+            if (qActionBtn) {
+                qActionBtn.disabled = true;
+                qActionBtn.style.opacity = "0.7";
+                qActionBtn.title = lockMsg;
+            }
+            if (subConfirmBtn && !isBatchSubmitting) {
+                subConfirmBtn.disabled = true;
+                subConfirmBtn.style.opacity = "0.7";
+                subConfirmBtn.title = lockMsg;
+            }
+            if (headerText) headerText.innerText = `🔒 Submitting ${activePlate || 'Order'} (${activeOp}) [${elapsed}s]`;
+            if (headerPill) {
+                headerPill.className = "badge badge-yellow";
+                headerPill.style.display = "inline-flex";
+                headerPill.title = `Submission lock active: ${activePlate} is currently being transmitted by ${activeOp}.`;
+            }
+        }
+    } else {
+        if (!isBatchSubmitting) {
+            if (qActionBtn) {
+                qActionBtn.disabled = false;
+                qActionBtn.style.opacity = "1";
+                qActionBtn.title = "Submit verified motorcycle pair to ITMS (Hotkey: Enter)";
+            }
+            if (subConfirmBtn) {
+                subConfirmBtn.disabled = false;
+                subConfirmBtn.style.opacity = "1";
+            }
+            if (headerPill && headerPill.className.includes("badge-yellow")) {
+                headerPill.className = "badge badge-green";
+                hideTopSubmissionIndicator();
+            }
+        }
+    }
+};
+
+window.reviewConflictsFromSubmitModal = function() {
+    closeSubmissionModal();
+    if (typeof switchNavTab === "function") switchNavTab(4); // Switch to Queue Tab
+    setTimeout(() => {
+        if (typeof setWorkQueueFilter === "function") {
+            setWorkQueueFilter("ISSUES");
+        }
+        if (typeof showToast === "function") {
+            showToast("Work Queue filtered to unresolved conflicts/issues for operator review.", "warning");
+        }
+    }, 120);
+};
+
+window.jumpToFailedPairsInQueue = function(failedPairIds) {
+    closeSubmissionModal();
+    const ids = failedPairIds || window.lastBatchFailures.map(f => f.pairId);
+    if (typeof switchNavTab === "function") switchNavTab(4); // Switch to Queue Tab
+    setTimeout(() => {
+        if (typeof setWorkQueueFilter === "function") {
+            setWorkQueueFilter("ISSUES");
+        }
+        if (ids && ids.length > 0 && typeof selectPair === "function") {
+            selectPair(ids[0]);
+        }
+        if (typeof showToast === "function") {
+            showToast(`Displaying ${ids ? ids.length : 'failed'} pair(s) with submission exceptions in Review Queue.`, "warning");
+        }
+    }, 120);
+};
+
 /**
  * ITMS CLOSING SYSTEM - BACKGROUND PIPELINE & ACTIVITY CONSOLE
  * Triggers dual-stream joint vision, order sync, batch submissions,
@@ -188,31 +286,73 @@ async function triggerBatchSubmit(requestedScope) {
         return;
     }
 
-    const scope = requestedScope || currentQueueDateScope || "TODAY";
+    if (window.isGlobalSubmissionLocked && !isBatchSubmitting) {
+        const lockInfo = window.globalSubmissionLockInfo;
+        const activePlate = lockInfo ? (lockInfo.registration_number || lockInfo.order_number || '') : '';
+        const activeOp = lockInfo ? (lockInfo.operator || 'another operator') : 'another operator';
+        showToast(`Another submission is currently in progress (${activePlate} by ${activeOp}). Please wait for it to complete.`, "warning");
+        return;
+    }
+
+    const scope = requestedScope || (typeof currentQueueDateScope !== "undefined" ? currentQueueDateScope : "TODAY");
 
     try {
-        const res = await fetch(`/api/pairs/?status=APPROVED&scope=${encodeURIComponent(scope)}&limit=500`);
+        // Fetch all pairs in the requested scope to detect discrepancies (approved vs unapproved)
+        const res = await fetch(`/api/pairs/?scope=${encodeURIComponent(scope)}&limit=500`);
         const data = await res.json();
-        const approvedPairs = (data.pairs || []).filter(p => p.verification_status === "APPROVED");
+        const allScopePairs = data.pairs || [];
+        const approvedPairs = allScopePairs.filter(p => p.verification_status === "APPROVED");
+        const totalInScope = allScopePairs.length;
+        const approvedInScope = approvedPairs.length;
+        const unapprovedCount = totalInScope - approvedInScope;
 
         if (approvedPairs.length === 0) {
             if (scope === "TODAY" && data.carryover_approved_count > 0) {
                 showToast(`No approved pairs in Today's shift. Found ${data.carryover_approved_count} in Prior Carryover (switch Date Scope to Prior Carryover).`, "warning");
             } else {
-                showToast(`No approved pairs ready for submission in ${scope} scope. Please approve pairs in Review Queue [A].`, "info");
+                showToast(`No approved pairs ready for submission in ${scope} scope (${unapprovedCount} pair(s) in review/issues). Please approve pairs in Review Queue [A].`, "info");
             }
             return;
         }
 
         // Refresh live config from config.json
         const isDry = await fetchLatestSubmissionSettings();
-        currentSubmissionTask = { type: "batch", pairs: approvedPairs, scope: scope };
+        currentSubmissionTask = {
+            type: "batch",
+            pairs: approvedPairs,
+            scope: scope,
+            totalInScope: totalInScope,
+            approvedInScope: approvedInScope,
+            unapprovedCount: unapprovedCount,
+        };
 
         setText("sub-modal-title", `🚀 Batch ITMS Submission (${scope})`);
         setText("sub-confirm-scope-title", `SCOPE: ${scope} TRANSMISSION`);
         setText("sub-confirm-count-badge", `${approvedPairs.length} Orders Ready`);
         setText("sub-confirm-target-main", `${approvedPairs.length} Approved Orders (${scope})`);
         setText("sub-confirm-target-sub", `All verified motorcycle pairs within the '${scope}' date scope will be sequentially submitted to ITMS.`);
+
+        // Pre-Submission Physical Discrepancy Banner (Section 16.3 B)
+        const discBanner = document.getElementById("sub-confirm-discrepancy-banner");
+        const btnReviewConflicts = document.getElementById("btn-sub-review-conflicts");
+        if (discBanner) {
+            if (unapprovedCount > 0) {
+                setText("sub-discrepancy-approved-count", approvedInScope);
+                setText("sub-discrepancy-total-count", totalInScope);
+                setText("sub-discrepancy-unapproved-count", unapprovedCount);
+                discBanner.style.display = "block";
+                if (btnReviewConflicts) btnReviewConflicts.style.display = "inline-flex";
+            } else {
+                discBanner.style.display = "none";
+                if (btnReviewConflicts) btnReviewConflicts.style.display = "none";
+            }
+        }
+
+        // Reset any leftover exception summary elements
+        const exSummary = document.getElementById("sub-exception-summary");
+        const btnJumpFailed = document.getElementById("btn-sub-jump-failed");
+        if (exSummary) exSummary.style.display = "none";
+        if (btnJumpFailed) btnJumpFailed.style.display = "none";
 
         const batchListBox = document.getElementById("sub-confirm-batch-list-box");
         if (batchListBox) {
@@ -308,7 +448,28 @@ async function startSubmissionExecution() {
                 headers: { "Content-Type": "application/x-www-form-urlencoded" },
                 body: `action=submit&dry_run=${isDryRun}`,
             });
-            const subData = await subRes.json();
+            let subData = {};
+            try {
+                subData = await subRes.json();
+            } catch (jsonErr) {
+                subData = { success: false, error: "Invalid response from server." };
+            }
+
+            if (subRes.status === 409 || subData.code === "SUBMISSION_IN_PROGRESS") {
+                const lockMsg = subData.error || subData.message || "Another submission is currently in progress.";
+                setText("sub-kpi-failed", 0);
+                setText("sub-status-desc", `Submission paused: ${lockMsg}`);
+                setText("sub-active-plate", "Transmission Locked");
+                appendSubmissionLog(`⚠️ Conflict: ${lockMsg}`, "warning");
+                showToast(lockMsg, "warning");
+                isBatchSubmitting = false;
+                if (btnAbort) btnAbort.style.display = "none";
+                if (btnDone) btnDone.style.display = "inline-flex";
+                hideTopSubmissionIndicator();
+                if (typeof fetchStats === "function") fetchStats();
+                return;
+            }
+
             if (subData.success) {
                 success = true;
                 setText("sub-kpi-success", 1);
@@ -367,6 +528,8 @@ async function startSubmissionExecution() {
 
         let succeeded = 0;
         let failed = 0;
+        let batchFailures = [];
+        window.lastBatchFailures = [];
 
         for (let i = 0; i < total; i++) {
             if (batchSubmissionAborted) {
@@ -397,20 +560,60 @@ async function startSubmissionExecution() {
                     headers: { "Content-Type": "application/x-www-form-urlencoded" },
                     body: `action=submit&dry_run=${isDryRun}`,
                 });
-                const subData = await subRes.json();
+                let subData = {};
+                try {
+                    subData = await subRes.json();
+                } catch (jsonErr) {
+                    subData = { success: false, error: "Invalid response from server." };
+                }
+
+                // Section 16.3 A: Mutual Exclusion Lock Conflict (HTTP 409)
+                if (subRes.status === 409 || subData.code === "SUBMISSION_IN_PROGRESS") {
+                    const lockMsg = subData.error || subData.message || "Another submission is currently in progress.";
+                    appendSubmissionLog(`⚠️ [${currentIdx}/${total}] Submission Lock Conflict: ${lockMsg}`, "warning");
+                    showToast(lockMsg, "warning");
+
+                    // Do NOT count as failed; stop further execution safely so operator can wait
+                    isBatchSubmitting = false;
+                    if (btnAbort) btnAbort.style.display = "none";
+                    if (btnDone) btnDone.style.display = "inline-flex";
+                    setText("sub-status-desc", `Batch paused due to active lock: ${lockMsg}`);
+                    setText("sub-active-plate", "Transmission Locked");
+                    hideTopSubmissionIndicator();
+                    if (typeof fetchStats === "function") fetchStats();
+                    return;
+                }
+
                 if (subData.success) {
                     succeeded++;
                     setText("sub-kpi-success", succeeded);
-                    appendSubmissionLog(`✓ [${currentIdx}/${total}] Success: ${plate} submitted! Token: ${subData.token || 'OK'}`, "success");
+                    appendSubmissionLog(`✓ [${currentIdx}/${total}] Success: ${plate} submitted & archived! Token: ${subData.token || 'OK'}`, "success");
                 } else {
                     failed++;
                     setText("sub-kpi-failed", failed);
-                    appendSubmissionLog(`✕ [${currentIdx}/${total}] Failed: ${plate} - ${subData.error || subData.message || 'Error'}`, "error");
+                    const errMsg = subData.error || subData.message || 'Error';
+                    const isOutbox = Boolean(subData.queued_outbox || errMsg.includes("Offline Outbox"));
+                    batchFailures.push({
+                        pairId: p.id,
+                        plate: plate,
+                        orderNumber: orderNo,
+                        error: errMsg,
+                        isOutbox: isOutbox
+                    });
+                    appendSubmissionLog(`✕ [${currentIdx}/${total}] Failed: ${plate} - ${errMsg}`, "error");
                 }
             } catch (netErr) {
                 failed++;
                 setText("sub-kpi-failed", failed);
-                appendSubmissionLog(`✕ [${currentIdx}/${total}] Request error on ${plate}: ${netErr}`, "error");
+                const errMsg = String(netErr);
+                batchFailures.push({
+                    pairId: p.id,
+                    plate: plate,
+                    orderNumber: orderNo,
+                    error: errMsg,
+                    isOutbox: false
+                });
+                appendSubmissionLog(`✕ [${currentIdx}/${total}] Request error on ${plate}: ${errMsg}`, "error");
             }
 
             const remaining = total - (i + 1);
@@ -421,14 +624,85 @@ async function startSubmissionExecution() {
         }
 
         isBatchSubmitting = false;
+        window.lastBatchFailures = batchFailures;
 
+        const unapprovedCount = (currentSubmissionTask && currentSubmissionTask.unapprovedCount) || 0;
+        const btnJumpFailed = document.getElementById("btn-sub-jump-failed");
+        const exSummary = document.getElementById("sub-exception-summary");
+        const exList = document.getElementById("sub-exception-list");
+
+        // Section 16.3 C: Truthful Completion State & Exceptions Breakdown
         if (batchSubmissionAborted) {
             setText("sub-status-desc", `Batch aborted by operator. ${succeeded} succeeded, ${failed} failed.`);
             setText("sub-active-plate", "Submission Aborted");
-        } else {
-            setText("sub-status-desc", `All pairs processed! ${succeeded} succeeded, ${failed} failed.`);
-            setText("sub-active-plate", "Batch Complete");
+            const modeBadge = document.getElementById("sub-modal-mode-badge");
+            if (modeBadge) {
+                modeBadge.innerText = "ABORTED BY OPERATOR";
+                modeBadge.className = "badge badge-yellow";
+            }
+        } else if (failed > 0) {
+            // Exceptions Encountered (Amber/Red Truthful Header)
+            const outboxCount = batchFailures.filter(f => f.isOutbox).length;
+            const outboxMsg = outboxCount > 0 ? ` (${outboxCount} in offline outbox)` : '';
+            setText("sub-status-desc", `⚠️ Batch Completed with Exceptions: ${succeeded} Succeeded, ${failed} Failed${outboxMsg}.`);
+            setText("sub-active-plate", `${succeeded}/${total} Succeeded • ${failed} Failed`);
             setText("sub-item-index-badge", `${total} / ${total}`);
+
+            const modeBadge = document.getElementById("sub-modal-mode-badge");
+            if (modeBadge) {
+                modeBadge.innerText = "COMPLETED WITH EXCEPTIONS";
+                modeBadge.className = "badge badge-red";
+            }
+
+            // Populate exception list panel
+            if (exSummary && exList) {
+                exList.innerHTML = batchFailures.map(f => `
+                    <div style="padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.06); display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                        <div>
+                            <strong style="color:var(--ug-yellow);">${escapeHtml(f.plate)}</strong>
+                            <span style="color:rgba(255,255,255,0.6); font-size:0.7rem;"> (Order #${escapeHtml(f.orderNumber || '—')})</span>
+                        </div>
+                        <span style="color:#fca5a5; text-align:right;">${escapeHtml(f.error)}</span>
+                    </div>
+                `).join("");
+                exSummary.style.display = "block";
+            }
+
+            if (btnJumpFailed) {
+                btnJumpFailed.style.display = "inline-flex";
+                btnJumpFailed.innerHTML = `🔍 Jump to Failed Pairs (${failed})`;
+                btnJumpFailed.onclick = () => jumpToFailedPairsInQueue(batchFailures.map(f => f.pairId));
+            }
+        } else if (unapprovedCount > 0) {
+            // Approved subset succeeded, but unapproved pairs remain in queue
+            setText("sub-status-desc", `✓ All ${succeeded} approved pairs submitted successfully! Note: ${unapprovedCount} unapproved pair(s) remain in Queue.`);
+            setText("sub-active-plate", `Approved Subset Complete (${succeeded})`);
+            setText("sub-item-index-badge", `${total} / ${total}`);
+
+            const modeBadge = document.getElementById("sub-modal-mode-badge");
+            if (modeBadge) {
+                modeBadge.innerText = "PARTIAL BATCH SUBMITTED";
+                modeBadge.className = "badge badge-yellow";
+            }
+            if (exSummary) exSummary.style.display = "none";
+            if (btnJumpFailed) {
+                btnJumpFailed.style.display = "inline-flex";
+                btnJumpFailed.innerHTML = `🔍 Review ${unapprovedCount} Remaining Conflicts`;
+                btnJumpFailed.onclick = reviewConflictsFromSubmitModal;
+            }
+        } else {
+            // 100% Truthful Green Completion
+            setText("sub-status-desc", `🎉 100% Batch Complete! All ${succeeded} pairs submitted and verified in ITMS.`);
+            setText("sub-active-plate", "100% Batch Complete");
+            setText("sub-item-index-badge", `${total} / ${total}`);
+
+            const modeBadge = document.getElementById("sub-modal-mode-badge");
+            if (modeBadge) {
+                modeBadge.innerText = "100% VERIFIED & SUBMITTED";
+                modeBadge.className = "badge badge-green";
+            }
+            if (exSummary) exSummary.style.display = "none";
+            if (btnJumpFailed) btnJumpFailed.style.display = "none";
         }
 
         if (btnAbort) btnAbort.style.display = "none";

@@ -522,7 +522,20 @@ async function executePairAction(action) {
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
             body: `action=${encodeURIComponent(action)}`,
         });
-        const data = await res.json();
+        let data = {};
+        try {
+            data = await res.json();
+        } catch (jsonErr) {
+            data = { success: false, error: "Invalid response from server." };
+        }
+
+        if (res.status === 409 || data.code === "SUBMISSION_IN_PROGRESS") {
+            const lockMsg = data.error || data.message || "Another submission is currently in progress.";
+            showToast(lockMsg, "warning");
+            if (typeof fetchStats === "function") fetchStats();
+            return;
+        }
+
         if (data.success) {
             showToast(data.message, "success");
             fetchStats();

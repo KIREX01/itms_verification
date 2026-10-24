@@ -10,7 +10,15 @@ function setDashboardViewMode(mode) {
     const btnAll = document.getElementById("btn-dash-mode-all");
     if (btnShift) btnShift.classList.toggle("active", mode === "SHIFT");
     if (btnAll) btnAll.classList.toggle("active", mode === "ALL_TIME");
-    updateDashboardDisplay();
+    
+            // Section 16.3 A: Synchronize submission concurrency lock state
+            const isLocked = Boolean(data.submission_locked !== undefined ? data.submission_locked : (s && s.submission_locked));
+            const lockInfo = data.submission_lock_info || (s && s.submission_lock_info) || null;
+            if (typeof updateSubmissionLockState === "function") {
+                updateSubmissionLockState(isLocked, lockInfo);
+            }
+
+            updateDashboardDisplay();
 }
 
 function updateDashboardDisplay() {

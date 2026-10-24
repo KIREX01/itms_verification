@@ -593,6 +593,19 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
                 update_cols.append("account_email")
         pair.save(update_fields=update_cols)
 
+        # Concurrency safety: check if another submission is actively executing
+        from core.services.submission_lock import is_submission_active
+        is_locked, lock_info = is_submission_active()
+        if is_locked and lock_info.get("pair_id") != pair.id:
+            active_op = lock_info.get("operator", "another operator")
+            active_plate = lock_info.get("registration_number") or lock_info.get("order_number", "")
+            return JsonResponse({
+                "success": False,
+                "code": "SUBMISSION_IN_PROGRESS",
+                "error": f"Another submission is currently in progress ({active_plate} by {active_op}). Please wait for it to complete.",
+                "lock_info": lock_info,
+            }, status=409)
+
         outcome = submission_worker.submit_pair(pair, backend="web", dry_run=is_dry_run, operator=operator_user)
         return JsonResponse({
             "success": outcome.success,
@@ -757,10 +770,32 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
                 "message": "No approved pairs available for submission across all scopes.",
             })
 
+    # Concurrency safety: check if another submission is in progress before starting batch
+    from core.services.submission_lock import is_submission_active
+    is_locked, lock_info = is_submission_active()
+    if is_locked:
+        active_op = lock_info.get("operator", "another operator")
+        active_plate = lock_info.get("registration_number") or lock_info.get("order_number", "")
+        return JsonResponse({
+            "success": False,
+            "code": "SUBMISSION_IN_PROGRESS",
+            "message": f"Another submission is currently in progress ({active_plate} by {active_op}). Please wait for it to complete.",
+            "lock_info": lock_info,
+        }, status=409)
+
+    # Pacing and detailed result tracking
+    from core.services import config_service
+    pacing_seconds = float(config_service.get_setting("submission.batch_pacing_seconds", 2.0))
     succeeded = 0
     failed = 0
+    outbox_queued = 0
+    failures = []
     operator_user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
-    for p in approved_pairs:
+
+    for idx, p in enumerate(approved_pairs, 1):
+        if idx > 1 and pacing_seconds > 0:
+            time.sleep(pacing_seconds)
+
         # Check that pair is still APPROVED to prevent concurrent race condition submissions
         refreshed = VehicleInstallationPair.objects.select_related(
             "order", "front_image", "rear_image"
@@ -770,20 +805,40 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
         ).first()
         if not refreshed:
             continue
-        outcome = submission_worker.submit_pair(refreshed, backend="web", dry_run=is_dry_run, operator=operator_user)
+
+        outcome = submission_worker.submit_pair(
+            refreshed,
+            backend="web",
+            dry_run=is_dry_run,
+            operator=operator_user,
+            blocking_lock=True,
+            lock_timeout=25.0,
+        )
         if outcome.success:
             succeeded += 1
         else:
             failed += 1
+            is_outbox = "Offline Outbox" in (outcome.error or "")
+            if is_outbox:
+                outbox_queued += 1
+            failures.append({
+                "pair_id": p.id,
+                "plate": p.registration_number_detected,
+                "order_number": p.order.order_number if p.order else "",
+                "error": outcome.error,
+                "queued_outbox": is_outbox,
+            })
 
     return JsonResponse({
         "success": True,
         "total": len(approved_pairs),
         "succeeded": succeeded,
         "failed": failed,
+        "outbox_queued": outbox_queued,
+        "failures": failures,
         "dry_run": is_dry_run,
         "scope": scope,
-        "message": f"{'[DRY RUN] ' if is_dry_run else ''}Batch submission complete ({scope}): {succeeded} succeeded, {failed} failed.",
+        "message": f"{'[DRY RUN] ' if is_dry_run else ''}Batch submission complete ({scope}): {succeeded} succeeded, {failed} failed (Outbox: {outbox_queued}).",
     })
 
 

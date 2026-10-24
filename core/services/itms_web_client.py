@@ -4390,36 +4390,46 @@ class ITMSWebClient:
             if resp.status_code == 302:
                 redirect_url = resp.headers.get("Location", "")
                 full_redirect_url = urllib.parse.urljoin(self.base_url, redirect_url)
-                is_index = "/installation-orders/index" in redirect_url
 
-                try:
-                    from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog, EvidenceImage, EvidenceImage
-                    from django.utils import timezone
-                    order_obj = InstallationOrder.objects.filter(itms_order_uuid=order_uuid).first()
-                    if order_obj:
-                        order_obj.status = InstallationOrder.Status.SUBMITTED
-                        order_obj.order_status = "Installed"
-                        order_obj.save(update_fields=["status", "order_status"])
-                        pairs = VehicleInstallationPair.objects.filter(order=order_obj)
-                        now = timezone.now()
-                        for p in pairs:
-                            p.verification_status = VehicleInstallationPair.VerificationStatus.SUBMITTED
-                            p.submitted_at = now
-                            p.save(update_fields=["verification_status", "submitted_at"])
-                            for img in (p.front_image, p.rear_image):
-                                if img and img.status != EvidenceImage.Status.SUBMITTED:
-                                    img.status = EvidenceImage.Status.SUBMITTED
-                                    img.submitted_at = now
-                                    img.save(update_fields=["status", "submitted_at"])
-                            SubmissionAuditLog.objects.create(
-                                pair=p,
-                                action=SubmissionAuditLog.Action.SUBMIT,
-                                result=SubmissionAuditLog.ResultStatus.SUCCESS,
-                                message=f"Step 3 confirmed and finalized: Redirected to {redirect_url}",
-                            )
-                except Exception as audit_exc:
-                    logger.warning("Audit log error on Step 3 submit: %s", audit_exc)
+                # Strict Redirect Validation:
+                # A. Check for session expiration mid-submission
+                if "/site/login" in redirect_url:
+                    logger.warning("Step 3 confirmation redirected to /site/login: Session expired.")
+                    try:
+                        self.session_store.mark_unauthenticated(message="Session expired during confirmation step.")
+                    except Exception:
+                        pass
+                    return {
+                        "success": False,
+                        "dry_run": False,
+                        "step": 3,
+                        "status_code": 302,
+                        "error": "ITMS session expired during Step 3 confirmation (redirected to /site/login). Please sign in again.",
+                        "code": "SESSION_EXPIRED",
+                        "redirect_url": full_redirect_url,
+                        "order_uuid": order_uuid,
+                    }
 
+                # B. Check for validation rejection / bounce back to Step 2
+                if "/installation-orders/approve" in redirect_url:
+                    logger.warning("Step 3 confirmation rejected by ITMS: Redirected back to /installation-orders/approve.")
+                    return {
+                        "success": False,
+                        "dry_run": False,
+                        "step": 3,
+                        "status_code": 302,
+                        "error": "Step 3 confirmation rejected by ITMS and bounced back to Step 2 (/installation-orders/approve).",
+                        "code": "CONFIRMATION_REJECTED",
+                        "redirect_url": full_redirect_url,
+                        "order_uuid": order_uuid,
+                    }
+
+                is_index = any(k in redirect_url for k in ("/installation-orders/index", "/installation-orders/archive", "/installation-orders/view"))
+                if not is_index:
+                    logger.warning("Step 3 unexpected redirect Location: %s", redirect_url)
+
+                # Note: Local DB records are NOT marked as SUBMITTED here.
+                # Step 4 verify_order_archived() confirms presence in ITMS Archive before advancing status.
                 return {
                     "success": True,
                     "dry_run": False,
@@ -4431,7 +4441,7 @@ class ITMSWebClient:
                     "order_uuid": order_uuid,
                     "has_replacements": has_replacements,
                     "replacements": replaced_info,
-                    "message": f"Step 3 confirmed successfully. Order finalized: {full_redirect_url}",
+                    "message": f"Step 3 accepted by ITMS. Redirected to: {full_redirect_url}",
                 }
             elif resp.status_code == 200:
                 err_m = re.findall(r'<div[^>]*class=["\'][^"\']*invalid-feedback[^"\']*["\'][^>]*>(.*?)</div>', resp.text, re.DOTALL)
@@ -4688,6 +4698,124 @@ class ITMSWebClient:
             "message": f"Order #{order_num} requires Step 1 hardware selection.",
         }
 
+    def verify_order_archived(
+        self,
+        order_identifier: str,
+        order_uuid: Optional[str] = None,
+        pair_id: Optional[int] = None,
+        max_retries: int = 4,
+        retry_delay: float = 1.5,
+    ) -> Dict[str, Any]:
+        """
+        Step 4 Post-Submission Verification:
+        Actively confirms that an order has completed Step 3 and is officially
+        registered in the ITMS Archive (/installation-orders/archive).
+
+        Retries up to `max_retries` with `retry_delay` seconds between checks
+        to accommodate ITMS asynchronous index-to-archive commit latency.
+        Only transitions local database models (InstallationOrder, VehicleInstallationPair)
+        to INSTALLED/SUBMITTED when archive presence is confirmed.
+        """
+        from core.models import InstallationOrder, VehicleInstallationPair, SubmissionAuditLog, EvidenceImage
+        from django.db import models
+        from django.utils import timezone
+
+        ident = (order_identifier or "").strip()
+        last_stage_info: Dict[str, Any] = {}
+
+        for attempt in range(1, max_retries + 1):
+            if attempt > 1 and retry_delay > 0:
+                time.sleep(retry_delay)
+
+            stage_info = self.detect_order_stage(ident)
+            last_stage_info = stage_info
+
+            if stage_info.get("success") and stage_info.get("stage") == "STAGE_ARCHIVED":
+                # CONFIRMED IN ARCHIVE!
+                now = timezone.now()
+                target_uuid = order_uuid or stage_info.get("order_uuid")
+
+                order_qs = (
+                    InstallationOrder.objects.filter(models.Q(order_number=ident) | models.Q(itms_order_uuid=target_uuid))
+                    if target_uuid
+                    else InstallationOrder.objects.filter(order_number=ident)
+                )
+                order_obj = order_qs.first()
+
+                if order_obj:
+                    order_obj.status = InstallationOrder.Status.INSTALLED
+                    order_obj.order_status = "Installed"
+                    order_obj.is_archived = True
+                    order_obj.is_active_on_itms = False
+                    order_obj.itms_stage = "STAGE_ARCHIVED"
+                    order_obj.last_synced_at = now
+                    order_obj.save(update_fields=["status", "order_status", "is_archived", "is_active_on_itms", "itms_stage", "last_synced_at"])
+
+                # Update Pair
+                pair_qs = None
+                if pair_id:
+                    pair_qs = VehicleInstallationPair.objects.filter(id=pair_id)
+                elif order_obj:
+                    pair_qs = VehicleInstallationPair.objects.filter(order=order_obj)
+
+                if pair_qs:
+                    for p in pair_qs:
+                        p.verification_status = VehicleInstallationPair.VerificationStatus.SUBMITTED
+                        p.submitted_at = now
+                        p.save(update_fields=["verification_status", "submitted_at"])
+
+                        for img in (p.front_image, p.rear_image):
+                            if img and img.status != EvidenceImage.Status.SUBMITTED:
+                                img.status = EvidenceImage.Status.SUBMITTED
+                                img.submitted_at = now
+                                img.save(update_fields=["status", "submitted_at"])
+
+                        SubmissionAuditLog.objects.create(
+                            pair=p,
+                            action=SubmissionAuditLog.Action.SUBMIT,
+                            result=SubmissionAuditLog.ResultStatus.SUCCESS,
+                            message=f"Step 4 Verified in ITMS Archive: Confirmed on attempt {attempt}/{max_retries} (Stage ARCHIVED).",
+                            timestamp=now,
+                        )
+
+                return {
+                    "success": True,
+                    "verified": True,
+                    "stage": "STAGE_ARCHIVED",
+                    "attempt": attempt,
+                    "order_identifier": ident,
+                    "order_uuid": target_uuid,
+                    "message": f"Confirmed in ITMS Archive on attempt {attempt}.",
+                }
+
+        # Failed to confirm in archive after retries
+        err_msg = (
+            f"Step 3 confirmation was submitted, but order '{ident}' was not confirmed in ITMS Archive "
+            f"after {max_retries} checks ({max_retries * retry_delay:.1f}s). Current stage: {last_stage_info.get('stage', 'UNKNOWN')}."
+        )
+        logger.warning(err_msg)
+
+        if pair_id:
+            try:
+                p = VehicleInstallationPair.objects.filter(id=pair_id).first()
+                if p:
+                    SubmissionAuditLog.objects.create(
+                        pair=p,
+                        action=SubmissionAuditLog.Action.SUBMIT,
+                        result=SubmissionAuditLog.ResultStatus.FAILURE,
+                        message=f"Step 4 Archive Verification Failed: {err_msg}",
+                    )
+            except Exception as e:
+                logger.debug("Failed logging archive audit: %s", e)
+
+        return {
+            "success": False,
+            "verified": False,
+            "stage": last_stage_info.get("stage", "UNKNOWN"),
+            "error": err_msg,
+            "code": "ARCHIVE_VERIFICATION_TIMEOUT",
+        }
+
     def execute_installation_order_workflow(
         self,
         order_identifier: str,
@@ -4769,14 +4897,55 @@ class ITMSWebClient:
                         dry_run=dry_run,
                         log_callback=log_callback,
                     )
+                    if not step3_res.get("success", False):
+                        return {
+                            "success": False,
+                            "already_in_step3": True,
+                            "order_uuid": order_uuid,
+                            "step3": step3_res,
+                            "error": step3_res.get("error", "Step 3 confirmation failed."),
+                            "code": step3_res.get("code", "CONFIRMATION_FAILED"),
+                        }
+
+                    # Step 4: Archive Verification
+                    if not dry_run:
+                        if log_callback:
+                            try:
+                                log_callback("🔍 Verifying final order status in ITMS Archive...")
+                            except Exception:
+                                pass
+                        arch_verif = self.verify_order_archived(order_identifier=order_identifier, order_uuid=order_uuid, pair_id=pair_id)
+                        if not arch_verif.get("success"):
+                            return {
+                                "success": False,
+                                "verified_in_archive": False,
+                                "already_in_step3": True,
+                                "order_uuid": order_uuid,
+                                "step3": step3_res,
+                                "archive_verification": arch_verif,
+                                "error": arch_verif.get("error", "Order not confirmed in ITMS Archive."),
+                                "code": arch_verif.get("code", "ARCHIVE_VERIFICATION_FAILED"),
+                            }
+                        return {
+                            "success": True,
+                            "verified_in_archive": True,
+                            "already_in_step3": True,
+                            "order_uuid": order_uuid,
+                            "step3": step3_res,
+                            "archive_verification": arch_verif,
+                            "is_finalized": True,
+                            "redirect_url": step3_res.get("redirect_url", ""),
+                            "message": f"Order #{order_identifier} finalized and verified in ITMS Archive.",
+                        }
                     return {
-                        "success": step3_res.get("success", False),
+                        "success": True,
+                        "dry_run": True,
                         "already_in_step3": True,
                         "order_uuid": order_uuid,
                         "step3": step3_res,
-                        "is_finalized": step3_res.get("is_finalized", False),
+                        "is_finalized": True,
                         "redirect_url": step3_res.get("redirect_url", ""),
-                        "message": step3_res.get("message", ""),
+                        "message": f"[DRY RUN] Order #{order_identifier} Step 3 simulated successfully.",
                     }
                 return {
                     "success": True,
@@ -4900,16 +5069,59 @@ class ITMSWebClient:
                 log_callback=log_callback,
             )
             step3_ok = step3_res.get("success", False)
+            if not step3_ok:
+                return {
+                    "success": False,
+                    "step1": step1_res,
+                    "step2": step2_res,
+                    "step3": step3_res,
+                    "order_uuid": order_uuid,
+                    "error": step3_res.get("error", "Step 3 confirmation failed."),
+                    "code": step3_res.get("code", "CONFIRMATION_FAILED"),
+                }
+
+            # ── STEP 4: POST-SUBMISSION ARCHIVE VERIFICATION ──────────────
+            if not dry_run:
+                if log_callback:
+                    try:
+                        log_callback("🔍 Verifying final order status in ITMS Archive...")
+                    except Exception:
+                        pass
+                arch_verif = self.verify_order_archived(order_identifier=order_identifier, order_uuid=order_uuid, pair_id=pair_id)
+                if not arch_verif.get("success"):
+                    return {
+                        "success": False,
+                        "verified_in_archive": False,
+                        "step1": step1_res,
+                        "step2": step2_res,
+                        "step3": step3_res,
+                        "archive_verification": arch_verif,
+                        "order_uuid": order_uuid,
+                        "error": arch_verif.get("error", "Order not confirmed in ITMS Archive."),
+                        "code": arch_verif.get("code", "ARCHIVE_VERIFICATION_FAILED"),
+                    }
+                return {
+                    "success": True,
+                    "verified_in_archive": True,
+                    "is_finalized": True,
+                    "step1": step1_res,
+                    "step2": step2_res,
+                    "step3": step3_res,
+                    "archive_verification": arch_verif,
+                    "order_uuid": order_uuid,
+                    "redirect_url": step3_res.get("redirect_url", ""),
+                    "message": f"Order #{order_identifier} finalized and verified in ITMS Archive.",
+                }
             return {
-                "success": step3_ok,
+                "success": True,
+                "dry_run": True,
+                "is_finalized": True,
                 "step1": step1_res,
                 "step2": step2_res,
                 "step3": step3_res,
                 "order_uuid": order_uuid,
-                "is_finalized": step3_res.get("is_finalized", False),
                 "redirect_url": step3_res.get("redirect_url", ""),
-                "error": step3_res.get("error", "") if not step3_ok else "",
-                "message": step3_res.get("message", "") if step3_ok else f"Step 2 photos uploaded successfully, but Step 3 confirmation failed: {step3_res.get('error', '')}",
+                "message": f"[DRY RUN] Order #{order_identifier} Step 3 simulated successfully.",
             }
 
         return {

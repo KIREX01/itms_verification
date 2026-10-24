@@ -62,6 +62,8 @@ def submit_pair(
     submit_step3: Optional[bool] = None,
     log_callback: Optional[Any] = None,
     operator: Optional[Any] = None,
+    blocking_lock: bool = False,
+    lock_timeout: float = 10.0,
 ) -> SubmissionOutcome:
     """Drive a single pair through the ITMS workflow (mock, live API, or live_web) with full audit logging."""
     if operator is None and pair and pair.operator:
@@ -158,25 +160,44 @@ def submit_pair(
     # Live Web Wizard Backend (Yii2 WebApp stock.itms.ug)
     if backend_mode in ("live_web", "web", "live"):
         from core.services.itms_web_client import get_web_client
-        web_client = get_web_client(user=effective_operator)
+        from core.services.submission_lock import submission_lock, SubmissionLockError
 
+        web_client = get_web_client(user=effective_operator)
         actual_front_path = str(front_path) if front_path.is_file() else pair.front_image.vault_file
         actual_rear_path = str(rear_path) if rear_path.is_file() else pair.rear_image.vault_file
+        op_name = getattr(effective_operator, "username", str(effective_operator or "Operator"))
 
-        res = web_client.execute_installation_order_workflow(
-            order_identifier=order.order_number,
-            front_photo_path=actual_front_path,
-            rear_photo_path=actual_rear_path,
-            pair_id=pair.id,
-            dry_run=is_dry_run,
-            submit_step3=is_submit_step3,
-            log_callback=log_callback,
-        )
+        try:
+            with submission_lock(
+                pair_id=pair.id,
+                order_number=order.order_number,
+                registration_number=pair.registration_number_detected,
+                operator=op_name,
+                blocking=blocking_lock,
+                timeout=lock_timeout,
+            ):
+                res = web_client.execute_installation_order_workflow(
+                    order_identifier=order.order_number,
+                    front_photo_path=actual_front_path,
+                    rear_photo_path=actual_rear_path,
+                    pair_id=pair.id,
+                    dry_run=is_dry_run,
+                    submit_step3=is_submit_step3,
+                    log_callback=log_callback,
+                )
+        except SubmissionLockError as lock_err:
+            err_msg = str(lock_err)
+            logger.warning("Submission blocked by concurrency lock: %s", err_msg)
+            _log(pair, SubmissionAuditLog.Action.SUBMIT, SubmissionAuditLog.ResultStatus.FAILURE, f"[LOCKED] {err_msg}", operator=effective_operator)
+            return SubmissionOutcome(pair_id=pair.id, success=False, error=err_msg, backend=backend_mode, dry_run=is_dry_run)
+
         if not res.get("success"):
             err_msg = res.get("error", "Web workflow failed")
             err_lower = str(err_msg).lower()
             is_net_err = any(k in err_lower for k in ("connection", "timeout", "10054", "offline", "unreachable", "getaddrinfo", "host", "reset by peer"))
-            if is_net_err:
+            is_archive_fail = res.get("code") in ("ARCHIVE_VERIFICATION_FAILED", "ARCHIVE_VERIFICATION_TIMEOUT")
+
+            if is_net_err and not is_archive_fail:
                 outbox_enabled = bool(config_service.get_setting("outbox.enabled", True))
                 if outbox_enabled:
                     pair.verification_status = VehicleInstallationPair.VerificationStatus.OFFLINE_OUTBOX
@@ -193,6 +214,14 @@ def submit_pair(
                     _log(pair, SubmissionAuditLog.Action.SUBMIT, SubmissionAuditLog.ResultStatus.FAILURE, f"[WEB NETWORK DROP] {err_msg}", operator=operator)
                     _log(pair, SubmissionAuditLog.Action.FALLBACK, SubmissionAuditLog.ResultStatus.INFO,
                          "Network dropped during upload. Vehicle pair preserved in APPROVED status for retry once connection is restored.", operator=operator)
+            elif is_archive_fail:
+                _log(pair, SubmissionAuditLog.Action.SUBMIT, SubmissionAuditLog.ResultStatus.FAILURE, f"[ARCHIVE UNCONFIRMED] {err_msg}", operator=operator)
+                _log(pair, SubmissionAuditLog.Action.FALLBACK, SubmissionAuditLog.ResultStatus.INFO,
+                     "Step 3 submitted, but order was not confirmed in ITMS Archive. Manual operator review required.", operator=operator)
+                pair.verification_status = VehicleInstallationPair.VerificationStatus.FAILED
+                pair.save(update_fields=["verification_status"])
+                order.status = InstallationOrder.Status.FAILED
+                order.save(update_fields=["status"])
             else:
                 _log(pair, SubmissionAuditLog.Action.SUBMIT, SubmissionAuditLog.ResultStatus.FAILURE, f"[WEB] {err_msg}", operator=operator)
                 _log(pair, SubmissionAuditLog.Action.FALLBACK, SubmissionAuditLog.ResultStatus.INFO,
@@ -214,8 +243,14 @@ def submit_pair(
             pair.submitted_at = now
             pair.save(update_fields=["verification_status", "submitted_at"])
 
-            order.status = InstallationOrder.Status.SUBMITTED
-            order.save(update_fields=["status"])
+            if not is_dry_run and res.get("verified_in_archive"):
+                order.status = InstallationOrder.Status.INSTALLED
+                order.is_archived = True
+                order.order_status = "Installed"
+                order.save(update_fields=["status", "is_archived", "order_status"])
+            else:
+                order.status = InstallationOrder.Status.SUBMITTED
+                order.save(update_fields=["status"])
 
             for image in (pair.front_image, pair.rear_image):
                 if image:
@@ -376,7 +411,18 @@ def submit_approved_pairs(
     )
     total_count = len(approved_qs)
 
+    from core.services import config_service
+    import time
+    pacing_seconds = float(config_service.get_setting("submission.batch_pacing_seconds", 2.0))
+
     for idx, pair in enumerate(approved_qs, 1):
+        if idx > 1 and pacing_seconds > 0:
+            if log_callback:
+                try:
+                    log_callback(f"⏳ Pacing batch upload: waiting {pacing_seconds:.1f}s before next order...")
+                except Exception:
+                    pass
+            time.sleep(pacing_seconds)
         outcome = submit_pair(
             pair,
             backend=backend,
@@ -384,6 +430,8 @@ def submit_approved_pairs(
             submit_step3=submit_step3,
             log_callback=log_callback,
             operator=operator,
+            blocking_lock=True,
+            lock_timeout=25.0,
         )
         outcomes.append(outcome)
         if progress_callback:

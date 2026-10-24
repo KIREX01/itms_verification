@@ -124,6 +124,8 @@ def api_stats(request: HttpRequest) -> JsonResponse:
     dry_run = config_service.get_setting("submission.dry_run_mode", True)
     db_info = config_service.get_active_database_info()
 
+    from core.services.submission_lock import is_submission_active
+    is_locked, lock_info = is_submission_active()
     stats_payload = {
         "total_orders": total_orders,
         "pending_orders": pending_orders,
@@ -135,6 +137,8 @@ def api_stats(request: HttpRequest) -> JsonResponse:
         "total_photos": total_photos,
         "batches_count": batches_count,
         "shift": shift_stats,
+        "submission_locked": is_locked,
+        "submission_lock_info": lock_info,
     }
 
     return JsonResponse({

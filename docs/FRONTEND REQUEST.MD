@@ -797,3 +797,119 @@ This transition aligns with our domain `close.kirex.online`, insulates operation
    - **Blocks Single-Orientation Completion**: If only REAR photos (0 FRONTS) were captured, completion is blocked with a clear warning instructing the operator to turn around and capture fronts.
    - **Count Asymmetry Confirmation**: If `rears != fronts`, prompts explicit confirmation detailing how many pairs will match and how many surplus will remain.
    - **Safe State Clearance**: Only advances `batchIndex` and resets counters AFTER the server returns `{"success": true}` from `POST /api/mobile/uturn/finish_batch/`.
+
+
+---
+
+## 16. Feature: Truthful Batch Submission, Archive Verification UI & Concurrency Lock Handling - [PENDING FRONTEND]
+
+- **Date**: Sun Oct 25, 2026
+- **Status**: ⏳ **Pending Frontend Implementation**
+- **Priority**: High (Eliminates the ~3% Silent Upload Drop & Concurrent Session Collisions)
+
+### 16.1 Problem Statement
+1. **The "Silent 3% Drop"**: When a batch of 25 pairs has 1 pair with an OCR discrepancy (in `CONFLICT`) or network drop, line 429 of `pipeline.js` displays:
+   `"All pairs processed! 24 succeeded, 0 failed. Batch Complete (24 / 24)"`.
+   Operators believe 100% of the physical batch was pushed to ITMS, while the unapproved or failed pair is silently skipped or moved into `OFFLINE_OUTBOX`.
+2. **Concurrent Submissions**: If two operators or tabs click "Submit Approved", overlapping requests fire against the ITMS PHP upload buffer, causing timeouts and corrupted multipart streams.
+3. **Missing Archive Feedback**: The UI currently considers an HTTP 302 as success without reflecting Step 4 Post-Submission Archive confirmation.
+
+---
+
+### 16.2 Backend REST Contracts Implemented & Available
+
+#### 1. Concurrency Lock Status (`GET /api/stats/` & `GET /api/pipeline/status/`)
+- In `api_stats`, the backend now returns real-time lock metadata:
+  ```json
+  {
+    "submission_locked": true,
+    "submission_lock_info": {
+      "pid": 1420,
+      "pair_id": 3206,
+      "order_number": "PO-UMA391QL-231026",
+      "registration_number": "UMA 391QL",
+      "operator": "john_doe",
+      "started_at": 1792879500.0,
+      "elapsed_seconds": 4.2
+    }
+  }
+  ```
+- When `submission_locked == true`, another submission is currently in progress.
+
+#### 2. Mutual Exclusion Conflict Response (`HTTP 409 Conflict`)
+- Both `POST /api/pairs/batch-submit/` and `POST /api/pairs/<id>/action/` (action=`submit`) return `409 Conflict` if a submission is already active:
+  ```json
+  {
+    "success": false,
+    "code": "SUBMISSION_IN_PROGRESS",
+    "message": "Another submission is currently in progress (UMA 391QL by john_doe). Please wait for it to complete.",
+    "lock_info": { ... }
+  }
+  ```
+
+#### 3. Enhanced Batch Submit Response (`POST /api/pairs/batch-submit/`)
+- The response now provides a truthful breakdown:
+  ```json
+  {
+    "success": true,
+    "total": 24,
+    "succeeded": 23,
+    "failed": 1,
+    "outbox_queued": 1,
+    "failures": [
+      {
+        "pair_id": 3105,
+        "plate": "UMA 654QJ",
+        "order_number": "PO-UMA654QJ-231026",
+        "error": "Step 3 submitted, but order was not confirmed in ITMS Archive within 6.0s.",
+        "queued_outbox": false
+      }
+    ],
+    "message": "Batch submission complete (TODAY): 23 succeeded, 1 failed (Outbox: 1)."
+  }
+  ```
+
+---
+
+### 16.3 Frontend Requirements & UI Integration Specifications
+
+#### A. Batch Submit Button & Active Lock State (`pipeline.js` & `tab_batches.js`)
+1. **Poll Lock State**: In `fetchStats()` (`app.js`), if `data.submission_locked === true`:
+   - Disable all batch submit buttons: `#btn-submit-batch`, `#btn-submit-approved`.
+   - Show an active lock badge / pulse indicator in the header ribbon or queue bar:
+     `"🔒 Submitting UMA 391QL (4s)..."`
+   - Prevent operators from double-clicking or triggering simultaneous submissions.
+2. **Handle HTTP 409**:
+   - If `POST /api/pairs/batch-submit/` or `POST /api/pairs/<id>/action/` returns HTTP 409:
+   - Display a non-blocking toast warning using the returned `data.message`.
+   - Do NOT mark the pair as failed; simply restore the button state.
+
+#### B. Pre-Submission Physical Discrepancy Banner (`pipeline.js:triggerBatchSubmit`)
+1. **Pre-Flight Count Inspection**:
+   - Before firing batch submit, compare total pairs in the active batch vs. approved pairs:
+     - `total_in_batch = pairsData.length`
+     - `approved_in_batch = pairsData.filter(p => p.verification_status === "APPROVED").length`
+     - `unapproved_count = total_in_batch - approved_in_batch`
+2. **Warning Confirmation**:
+   - If `unapproved_count > 0`:
+     Display an explicit confirmation modal or banner:
+     ```html
+     <div class="alert alert-warning mb-3">
+       <strong>⚠️ Partial Batch Submission:</strong> 
+       Only <strong>${approved_in_batch}</strong> of <strong>${total_in_batch}</strong> pairs in this batch are APPROVED.
+       <br>
+       <strong>${unapproved_count}</strong> pair(s) in CONFLICT / PENDING REVIEW will NOT be sent to ITMS until reviewed.
+     </div>
+     ```
+   - Give the operator two buttons: `[ Review Conflicts First ]` and `[ Submit Approved Only (${approved_in_batch}) ]`.
+
+#### C. Truthful Batch Completion Modal (`pipeline.js:updateBatchModal`)
+1. **Replace the misleading line 429**:
+   - Instead of blindly reporting `"All pairs processed! X succeeded, 0 failed. Batch Complete"`:
+   - Read the server response `data.succeeded`, `data.failed`, `data.outbox_queued`, and `data.failures`.
+2. **Display Color-Coded Breakdown**:
+   - If `failed > 0` or `outbox_queued > 0`:
+     - Show **amber/red** header: `"⚠️ Batch Completed with Exceptions: ${succeeded} Succeeded, ${failed} Failed"`.
+     - List each failed plate with its exact error reason (e.g., *"Not confirmed in ITMS Archive"*, *"Offline Outbox"*).
+     - Add a direct button: `[ 🔍 Jump to Failed Pairs in Queue ]` to immediately filter the queue to those specific pair IDs.
+   - Only show green `"100% Batch Complete"` when `failed === 0` AND all pairs in the batch were approved and archived.

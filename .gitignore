@@ -10,6 +10,10 @@ db.sqlite3-*
 .itms_web.pid
 media/vault/
 media/crops/
+media/locks/
+*.lock
+*.lock.json
+media/crops/
 media/*.log
 media/*.bak
 *.log

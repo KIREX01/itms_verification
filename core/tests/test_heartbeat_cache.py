@@ -22,12 +22,17 @@ class HeartbeatReachabilityCacheTests(TestCase):
         ITMSWebClient._connection_cache.clear()
         ITMSWebClient._connection_cache_time = 0.0
 
+        # Hermetic test isolation: Default ITMS master switch to enabled
+        self.itms_enabled_patcher = patch("core.services.config_service.is_itms_enabled", return_value=True)
+        self.itms_enabled_patcher.start()
+
         self.client = ITMSWebClient()
         self.http_client = Client()
         self.user = User.objects.create_user(username="heartbeatop", password="password123")
         self.http_client.login(username="heartbeatop", password="password123")
 
     def tearDown(self):
+        self.itms_enabled_patcher.stop()
         ITMSWebClient._connection_cache.clear()
         ITMSWebClient._connection_cache_time = 0.0
 

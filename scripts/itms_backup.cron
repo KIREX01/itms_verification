@@ -1,0 +1,2 @@
+# Daily backup of ITMS PostgreSQL database at 02:30 UTC
+30 2 * * * www-data /bin/bash /opt/itms/scripts/backup_db.sh >> /opt/itms/backups/backup.log 2>&1

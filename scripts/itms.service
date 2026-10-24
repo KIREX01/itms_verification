@@ -1,0 +1,24 @@
+[Unit]
+Description=ITMS Verification Copilot Service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/itms
+ExecStart=/opt/itms/.venv/bin/python manage.py run_web --no-ssl --host 127.0.0.1 --port 8000 --noreload
+Restart=always
+RestartSec=5
+StandardOutput=append:/opt/itms/media/itms_web.log
+StandardError=append:/opt/itms/media/itms_web.log
+
+# Security Sandboxing
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/itms /var/log
+
+[Install]
+WantedBy=multi-user.target

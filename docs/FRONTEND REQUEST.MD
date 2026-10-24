@@ -913,3 +913,159 @@ This transition aligns with our domain `close.kirex.online`, insulates operation
      - List each failed plate with its exact error reason (e.g., *"Not confirmed in ITMS Archive"*, *"Offline Outbox"*).
      - Add a direct button: `[ 🔍 Jump to Failed Pairs in Queue ]` to immediately filter the queue to those specific pair IDs.
    - Only show green `"100% Batch Complete"` when `failed === 0` AND all pairs in the batch were approved and archived.
+
+
+---
+
+## 17. Feature: Robust Quick Install, Serial-to-UUID Resolution, Fresh Form CSRF & Hardware Carry-Through - [COMPLETED]
+
+- **Date**: Sun Oct 25, 2026
+- **Status**: 🟢 **Completed & Verified (Backend Services & REST APIs)**
+- **Priority**: High (Eliminates Quick Install Validation Drops & Form Submission Rejections)
+
+### 17.1 Problem Statement & Root Cause Resolution
+1. **Serial String vs. ActiveForm UUID Mismatch**:
+   - In the ITMS Yii2 web application, hardware selection dropdowns expect a 36-character inventory UUID (e.g., `a90e3bf1-5176-422e-9e3f-ac8235e2d243`).
+   - When operators input human-readable serials (`001182812`, `8BAE470808CF`), the ITMS server returned:
+     `Form validation rejected by ITMS: {'installationorderform-front_license_plate_id': ['Front License Plate is not a valid UUID']}`.
+   - **Resolution**: Implemented `ITMSWebClient.resolve_option_uuid()` which automatically matches serial numbers, plate numbers, and leading-zero variations against the parsed ITMS dropdown options, resolving to valid UUIDs automatically.
+2. **Missing Fresh Form CSRF Token**:
+   - Calling `submit_installation_step1` previously relied on stale login session CSRF cookies instead of the fresh page token rendered on `/installation-orders/installation?id=<uuid>`.
+   - **Resolution**: Backend now automatically fetches Step 1 form HTML, extracts fresh `_csrf-frontend` tokens, and passes them to ActiveForm validation and POST submissions.
+3. **Hardware Serials Discarded on 1-Click Direct Submit (`action="submit"`)**:
+   - When operators clicked "1-Tap Finalize & Submit", `orders.py` attached photos and immediately dispatched to `submit_pair`, discarding the hardware serial inputs and leaving Step 1 blank on ITMS.
+   - **Resolution**: The backend now persists hardware inputs to the `InstallationOrder` record, passes `front_plate_id`, `rear_plate_id`, and `tracker_id` into `submission_worker.submit_pair()`, which forwards them into `execute_installation_order_workflow()` to complete Step 1 before uploading Step 2 photos.
+4. **Empty Hardware Pre-fill on New Orders**:
+   - **Resolution**: `GET /api/itms/orders/<ident>/install/` now automatically resolves provisioned kit inventory from `InstallationKit` and ITMS Step 1 dropdown selections to pre-populate blank serials.
+
+---
+
+### 17.2 Backend REST Contracts Implemented & Available
+
+#### 1. Hardware Inspection & Step 1 Form Data (`GET /api/itms/orders/<ident>/install/`)
+The endpoint now returns pre-filled order serials and the complete `step1_form` dropdown structure:
+```json
+{
+  "success": true,
+  "order": {
+    "order_number": "PO-UMA300P-100926",
+    "registration_number": "UMA 300P",
+    "status": "PENDING",
+    "vin": "VIN1234567890",
+    "warehouse_name": "AGM Bond",
+    "itms_uuid": "a90e3bf1-5176-422e-9e3f-ac8235e2d243",
+    "front_plate_serial": "001182812",
+    "rear_plate_serial": "001182813",
+    "gps_tracker_id": "8BAE470808CF"
+  },
+  "stage": "STAGE_1_INSTALLATION",
+  "stage_info": { "stage": "STAGE_1_INSTALLATION", "order_uuid": "a90e3bf1-5176-422e-9e3f-ac8235e2d243" },
+  "step1_form": {
+    "csrf_token": "fresh-token-xyz-789",
+    "front_plate": {
+      "selected_id": "a90e3bf1-5176-422e-9e3f-ac8235e2d243",
+      "selected_text": "001182812 (UMA 300P)",
+      "options": [
+        {
+          "value": "a90e3bf1-5176-422e-9e3f-ac8235e2d243",
+          "text": "001182812 (UMA 300P)",
+          "serial": "001182812",
+          "selected": true
+        }
+      ]
+    },
+    "rear_plate": {
+      "selected_id": "bbbbbbbb-2222-3333-4444-555555555555",
+      "selected_text": "001182813 (UMA 300P)",
+      "options": [
+        {
+          "value": "bbbbbbbb-2222-3333-4444-555555555555",
+          "text": "001182813 (UMA 300P)",
+          "serial": "001182813",
+          "selected": true
+        }
+      ]
+    },
+    "tracker": {
+      "selected_id": "cccccccc-3333-4444-5555-666666666666",
+      "selected_text": "8BAE470808CF",
+      "options": [
+        {
+          "value": "cccccccc-3333-4444-5555-666666666666",
+          "text": "8BAE470808CF",
+          "serial": "8BAE470808CF",
+          "selected": true
+        }
+      ]
+    }
+  },
+  "existing_pair": null
+}
+```
+
+#### 2. Save Step 1 (`POST /api/itms/orders/<ident>/install/`)
+Payload:
+- `action`: `"save_step1"` (or `"save_continue"`)
+- `front_plate_id`: Human-readable serial `001182812` OR option UUID
+- `rear_plate_id`: Human-readable serial `001182813` OR option UUID
+- `tracker_id`: IMEI/tracker serial `8BAE470808CF` OR option UUID
+- `dry_run`: `"true"` or `"false"` (default: config setting)
+
+Response:
+```json
+{
+  "success": true,
+  "stage": "STAGE_2_EVIDENCE",
+  "message": "Step 1 saved successfully. Order is ready for photo upload.",
+  "details": { "success": true, "step": 1, "status_code": 302, "redirect_url": "..." }
+}
+```
+
+#### 3. 1-Tap Finalize & Submit (`POST /api/itms/orders/<ident>/install/`)
+Payload:
+- `action`: `"submit"`
+- `front_photo`: File
+- `rear_photo`: File
+- `front_plate_id`: Serial or option UUID (optional override)
+- `rear_plate_id`: Serial or option UUID (optional override)
+- `tracker_id`: Tracker serial or option UUID (optional override)
+- `dry_run`: `"true"` or `"false"`
+
+Response:
+```json
+{
+  "success": true,
+  "message": "Order #PO-UMA300P-100926 (UMA 300P) submitted successfully to ITMS!",
+  "is_finalized": true,
+  "dry_run": false,
+  "order_number": "PO-UMA300P-100926",
+  "registration_number": "UMA 300P",
+  "pair_id": 3412,
+  "token": "a90e3bf1-5176-422e-9e3f-ac8235e2d243"
+}
+```
+
+---
+
+### 17.3 Frontend UI Integration Guidance (`tab_orders.js` & `mobile_companion.js`)
+
+1. **Auto-Populate Input Fields on Load**:
+   - In `openOrderInstallModal()` (`tab_orders.js`) and `lookupMobileOrder()` (`mobile_companion.js`):
+     - Check `data.order.front_plate_serial`, `data.order.rear_plate_serial`, and `data.order.gps_tracker_id`.
+     - If non-empty, auto-populate the respective input values:
+       ```javascript
+       if (data.order?.front_plate_serial) {
+           frontSerialInput.value = data.order.front_plate_serial;
+       }
+       if (data.order?.rear_plate_serial) {
+           rearSerialInput.value = data.order.rear_plate_serial;
+       }
+       if (data.order?.gps_tracker_id) {
+           gpsIdInput.value = data.order.gps_tracker_id;
+       }
+       ```
+2. **Support Native `<datalist>` Auto-Suggest / Dropdown Selection**:
+   - If `data.step1_form` is provided and contains `options` arrays:
+     - Populate `<datalist id="order-install-front-options">` and `<datalist id="order-install-rear-options">` so operators can select matching kits directly or view provisioned hardware without typing.
+3. **Zero Breaking Changes for Operators**:
+   - Operators can continue typing serial numbers or scanning barcodes directly; the backend handles UUID resolution and fresh CSRF verification transparently.

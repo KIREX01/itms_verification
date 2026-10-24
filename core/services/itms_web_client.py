@@ -37,6 +37,7 @@ import time
 import urllib.parse
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+import html as html_lib
 from html.parser import HTMLParser
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -3108,12 +3109,20 @@ class ITMSWebClient:
                 val = opt_m.group(1).strip()
                 attrs = opt_m.group(2)
                 txt = opt_m.group(3).strip()
+                txt_clean = html_lib.unescape(re.sub(r'<[^>]+>', '', txt).strip())
                 is_sel = "selected" in attrs.lower()
                 if val:
-                    options.append({"value": val, "text": txt, "selected": is_sel})
+                    serial_m = re.search(r'([A-Za-z0-9]+)', txt_clean)
+                    serial = serial_m.group(1) if serial_m else txt_clean
+                    options.append({
+                        "value": val,
+                        "text": txt_clean,
+                        "serial": serial,
+                        "selected": is_sel,
+                    })
                 if is_sel and val:
                     selected_id = val
-                    selected_text = txt
+                    selected_text = txt_clean
             # If nothing was explicitly marked selected, default to the first non-empty option
             if not selected_id and options:
                 selected_id = options[0]["value"]
@@ -3155,6 +3164,88 @@ class ITMSWebClient:
             "validation_url": validation_url,
             "form_action": form_action,
         }
+
+    @staticmethod
+    def resolve_option_uuid(
+        select_data: Union[Dict[str, Any], List[Dict[str, Any]]],
+        user_input: Optional[str] = None,
+    ) -> str:
+        """
+        Resolves a user-provided serial, plate number, IMEI, or option UUID string
+        against the dropdown options parsed from an ITMS form.
+        """
+        options: List[Dict[str, Any]] = []
+        default_id = ""
+
+        if isinstance(select_data, dict):
+            options = select_data.get("options", []) or []
+            default_id = select_data.get("selected_id", "") or ""
+        elif isinstance(select_data, list):
+            options = select_data
+
+        raw_input = str(user_input or "").strip()
+
+        def _clean(val: Any) -> str:
+            return re.sub(r"[^A-Za-z0-9]", "", str(val)).upper()
+
+        uuid_pattern = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+
+        # 1. If input is empty, return default_id or first available option
+        if not raw_input:
+            if default_id:
+                return default_id
+            if options and options[0].get("value"):
+                return str(options[0]["value"])
+            return ""
+
+        # 2. If input is already a valid UUID, verify if in options or return as-is
+        if re.match(uuid_pattern, raw_input):
+            for opt in options:
+                if str(opt.get("value", "")).lower() == raw_input.lower():
+                    return str(opt["value"])
+            return raw_input
+
+        # 3. Match against options by serial or text
+        clean_in = _clean(raw_input)
+        if clean_in:
+            # Pass 3a: Exact serial or text match
+            for opt in options:
+                val = str(opt.get("value", "")).strip()
+                txt = str(opt.get("text", "")).strip()
+                srl = str(opt.get("serial", "")).strip()
+                if clean_in == _clean(srl) or clean_in == _clean(txt):
+                    return val
+
+            # Pass 3b: Leading zeros stripped match (e.g. 001182812 vs 1182812)
+            clean_in_nozeros = clean_in.lstrip("0")
+            if clean_in_nozeros:
+                for opt in options:
+                    val = str(opt.get("value", "")).strip()
+                    srl = str(opt.get("serial", "")).strip()
+                    if clean_in_nozeros == _clean(srl).lstrip("0"):
+                        return val
+
+            # Pass 3c: Substring / containment match
+            for opt in options:
+                val = str(opt.get("value", "")).strip()
+                txt = str(opt.get("text", "")).strip()
+                srl = str(opt.get("serial", "")).strip()
+                clean_srl = _clean(srl)
+                clean_txt = _clean(txt)
+                if (clean_in and clean_in in clean_txt) or (clean_in and clean_in in clean_srl):
+                    return val
+                if clean_srl and clean_srl in clean_in:
+                    return val
+
+        # 4. Fallback if no match found
+        if default_id and re.match(uuid_pattern, default_id):
+            return default_id
+        if len(options) == 1 and options[0].get("value"):
+            return str(options[0]["value"])
+        if options and options[0].get("value"):
+            return str(options[0]["value"])
+
+        return raw_input
 
     def fetch_installation_step1(self, order_identifier: str) -> Dict[str, Any]:
         """
@@ -3281,6 +3372,28 @@ class ITMSWebClient:
                 "error": "Session cookies invalid or missing. Please sign in first.",
             }
 
+        uuid_pattern = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        needs_step1_fetch = (
+            not csrf_token
+            or not re.match(uuid_pattern, str(front_plate_id).strip())
+            or not re.match(uuid_pattern, str(back_plate_id).strip())
+            or not re.match(uuid_pattern, str(tracker_id).strip())
+        )
+        if needs_step1_fetch and order_uuid:
+            try:
+                step1_info = self.fetch_installation_step1(order_uuid)
+                if step1_info.get("success"):
+                    if not csrf_token:
+                        csrf_token = step1_info.get("csrf_token")
+                    if not re.match(uuid_pattern, str(front_plate_id).strip()):
+                        front_plate_id = self.resolve_option_uuid(step1_info.get("front_plate", {}), front_plate_id)
+                    if not re.match(uuid_pattern, str(back_plate_id).strip()):
+                        back_plate_id = self.resolve_option_uuid(step1_info.get("rear_plate", {}), back_plate_id)
+                    if not re.match(uuid_pattern, str(tracker_id).strip()):
+                        tracker_id = self.resolve_option_uuid(step1_info.get("tracker", {}), tracker_id)
+            except Exception as exc:
+                logger.warning("Could not auto-resolve Step 1 inputs from ITMS page for '%s': %s", order_uuid, exc)
+
         target_csrf = csrf_token or session_data.csrf_token
         val_url = validation_url or f"{self.base_url}/installation-orders/validate-installation?id={order_uuid}"
         if val_url.startswith("/"):
@@ -3381,24 +3494,6 @@ class ITMSWebClient:
                 "error": "Session cookies invalid or missing. Please sign in first.",
             }
 
-        # Step 1a: Pre-validate form inputs using AJAX ActiveForm if requested
-        if run_validation_first:
-            val_res = self.validate_installation_step1(
-                order_uuid=order_uuid,
-                front_plate_id=front_plate_id,
-                back_plate_id=back_plate_id,
-                tracker_id=tracker_id,
-                csrf_token=csrf_token,
-            )
-            if not val_res.get("success") or not val_res.get("valid"):
-                return {
-                    "success": False,
-                    "step": 1,
-                    "error": val_res.get("error", "Validation failed"),
-                    "validation_errors": val_res.get("errors", {}),
-                    "order_uuid": order_uuid,
-                }
-
         # Dry Run Protection Guard
         if dry_run:
             simulated_redirect = f"{self.base_url}/installation-orders/approve?id={order_uuid}"
@@ -3428,6 +3523,46 @@ class ITMSWebClient:
                 "order_uuid": order_uuid,
                 "message": f"[DRY RUN] Step 1 hardware fitment verified. Simulated advance to Step 2: {simulated_redirect}",
             }
+
+        # Step 1a: Pre-validate form inputs using AJAX ActiveForm if requested (live mode only)
+        if run_validation_first:
+            val_res = self.validate_installation_step1(
+                order_uuid=order_uuid,
+                front_plate_id=front_plate_id,
+                back_plate_id=back_plate_id,
+                tracker_id=tracker_id,
+                csrf_token=csrf_token,
+            )
+            if not val_res.get("success") or not val_res.get("valid"):
+                return {
+                    "success": False,
+                    "step": 1,
+                    "error": val_res.get("error", "Validation failed"),
+                    "validation_errors": val_res.get("errors", {}),
+                    "order_uuid": order_uuid,
+                }
+
+        uuid_pattern = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        needs_step1_fetch = (
+            not csrf_token
+            or not re.match(uuid_pattern, str(front_plate_id).strip())
+            or not re.match(uuid_pattern, str(back_plate_id).strip())
+            or not re.match(uuid_pattern, str(tracker_id).strip())
+        )
+        if needs_step1_fetch and order_uuid:
+            try:
+                step1_info = self.fetch_installation_step1(order_uuid)
+                if step1_info.get("success"):
+                    if not csrf_token:
+                        csrf_token = step1_info.get("csrf_token")
+                    if not re.match(uuid_pattern, str(front_plate_id).strip()):
+                        front_plate_id = self.resolve_option_uuid(step1_info.get("front_plate", {}), front_plate_id)
+                    if not re.match(uuid_pattern, str(back_plate_id).strip()):
+                        back_plate_id = self.resolve_option_uuid(step1_info.get("rear_plate", {}), back_plate_id)
+                    if not re.match(uuid_pattern, str(tracker_id).strip()):
+                        tracker_id = self.resolve_option_uuid(step1_info.get("tracker", {}), tracker_id)
+            except Exception as exc:
+                logger.warning("Could not auto-resolve Step 1 inputs from ITMS page for '%s': %s", order_uuid, exc)
 
         target_csrf = csrf_token or session_data.csrf_token
         url = f"{self.base_url}/installation-orders/installation?id={order_uuid}"
@@ -4826,6 +4961,9 @@ class ITMSWebClient:
         dry_run: Optional[bool] = None,
         submit_step3: Optional[bool] = None,
         log_callback: Optional[Any] = None,
+        front_plate_id: Optional[str] = None,
+        rear_plate_id: Optional[str] = None,
+        tracker_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         End-to-End Orchestrator:
@@ -4977,12 +5115,34 @@ class ITMSWebClient:
             # Sync Step 1 to local DB
             self.sync_installation_step1_to_local_db(step1_info, order_uuid=order_uuid)
 
+            # Determine target hardware selections from:
+            # 1. Method arguments passed directly
+            # 2. Local InstallationOrder record
+            # 3. Pre-selected ID from ITMS Step 1 form
+            order_rec = None
+            from django.db import models
+            if pair and pair.order:
+                order_rec = pair.order
+            elif order_uuid:
+                order_rec = InstallationOrder.objects.filter(
+                    models.Q(itms_order_uuid=order_uuid) | models.Q(order_number=order_identifier)
+                ).first()
+
+            raw_front = front_plate_id or (order_rec.front_plate_serial if order_rec else "") or front_p.get("selected_id", "")
+            raw_rear = rear_plate_id or (order_rec.rear_plate_serial if order_rec else "") or rear_p.get("selected_id", "")
+            raw_tracker = tracker_id or (order_rec.gps_tracker_id if order_rec else "") or tracker.get("selected_id", "")
+
+            # Resolve to valid ITMS option UUIDs
+            resolved_front = self.resolve_option_uuid(front_p, raw_front)
+            resolved_rear = self.resolve_option_uuid(rear_p, raw_rear)
+            resolved_tracker = self.resolve_option_uuid(tracker, raw_tracker)
+
             # Submit Step 1 ("Save and continue") with ActiveForm validation
             step1_res = self.submit_installation_step1(
                 order_uuid=order_uuid,
-                front_plate_id=front_p.get("selected_id", ""),
-                back_plate_id=rear_p.get("selected_id", ""),
-                tracker_id=tracker.get("selected_id", ""),
+                front_plate_id=resolved_front,
+                back_plate_id=resolved_rear,
+                tracker_id=resolved_tracker,
                 csrf_token=step1_info.get("csrf_token"),
                 just_save=False,
                 run_validation_first=True,

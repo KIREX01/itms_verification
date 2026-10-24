@@ -1079,12 +1079,58 @@ def api_itms_order_install(request: HttpRequest, order_ident: str) -> JsonRespon
     if request.method == "GET":
         stage_info = {}
         stage = "UNKNOWN"
+        step1_form = {}
         if client.session_store.session.is_cookie_valid():
             try:
                 stage_info = client.detect_order_stage(order_uuid)
                 stage = stage_info.get("stage", "UNKNOWN")
+                if stage == "STAGE_1_INSTALLATION":
+                    step1_form = client.fetch_installation_step1(order_uuid)
             except Exception as exc:
                 stage_info = {"success": False, "error": str(exc)}
+
+        # Auto-match hardware from local InstallationKit if serials are missing
+        if (not order.front_plate_serial or not order.rear_plate_serial or not order.gps_tracker_id) and order.registration_number:
+            try:
+                from core.models import InstallationKit
+                kit = InstallationKit.objects.filter(
+                    Q(registration_number__iexact=order.registration_number) |
+                    Q(registration_number__iexact=normalizer.canonicalize(order.registration_number) or "") |
+                    Q(kit_code__icontains=normalizer.canonicalize(order.registration_number) or "")
+                ).first()
+                if kit:
+                    updated = False
+                    if not order.front_plate_serial and kit.front_plate:
+                        order.front_plate_serial = kit.front_plate
+                        updated = True
+                    if not order.rear_plate_serial and kit.rear_plate:
+                        order.rear_plate_serial = kit.rear_plate
+                        updated = True
+                    if not order.gps_tracker_id and (kit.gps_tracker or kit.front_tracker or kit.rear_tracker):
+                        order.gps_tracker_id = kit.gps_tracker or kit.front_tracker or kit.rear_tracker
+                        updated = True
+                    if updated:
+                        order.save()
+            except Exception as exc:
+                logger.warning("Error pre-filling hardware from InstallationKit for '%s': %s", order.order_number, exc)
+
+        # Fallback to step1_form selected text if order serials are still blank
+        if step1_form.get("success"):
+            front_text = step1_form.get("front_plate", {}).get("selected_text", "")
+            rear_text = step1_form.get("rear_plate", {}).get("selected_text", "")
+            tracker_text = step1_form.get("tracker", {}).get("selected_text", "")
+            updated = False
+            if not order.front_plate_serial and front_text:
+                order.front_plate_serial = front_text
+                updated = True
+            if not order.rear_plate_serial and rear_text:
+                order.rear_plate_serial = rear_text
+                updated = True
+            if not order.gps_tracker_id and tracker_text:
+                order.gps_tracker_id = tracker_text
+                updated = True
+            if updated:
+                order.save()
 
         pair_data = None
         if pair:
@@ -1112,6 +1158,12 @@ def api_itms_order_install(request: HttpRequest, order_ident: str) -> JsonRespon
             },
             "stage": stage,
             "stage_info": stage_info,
+            "step1_form": {
+                "front_plate": step1_form.get("front_plate", {}),
+                "rear_plate": step1_form.get("rear_plate", {}),
+                "tracker": step1_form.get("tracker", {}),
+                "csrf_token": step1_form.get("csrf_token", ""),
+            } if step1_form.get("success") else None,
             "existing_pair": pair_data,
         })
 
@@ -1124,16 +1176,36 @@ def api_itms_order_install(request: HttpRequest, order_ident: str) -> JsonRespon
         is_dry_run = config_service.get_setting("submission.dry_run_mode", getattr(settings, "ITMS_WEB_DRY_RUN", True))
 
     # Action 1: Save and Proceed (Step 1 only)
-    if action == "save_step1":
+    if action in ("save_step1", "save_continue"):
         front_plate_id = request.POST.get("front_plate_id", "").strip()
         rear_plate_id = request.POST.get("rear_plate_id", "").strip()
         tracker_id = request.POST.get("tracker_id", "").strip()
 
+        # Step 1: Attempt to fetch fresh form context (CSRF token and option UUIDs) from ITMS
+        step1_info = {}
+        try:
+            step1_info = client.fetch_installation_step1(order_uuid)
+        except Exception as exc:
+            logger.warning("Could not fetch Step 1 form page for %s: %s", order_uuid, exc)
+
+        csrf_token = step1_info.get("csrf_token") if step1_info.get("success") else None
+
+        # Resolve serials to ITMS dropdown option UUIDs if options are available
+        if step1_info.get("success"):
+            resolved_front = client.resolve_option_uuid(step1_info.get("front_plate", {}), front_plate_id)
+            resolved_rear = client.resolve_option_uuid(step1_info.get("rear_plate", {}), rear_plate_id)
+            resolved_tracker = client.resolve_option_uuid(step1_info.get("tracker", {}), tracker_id)
+        else:
+            resolved_front = front_plate_id
+            resolved_rear = rear_plate_id
+            resolved_tracker = tracker_id
+
         step1_res = client.submit_installation_step1(
             order_uuid=order_uuid,
-            front_plate_id=front_plate_id,
-            back_plate_id=rear_plate_id,
-            tracker_id=tracker_id,
+            front_plate_id=resolved_front,
+            back_plate_id=resolved_rear,
+            tracker_id=resolved_tracker,
+            csrf_token=csrf_token,
             just_save=False,
             run_validation_first=True,
             dry_run=is_dry_run,
@@ -1144,6 +1216,15 @@ def api_itms_order_install(request: HttpRequest, order_ident: str) -> JsonRespon
                 "error": f"Step 1 failed: {step1_res.get('error')}",
                 "details": step1_res,
             }, status=400)
+
+        # Update order with saved serials
+        if front_plate_id:
+            order.front_plate_serial = front_plate_id
+        if rear_plate_id:
+            order.rear_plate_serial = rear_plate_id
+        if tracker_id:
+            order.gps_tracker_id = tracker_id
+        order.save()
 
         # Audit log
         SubmissionAuditLog.objects.create(
@@ -1237,8 +1318,33 @@ def api_itms_order_install(request: HttpRequest, order_ident: str) -> JsonRespon
             "error": "Both front and rear evidence photos are required to submit installation.",
         }, status=400)
 
-    # Submit using established submission_worker
-    outcome = submission_worker.submit_pair(pair, backend="web", dry_run=is_dry_run, operator=request.user)
+    # Update hardware serials on order from inputs if provided
+    front_plate_input = request.POST.get("front_plate_id", "").strip()
+    rear_plate_input = request.POST.get("rear_plate_id", "").strip()
+    tracker_input = request.POST.get("tracker_id", "").strip()
+    updated_hardware = False
+    if front_plate_input and order.front_plate_serial != front_plate_input:
+        order.front_plate_serial = front_plate_input
+        updated_hardware = True
+    if rear_plate_input and order.rear_plate_serial != rear_plate_input:
+        order.rear_plate_serial = rear_plate_input
+        updated_hardware = True
+    if tracker_input and order.gps_tracker_id != tracker_input:
+        order.gps_tracker_id = tracker_input
+        updated_hardware = True
+    if updated_hardware:
+        order.save()
+
+    # Submit using established submission_worker with hardware inputs passed through
+    outcome = submission_worker.submit_pair(
+        pair,
+        backend="web",
+        dry_run=is_dry_run,
+        operator=request.user,
+        front_plate_id=front_plate_input,
+        rear_plate_id=rear_plate_input,
+        tracker_id=tracker_input,
+    )
 
     if outcome.success:
         return JsonResponse({

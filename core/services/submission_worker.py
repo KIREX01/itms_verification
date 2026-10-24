@@ -64,6 +64,9 @@ def submit_pair(
     operator: Optional[Any] = None,
     blocking_lock: bool = False,
     lock_timeout: float = 10.0,
+    front_plate_id: Optional[str] = None,
+    rear_plate_id: Optional[str] = None,
+    tracker_id: Optional[str] = None,
 ) -> SubmissionOutcome:
     """Drive a single pair through the ITMS workflow (mock, live API, or live_web) with full audit logging."""
     if operator is None and pair and pair.operator:
@@ -184,6 +187,9 @@ def submit_pair(
                     dry_run=is_dry_run,
                     submit_step3=is_submit_step3,
                     log_callback=log_callback,
+                    front_plate_id=front_plate_id,
+                    rear_plate_id=rear_plate_id,
+                    tracker_id=tracker_id,
                 )
         except SubmissionLockError as lock_err:
             err_msg = str(lock_err)
@@ -278,6 +284,9 @@ def submit_pair(
             dry_run=is_dry_run,
             submit_step3=is_submit_step3,
             log_callback=log_callback,
+            front_plate_id=front_plate_id,
+            rear_plate_id=rear_plate_id,
+            tracker_id=tracker_id,
         )
         if not res.get("success"):
             err_msg = res.get("error", "Web workflow failed")

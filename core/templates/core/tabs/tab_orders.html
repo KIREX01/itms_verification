@@ -69,15 +69,18 @@
                 <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;" id="order-hardware-grid">
                     <div>
                         <label style="display: block; font-size: 0.74rem; font-weight: 700; color: rgba(255,255,255,0.8); margin-bottom: 4px;">Front Plate Serial</label>
-                        <input type="text" id="order-install-front-serial" class="form-control" placeholder="e.g. FP-1001" style="width: 100%; box-sizing: border-box; background: #0c1017; border: 1px solid #334155; color: #ffffff; font-family: var(--font-mono, monospace); padding: 8px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 700;">
+                        <input type="text" id="order-install-front-serial" list="order-install-front-options" class="form-control" placeholder="e.g. FP-1001" style="width: 100%; box-sizing: border-box; background: #0c1017; border: 1px solid #334155; color: #ffffff; font-family: var(--font-mono, monospace); padding: 8px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 700;">
+                        <datalist id="order-install-front-options"></datalist>
                     </div>
                     <div>
                         <label style="display: block; font-size: 0.74rem; font-weight: 700; color: rgba(255,255,255,0.8); margin-bottom: 4px;">Rear Plate Serial</label>
-                        <input type="text" id="order-install-rear-serial" class="form-control" placeholder="e.g. RP-1001" style="width: 100%; box-sizing: border-box; background: #0c1017; border: 1px solid #334155; color: #ffffff; font-family: var(--font-mono, monospace); padding: 8px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 700;">
+                        <input type="text" id="order-install-rear-serial" list="order-install-rear-options" class="form-control" placeholder="e.g. RP-1001" style="width: 100%; box-sizing: border-box; background: #0c1017; border: 1px solid #334155; color: #ffffff; font-family: var(--font-mono, monospace); padding: 8px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 700;">
+                        <datalist id="order-install-rear-options"></datalist>
                     </div>
                     <div>
                         <label style="display: block; font-size: 0.74rem; font-weight: 700; color: rgba(255,255,255,0.8); margin-bottom: 4px;">GPS Tracker ID</label>
-                        <input type="text" id="order-install-gps-id" class="form-control" placeholder="e.g. GPS-5544" style="width: 100%; box-sizing: border-box; background: #0c1017; border: 1px solid #334155; color: #ffffff; font-family: var(--font-mono, monospace); padding: 8px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 700;">
+                        <input type="text" id="order-install-gps-id" list="order-install-gps-options" class="form-control" placeholder="e.g. GPS-5544" style="width: 100%; box-sizing: border-box; background: #0c1017; border: 1px solid #334155; color: #ffffff; font-family: var(--font-mono, monospace); padding: 8px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 700;">
+                        <datalist id="order-install-gps-options"></datalist>
                     </div>
                 </div>
             </div>

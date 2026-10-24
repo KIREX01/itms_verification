@@ -628,6 +628,12 @@ class ITMSWebClient:
     _CIRCUIT_FAILURE_THRESHOLD: int = 2
     _CIRCUIT_COOLDOWN_SECONDS: float = 45.0
 
+    # Process-level connection reachability cache (cooldown for heartbeat pings)
+    _connection_cache: Dict[str, Any] = {}
+    _connection_cache_time: float = 0.0
+    _connection_cache_lock = threading.Lock()
+    _CONNECTION_CACHE_TTL: float = 120.0  # 2 minutes default cache cooldown
+
     @classmethod
     def is_circuit_open(cls) -> bool:
         """Returns True if upstream ITMS has timed out repeatedly and is in cooldown."""
@@ -853,8 +859,61 @@ class ITMSWebClient:
     # Diagnostic / Connectivity (Rate-Limit Friendly)
     # ──────────────────────────────────────────────────────────────────────────
 
-    def test_connection(self) -> Dict[str, Any]:
-        """Performs a single lightweight reachability check against the ITMS base URL."""
+    def test_connection(
+        self,
+        force: bool = False,
+        max_age_seconds: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        Performs a lightweight reachability check against the ITMS base URL.
+        Rate-limited with a cooldown (default: 120s) to prevent spamming upstream ITMS
+        with rapid HTTP pings from client heartbeat intervals.
+        """
+        ttl = max_age_seconds if max_age_seconds is not None else self._CONNECTION_CACHE_TTL
+
+        # 1. Master Switch Protection Guard
+        from core.services import config_service
+        if not config_service.is_itms_enabled():
+            return {
+                "success": True,
+                "cached": True,
+                "paused": True,
+                "status_code": 200,
+                "latency_ms": 0.0,
+                "server": "offline-cache",
+                "url": self.base_url,
+                "message": "ITMS Master Switch is PAUSED. Upstream reachability probes skipped.",
+                "error": "",
+            }
+
+        # 2. Return cached reachability if valid and not forced
+        now = time.time()
+        if not force and ttl > 0:
+            with self._connection_cache_lock:
+                if self._connection_cache and (now - self._connection_cache_time) < ttl:
+                    cached = dict(self._connection_cache)
+                    cached["cached"] = True
+                    cached["cache_age_seconds"] = round(now - self._connection_cache_time, 1)
+                    return cached
+
+        # 3. Circuit breaker check
+        if self.is_circuit_open():
+            with self._connection_cache_lock:
+                if self._connection_cache:
+                    cached = dict(self._connection_cache)
+                    cached["cached"] = True
+                    cached["circuit_open"] = True
+                    return cached
+            return {
+                "success": False,
+                "status_code": 0,
+                "error": "Upstream ITMS circuit breaker is OPEN due to consecutive timeouts.",
+                "url": self.base_url,
+                "circuit_open": True,
+                "cached": False,
+            }
+
+        # 4. Live reachability probe
         start = time.time()
         probe_url = f"{self.base_url}{URL_PATH_LOGIN}"
         try:
@@ -863,7 +922,7 @@ class ITMSWebClient:
             elapsed_ms = round((time.time() - start) * 1000, 1)
             is_ok = resp.status_code in (200, 301, 302, 303, 307, 308)
             server = resp.headers.get("Server", "nginx")
-            return {
+            result = {
                 "success": is_ok,
                 "status_code": resp.status_code,
                 "latency_ms": elapsed_ms,
@@ -871,14 +930,24 @@ class ITMSWebClient:
                 "url": self.base_url,
                 "message": f"Server reached in {elapsed_ms}ms (HTTP {resp.status_code}, {server})",
                 "error": "" if is_ok else f"HTTP Status {resp.status_code}",
+                "cached": False,
             }
+            with self._connection_cache_lock:
+                ITMSWebClient._connection_cache = dict(result)
+                ITMSWebClient._connection_cache_time = time.time()
+            return result
         except requests.exceptions.SSLError as exc:
-            return {
+            err_result = {
                 "success": False,
                 "status_code": 0,
                 "error": f"SSL Certificate Error: {exc}",
                 "url": self.base_url,
+                "cached": False,
             }
+            with self._connection_cache_lock:
+                ITMSWebClient._connection_cache = dict(err_result)
+                ITMSWebClient._connection_cache_time = time.time()
+            return err_result
         except requests.exceptions.RequestException as exc:
             # Fallback probe directly to base_url without following heavy redirects
             try:
@@ -887,7 +956,7 @@ class ITMSWebClient:
                 elapsed_ms = round((time.time() - start) * 1000, 1)
                 is_ok = resp.status_code in (200, 301, 302, 303, 307, 308)
                 if is_ok:
-                    return {
+                    fb_result = {
                         "success": True,
                         "status_code": resp.status_code,
                         "latency_ms": elapsed_ms,
@@ -895,15 +964,25 @@ class ITMSWebClient:
                         "url": self.base_url,
                         "message": f"Server reached in {elapsed_ms}ms (HTTP {resp.status_code})",
                         "error": "",
+                        "cached": False,
                     }
+                    with self._connection_cache_lock:
+                        ITMSWebClient._connection_cache = dict(fb_result)
+                        ITMSWebClient._connection_cache_time = time.time()
+                    return fb_result
             except Exception:
                 pass
-            return {
+            conn_err = {
                 "success": False,
                 "status_code": 0,
                 "error": f"Connection Error: {exc}",
                 "url": self.base_url,
+                "cached": False,
             }
+            with self._connection_cache_lock:
+                ITMSWebClient._connection_cache = dict(conn_err)
+                ITMSWebClient._connection_cache_time = time.time()
+            return conn_err
 
     # ──────────────────────────────────────────────────────────────────────────
     # Session Verification (With Rate-Limit Cooldown)

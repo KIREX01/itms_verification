@@ -129,7 +129,8 @@ def api_seed_orders(request: HttpRequest) -> JsonResponse:
 @require_GET
 def api_itms_status(request: HttpRequest) -> JsonResponse:
     """Returns current ITMS WebApp connection status, active user identity, and operating bond."""
-    status = auth_service.get_itms_status(user=request.user)
+    force = request.GET.get("force", "").lower() in ("1", "true", "yes")
+    status = auth_service.get_itms_status(user=request.user, force_ping=force)
     return JsonResponse({
         "success": True,
         "status": status,

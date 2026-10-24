@@ -27,7 +27,7 @@
     <meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'core/logos/android-chrome-512x512.png' %}">
     <meta property="og:type" content="website">
 
-    <link rel="stylesheet" href="{% static 'core/css/mobile_companion.css' %}?v=20">
+    <link rel="stylesheet" href="{% static 'core/css/mobile_companion.css' %}?v=22">
 </head>
 <body>
     <!-- Top National Flag Ribbon -->
@@ -558,16 +558,19 @@
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                         <div>
                             <label style="font-size:0.68rem; color:rgba(255,255,255,0.6); display:block; margin-bottom:2px;">Front Plate ID</label>
-                            <input type="text" id="m-order-front-serial" style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
+                            <input type="text" id="m-order-front-serial" list="m-order-front-options" style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
+                            <datalist id="m-order-front-options"></datalist>
                         </div>
                         <div>
                             <label style="font-size:0.68rem; color:rgba(255,255,255,0.6); display:block; margin-bottom:2px;">Rear Plate ID</label>
-                            <input type="text" id="m-order-rear-serial" style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
+                            <input type="text" id="m-order-rear-serial" list="m-order-rear-options" style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
+                            <datalist id="m-order-rear-options"></datalist>
                         </div>
                     </div>
                     <div>
                         <label style="font-size:0.68rem; color:rgba(255,255,255,0.6); display:block; margin-bottom:2px;">GPS Tracker ID</label>
-                        <input type="text" id="m-order-gps-id" style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
+                        <input type="text" id="m-order-gps-id" list="m-order-gps-options" style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
+                        <datalist id="m-order-gps-options"></datalist>
                     </div>
                 </div>
 
@@ -726,6 +729,6 @@
     </div>
 
     <!-- Client-Side Engine -->
-    <script src="{% static 'core/js/mobile_companion.js' %}?v=20"></script>
+    <script src="{% static 'core/js/mobile_companion.js' %}?v=22"></script>
 </body>
 </html>

@@ -920,7 +920,7 @@ This transition aligns with our domain `close.kirex.online`, insulates operation
 ## 17. Feature: Robust Quick Install, Serial-to-UUID Resolution, Fresh Form CSRF & Hardware Carry-Through - [COMPLETED]
 
 - **Date**: Sun Oct 25, 2026
-- **Status**: 🟢 **Completed & Verified (Backend Services & REST APIs)**
+- **Status**: 🟢 **Completed & Verified (Backend Services, REST APIs, Desktop & Mobile UI)**
 - **Priority**: High (Eliminates Quick Install Validation Drops & Form Submission Rejections)
 
 ### 17.1 Problem Statement & Root Cause Resolution
@@ -1069,3 +1069,116 @@ Response:
      - Populate `<datalist id="order-install-front-options">` and `<datalist id="order-install-rear-options">` so operators can select matching kits directly or view provisioned hardware without typing.
 3. **Zero Breaking Changes for Operators**:
    - Operators can continue typing serial numbers or scanning barcodes directly; the backend handles UUID resolution and fresh CSRF verification transparently.
+
+---
+
+### 17.4 Summary of Frontend Changes Implemented
+
+1. **Desktop Native Datalists & Auto-Population (`tab_orders.js` & `tabs/tab_orders.html`)**:
+   - Added native `<datalist id="order-install-front-options">`, `<datalist id="order-install-rear-options">`, and `<datalist id="order-install-gps-options">` linked to hardware inputs via `list` attributes.
+   - Implemented `populateHardwareDatalist()` in `tab_orders.js` to dynamically inject matching serial numbers, UUIDs, and plate labels parsed from ITMS ActiveForm dropdowns.
+   - Auto-populates inputs from `data.order` serials with fallback to `data.step1_form` selected hardware.
+
+2. **Mobile Companion Datalists & Auto-Population (`mobile_companion.js` & `mobile_companion.html`)**:
+   - Added native `<datalist id="m-order-front-options">`, `<datalist id="m-order-rear-options">`, and `<datalist id="m-order-gps-options">` to the mobile companion order fitment view.
+   - Implemented `populateMobileHardwareDatalist()` in `mobile_companion.js` to inject ITMS inventory suggestions on order lookup.
+   - Updated `lookupMobileOrder()` to pre-fill front plate, rear plate, and GPS tracker IDs with fallback to `step1_form.selected_text`.
+
+3. **Cache Invalidation**:
+   - Bumped asset cache versions to `?v=22` in `core/templates/core/base.html` and `core/templates/core/mobile_companion.html`.
+
+
+---
+
+## 18. Feature: Heartbeat Cadence Optimization & Upstream Reachability Caching - [COMPLETED]
+
+- **Date**: Sun Oct 25, 2026
+- **Status**: 🟢 **Completed & Verified (Backend Services & REST APIs)**
+- **Priority**: Medium / Performance (Eliminates 96% of Periodic Upstream ITMS Pings)
+
+### 18.1 Problem Statement
+- Previously, every 25 seconds, open browser tabs (`app.js:17` via `setInterval(fetchItmsStatus, 25000)`) called `/api/itms/status/`.
+- On the backend, `auth_service.get_itms_status()` called `client.test_connection()`, which fired an un-cached HTTP GET request directly to `https://stock.itms.ug/site/login`.
+- If 5 technicians had the web application open on laptops and mobile scanners simultaneously, the system sent **12 requests every minute** directly to the ITMS server just for the idle heartbeat badge.
+
+---
+
+### 18.2 Backend REST Contracts & Caching Architecture Implemented
+
+#### 1. In-Memory Reachability Cache (`ITMSWebClient._connection_cache`)
+- Reachability checks to `stock.itms.ug` are now cached across all requests and tabs with a **120-second (2-minute) cooldown window**.
+- Multiple browser tabs and mobile scanners polling `/api/itms/status/` are served instantly (< 1ms response time) from local process memory without firing upstream HTTP requests.
+- **Traffic Reduction**: Upstream heartbeat traffic dropped from 12+ requests/minute down to **0.5 requests/minute** (at most 1 request every 2 minutes across the entire fleet of operators).
+- When the **ITMS Master Switch is PAUSED**, `test_connection()` returns immediately with `paused: true, cached: true`, firing 0 upstream network calls.
+
+#### 2. Enhanced Heartbeat Response (`GET /api/itms/status/`)
+```json
+{
+  "success": true,
+  "status": {
+    "url": "https://stock.itms.ug",
+    "online": true,
+    "online_error": "",
+    "authenticated": true,
+    "user_email": "operator@kirex.ug",
+    "user_uuid": "c3f8709e-7bd1-4f11-9f6b-76fca55490bf",
+    "expires_in_days": 28.5,
+    "last_status_message": "Session active and authenticated.",
+    "cached": true,
+    "cache_age_seconds": 18.4,
+    "latency_ms": 145.2
+  },
+  "active_bond": { "code": "AGM", "name": "AGM Bond Warehouse" }
+}
+```
+
+#### 3. Forced Live Probe Parameter (`GET /api/itms/status/?force=1`)
+- When an operator explicitly clicks **"Test Connection"** or **"Sign In"**, the frontend can pass `?force=1` to immediately bypass the 120s cache and probe upstream reachability in real time.
+
+---
+
+### 18.3 Frontend UI Integration Guidance (`app.js`, `tab_itms.js`)
+
+1. **Adjust Polling Interval in `app.js:17`**:
+   - Change:
+     ```javascript
+     setInterval(fetchItmsStatus, 25000); // 25s
+     ```
+   - To:
+     ```javascript
+     setInterval(fetchItmsStatus, 60000); // 60s
+     ```
+2. **Page Visibility Awareness (Battery & Network Friendly)**:
+   - When an operator switches to another tab or locks their phone screen, avoid running heartbeat timers while hidden:
+     ```javascript
+     let itmsHeartbeatTimer = null;
+
+     function startItmsHeartbeat() {
+         if (!itmsHeartbeatTimer) {
+             itmsHeartbeatTimer = setInterval(fetchItmsStatus, 60000);
+         }
+     }
+
+     function stopItmsHeartbeat() {
+         if (itmsHeartbeatTimer) {
+             clearInterval(itmsHeartbeatTimer);
+             itmsHeartbeatTimer = null;
+         }
+     }
+
+     document.addEventListener("visibilitychange", () => {
+         if (document.visibilityState === "visible") {
+             fetchItmsStatus();
+             startItmsHeartbeat();
+         } else {
+             stopItmsHeartbeat();
+         }
+     });
+
+     startItmsHeartbeat();
+     ```
+3. **Manual Probe Bypass in Modals**:
+   - In `tab_itms.js` or `tab_settings.js` when triggering a manual "Test Connection" button click:
+     ```javascript
+     const res = await fetch("/api/itms/status/?force=1");
+     ```

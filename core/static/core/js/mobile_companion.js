@@ -2776,6 +2776,25 @@ function clearSelectedMobileOrder() {
     }
 }
 
+function populateMobileHardwareDatalist(datalistId, options) {
+    const dl = document.getElementById(datalistId);
+    if (!dl) return;
+    dl.innerHTML = "";
+    if (!Array.isArray(options)) return;
+    options.forEach((opt) => {
+        if (!opt) return;
+        const val = opt.serial || opt.value;
+        if (!val) return;
+        const optionEl = document.createElement("option");
+        optionEl.value = val;
+        if (opt.text && opt.text !== val) {
+            optionEl.label = opt.text;
+            optionEl.textContent = opt.text;
+        }
+        dl.appendChild(optionEl);
+    });
+}
+
 async function lookupMobileOrder(targetQuery) {
     const input = document.getElementById("m-order-search-input");
     const query = (typeof targetQuery === "string" && targetQuery.trim()) ? targetQuery.trim() : (input ? input.value : "").trim();
@@ -2850,9 +2869,19 @@ async function lookupMobileOrder(targetQuery) {
         const rInput = document.getElementById("m-order-rear-serial");
         const gInput = document.getElementById("m-order-gps-id");
 
-        if (fInput) fInput.value = o.front_plate_serial || "";
-        if (rInput) rInput.value = o.rear_plate_serial || "";
-        if (gInput) gInput.value = o.gps_tracker_id || "";
+        const fVal = o.front_plate_serial || (data.step1_form?.front_plate?.selected_text ? data.step1_form.front_plate.selected_text.split(" ")[0] : "") || data.step1_form?.front_plate?.selected_id || "";
+        const rVal = o.rear_plate_serial || (data.step1_form?.rear_plate?.selected_text ? data.step1_form.rear_plate.selected_text.split(" ")[0] : "") || data.step1_form?.rear_plate?.selected_id || "";
+        const gVal = o.gps_tracker_id || data.step1_form?.tracker?.selected_text || data.step1_form?.tracker?.selected_id || "";
+
+        if (fInput) fInput.value = fVal;
+        if (rInput) rInput.value = rVal;
+        if (gInput) gInput.value = gVal;
+
+        if (data.step1_form) {
+            populateMobileHardwareDatalist("m-order-front-options", data.step1_form.front_plate?.options);
+            populateMobileHardwareDatalist("m-order-rear-options", data.step1_form.rear_plate?.options);
+            populateMobileHardwareDatalist("m-order-gps-options", data.step1_form.tracker?.options);
+        }
 
         // Reset photo dropzones
         resetMobileOrderPhotoDropzone("front");

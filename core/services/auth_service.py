@@ -227,12 +227,12 @@ def save_operator_preferences(updates: Dict[str, Any]) -> None:
         logger.warning("Could not save operator preferences: %s", exc)
 
 
-def get_itms_status(user: Optional[Any] = None) -> Dict[str, Any]:
-    """Queries current ITMS WebApp connection status."""
+def get_itms_status(user: Optional[Any] = None, force_ping: bool = False) -> Dict[str, Any]:
+    """Queries current ITMS WebApp connection status with rate-limit cached reachability."""
     from core.services.itms_web_client import get_web_client
     client = get_web_client(user=user)
     status = client.get_status()
-    ping_status = client.test_connection()
+    ping_status = client.test_connection(force=force_ping, max_age_seconds=120)
     return {
         "url": client.base_url,
         "online": ping_status.get("success", False),
@@ -242,6 +242,9 @@ def get_itms_status(user: Optional[Any] = None) -> Dict[str, Any]:
         "user_uuid": status.get("user_uuid", ""),
         "expires_in_days": status.get("expires_in_days", 0),
         "last_status_message": status.get("status_message", ""),
+        "cached": ping_status.get("cached", False),
+        "cache_age_seconds": ping_status.get("cache_age_seconds", 0.0),
+        "latency_ms": ping_status.get("latency_ms", 0.0),
     }
 
 

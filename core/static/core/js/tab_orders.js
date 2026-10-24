@@ -78,6 +78,25 @@
     /**
      * Open Single-Order Quick Install Modal for given order identifier
      */
+    function populateHardwareDatalist(datalistId, options) {
+        const dl = document.getElementById(datalistId);
+        if (!dl) return;
+        dl.innerHTML = "";
+        if (!Array.isArray(options)) return;
+        options.forEach((opt) => {
+            if (!opt) return;
+            const val = opt.serial || opt.value;
+            if (!val) return;
+            const optionEl = document.createElement("option");
+            optionEl.value = val;
+            if (opt.text && opt.text !== val) {
+                optionEl.label = opt.text;
+                optionEl.textContent = opt.text;
+            }
+            dl.appendChild(optionEl);
+        });
+    }
+
     window.openOrderInstallModal = async function (orderIdent) {
         if (!orderIdent) return;
 
@@ -161,9 +180,20 @@
             const rearSerialInput = document.getElementById("order-install-rear-serial");
             const gpsIdInput = document.getElementById("order-install-gps-id");
 
-            if (frontSerialInput) frontSerialInput.value = o.front_plate_serial || "";
-            if (rearSerialInput) rearSerialInput.value = o.rear_plate_serial || "";
-            if (gpsIdInput) gpsIdInput.value = o.gps_tracker_id || "";
+            const frontVal = o.front_plate_serial || (data.step1_form?.front_plate?.selected_text ? data.step1_form.front_plate.selected_text.split(" ")[0] : "") || data.step1_form?.front_plate?.selected_id || "";
+            const rearVal = o.rear_plate_serial || (data.step1_form?.rear_plate?.selected_text ? data.step1_form.rear_plate.selected_text.split(" ")[0] : "") || data.step1_form?.rear_plate?.selected_id || "";
+            const gpsVal = o.gps_tracker_id || data.step1_form?.tracker?.selected_text || data.step1_form?.tracker?.selected_id || "";
+
+            if (frontSerialInput) frontSerialInput.value = frontVal;
+            if (rearSerialInput) rearSerialInput.value = rearVal;
+            if (gpsIdInput) gpsIdInput.value = gpsVal;
+
+            // Populate native datalists with available inventory options (Section 17.3)
+            if (data.step1_form) {
+                populateHardwareDatalist("order-install-front-options", data.step1_form.front_plate?.options);
+                populateHardwareDatalist("order-install-rear-options", data.step1_form.rear_plate?.options);
+                populateHardwareDatalist("order-install-gps-options", data.step1_form.tracker?.options);
+            }
 
             // Format stage badge
             updateStageBadge(data.stage);

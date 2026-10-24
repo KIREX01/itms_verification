@@ -4,9 +4,9 @@
  * and direct web link rendering of installation evidence photos.
  */
 
-async function fetchItmsStatus() {
+async function fetchItmsStatus(force = false) {
     try {
-        const res = await fetch("/api/itms/status/");
+        const res = await fetch(force ? "/api/itms/status/?force=1" : "/api/itms/status/");
         const data = await res.json();
         if (data.success && data.status) {
             const st = data.status;
@@ -74,7 +74,10 @@ async function fetchItmsStatus() {
     }
 }
 
-async function loadOperatingBonds() {
+async function loadOperatingBonds(forceProbe = false) {
+    if (forceProbe) {
+        void fetchItmsStatus(true);
+    }
     try {
         const res = await fetch("/api/itms/warehouses/");
         const data = await res.json();
@@ -183,7 +186,7 @@ async function submitItmsConnect() {
             const inputPass = document.getElementById("itms-input-password");
             if (inputPass) inputPass.value = "";
             closeModal("modal-itms");
-            fetchItmsStatus();
+            fetchItmsStatus(true);
             if (typeof switchItmsSubview === "function") switchItmsSubview("ORDERS");
         } else {
             showToast(data.message || data.error || "ITMS authentication failed.", "error");
@@ -209,7 +212,7 @@ async function disconnectItms() {
         if (data.success) {
             showToast("Disconnected from ITMS WebApp.", "info");
             appendConsoleLog("Disconnected from ITMS WebApp session.", "warning");
-            fetchItmsStatus();
+            fetchItmsStatus(true);
             switchItmsSubview("CONNECT");
         }
     } catch (err) {

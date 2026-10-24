@@ -14,7 +14,31 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // 2. Periodic telemetry polling intervals
     setInterval(fetchStats, 8000);
-    setInterval(fetchItmsStatus, 25000);
+    let itmsHeartbeatTimer = null;
+
+    function startItmsHeartbeat() {
+        if (!itmsHeartbeatTimer) {
+            itmsHeartbeatTimer = setInterval(fetchItmsStatus, 60000); // 60s cadence (Section 18.3)
+        }
+    }
+
+    function stopItmsHeartbeat() {
+        if (itmsHeartbeatTimer) {
+            clearInterval(itmsHeartbeatTimer);
+            itmsHeartbeatTimer = null;
+        }
+    }
+
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+            fetchItmsStatus();
+            startItmsHeartbeat();
+        } else {
+            stopItmsHeartbeat();
+        }
+    });
+
+    startItmsHeartbeat();
 
     // 3. Global Keyboard Shortcuts (matching TUI keybindings 1:1)
     document.addEventListener("keydown", (e) => {

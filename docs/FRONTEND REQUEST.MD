@@ -1093,7 +1093,7 @@ Response:
 ## 18. Feature: Heartbeat Cadence Optimization & Upstream Reachability Caching - [COMPLETED]
 
 - **Date**: Sun Oct 25, 2026
-- **Status**: 🟢 **Completed & Verified (Backend Services & REST APIs)**
+- **Status**: 🟢 **Completed & Verified (Backend Services, REST APIs & Desktop Frontend)**
 - **Priority**: Medium / Performance (Eliminates 96% of Periodic Upstream ITMS Pings)
 
 ### 18.1 Problem Statement
@@ -1181,4 +1181,22 @@ Response:
    - In `tab_itms.js` or `tab_settings.js` when triggering a manual "Test Connection" button click:
      ```javascript
      const res = await fetch("/api/itms/status/?force=1");
+     ```
+
+---
+
+### 18.4 Summary of Frontend Implementation
+
+1. **Adjusted Cadence to 60s (`app.js`)**:
+   - Replaced aggressive 25-second `setInterval(fetchItmsStatus, 25000)` with a 60-second heartbeat interval.
+2. **Page Visibility Awareness (`app.js`)**:
+   - Added `visibilitychange` listener that stops the heartbeat timer when the operator minimizes or navigates away from the browser tab, preventing background battery and network drain.
+   - Automatically executes an immediate refresh and resumes the 60s timer when the tab returns to `visible`.
+3. **Manual Probe Bypass Support (`tab_itms.js` & `tab_itms.html`)**:
+   - Updated `fetchItmsStatus(force = false)` to support `?force=1` for manual actions.
+   - Wired `loadOperatingBonds(true)` to pass `force=1` when clicking the "Test Connection" button.
+   - Ensured account connect and disconnect actions bypass the reachability cache with immediate live verification.
+4. **Cache Invalidation**:
+   - Bumped assets to `?v=23` in `core/templates/core/base.html` and `core/templates/core/mobile_companion.html`.
+
      ```

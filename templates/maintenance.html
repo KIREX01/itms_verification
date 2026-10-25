@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="30">
+    <title>Custom Maintenance Title</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0b0d10;
+            color: #f1f5f9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .maintenance-card {
+            background: #111620;
+            border: 1px solid #1f2937;
+            border-radius: 16px;
+            max-width: 580px;
+            width: 100%;
+            padding: 40px 32px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        .maintenance-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #eab308, #f59e0b, #eab308);
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            background: rgba(234, 179, 8, 0.12);
+            border: 1px solid rgba(234, 179, 8, 0.3);
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #facc15;
+            margin-bottom: 24px;
+        }
+        .badge-dot {
+            width: 8px;
+            height: 8px;
+            background-color: #eab308;
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 0 10px #eab308;
+            animation: pulse 2s infinite ease-in-out;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+        .icon-wrap {
+            width: 72px;
+            height: 72px;
+            margin: 0 auto 20px;
+            background: rgba(234, 179, 8, 0.1);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(234, 179, 8, 0.2);
+        }
+        .icon-wrap svg {
+            width: 36px;
+            height: 36px;
+            stroke: #facc15;
+            fill: none;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: #ffffff;
+            margin: 0 0 12px 0;
+            letter-spacing: -0.02em;
+        }
+        p.subtitle {
+            font-size: 0.95rem;
+            color: #94a3b8;
+            line-height: 1.6;
+            margin: 0 0 28px 0;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 28px;
+            text-align: left;
+        }
+        @media (max-width: 480px) {
+            .info-grid { grid-template-columns: 1fr; }
+        }
+        .info-box {
+            background: #171f2c;
+            border: 1px solid #243044;
+            border-radius: 10px;
+            padding: 12px 14px;
+        }
+        .info-label {
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 4px;
+        }
+        .info-value {
+            font-size: 0.9rem;
+            font-weight: 700;
+            color: #e2e8f0;
+            word-break: break-all;
+        }
+        .countdown-container {
+            background: #171f2c;
+            border: 1px solid #243044;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+        .countdown-text {
+            font-size: 0.85rem;
+            color: #94a3b8;
+            margin-bottom: 8px;
+        }
+        .countdown-number {
+            font-weight: 800;
+            color: #facc15;
+            font-variant-numeric: tabular-nums;
+        }
+        .progress-track {
+            width: 100%;
+            height: 6px;
+            background: #0f172a;
+            border-radius: 9999px;
+            overflow: hidden;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 100%;
+            background: #eab308;
+            border-radius: 9999px;
+            transition: width 1s linear;
+        }
+        .btn-retry {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: #eab308;
+            color: #0b0d10;
+            font-weight: 700;
+            font-size: 0.9rem;
+            padding: 12px 24px;
+            border-radius: 10px;
+            border: none;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            width: 100%;
+        }
+        .btn-retry:hover {
+            background: #facc15;
+            transform: translateY(-1px);
+        }
+        .footer-note {
+            margin-top: 24px;
+            font-size: 0.75rem;
+            color: #475569;
+        }
+    </style>
+</head>
+<body>
+    <div class="maintenance-card">
+        <div class="badge">
+            <span class="badge-dot"></span>
+            System Unavailable &bull; Maintenance
+        </div>
+
+        <div class="icon-wrap">
+            <svg viewBox="0 0 24 24">
+                <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+            </svg>
+        </div>
+
+        <h1>Custom Maintenance Title</h1>
+        <p class="subtitle">We are updating database indices.</p>
+
+        <div class="info-grid">
+            <div class="info-box">
+                <div class="info-label">Estimated Window</div>
+                <div class="info-value">20 minutes</div>
+            </div>
+            <div class="info-box">
+                <div class="info-label">Operations Contact</div>
+                <div class="info-value">help@kirex.online</div>
+            </div>
+        </div>
+
+        <div class="countdown-container">
+            <div class="countdown-text">
+                Automatic retry in <span id="countdown" class="countdown-number">30</span> seconds...
+            </div>
+            <div class="progress-track">
+                <div id="progress-bar" class="progress-bar"></div>
+            </div>
+        </div>
+
+        <button class="btn-retry" onclick="window.location.reload();">
+            <svg style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2.5;" viewBox="0 0 24 24">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+            </svg>
+            Check Service Again
+        </button>
+
+        <div class="footer-note">
+            ITMS Verification Copilot &bull; Timestamp: 2026-10-25 00:24:45 UTC
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            var total = 30;
+            var remaining = total;
+            var cd = document.getElementById('countdown');
+            var bar = document.getElementById('progress-bar');
+            var timer = setInterval(function() {
+                remaining--;
+                if (cd) cd.textContent = Math.max(0, remaining);
+                if (bar) bar.style.width = Math.max(0, (remaining / total) * 100) + '%';
+                if (remaining <= 0) {
+                    clearInterval(timer);
+                    window.location.reload();
+                }
+            }, 1000);
+        })();
+    </script>
+</body>
+</html>

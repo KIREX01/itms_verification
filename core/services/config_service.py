@@ -125,6 +125,14 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             {"code": "MAYBACH", "name": "MAYBACH", "warehouse_id": "31"},
         ],
     },
+    "maintenance": {
+        "enabled": False,                       # When True, Web UI serves maintenance page (HTTP 503)
+        "title": "ITMS Verification Copilot — Maintenance",
+        "message": "The system is currently undergoing scheduled maintenance or updates. The service will resume shortly.",
+        "estimated_duration": "15-30 minutes",
+        "contact_support": "operations@kirex.online",
+        "retry_after_seconds": 30,              # Meta refresh and countdown interval in seconds
+    },
 }
 
 USER_SETTINGS_SCHEMA: Dict[str, Dict[str, Any]] = {
@@ -610,6 +618,373 @@ def is_developer_mode(base_dir: Optional[Path] = None) -> bool:
 def is_itms_enabled(base_dir: Optional[Path] = None) -> bool:
     """Return whether remote ITMS interactions are currently enabled."""
     return bool(get_setting("itms.enabled", default=True, base_dir=base_dir))
+
+
+def get_maintenance_config(base_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """Returns the maintenance configuration dictionary."""
+    cfg = load_config(base_dir)
+    m = cfg.get("maintenance", {})
+    return {
+        "enabled": bool(m.get("enabled", False)),
+        "title": str(m.get("title", "ITMS Verification Copilot — Maintenance")),
+        "message": str(m.get("message", "The system is currently undergoing scheduled maintenance or updates. The service will resume shortly.")),
+        "estimated_duration": str(m.get("estimated_duration", "15-30 minutes")),
+        "contact_support": str(m.get("contact_support", "operations@kirex.online")),
+        "retry_after_seconds": int(m.get("retry_after_seconds", 30)),
+    }
+
+
+def get_maintenance_flag_path(base_dir: Optional[Path] = None) -> Path:
+    """Returns the path to the secure maintenance flag file."""
+    b_dir = base_dir or _get_project_root()
+    return b_dir / "secure" / "maintenance.flag"
+
+
+def is_maintenance_enabled(base_dir: Optional[Path] = None) -> bool:
+    """Return whether maintenance mode is currently enabled."""
+    flag_file = get_maintenance_flag_path(base_dir)
+    if flag_file.is_file():
+        return True
+    return bool(get_setting("maintenance.enabled", default=False, base_dir=base_dir))
+
+
+def set_maintenance_mode(
+    enabled: bool,
+    title: str = "",
+    message: str = "",
+    estimated_duration: str = "",
+    contact_support: str = "",
+    retry_after_seconds: int = 30,
+    base_dir: Optional[Path] = None,
+) -> bool:
+    """Toggle maintenance mode, update config, and generate static maintenance HTML."""
+    b_dir = base_dir or _get_project_root()
+    cfg = load_config(b_dir)
+    cfg.setdefault("maintenance", {})
+    cfg["maintenance"]["enabled"] = bool(enabled)
+    if title:
+        cfg["maintenance"]["title"] = title
+    if message:
+        cfg["maintenance"]["message"] = message
+    if estimated_duration:
+        cfg["maintenance"]["estimated_duration"] = estimated_duration
+    if contact_support:
+        cfg["maintenance"]["contact_support"] = contact_support
+    if retry_after_seconds:
+        cfg["maintenance"]["retry_after_seconds"] = max(5, int(retry_after_seconds))
+
+    saved = save_config(cfg, b_dir)
+
+    flag_file = get_maintenance_flag_path(b_dir)
+    flag_file.parent.mkdir(parents=True, exist_ok=True)
+    if enabled:
+        flag_file.write_text("maintenance_active\n", encoding="utf-8")
+    else:
+        if flag_file.is_file():
+            try:
+                flag_file.unlink()
+            except OSError:
+                pass
+
+    # Generate standalone maintenance pages
+    generate_maintenance_html(b_dir)
+    return saved
+
+
+def generate_maintenance_html(base_dir: Optional[Path] = None) -> str:
+    """
+    Renders and writes standalone HTML error pages to templates/maintenance.html
+    and templates/503.html for Nginx and Django 503 fallback.
+    """
+    b_dir = base_dir or _get_project_root()
+    m_cfg = get_maintenance_config(b_dir)
+    from datetime import datetime, timezone as dt_timezone
+    now_str = datetime.now(dt_timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    title = m_cfg.get("title") or "ITMS Verification Copilot — Maintenance"
+    message = m_cfg.get("message") or "The system is currently undergoing scheduled maintenance or updates. The service will resume shortly."
+    estimated_duration = m_cfg.get("estimated_duration") or "15-30 minutes"
+    contact_support = m_cfg.get("contact_support") or "operations@kirex.online"
+    retry_after = m_cfg.get("retry_after_seconds", 30)
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="{retry_after}">
+    <title>{title}</title>
+    <style>
+        * {{ box-sizing: border-box; }}
+        body {{
+            margin: 0;
+            padding: 0;
+            background-color: #0b0d10;
+            color: #f1f5f9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }}
+        .maintenance-card {{
+            background: #111620;
+            border: 1px solid #1f2937;
+            border-radius: 16px;
+            max-width: 580px;
+            width: 100%;
+            padding: 40px 32px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }}
+        .maintenance-card::before {{
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #eab308, #f59e0b, #eab308);
+        }}
+        .badge {{
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            background: rgba(234, 179, 8, 0.12);
+            border: 1px solid rgba(234, 179, 8, 0.3);
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #facc15;
+            margin-bottom: 24px;
+        }}
+        .badge-dot {{
+            width: 8px;
+            height: 8px;
+            background-color: #eab308;
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 0 10px #eab308;
+            animation: pulse 2s infinite ease-in-out;
+        }}
+        @keyframes pulse {{
+            0%, 100% {{ opacity: 1; transform: scale(1); }}
+            50% {{ opacity: 0.4; transform: scale(0.85); }}
+        }}
+        .icon-wrap {{
+            width: 72px;
+            height: 72px;
+            margin: 0 auto 20px;
+            background: rgba(234, 179, 8, 0.1);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(234, 179, 8, 0.2);
+        }}
+        .icon-wrap svg {{
+            width: 36px;
+            height: 36px;
+            stroke: #facc15;
+            fill: none;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }}
+        h1 {{
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: #ffffff;
+            margin: 0 0 12px 0;
+            letter-spacing: -0.02em;
+        }}
+        p.subtitle {{
+            font-size: 0.95rem;
+            color: #94a3b8;
+            line-height: 1.6;
+            margin: 0 0 28px 0;
+        }}
+        .info-grid {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 28px;
+            text-align: left;
+        }}
+        @media (max-width: 480px) {{
+            .info-grid {{ grid-template-columns: 1fr; }}
+        }}
+        .info-box {{
+            background: #171f2c;
+            border: 1px solid #243044;
+            border-radius: 10px;
+            padding: 12px 14px;
+        }}
+        .info-label {{
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 4px;
+        }}
+        .info-value {{
+            font-size: 0.9rem;
+            font-weight: 700;
+            color: #e2e8f0;
+            word-break: break-all;
+        }}
+        .countdown-container {{
+            background: #171f2c;
+            border: 1px solid #243044;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }}
+        .countdown-text {{
+            font-size: 0.85rem;
+            color: #94a3b8;
+            margin-bottom: 8px;
+        }}
+        .countdown-number {{
+            font-weight: 800;
+            color: #facc15;
+            font-variant-numeric: tabular-nums;
+        }}
+        .progress-track {{
+            width: 100%;
+            height: 6px;
+            background: #0f172a;
+            border-radius: 9999px;
+            overflow: hidden;
+        }}
+        .progress-bar {{
+            width: 100%;
+            height: 100%;
+            background: #eab308;
+            border-radius: 9999px;
+            transition: width 1s linear;
+        }}
+        .btn-retry {{
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: #eab308;
+            color: #0b0d10;
+            font-weight: 700;
+            font-size: 0.9rem;
+            padding: 12px 24px;
+            border-radius: 10px;
+            border: none;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            width: 100%;
+        }}
+        .btn-retry:hover {{
+            background: #facc15;
+            transform: translateY(-1px);
+        }}
+        .footer-note {{
+            margin-top: 24px;
+            font-size: 0.75rem;
+            color: #475569;
+        }}
+    </style>
+</head>
+<body>
+    <div class="maintenance-card">
+        <div class="badge">
+            <span class="badge-dot"></span>
+            System Unavailable &bull; Maintenance
+        </div>
+
+        <div class="icon-wrap">
+            <svg viewBox="0 0 24 24">
+                <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+            </svg>
+        </div>
+
+        <h1>{title}</h1>
+        <p class="subtitle">{message}</p>
+
+        <div class="info-grid">
+            <div class="info-box">
+                <div class="info-label">Estimated Window</div>
+                <div class="info-value">{estimated_duration}</div>
+            </div>
+            <div class="info-box">
+                <div class="info-label">Operations Contact</div>
+                <div class="info-value">{contact_support}</div>
+            </div>
+        </div>
+
+        <div class="countdown-container">
+            <div class="countdown-text">
+                Automatic retry in <span id="countdown" class="countdown-number">{retry_after}</span> seconds...
+            </div>
+            <div class="progress-track">
+                <div id="progress-bar" class="progress-bar"></div>
+            </div>
+        </div>
+
+        <button class="btn-retry" onclick="window.location.reload();">
+            <svg style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2.5;" viewBox="0 0 24 24">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+            </svg>
+            Check Service Again
+        </button>
+
+        <div class="footer-note">
+            ITMS Verification Copilot &bull; Timestamp: {now_str}
+        </div>
+    </div>
+
+    <script>
+        (function() {{
+            var total = {retry_after};
+            var remaining = total;
+            var cd = document.getElementById('countdown');
+            var bar = document.getElementById('progress-bar');
+            var timer = setInterval(function() {{
+                remaining--;
+                if (cd) cd.textContent = Math.max(0, remaining);
+                if (bar) bar.style.width = Math.max(0, (remaining / total) * 100) + '%';
+                if (remaining <= 0) {{
+                    clearInterval(timer);
+                    window.location.reload();
+                }}
+            }}, 1000);
+        }})();
+    </script>
+</body>
+</html>
+"""
+    tpl_dir = b_dir / "templates"
+    tpl_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        (tpl_dir / "maintenance.html").write_text(html_content, encoding="utf-8")
+        (tpl_dir / "503.html").write_text(html_content, encoding="utf-8")
+    except Exception:
+        pass
+
+    static_dir = b_dir / "staticfiles"
+    if static_dir.is_dir():
+        try:
+            (static_dir / "maintenance.html").write_text(html_content, encoding="utf-8")
+        except Exception:
+            pass
+
+    return html_content
 
 
 def set_itms_enabled(
@@ -1161,6 +1536,32 @@ class ConfigService:
         base_dir: Optional[Path] = None,
     ) -> bool:
         return set_itms_enabled(enabled, paused_by, reason, base_dir)
+
+    @staticmethod
+    def get_maintenance_config(base_dir: Optional[Path] = None) -> Dict[str, Any]:
+        return get_maintenance_config(base_dir)
+
+    @staticmethod
+    def is_maintenance_enabled(base_dir: Optional[Path] = None) -> bool:
+        return is_maintenance_enabled(base_dir)
+
+    @staticmethod
+    def set_maintenance_mode(
+        enabled: bool,
+        title: str = "",
+        message: str = "",
+        estimated_duration: str = "",
+        contact_support: str = "",
+        retry_after_seconds: int = 30,
+        base_dir: Optional[Path] = None,
+    ) -> bool:
+        return set_maintenance_mode(
+            enabled, title, message, estimated_duration, contact_support, retry_after_seconds, base_dir
+        )
+
+    @staticmethod
+    def generate_maintenance_html(base_dir: Optional[Path] = None) -> str:
+        return generate_maintenance_html(base_dir)
 
     @staticmethod
     def get_database_config(base_dir: Optional[Path] = None) -> Dict[str, Any]:

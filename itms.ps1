@@ -1,30 +1,29 @@
-# Do not use [CmdletBinding()] to prevent PowerShell from consuming -v as -Verbose
+# ITMS Verification Copilot PowerShell CLI Controller
+param(
+    [Parameter(Position=0)]
+    [string]$Action = "status",
 
-# Determine Application Directory
-if (Test-Path (Join-Path (Get-Location) "itms_cli.py")) {
-    $AppDir = (Get-Location).Path
-} elseif (Test-Path (Join-Path $PSScriptRoot "itms_cli.py")) {
-    $AppDir = $PSScriptRoot
-} elseif ($env:ITMS_HOME -and (Test-Path (Join-Path $env:ITMS_HOME "itms_cli.py"))) {
-    $AppDir = $env:ITMS_HOME
-} else {
-    try {
-        $regHome = [Environment]::GetEnvironmentVariable("ITMS_HOME", "User")
-        if ($regHome -and (Test-Path (Join-Path $regHome "itms_cli.py"))) {
-            $AppDir = $regHome
-        }
-    } catch {}
-}
-if (-not $AppDir) {
-    $AppDir = $PSScriptRoot
-}
+    [Parameter(Position=1)]
+    [string]$SubAction = "",
 
-# Determine Python Executable
-$venvPy = Join-Path $AppDir ".venv\Scripts\python.exe"
-if (-not (Test-Path $venvPy)) {
-    $venvPy = "python"
+    [Parameter(ValueFromRemainingArguments=$true)]
+    $RemainingArgs
+)
+
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+Set-Location $ScriptDir
+
+$PythonExe = Join-Path $ScriptDir ".venv\Scripts\python.exe"
+if (-not (Test-Path $PythonExe)) {
+    $PythonExe = "python"
 }
 
-$cliScript = Join-Path $AppDir "itms_cli.py"
-& $venvPy $cliScript @args
-exit $LASTEXITCODE
+$Arguments = @("manage.py", "itms_ctl", $Action)
+if ($SubAction) {
+    $Arguments += $SubAction
+}
+if ($RemainingArgs) {
+    $Arguments += $RemainingArgs
+}
+
+& $PythonExe $Arguments

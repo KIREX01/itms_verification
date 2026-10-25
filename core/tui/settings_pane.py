@@ -159,6 +159,15 @@ class SettingsPane(Vertical):
         pg_user = str(db_cfg.get("postgres_user", "postgres"))
         pg_pass = str(db_cfg.get("postgres_password", ""))
 
+        # Developer settings: Maintenance Mode & Web Availability
+        m_cfg = config_service.get_maintenance_config()
+        m_enabled = m_cfg.get("enabled", False)
+        m_title = str(m_cfg.get("title", "ITMS Verification Copilot — Maintenance"))
+        m_message = str(m_cfg.get("message", "The system is currently undergoing scheduled maintenance or updates. The service will resume shortly."))
+        m_duration = str(m_cfg.get("estimated_duration", "15-30 minutes"))
+        m_contact = str(m_cfg.get("contact_support", "operations@kirex.online"))
+        m_refresh = str(m_cfg.get("retry_after_seconds", 30))
+
         db_info = config_service.get_active_database_info()["display"]
         current_vault_root = str(vault_service.get_vault_root())
 
@@ -470,6 +479,46 @@ class SettingsPane(Vertical):
                             id="settings-db-feedback",
                         )
 
+                    # Card 2F: System Availability & Maintenance Mode
+                    with Vertical(classes="settings-card", id="card-dev-maintenance"):
+                        yield Static("[bold yellow]🛠️ System Availability & Maintenance Page (Developer Mode)[/bold yellow]", classes="settings-card-title")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static(
+                                "[b]Web Maintenance Mode[/b]\n"
+                                "[dim]Serve maintenance page to all browser and mobile operators (HTTP 503)[/dim]",
+                                classes="settings-label",
+                            )
+                            yield Switch(value=m_enabled, id="switch-maintenance-mode")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Maintenance Page Title[/b]\n[dim]Headline shown on maintenance page[/dim]", classes="settings-label")
+                            yield Input(value=m_title, placeholder="ITMS Verification Copilot — Maintenance", id="input-maintenance-title", classes="settings-input")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Maintenance Notice Message[/b]\n[dim]Descriptive explanation shown to operators[/dim]", classes="settings-label")
+                            yield Input(value=m_message, placeholder="The system is undergoing maintenance...", id="input-maintenance-message", classes="settings-input")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Estimated Maintenance Window[/b]\n[dim]e.g. '15-30 minutes' or 'Until 04:00 AM UTC'[/dim]", classes="settings-label")
+                            yield Input(value=m_duration, placeholder="15-30 minutes", id="input-maintenance-duration", classes="settings-input")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Operations Contact / Support[/b]\n[dim]Support email or telephone displayed on notice[/dim]", classes="settings-label")
+                            yield Input(value=m_contact, placeholder="operations@kirex.online", id="input-maintenance-contact", classes="settings-input")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static("[b]Auto-Refresh Interval (seconds)[/b]\n[dim]Browser countdown frequency before automatic reload[/dim]", classes="settings-label")
+                            yield Input(value=m_refresh, placeholder="30", id="input-maintenance-refresh", classes="settings-input")
+
+                        with Horizontal(classes="settings-db-buttons"):
+                            yield Button("📄 Regenerate Maintenance HTML", variant="primary", id="btn-generate-maintenance-html")
+
+                        yield Static(
+                            "[dim]Configures the static maintenance page served when app is offline or in maintenance mode.[/dim]",
+                            id="settings-maintenance-feedback",
+                        )
+
             # Bottom Action Bar
             with Horizontal(id="settings-actions-bar"):
                 yield Button("💾 Save Configuration", variant="success", id="btn-save-settings")
@@ -586,6 +635,32 @@ class SettingsPane(Vertical):
             self.action_change_yolo_weights()
         elif btn_id == "btn-sync-bonds-tui":
             self.run_worker(self._async_sync_bonds_itms, thread=True)
+        elif btn_id == "btn-generate-maintenance-html":
+            self.action_regenerate_maintenance_html()
+
+    def action_regenerate_maintenance_html(self) -> None:
+        """Regenerates the standalone maintenance HTML file from current inputs."""
+        try:
+            m_title = self.query_one("#input-maintenance-title", Input).value.strip()
+            m_msg = self.query_one("#input-maintenance-message", Input).value.strip()
+            m_dur = self.query_one("#input-maintenance-duration", Input).value.strip()
+            m_cnt = self.query_one("#input-maintenance-contact", Input).value.strip()
+            m_ref = int(self.query_one("#input-maintenance-refresh", Input).value.strip() or 30)
+            m_sw = self.query_one("#switch-maintenance-mode", Switch).value
+
+            config_service.set_maintenance_mode(
+                enabled=m_sw,
+                title=m_title,
+                message=m_msg,
+                estimated_duration=m_dur,
+                contact_support=m_cnt,
+                retry_after_seconds=m_ref,
+            )
+            self.app.notify("✅ Maintenance page HTML compiled successfully!", severity="information")
+            if hasattr(self.app, "log_message"):
+                self.app.log_message("[bold green]Maintenance page HTML generated and synced.[/bold green]", level="SUCCESS")
+        except Exception as exc:
+            self.app.notify(f"Failed to generate maintenance HTML: {exc}", severity="error")
 
     def action_save_master_pin(self) -> None:
         """Saves updated 6-digit Master Security PIN to secure/config.json."""
@@ -1031,6 +1106,25 @@ class SettingsPane(Vertical):
                 cfg["database"]["postgres_db"] = pg_db
                 cfg["database"]["postgres_user"] = pg_user
                 cfg["database"]["postgres_password"] = pg_pass
+            except Exception:
+                pass
+
+            # Developer Mode: Maintenance Mode & Web Availability
+            try:
+                m_enabled = self.query_one("#switch-maintenance-mode", Switch).value
+                m_title = self.query_one("#input-maintenance-title", Input).value.strip()
+                m_msg = self.query_one("#input-maintenance-message", Input).value.strip()
+                m_dur = self.query_one("#input-maintenance-duration", Input).value.strip()
+                m_contact = self.query_one("#input-maintenance-contact", Input).value.strip()
+                m_ref = int(self.query_one("#input-maintenance-refresh", Input).value.strip() or 30)
+                config_service.set_maintenance_mode(
+                    enabled=m_enabled,
+                    title=m_title,
+                    message=m_msg,
+                    estimated_duration=m_dur,
+                    contact_support=m_contact,
+                    retry_after_seconds=m_ref,
+                )
             except Exception:
                 pass
 

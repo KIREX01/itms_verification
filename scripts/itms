@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# ITMS Verification Copilot Unified CLI Controller
+set -e
+
+APP_DIR="/opt/itms"
+if [[ ! -d "${APP_DIR}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    APP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+fi
+
+cd "${APP_DIR}"
+
+VENV_PYTHON="${APP_DIR}/.venv/bin/python"
+if [[ ! -x "${VENV_PYTHON}" ]]; then
+    VENV_PYTHON="python3"
+fi
+
+exec "${VENV_PYTHON}" "${APP_DIR}/manage.py" itms_ctl "$@"

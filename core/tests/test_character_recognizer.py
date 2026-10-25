@@ -180,6 +180,20 @@ class DirectCharacterRecognizerLogicTests(SimpleTestCase):
             self.assertIsNone(self.recognizer.recognize(self.dummy_crop))
 
 
+    def test_weights_path_resolution_and_model_loading(self):
+        """Verify weights file resolution and model loading."""
+        weights = self.recognizer.resolve_weights_path()
+        self.assertIsNotNone(weights)
+        self.assertTrue(weights.exists())
+
+        model = self.recognizer.get_model()
+        self.assertIsNotNone(model)
+
+        # Blank crop produces no boxes and safely returns None
+        blank_crop = np.zeros((100, 200, 3), dtype=np.uint8)
+        self.assertIsNone(self.recognizer.recognize(blank_crop))
+
+
 class OCREngineFallbackIntegrationTests(SimpleTestCase):
     """Test seamless fallback between Direct Character Reader and existing OCR engines."""
 

@@ -21,6 +21,11 @@ Architecture & Capabilities:
 """
 import logging
 import os
+
+# Ensure Ultralytics operates 100% offline without network checks or auto-installs
+os.environ["ULTRALYTICS_AUTOINSTALL"] = "0"
+os.environ["YOLO_VERBOSE"] = "False"
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
@@ -175,7 +180,7 @@ class DirectCharacterRecognizer:
             return 0.65
 
     def resolve_weights_path(self) -> Optional[Path]:
-        """Resolves the path to character model weights file on disk."""
+        """Resolves the path to character model weights file on disk or auto-downloads from HF."""
         target = self._weights_path
         if not target:
             try:
@@ -207,6 +212,33 @@ class DirectCharacterRecognizer:
         if alt_p.exists():
             return alt_p
 
+        # Check alternate extension (.pt <-> .onnx)
+        alt_ext = ".pt" if p.suffix == ".onnx" else ".onnx"
+        alt_ext_p = root / "models" / f"{p.stem}{alt_ext}"
+        if alt_ext_p.exists():
+            return alt_ext_p
+
+        # If missing on disk, attempt automatic download from Hugging Face
+        if "char_reader" in target or "plate_recognizer" in target:
+            models_dir = root / "models"
+            models_dir.mkdir(parents=True, exist_ok=True)
+            fname = "plate_recognizer_yolo11n.pt" if p.suffix == ".pt" else "plate_recognizer_yolo11n.onnx"
+            dest = models_dir / Path(target).name
+            if dest.exists():
+                return dest
+            try:
+                from huggingface_hub import hf_hub_download
+                import shutil
+                downloaded = hf_hub_download(
+                    repo_id="carlravel/indonesian-plate-recognizer-yolo11",
+                    filename=fname,
+                )
+                shutil.copy(downloaded, dest)
+                logger.info("Auto-downloaded character recognition weights: %s -> %s", fname, dest)
+                return dest
+            except Exception as dl_err:
+                logger.debug("Automatic character weights download skipped/failed: %s", dl_err)
+
         return None
 
     def get_model(self) -> Any:
@@ -217,6 +249,10 @@ class DirectCharacterRecognizer:
         weights_file = self.resolve_weights_path()
         if not weights_file or not weights_file.exists():
             return None
+
+        # If .onnx was requested but matching .pt is on disk, prefer .pt for native PyTorch execution
+        if weights_file.suffix == ".onnx" and weights_file.with_suffix(".pt").exists():
+            weights_file = weights_file.with_suffix(".pt")
 
         weights_str = str(weights_file)
 

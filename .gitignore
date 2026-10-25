@@ -19,6 +19,7 @@ media/*.bak
 *.log
 *.bak
 *.pt
+*.onnx
 dist/
 .pytest_cache/
 .DS_Store

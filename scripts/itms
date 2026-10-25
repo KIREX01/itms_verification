@@ -15,4 +15,9 @@ if [[ ! -x "${VENV_PYTHON}" ]]; then
     VENV_PYTHON="python3"
 fi
 
+# Auto-elevate with sudo if not root
+if [[ "$(id -u)" -ne 0 ]]; then
+    exec sudo "${VENV_PYTHON}" "${APP_DIR}/manage.py" itms_ctl "$@"
+fi
+
 exec "${VENV_PYTHON}" "${APP_DIR}/manage.py" itms_ctl "$@"

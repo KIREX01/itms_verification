@@ -46,6 +46,8 @@ fill in real values locally:
 [x] Level 8: High-Capacity 100-Page Deep Crawling, 3-Hour Safe Room Daemon & Floor Discrepancy Isolation (v1.0.7)
      ↓
 [x] Level 9: Zero-Config Self-Healing SSL, 24/7 Windows Away Mode Service & Enterprise Hardening (v1.0.8)
+     ↓
+[x] Level 10: Production Hardening, Concurrency Lock, Serial-to-UUID Resolution, Visibility-Aware Heartbeats & Unified Lifecycle CLI (v1.0.9)
 ```
 
 Every level below has real, runnable code in this repository (see file paths). The one

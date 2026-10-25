@@ -28,6 +28,9 @@ from core.services.update_service import UpdateService
 
 class SecurityAuditRemediationTests(TestCase):
     def setUp(self):
+        from django.db import connection
+        connection.ensure_connection()
+
         self.client = Client()
         self.user = User.objects.create_superuser(
             username="security_tester",
@@ -102,10 +105,11 @@ class SecurityAuditRemediationTests(TestCase):
             resp2 = self.client.get("/media/media/vault/test_display_valid.jpg")
             self.assertEqual(resp2.status_code, 200)
         finally:
-            if resp1 and hasattr(resp1, "close"):
-                resp1.close()
-            if resp2 and hasattr(resp2, "close"):
-                resp2.close()
+            for r in (resp1, resp2):
+                if r is not None:
+                    f_stream = getattr(r, "file_to_stream", None)
+                    if f_stream and hasattr(f_stream, "close"):
+                        f_stream.close()
             if test_file.exists():
                 try:
                     test_file.unlink()

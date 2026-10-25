@@ -18,10 +18,12 @@ from django.test import SimpleTestCase
 from core.vision.character_recognizer import (
     CharacterBox,
     DirectCharacterRecognizer,
+    clean_plate_boxes_advanced,
     cluster_and_order_characters,
     filter_overlapping_boxes,
     get_character_recognizer,
     recognize_plate_characters,
+    slice_and_normalize_ordered_boxes,
 )
 from core.vision.ocr_engine import OCRResult, read_plate_text
 
@@ -48,6 +50,24 @@ class CharacterBoxGeometryTests(SimpleTestCase):
         self.assertIn("U", chars)
         self.assertIn("M", chars)
         self.assertNotIn("O", chars)
+
+    def test_clean_plate_boxes_removes_bolt_heads(self):
+        # Letters have height ~100px; bolt head has height 40px (< 58% of median height)
+        letters = [
+            CharacterBox(char="U", confidence=0.92, x1=50, y1=30, x2=90, y2=130),   # h=100
+            CharacterBox(char="M", confidence=0.90, x1=100, y1=30, x2=140, y2=130), # h=100
+            CharacterBox(char="A", confidence=0.91, x1=150, y1=30, x2=190, y2=130), # h=100
+            CharacterBox(char="1", confidence=0.88, x1=50, y1=150, x2=90, y2=250),  # h=100
+            CharacterBox(char="2", confidence=0.89, x1=100, y1=150, x2=140, y2=250),# h=100
+        ]
+        bolt_box = CharacterBox(char="H", confidence=0.75, x1=10, y1=30, x2=40, y2=70) # h=40 (< 0.58 * 100)
+        all_boxes = letters + [bolt_box]
+
+        cleaned = clean_plate_boxes_advanced(all_boxes, crop_w=200, crop_h=300)
+        self.assertEqual(len(cleaned), 5)
+        chars = [b.char for b in cleaned]
+        self.assertNotIn("H", chars)
+        self.assertIn("U", chars)
 
 
 class SpatialClusteringTests(SimpleTestCase):
@@ -133,6 +153,46 @@ class DirectCharacterRecognizerLogicTests(SimpleTestCase):
         self.assertEqual(res.text, "UMA421NC")
         self.assertEqual(res.backend, "direct_char_reader")
         self.assertGreaterEqual(res.confidence, 0.90)
+
+    def test_direct_recognition_strips_bolt_prefix(self):
+        # Rogue bolt detected as 'F' to the left of 'UMA', e.g. 'FUMA488OH'
+        mock_boxes = [
+            CharacterBox(char="F", confidence=0.35, x1=5, y1=10, x2=20, y2=40),
+            CharacterBox(char="U", confidence=0.95, x1=25, y1=10, x2=45, y2=40),
+            CharacterBox(char="M", confidence=0.94, x1=48, y1=10, x2=68, y2=40),
+            CharacterBox(char="A", confidence=0.93, x1=70, y1=10, x2=90, y2=40),
+            CharacterBox(char="4", confidence=0.92, x1=15, y1=60, x2=35, y2=90),
+            CharacterBox(char="8", confidence=0.91, x1=35, y1=60, x2=55, y2=90),
+            CharacterBox(char="8", confidence=0.90, x1=55, y1=60, x2=75, y2=90),
+            CharacterBox(char="O", confidence=0.89, x1=75, y1=60, x2=95, y2=90),
+            CharacterBox(char="H", confidence=0.88, x1=95, y1=60, x2=115, y2=90),
+        ]
+        self.recognizer.set_mock_boxes(mock_boxes)
+        res = self.recognizer.recognize(self.dummy_crop)
+
+        self.assertIsNotNone(res)
+        self.assertEqual(res.text, "UMA488OH")
+        self.assertEqual(res.backend, "direct_char_reader")
+        self.assertGreaterEqual(res.confidence, 0.85)
+
+    def test_direct_recognition_slot_coercion(self):
+        # Ambiguous characters: 'Z' in slot 4 (digit slot) -> '2', '0' in slot 6 (letter slot) -> 'O'
+        mock_boxes = [
+            CharacterBox(char="U", confidence=0.92, x1=25, y1=10, x2=45, y2=40),
+            CharacterBox(char="M", confidence=0.91, x1=48, y1=10, x2=68, y2=40),
+            CharacterBox(char="A", confidence=0.90, x1=70, y1=10, x2=90, y2=40),
+            CharacterBox(char="4", confidence=0.89, x1=15, y1=60, x2=35, y2=90),
+            CharacterBox(char="Z", confidence=0.88, x1=35, y1=60, x2=55, y2=90), # slot 4: Z -> 2
+            CharacterBox(char="1", confidence=0.87, x1=55, y1=60, x2=75, y2=90),
+            CharacterBox(char="0", confidence=0.86, x1=75, y1=60, x2=95, y2=90), # slot 6: 0 -> O
+            CharacterBox(char="H", confidence=0.85, x1=95, y1=60, x2=115, y2=90),
+        ]
+        self.recognizer.set_mock_boxes(mock_boxes)
+        res = self.recognizer.recognize(self.dummy_crop)
+
+        self.assertIsNotNone(res)
+        self.assertEqual(res.text, "UMA421OH")
+        self.assertEqual(res.backend, "direct_char_reader")
 
     def test_rejection_on_low_confidence(self):
         # Boxes average to 0.50, which is below min_confidence 0.65

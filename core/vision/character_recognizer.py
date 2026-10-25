@@ -21,6 +21,7 @@ Architecture & Capabilities:
 """
 import logging
 import os
+import re
 
 # Ensure Ultralytics operates 100% offline without network checks or auto-installs
 os.environ["ULTRALYTICS_AUTOINSTALL"] = "0"
@@ -99,15 +100,41 @@ def filter_overlapping_boxes(boxes: List[CharacterBox], iou_threshold: float = 0
     return kept
 
 
-def cluster_and_order_characters(boxes: List[CharacterBox]) -> Tuple[str, float]:
+def clean_plate_boxes_advanced(
+    boxes: List[CharacterBox], crop_w: float, crop_h: float
+) -> List[CharacterBox]:
+    """Filters duplicate detections, bolt/screw artifacts, and extreme border noise."""
+    if len(boxes) < 4:
+        return list(boxes)
+
+    filtered = filter_overlapping_boxes(boxes, iou_threshold=0.45)
+    if len(filtered) < 4:
+        return filtered
+
+    heights = [b.height for b in filtered]
+    median_h = float(np.median(heights)) if heights else 1.0
+
+    # 1. Filter out bolt/screw artifacts whose height is significantly smaller than normal characters
+    # (Real plate characters have uniform height; bolts/screws/emblems are small circular heads < 58% median height)
+    size_filtered = [b for b in filtered if b.height >= 0.58 * median_h]
+    if len(size_filtered) >= 4:
+        filtered = size_filtered
+
+    # 2. Filter out extreme vertical edge noise (extreme top or bottom margin)
+    edge_filtered = [b for b in filtered if b.yc > 0.10 * crop_h and b.yc < 0.94 * crop_h]
+    if len(edge_filtered) >= 4:
+        filtered = edge_filtered
+
+    return filtered
+
+
+def order_character_boxes(boxes: List[CharacterBox]) -> List[CharacterBox]:
     """
     Orders character boxes into reading order (left-to-right, top-to-bottom).
-    Handles both 1-row plates and 2-row motorcycle plates.
+    Handles both standard 1-row plates and Ugandan 2-row motorcycle plates.
     """
-    if not boxes:
-        return "", 0.0
-    if len(boxes) == 1:
-        return boxes[0].char.upper(), boxes[0].confidence
+    if not boxes or len(boxes) <= 1:
+        return list(boxes)
 
     heights = [b.height for b in boxes]
     median_h = float(np.median(heights)) if heights else 1.0
@@ -131,15 +158,96 @@ def cluster_and_order_characters(boxes: List[CharacterBox]) -> Tuple[str, float]
             row2 = by_y[split_idx + 1:]
             row1_sorted = sorted(row1, key=lambda b: b.xc)
             row2_sorted = sorted(row2, key=lambda b: b.xc)
-            ordered_boxes = row1_sorted + row2_sorted
-        else:
-            ordered_boxes = sorted(boxes, key=lambda b: b.xc)
-    else:
-        ordered_boxes = sorted(boxes, key=lambda b: b.xc)
+            return row1_sorted + row2_sorted
 
+    return sorted(boxes, key=lambda b: b.xc)
+
+
+def cluster_and_order_characters(boxes: List[CharacterBox]) -> Tuple[str, float]:
+    """
+    Orders character boxes into reading order (left-to-right, top-to-bottom).
+    Handles both 1-row plates and 2-row motorcycle plates.
+    """
+    ordered_boxes = order_character_boxes(boxes)
+    if not ordered_boxes:
+        return "", 0.0
     raw_text = "".join(b.char.upper() for b in ordered_boxes)
     avg_conf = float(sum(b.confidence for b in ordered_boxes) / len(ordered_boxes))
     return raw_text, avg_conf
+
+
+# Positional slot mappings for Ugandan vehicle registrations:
+# Standard syntax: 3 letters, 3 digits, 1-2 letters (e.g. UMA 123A, UBA 456AB)
+DIGIT_MAP = {
+    "O": "0", "D": "0", "Q": "0", "U": "0",
+    "I": "1", "T": "1", "L": "1", "J": "1",
+    "Z": "2", "A": "4", "S": "5", "G": "6",
+    "B": "8", "E": "6",
+}
+
+LETTER_MAP = {
+    "0": "O", "1": "I", "8": "B", "5": "S",
+    "2": "Z", "4": "A", "6": "G",
+}
+
+
+def slice_and_normalize_ordered_boxes(
+    ordered_boxes: List[CharacterBox],
+) -> Tuple[Optional[str], float, bool]:
+    """
+    Trims prefix margin artifacts before the Ugandan registration sequence,
+    performs positional slot disambiguation (e.g. O->0 in digits slot, 0->O in letters slot),
+    and validates canonical Ugandan plate syntax.
+
+    Returns:
+        (canonical_plate_text, average_confidence_over_surviving_boxes, is_valid)
+    """
+    if not ordered_boxes:
+        return None, 0.0, False
+
+    raw_chars = [b.char.upper() for b in ordered_boxes]
+    raw_text = "".join(raw_chars)
+
+    # Locate Ugandan plate start: UM or U[A-Z]{2}
+    start_idx = 0
+    m_um = re.search(r"(UM[A-Z])", raw_text)
+    m_u = re.search(r"(U[A-Z]{2})", raw_text)
+    if m_um:
+        start_idx = m_um.start()
+    elif m_u:
+        start_idx = m_u.start()
+
+    surviving_boxes = ordered_boxes[start_idx:]
+    if len(surviving_boxes) > 8:
+        surviving_boxes = surviving_boxes[:8]
+
+    if len(surviving_boxes) < 5:
+        return None, 0.0, False
+
+    chars = [b.char.upper() for b in surviving_boxes]
+    text = "".join(chars)
+
+    # 1. Direct validation
+    norm = normalize_plate(text)
+    if norm.get("is_valid") and is_valid_plate(norm.get("canonical")):
+        conf = float(sum(b.confidence for b in surviving_boxes) / len(surviving_boxes))
+        return norm.get("canonical"), conf, True
+
+    # 2. Positional slot coercion for 7 or 8 character Ugandan registrations
+    if len(chars) in (7, 8) and chars[0] == "U":
+        for i in (3, 4, 5):
+            if chars[i] in DIGIT_MAP:
+                chars[i] = DIGIT_MAP[chars[i]]
+        for i in range(6, len(chars)):
+            if chars[i] in LETTER_MAP:
+                chars[i] = LETTER_MAP[chars[i]]
+        coerced_text = "".join(chars)
+        norm_c = normalize_plate(coerced_text)
+        if norm_c.get("is_valid") and is_valid_plate(norm_c.get("canonical")):
+            conf = float(sum(b.confidence for b in surviving_boxes) / len(surviving_boxes))
+            return norm_c.get("canonical"), conf, True
+
+    return None, 0.0, False
 
 
 class DirectCharacterRecognizer:
@@ -175,9 +283,9 @@ class DirectCharacterRecognizer:
         try:
             from core.services import config_service
             cfg = config_service.load_config()
-            return float(cfg.get("vision", {}).get("direct_char_min_confidence", 0.65))
+            return float(cfg.get("vision", {}).get("direct_char_min_confidence", 0.45))
         except Exception:
-            return 0.65
+            return 0.45
 
     def resolve_weights_path(self) -> Optional[Path]:
         """Resolves the path to character model weights file on disk or auto-downloads from HF."""
@@ -285,7 +393,7 @@ class DirectCharacterRecognizer:
 
         # 1. Ultralytics YOLO model (.pt or .onnx)
         if hasattr(model, "predict"):
-            results = model.predict(plate_crop, conf=0.25, verbose=False)
+            results = model.predict(plate_crop, conf=0.12, verbose=False)
             if results and len(results) > 0:
                 det = results[0]
                 if hasattr(det, "boxes") and det.boxes is not None:
@@ -347,7 +455,7 @@ class DirectCharacterRecognizer:
                     class_scores = row[4:]
                     cls_id = int(np.argmax(class_scores))
                     max_score = float(class_scores[cls_id])
-                    if max_score >= 0.25:
+                    if max_score >= 0.12:
                         cx, cy, bw, bh = row[0], row[1], row[2], row[3]
                         x1 = (cx - bw / 2.0) * x_scale
                         y1 = (cy - bh / 2.0) * y_scale
@@ -388,64 +496,68 @@ class DirectCharacterRecognizer:
 
         min_conf = self.get_min_confidence()
 
-        boxes: List[CharacterBox] = []
-
         # 1. Check for injected mock predictions (used in test suites)
         if self._mock_boxes is not None:
-            boxes = list(self._mock_boxes)
-        else:
-            model = self.get_model()
-            if model is None:
-                # No weights file found or model unavailable -> seamless fallback
+            crop_h = float(plate_crop.shape[0]) if plate_crop.ndim > 0 else 100.0
+            crop_w = float(plate_crop.shape[1]) if plate_crop.ndim > 1 else 200.0
+            cleaned = clean_plate_boxes_advanced(list(self._mock_boxes), crop_w=crop_w, crop_h=crop_h)
+            if len(cleaned) < 5:
                 return None
+            ordered = order_character_boxes(cleaned)
+            canonical, conf, ok = slice_and_normalize_ordered_boxes(ordered)
+            if ok and conf >= min_conf:
+                from core.vision.ocr_engine import OCRResult
+                return OCRResult(
+                    text=canonical,
+                    confidence=round(float(conf), 3),
+                    backend="direct_char_reader",
+                )
+            return None
+
+        # 2. Real neural inference path
+        model = self.get_model()
+        if model is None:
+            # No weights file found or model unavailable -> seamless fallback
+            return None
+
+        h, w = plate_crop.shape[:2]
+        # Standardize crop height: upscale small crops (< 140px tall) to 160px for character clarity
+        if h < 140:
+            scale = 160.0 / max(1, h)
+            crop_std = cv2.resize(plate_crop, (int(w * scale), 160), interpolation=cv2.INTER_CUBIC)
+        else:
+            crop_std = plate_crop
+
+        from core.vision.plate_enhancer import enhance_plate_crop
+        variants = [crop_std, enhance_plate_crop(crop_std)]
+
+        for var in variants:
+            vh, vw = var.shape[:2]
             try:
-                boxes = self._run_inference(model, plate_crop)
+                boxes = self._run_inference(model, var)
             except Exception as exc:
                 logger.debug("Direct character inference error: %s", exc)
-                return None
+                continue
 
-        if not boxes:
-            return None
+            if not boxes:
+                continue
 
-        # 2. Filter duplicate / overlapping detections
-        filtered_boxes = filter_overlapping_boxes(boxes, iou_threshold=0.45)
+            cleaned_boxes = clean_plate_boxes_advanced(boxes, crop_w=float(vw), crop_h=float(vh))
+            if len(cleaned_boxes) < 5:
+                continue
 
-        # 3. Require at least 5 character detections (shortest Ugandan plate is e.g. 6-7 chars)
-        if len(filtered_boxes) < 5:
-            return None
+            ordered_boxes = order_character_boxes(cleaned_boxes)
+            canonical, conf, ok = slice_and_normalize_ordered_boxes(ordered_boxes)
 
-        # 4. Spatial 2D reading order (row clustering + left-to-right sorting)
-        raw_text, avg_conf = cluster_and_order_characters(filtered_boxes)
-        if not raw_text:
-            return None
+            if ok and conf >= min_conf:
+                from core.vision.ocr_engine import OCRResult
+                return OCRResult(
+                    text=canonical,
+                    confidence=round(float(conf), 3),
+                    backend="direct_char_reader",
+                )
 
-        # 5. Check confidence threshold
-        if avg_conf < min_conf:
-            logger.debug(
-                "Direct character reader rejected candidate '%s': confidence %.2f < threshold %.2f",
-                raw_text,
-                avg_conf,
-                min_conf,
-            )
-            return None
-
-        # 6. Normalize and validate against Uganda plate syntax
-        norm = normalize_plate(raw_text)
-        canonical_text = norm.get("canonical", "")
-        if not norm.get("is_valid", False) or not is_valid_plate(canonical_text):
-            logger.debug(
-                "Direct character reader candidate '%s' (raw: '%s') does not match valid Uganda syntax",
-                canonical_text,
-                raw_text,
-            )
-            return None
-
-        from core.vision.ocr_engine import OCRResult
-        return OCRResult(
-            text=canonical_text,
-            confidence=round(float(avg_conf), 3),
-            backend="direct_char_reader",
-        )
+        return None
 
 
 # Global singleton instance

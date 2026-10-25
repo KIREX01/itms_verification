@@ -69,7 +69,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "vision": {
         "use_direct_character_reader": True,   # Direct ALPR character reader bypassing generic OCR
         "character_model_weights": "models/plate_char_reader.onnx", # Path to direct character model (.onnx / .pt)
-        "direct_char_min_confidence": 0.65,    # Minimum confidence to accept direct character reading
+        "direct_char_min_confidence": 0.45,    # Minimum confidence to accept direct character reading
         "use_paddleocr": True,
         "adaptive_ensemble_voting": True,
         "positional_disambiguation": True,
@@ -330,7 +330,7 @@ DEVELOPER_SETTINGS_SCHEMA: Dict[str, Dict[str, Any]] = {
         "label": "Direct Character Min Confidence",
         "description": "Confidence threshold required to accept direct character reading before OCR fallback (0.0 to 1.0).",
         "type": "float",
-        "default": 0.65,
+        "default": 0.45,
         "category": "Vision Pipeline",
     },
     "vision.min_ocr_confidence": {

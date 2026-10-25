@@ -11,11 +11,14 @@ Fallback: pytesseract with a restricted alphanumeric whitelist, used if
 Both paths return a common OCRResult(text, confidence) so the caller
 never needs to branch on which engine ran.
 """
+import logging
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Optional
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 try:
     from django.conf import settings
@@ -432,9 +435,11 @@ def _run_ensemble_voting(plate_crop: np.ndarray, existing_candidates: list) -> O
 
 
 def read_plate_text(plate_crop: np.ndarray) -> Optional[OCRResult]:
-    """Run OCR on an already-localized plate crop with multi-stage enhancement.
+    """Run OCR / character recognition on an already-localized plate crop with multi-stage fallback.
 
     Strategy:
+      0. Direct Character Recognition (ALPR bypass): If direct character model weights exist
+         and yield a syntactically valid Ugandan registration, return immediately without running OCR.
       1. Primary: PaddleOCR on raw crop. If valid Ugandan syntax, return immediately.
       2. Plate-specific enhanced crop (CLAHE, gamma, unsharp mask, saturation suppression).
          If PaddleOCR on enhanced crop yields valid syntax, return immediately.
@@ -447,6 +452,15 @@ def read_plate_text(plate_crop: np.ndarray) -> Optional[OCRResult]:
         return None
 
     from core.vision.normalizer import is_valid_plate
+
+    # 0. Direct Character Recognition (ALPR neural model bypassing generic OCR)
+    try:
+        from core.vision.character_recognizer import recognize_plate_characters
+        direct_res = recognize_plate_characters(plate_crop)
+        if direct_res is not None and is_valid_plate(direct_res.text):
+            return direct_res
+    except Exception as exc:
+        logger.debug("Direct character recognition bypassed: %s", exc)
 
     # 1. Primary: PaddleOCR on raw crop
     res_raw = _ocr_with_paddle(plate_crop)

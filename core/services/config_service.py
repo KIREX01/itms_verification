@@ -67,6 +67,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "max_retries": 3,
     },
     "vision": {
+        "use_direct_character_reader": True,   # Direct ALPR character reader bypassing generic OCR
+        "character_model_weights": "models/plate_char_reader.onnx", # Path to direct character model (.onnx / .pt)
+        "direct_char_min_confidence": 0.65,    # Minimum confidence to accept direct character reading
         "use_paddleocr": True,
         "adaptive_ensemble_voting": True,
         "positional_disambiguation": True,
@@ -308,6 +311,27 @@ DEVELOPER_SETTINGS_SCHEMA: Dict[str, Dict[str, Any]] = {
         "type": "int",
         "default": 200,
         "category": "Database Performance",
+    },
+    "vision.use_direct_character_reader": {
+        "label": "Direct Character Reader (Bypass OCR)",
+        "description": "Direct ALPR character recognition on plate crops, bypassing generic OCR engines.",
+        "type": "bool",
+        "default": True,
+        "category": "Vision Pipeline",
+    },
+    "vision.character_model_weights": {
+        "label": "Character Model Weights Path",
+        "description": "Local path to direct character recognition neural weights (.onnx / .pt).",
+        "type": "string",
+        "default": "models/plate_char_reader.onnx",
+        "category": "Vision Pipeline",
+    },
+    "vision.direct_char_min_confidence": {
+        "label": "Direct Character Min Confidence",
+        "description": "Confidence threshold required to accept direct character reading before OCR fallback (0.0 to 1.0).",
+        "type": "float",
+        "default": 0.65,
+        "category": "Vision Pipeline",
     },
     "vision.min_ocr_confidence": {
         "label": "Minimum OCR Confidence",
@@ -1406,6 +1430,16 @@ def switch_database(
         }
 
 
+def get_direct_character_reader_config(base_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """Returns direct character reader configuration dictionary."""
+    cfg = load_config(base_dir).get("vision", {})
+    return {
+        "enabled": bool(cfg.get("use_direct_character_reader", True)),
+        "weights_path": str(cfg.get("character_model_weights", "models/plate_char_reader.onnx")),
+        "min_confidence": float(cfg.get("direct_char_min_confidence", 0.65)),
+    }
+
+
 def get_active_database_info() -> Dict[str, Any]:
     """Returns vendor and connection metadata for the currently active default database."""
     from django.db import connection
@@ -1610,6 +1644,10 @@ class ConfigService:
     @staticmethod
     def ensure_operator_accounts_synced(base_dir: Optional[Path] = None) -> int:
         return ensure_operator_accounts_synced(base_dir)
+
+    @staticmethod
+    def get_direct_character_reader_config(base_dir: Optional[Path] = None) -> Dict[str, Any]:
+        return get_direct_character_reader_config(base_dir)
 
     @staticmethod
     def get_active_database_info() -> Dict[str, Any]:

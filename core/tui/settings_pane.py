@@ -137,6 +137,9 @@ class SettingsPane(Vertical):
 
         # Developer settings: Vision & OCR
         from core.vision import detector
+        char_reader_enabled = cfg.get("vision", {}).get("use_direct_character_reader", True)
+        char_weights = str(cfg.get("vision", {}).get("character_model_weights", "models/plate_char_reader.onnx"))
+        char_min_conf = str(cfg.get("vision", {}).get("direct_char_min_confidence", 0.65))
         yolo_weights = detector.get_yolo_weights()
         ensemble = cfg.get("vision", {}).get("adaptive_ensemble_voting", True)
         syntax_corr = cfg.get("vision", {}).get("positional_disambiguation", True)
@@ -391,6 +394,31 @@ class SettingsPane(Vertical):
                     # Card 2C: Vision Pipeline & OCR Intelligence
                     with Vertical(classes="settings-card"):
                         yield Static("[bold magenta]🧠 Vision Pipeline & OCR Intelligence (Developer Mode)[/bold magenta]", classes="settings-card-title")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static(
+                                "[b]Direct Plate Character Reader (Bypass OCR)[/b]\n"
+                                "[dim]Direct ALPR character recognition on plate crops, bypassing generic OCR engines[/dim]",
+                                classes="settings-label",
+                            )
+                            yield Switch(value=char_reader_enabled, id="switch-direct-char-reader")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static(
+                                f"[b]Character Model Weights:[/b] [bold yellow]{char_weights}[/bold yellow]\n"
+                                "[dim]Neural network checkpoint (.onnx / .pt) for direct plate character recognition[/dim]",
+                                id="label-char-model-weights",
+                                classes="settings-label",
+                            )
+                            yield Input(value=char_weights, id="input-char-model-weights", classes="settings-input")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static(
+                                "[b]Direct Character Min Confidence[/b]\n"
+                                "[dim]Confidence threshold to accept direct character reading before OCR fallback (default: 0.65)[/dim]",
+                                classes="settings-label",
+                            )
+                            yield Input(value=char_min_conf, id="input-char-min-conf", classes="settings-input")
 
                         with Horizontal(classes="settings-row"):
                             yield Static(
@@ -1065,12 +1093,18 @@ class SettingsPane(Vertical):
 
             # Developer Mode: Vision & OCR
             try:
+                char_reader_sw = self.query_one("#switch-direct-char-reader", Switch).value
+                char_weights_in = self.query_one("#input-char-model-weights", Input).value.strip() or "models/plate_char_reader.onnx"
+                char_conf_in = float(self.query_one("#input-char-min-conf", Input).value.strip() or 0.65)
                 ensemble = self.query_one("#switch-ensemble", Switch).value
                 syntax_corr = self.query_one("#switch-syntax-corr", Switch).value
                 auto_pre = self.query_one("#switch-auto-pre", Switch).value
                 min_ocr = float(self.query_one("#input-min-ocr-conf", Input).value.strip() or 0.55)
                 det_conf = float(self.query_one("#input-detector-conf", Input).value.strip() or 0.35)
                 cfg.setdefault("vision", {})
+                cfg["vision"]["use_direct_character_reader"] = char_reader_sw
+                cfg["vision"]["character_model_weights"] = char_weights_in
+                cfg["vision"]["direct_char_min_confidence"] = char_conf_in
                 cfg["vision"]["adaptive_ensemble_voting"] = ensemble
                 cfg["vision"]["positional_disambiguation"] = syntax_corr
                 cfg["vision"]["auto_preprocess_ingest"] = auto_pre

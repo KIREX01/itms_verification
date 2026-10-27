@@ -28,8 +28,14 @@ fi
 
 # Informational and diagnostic commands run directly under active user session without sudo
 case "$1" in
-    help|--help|-h|status|version|--version|-v)
-        exec "${VENV_PYTHON}" "${APP_DIR}/manage.py" itms_ctl "$@"
+    -v|--version|version)
+        exec "${VENV_PYTHON}" "${APP_DIR}/manage.py" itms_ctl version
+        ;;
+    help|--help|-h)
+        exec "${VENV_PYTHON}" "${APP_DIR}/manage.py" itms_ctl help
+        ;;
+    status)
+        exec "${VENV_PYTHON}" "${APP_DIR}/manage.py" itms_ctl status "${@:2}"
         ;;
     manage)
         shift

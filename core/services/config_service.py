@@ -49,8 +49,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "batch_write_size": 200,               # Bulk atomic commit chunk size
         "postgres_host": "localhost",
         "postgres_port": "5432",
-        "postgres_db": "itms",
-        "postgres_user": "postgres",
+        "postgres_db": "itms_db",
+        "postgres_user": "admin",
         "postgres_password": "",
     },
     "itms": {
@@ -1034,6 +1034,26 @@ def set_itms_enabled(
     return save_config(cfg, base_dir)
 
 
+def _load_env_file(base_dir: Optional[Path] = None) -> None:
+    """Populates os.environ from .env if present and not already defined."""
+    root = base_dir or PROJECT_ROOT
+    env_file = root / ".env"
+    if env_file.is_file():
+        try:
+            with open(env_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip().strip("'\"")
+                    if k and k not in os.environ:
+                        os.environ[k] = v
+        except Exception:
+            pass
+
+
 def get_database_config(base_dir: Path) -> Dict[str, Any]:
     """
     Returns Django DATABASES['default'] dictionary.
@@ -1056,11 +1076,16 @@ def get_database_config(base_dir: Path) -> Dict[str, Any]:
         engine = db_cfg.get("engine", "sqlite").lower()
 
     if engine in ("postgres", "postgresql"):
-        pg_db = os.getenv("POSTGRES_DB", db_cfg.get("postgres_db", "itms"))
-        pg_user = os.getenv("POSTGRES_USER", db_cfg.get("postgres_user", "postgres"))
-        pg_pwd = os.getenv("POSTGRES_PASSWORD", db_cfg.get("postgres_password", ""))
-        pg_host = os.getenv("POSTGRES_HOST", db_cfg.get("postgres_host", "localhost"))
-        pg_port = os.getenv("POSTGRES_PORT", str(db_cfg.get("postgres_port", "5432")))
+        _load_env_file(base_dir)
+        pg_db = os.getenv("POSTGRES_DB") or db_cfg.get("postgres_db") or "itms_db"
+        if pg_db == "itms":
+            pg_db = "itms_db"
+        pg_user = os.getenv("POSTGRES_USER") or db_cfg.get("postgres_user") or "admin"
+        if pg_user == "postgres" and os.getenv("POSTGRES_USER"):
+            pg_user = os.getenv("POSTGRES_USER")
+        pg_pwd = os.getenv("POSTGRES_PASSWORD") or db_cfg.get("postgres_password") or ""
+        pg_host = os.getenv("POSTGRES_HOST") or db_cfg.get("postgres_host") or "127.0.0.1"
+        pg_port = os.getenv("POSTGRES_PORT") or str(db_cfg.get("postgres_port", "5432"))
 
         # If not running in a test suite, verify reachability so offline boots gracefully fallback to SQLite
         import sys

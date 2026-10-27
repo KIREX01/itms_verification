@@ -20,18 +20,18 @@ if (-not (Test-Path $PythonExe)) {
 
 # 1. Detect if user specified version (-v, --version, version, or PowerShell -Verbose switch)
 if ($PSBoundParameters.ContainsKey('Verbose') -or $Action -in @("version", "--version", "-v")) {
-    & $PythonExe "manage.py" "itms_ctl" "version"
+    & $PythonExe "itms_cli.py" "version"
     exit $LASTEXITCODE
 }
 
 # 2. Detect if user specified help (-h, --help, help)
 if ($Action -in @("help", "--help", "-h", "/?")) {
-    & $PythonExe "manage.py" "itms_ctl" "help"
+    & $PythonExe "itms_cli.py" "help"
     exit $LASTEXITCODE
 }
 
-# 3. Detect if no args or user explicitly requested TUI
-if ([string]::IsNullOrWhiteSpace($Action) -or $Action -in @("tui", "--tui", "-t")) {
+# 3. Explicit TUI request
+if ($Action -in @("tui", "--tui", "-t")) {
     $Arguments = @("manage.py", "run_tui")
     if ($RemainingArgs) {
         $Arguments += $RemainingArgs
@@ -49,8 +49,11 @@ if ($Action -eq "manage") {
     exit $LASTEXITCODE
 }
 
-# 5. Dispatch all other lifecycle & operational commands to itms_ctl
-$Arguments = @("manage.py", "itms_ctl", $Action)
+# 5. Default action (no args) or dispatch all other commands to itms_cli.py
+$Arguments = @("itms_cli.py")
+if ($Action) {
+    $Arguments += $Action
+}
 if ($SubAction) {
     $Arguments += $SubAction
 }

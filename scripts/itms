@@ -18,24 +18,27 @@ fi
 # Ensure terminal type is set for Textual TUI
 export TERM="${TERM:-xterm-256color}"
 
-# If no arguments or user explicitly requested TUI, launch TUI directly without sudo
-if [[ $# -eq 0 || "$1" == "--tui" || "$1" == "-t" || "$1" == "tui" ]]; then
-    if [[ "$1" == "--tui" || "$1" == "-t" || "$1" == "tui" ]]; then
-        shift
-    fi
+# 1. Default action (no arguments): Launch Web Console in browser (v1.0.8 standard)
+if [[ $# -eq 0 ]]; then
+    exec "${VENV_PYTHON}" "${APP_DIR}/itms_cli.py"
+fi
+
+# 2. Explicit TUI request: Launch Terminal User Interface directly
+if [[ "$1" == "--tui" || "$1" == "-t" || "$1" == "tui" ]]; then
+    shift
     exec "${VENV_PYTHON}" "${APP_DIR}/manage.py" run_tui "$@"
 fi
 
-# Informational and diagnostic commands run directly under active user session without sudo
+# 3. Informational and diagnostic commands run directly under active user session without sudo
 case "$1" in
     -v|--version|version)
-        exec "${VENV_PYTHON}" "${APP_DIR}/manage.py" itms_ctl version
+        exec "${VENV_PYTHON}" "${APP_DIR}/itms_cli.py" version
         ;;
     help|--help|-h)
-        exec "${VENV_PYTHON}" "${APP_DIR}/manage.py" itms_ctl help
+        exec "${VENV_PYTHON}" "${APP_DIR}/itms_cli.py" help
         ;;
     status)
-        exec "${VENV_PYTHON}" "${APP_DIR}/manage.py" itms_ctl status "${@:2}"
+        exec "${VENV_PYTHON}" "${APP_DIR}/itms_cli.py" status "${@:2}"
         ;;
     manage)
         shift
@@ -43,9 +46,9 @@ case "$1" in
         ;;
 esac
 
-# Auto-elevate with sudo if not root for lifecycle mutations (start, stop, restart, maintenance, switch, rollback, update, bootstrap, clear)
+# 4. Auto-elevate with sudo if not root for lifecycle mutations and uninstallation
 if [[ "$(id -u)" -ne 0 ]]; then
-    exec sudo "${VENV_PYTHON}" "${APP_DIR}/manage.py" itms_ctl "$@"
+    exec sudo "${VENV_PYTHON}" "${APP_DIR}/itms_cli.py" "$@"
 fi
 
-exec "${VENV_PYTHON}" "${APP_DIR}/manage.py" itms_ctl "$@"
+exec "${VENV_PYTHON}" "${APP_DIR}/itms_cli.py" "$@"

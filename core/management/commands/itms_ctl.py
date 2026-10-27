@@ -78,6 +78,12 @@ class Command(BaseCommand):
                 "update",
                 "bootstrap",
                 "clear",
+                "reset",
+                "prune",
+                "audit",
+                "fetch",
+                "reconcile",
+                "uninstall",
                 "manage",
                 "version",
                 "help",
@@ -169,6 +175,18 @@ class Command(BaseCommand):
             self.handle_bootstrap(subargs)
         elif action == "clear":
             self.handle_clear(subargs)
+        elif action in ("reset", "factory-reset"):
+            self.handle_reset(subargs)
+        elif action == "prune":
+            self.handle_prune(subargs)
+        elif action == "audit":
+            self.handle_audit(subargs)
+        elif action == "fetch":
+            self.handle_fetch(subargs)
+        elif action == "reconcile":
+            self.handle_reconcile(subargs)
+        elif action == "uninstall":
+            self.handle_uninstall(subargs)
         elif action == "manage":
             self.handle_manage(subargs)
         else:
@@ -178,36 +196,85 @@ class Command(BaseCommand):
         from core.version import __version__
         guide = f"""
 ======================================================================
-  ITMS VERIFICATION COPILOT v{__version__} — UNIFIED COMMAND GUIDE
+  ITMS VERIFICATION COPILOT v{__version__} — SYSTEM COMMAND INTERFACE
 ======================================================================
 
-Usage:
-  itms <command> [options]
+USAGE:
+  itms [command] [options]
 
-Core Operations:
-  itms                     Launch interactive Operator TUI Console (default)
-  itms tui, --tui, -t      Launch interactive Operator TUI Console
-  itms web, --web, -w      Launch Web Operator Console in foreground
-  itms status              Display system health, ports, services & database
-  itms start               Start the application service in background
-  itms stop                Stop the application service safely
-  itms restart             Restart the application service gracefully
+LAUNCH & USER INTERFACES:
+  itms                     Launch Web Operator Console in browser (default)
+  itms --web, -w [options] Launch Web Operator Console in foreground
+  itms --tui, -t           Launch Textual Terminal UI (keyboard-driven TUI)
+  itms --port <port>       Launch Web Console on custom port (e.g. 8080)
+  itms --ssl, -s           Launch Web Console with HTTPS primary (port 443)
 
-Release & Maintenance:
+SERVICE & LIFECYCLE MANAGEMENT:
+  itms start, --bg         Start Web Console / services in background (daemon)
+  itms stop                Stop running background service safely
+  itms restart             Restart background service gracefully
+  itms status              Display system health, active database & diagnostics
+  itms maintenance [mode]  Web maintenance page: on (HTTP 503) | off | status
+  itms switch [mode]       ITMS upstream connection switch: on | off | status
+  itms service [action]    Manage Windows Service / systemd (status|install|start|stop)
+
+DATA CLEANING & REPOSITORY RESET:
+  itms clear [target]      Clean temporary data (data | crops | vault | exports)
+  itms reset               Reset active batches and unassigned queue records
+  itms reset --factory     Factory reset: wipe orders, kits, ledgers (preserves superuser)
+  itms prune [days]        Prune vault evidence photos older than N days (default: 30)
+  itms audit               Verify SHA-256 cryptographic integrity of vaulted evidence
+
+OPERATIONS & ITMS UPSTREAM SYNC:
+  itms fetch orders        Pull & sync vehicle installation orders from ITMS portal
+  itms fetch stock         Synchronize safe-room warehouse kits with ITMS stock ledger
+  itms fetch bonds         Synchronize bonded facilities (AGM, NAGURU, CFAO, etc.)
+  itms reconcile [date]    Run shift reconciliation and export discrepancy CSV reports
+
+SYSTEM MAINTENANCE & RELEASES:
+  itms bootstrap           Verify AI models, directory structure, and run migrations
   itms update              Check for and apply latest software update from GitHub
   itms rollback [tag]      Roll back code non-destructively to previous release (e.g. v1.0.9)
-  itms bootstrap           Verify AI models, directory structure, and run migrations
-  itms maintenance [mode]  Web maintenance page: on (503) | off | status
-  itms switch [mode]       ITMS upstream connection switch: on | off | status
-  itms clear [target]      Clean temporary storage: data | crops | vault
-
-Administration & System:
+  itms uninstall           Completely uninstall app, background service, and global commands
   itms manage <command>    Run any Django management command (e.g. itms manage showmigrations)
   itms version, -v         Display installed software version
-  itms help, -h, --help    Show this command guide
+  itms help, -h            Show this command reference
+
+EXAMPLES:
+  itms                     # Opens Web Console at http://127.0.0.1:8000 (or https://127.0.0.1:443)
+  itms --tui               # Launches keyboard-driven terminal dashboard
+  itms status              # Verifies SQLite/PostgreSQL, plate models & OCR health
+  itms clear data          # Purges temporary evidence and unallocated pairs
+  itms fetch orders        # Queries ITMS portal for new installation work orders
+  itms rollback v1.0.9     # Reverts code safely while preserving operator database
+  itms uninstall           # Removes Windows service or systemd unit and shortcuts
 ======================================================================
 """
         self.stdout.write(guide.strip())
+
+    def handle_reset(self, subargs: list):
+        from itms_cli import run_reset
+        run_reset(subargs)
+
+    def handle_prune(self, subargs: list):
+        from itms_cli import run_prune
+        run_prune(subargs)
+
+    def handle_audit(self, subargs: list):
+        from itms_cli import run_audit
+        run_audit(subargs)
+
+    def handle_fetch(self, subargs: list):
+        from itms_cli import run_fetch
+        run_fetch(subargs)
+
+    def handle_reconcile(self, subargs: list):
+        from itms_cli import run_reconcile
+        run_reconcile(subargs)
+
+    def handle_uninstall(self, subargs: list):
+        from itms_cli import run_uninstall
+        run_uninstall(subargs)
 
     def handle_version(self):
         from core.version import __version__

@@ -63,36 +63,66 @@ def is_port_in_use(port: int = 8000, host: str = "127.0.0.1") -> bool:
 
 
 def show_help():
-    print("""
+    try:
+        from core.version import __version__
+        ver = f"v{__version__}"
+    except Exception:
+        ver = "v1.1.0"
+    print(f"""
 ======================================================================
-  ITMS VERIFICATION COPILOT - SYSTEM COMMAND INTERFACE
+  ITMS VERIFICATION COPILOT {ver} — SYSTEM COMMAND INTERFACE
 ======================================================================
 
-Usage:
-  itms                Launch Web Operator Console in browser (default)
-  itms start, --bg    Start Web Console in BACKGROUND (daemon mode)
-  itms stop           Stop running background Web Console
-  itms restart        Restart background Web Console
-  itms --tui, -t      Launch Textual Terminal UI (keyboard-driven TUI)
-  itms --web, -w      Launch Web Operator Console in foreground
-  itms --ssl, -s      Launch Web Console with HTTPS primary (port 8443)
-  itms --port <port>  Launch Web Console on custom port (e.g. 8080)
-  itms clear data     Clean up evidence images, batches, and vaulted files
-  itms status         Display system health, active database & diagnostics
-  itms bootstrap      Verify AI plate models, dependencies & run migrations
-  itms update         Check for and pull latest software updates
-  itms uninstall      Completely uninstall app, shortcuts, and global commands
-  itms manage <cmd>   Execute any Django management command
-  itms --version, -v  Display installed version
-  itms --help, -h     Show this command guide
+USAGE:
+  itms [command] [options]
 
-Examples:
-  itms                # Opens Web Console at http://127.0.0.1:8000
-  itms start          # Starts server in background so terminal can be closed
-  itms stop           # Stops the background server cleanly
-  itms clear data     # Cleans temporary photos and resets batches
-  itms --tui          # Launches keyboard-driven terminal dashboard
-  itms status         # Verifies SQLite database, plate models & OCR
+LAUNCH & USER INTERFACES:
+  itms                     Launch Web Operator Console in browser (default)
+  itms --web, -w [options] Launch Web Operator Console in foreground
+  itms --tui, -t           Launch Textual Terminal UI (keyboard-driven TUI)
+  itms --port <port>       Launch Web Console on custom port (e.g. 8080)
+  itms --ssl, -s           Launch Web Console with HTTPS primary (port 443)
+
+SERVICE & LIFECYCLE MANAGEMENT:
+  itms start, --bg         Start Web Console / services in background (daemon)
+  itms stop                Stop running background service safely
+  itms restart             Restart background service gracefully
+  itms status              Display system health, active database & diagnostics
+  itms maintenance [mode]  Web maintenance page: on (HTTP 503) | off | status
+  itms switch [mode]       ITMS upstream connection switch: on | off | status
+  itms service [action]    Manage Windows Service / systemd (status|install|start|stop)
+
+DATA CLEANING & REPOSITORY RESET:
+  itms clear [target]      Clean temporary data (data | crops | vault | exports)
+  itms reset               Reset active batches and unassigned queue records
+  itms reset --factory     Factory reset: wipe orders, kits, ledgers (preserves superuser)
+  itms prune [days]        Prune vault evidence photos older than N days (default: 30)
+  itms audit               Verify SHA-256 cryptographic integrity of vaulted evidence
+
+OPERATIONS & ITMS UPSTREAM SYNC:
+  itms fetch orders        Pull & sync vehicle installation orders from ITMS portal
+  itms fetch stock         Synchronize safe-room warehouse kits with ITMS stock ledger
+  itms fetch bonds         Synchronize bonded facilities (AGM, NAGURU, CFAO, etc.)
+  itms reconcile [date]    Run shift reconciliation and export discrepancy CSV reports
+
+SYSTEM MAINTENANCE & RELEASES:
+  itms bootstrap           Verify AI models, directory structure, and run migrations
+  itms update              Check for and apply latest software update from GitHub
+  itms rollback [tag]      Roll back code non-destructively to previous release (e.g. v1.0.9)
+  itms uninstall           Completely uninstall app, background service, and global commands
+  itms manage <command>    Run any Django management command (e.g. itms manage showmigrations)
+  itms version, -v         Display installed software version
+  itms help, -h            Show this command reference
+
+EXAMPLES:
+  itms                     # Opens Web Console at http://127.0.0.1:8000 (or https://127.0.0.1:443)
+  itms --tui               # Launches keyboard-driven terminal dashboard
+  itms status              # Verifies SQLite/PostgreSQL, plate models & OCR health
+  itms clear data          # Purges temporary evidence and unallocated pairs
+  itms fetch orders        # Queries ITMS portal for new installation work orders
+  itms rollback v1.0.9     # Reverts code safely while preserving operator database
+  itms uninstall           # Removes Windows service or systemd unit and shortcuts
+======================================================================
 """)
 
 
@@ -354,6 +384,100 @@ def stop_server(extra_args=None):
         print("[+] ITMS Web server stopped cleanly.")
     else:
         print("[i] No running ITMS Web server found.")
+
+
+def run_reset(args=None):
+    """Executes clear_data with confirmation guardrails for factory reset."""
+    args = args or []
+    is_factory = any(a in ("--factory", "--factory-reset", "factory") for a in args)
+    is_forced = any(a in ("-y", "--yes", "--force", "-f") for a in args)
+
+    if is_factory:
+        print("\n====================================================================")
+        print("  ⚠️  WARNING: ITMS SYSTEM FACTORY RESET")
+        print("====================================================================")
+        print("This will PERMANENTLY ERASE:")
+        print("  - All vehicle installation orders and pairs")
+        print("  - All warehouse stock kits, dispatches, deliveries, and ledgers")
+        print("  - All vaulted evidence photos, plate crops, and CSV shift reports")
+        print("  - All operator sessions and test users (only primary superuser kept)")
+        print("====================================================================")
+        if not is_forced:
+            try:
+                confirm = input("Type 'YES' to proceed with complete factory reset: ").strip()
+            except (KeyboardInterrupt, EOFError):
+                print("\n[!] Operation cancelled.")
+                return
+            if confirm != "YES":
+                print("[!] Reset aborted by operator.")
+                return
+        print("\n[*] Performing factory reset...")
+        import django
+        django.setup()
+        from django.core.management import call_command
+        call_command("clear_data", factory_reset=True)
+    else:
+        print("[*] Resetting active batches and unassigned queue pairs...")
+        import django
+        django.setup()
+        from django.core.management import call_command
+        call_command("clear_data")
+
+
+def run_prune(args=None):
+    """Prunes vaulted photos older than retention policy."""
+    days = 30
+    if args:
+        for a in args:
+            if a.isdigit():
+                days = int(a)
+                break
+    print(f"[*] Pruning vaulted photos older than {days} days...")
+    import django
+    django.setup()
+    from django.core.management import call_command
+    call_command("prune_vault", days=days)
+
+
+def run_audit(args=None):
+    """Verifies SHA-256 cryptographic hashes of all vaulted photos."""
+    print("[*] Running cryptographic SHA-256 vault integrity audit...")
+    import django
+    django.setup()
+    from django.core.management import call_command
+    call_command("verify_vault_integrity")
+
+
+def run_fetch(args=None):
+    """Dispatches upstream ITMS queries (orders, stock, bonds)."""
+    args = args or []
+    target = args[0].lower() if args else "orders"
+    subargs = args[1:]
+    import django
+    django.setup()
+    from django.core.management import call_command
+
+    if target in ("orders", "order"):
+        print("[*] Fetching vehicle installation orders from ITMS portal...")
+        call_command("fetch_itms_orders", *subargs)
+    elif target in ("stock", "kits", "kit"):
+        print("[*] Synchronizing warehouse installation kits with ITMS stock...")
+        call_command("sync_stock_kits", *subargs)
+    elif target in ("bonds", "facilities", "bond"):
+        print("[*] Synchronizing bonded facilities and operator accounts...")
+        call_command("sync_operator_and_bonds", *subargs)
+    else:
+        print(f"[!] Unknown fetch target: '{target}'. Available targets: orders, stock, bonds.")
+
+
+def run_reconcile(args=None):
+    """Runs daily shift reconciliation and generates discrepancy reports."""
+    args = args or []
+    print("[*] Running shift reconciliation and discrepancy ledger analysis...")
+    import django
+    django.setup()
+    from django.core.management import call_command
+    call_command("reconcile_shift", *args)
 
 
 def run_clear_data(args=None):
@@ -660,6 +784,26 @@ def main():
     if first in ("clear", "clean"):
         # itms clear data, itms clear --all, itms clear
         run_clear_data(args[1:])
+        return
+
+    if first in ("reset", "factory-reset"):
+        run_reset(args[1:])
+        return
+
+    if first in ("prune", "prune-vault"):
+        run_prune(args[1:])
+        return
+
+    if first in ("audit", "verify-vault"):
+        run_audit(args[1:])
+        return
+
+    if first in ("fetch", "sync-itms"):
+        run_fetch(args[1:])
+        return
+
+    if first in ("reconcile", "reconcile-shift"):
+        run_reconcile(args[1:])
         return
 
     if first in ("--tui", "-t", "tui"):

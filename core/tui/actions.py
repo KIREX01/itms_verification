@@ -450,11 +450,11 @@ class OperatorActionsMixin:
             from core.matcher.order_matcher import match_pair_to_order
             match_pair_to_order(pair)
             if not pair.order:
-                from core.models import InstallationOrder
+                from core.matcher.order_matcher import get_pending_orders_queryset
                 clean_reg = "".join(c for c in pair.registration_number_detected.upper() if c.isalnum())
                 found_order = (
-                    InstallationOrder.objects.filter(registration_number__iexact=clean_reg)
-                    .exclude(status=InstallationOrder.Status.SUBMITTED)
+                    get_pending_orders_queryset()
+                    .filter(registration_number__iexact=clean_reg)
                     .first()
                 )
                 if found_order:
@@ -462,9 +462,11 @@ class OperatorActionsMixin:
                     pair.save(update_fields=["order"])
 
         if not pair.is_complete or not pair.order:
-            self.notify(f"Cannot approve {pair.registration_number_detected}: Order not found in ITMS.", severity="error")
+            pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
+            pair.save(update_fields=["verification_status"])
+            self.notify(f"Cannot approve {pair.registration_number_detected}: No pending order found on ITMS.", severity="error")
             self.log_message(
-                f"Cannot approve {pair.registration_number_detected}: Order not found in registry (not yet created on ITMS). Sync via [S] or type plate [T].",
+                f"Cannot approve {pair.registration_number_detected}: No pending order in registry (order may be closed or not yet created on ITMS). Flagged as CONFLICT.",
                 level="WARNING",
             )
             return

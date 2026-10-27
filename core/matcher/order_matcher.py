@@ -10,7 +10,7 @@ Thresholds (configurable via settings / .env):
     score == FUZZY_EXACT_THRESHOLD (100)          -> MatchType.EXACT
     score >= FUZZY_ACCEPT_THRESHOLD (85)           -> MatchType.FUZZY (auto-linked)
     FUZZY_REJECT_THRESHOLD <= score < ACCEPT (75-85) -> ambiguous, needs operator review
-    score < FUZZY_REJECT_THRESHOLD (75)            -> UNREGISTERED_VEHICLE
+    score < FUZZY_REJECT_THRESHOLD (75)            -> CONFLICT (No active pending order)
 """
 from __future__ import annotations
 
@@ -35,16 +35,36 @@ class MatchOutcome:
     match_type: str  # VehicleInstallationPair.MatchType value
 
 
-def _active_registry(account_email: Optional[str] = None):
-    """Orders still awaiting evidence -- the bounded search space."""
+def get_pending_orders_queryset(account_email: Optional[str] = None):
+    """
+    Returns only truly PENDING orders awaiting installation evidence.
+    Orders that are SUBMITTED, INSTALLED, CANCELLED, archived, closed,
+    or already fulfilled by an existing submitted pair are strictly excluded.
+    """
     from core.services.itms_web_client import get_current_itms_account
     curr_email = (account_email or get_current_itms_account() or "").strip().lower()
 
-    qs = InstallationOrder.objects.exclude(status=InstallationOrder.Status.SUBMITTED).exclude(status=InstallationOrder.Status.CANCELLED)
+    qs = InstallationOrder.objects.filter(
+        status=InstallationOrder.Status.PENDING,
+        is_archived=False,
+        is_active_on_itms=True,
+    ).exclude(
+        order_status__in=["Installed", "Ready for approve", "Closed", "Archived"]
+    ).exclude(
+        itms_stage__in=["STAGE_2_APPROVE", "STAGE_3_CONFIRMATION", "ARCHIVED"]
+    ).exclude(
+        pairs__verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED
+    )
+
     if curr_email:
-        from django.db.models import Q
         qs = qs.filter(Q(account_email__iexact=curr_email) | Q(account_email=""))
 
+    return qs
+
+
+def _active_registry(account_email: Optional[str] = None):
+    """Orders still awaiting evidence -- bounded search space strictly containing PENDING orders."""
+    qs = get_pending_orders_queryset(account_email=account_email)
     return list(qs.values_list("id", "registration_number"))
 
 
@@ -61,7 +81,7 @@ def find_best_match(
     prior_res = disambiguate_plate_with_orders(detected_plate, detected_plate, active_orders=active_orders)
     if prior_res["order_id"]:
         oid = prior_res["order_id"]
-        order = order_map.get(oid) if order_map is not None else InstallationOrder.objects.filter(id=oid).first()
+        order = order_map.get(oid) if order_map is not None else get_pending_orders_queryset().filter(id=oid).first()
         if order:
             m_type = (
                 VehicleInstallationPair.MatchType.EXACT
@@ -94,7 +114,7 @@ def find_best_match(
         match_type = VehicleInstallationPair.MatchType.NONE
 
     if match_type != VehicleInstallationPair.MatchType.NONE:
-        order = order_map.get(order_id) if order_map is not None else InstallationOrder.objects.filter(id=order_id).first()
+        order = order_map.get(order_id) if order_map is not None else get_pending_orders_queryset().filter(id=order_id).first()
     else:
         order = None
     return MatchOutcome(order=order, score=float(score), match_type=match_type)
@@ -108,13 +128,17 @@ def match_pair_to_order(
 ) -> VehicleInstallationPair:
     """
     Run fuzzy matching for a single pair and update its order/match_type/
-    match_score/verification_status fields (does not save related images).
+    match_score/verification_status fields.
+
+    Strict Order Linking Rule:
+    Only orders that are truly PENDING may be linked.
+    If no pending order is available, the pair is flagged with CONFLICT status.
     """
-    # Once a pair is SUBMITTED, it must ALWAYS remain SUBMITTED (never demote or alter)
+    # Once a pair is SUBMITTED, it must ALWAYS remain SUBMITTED (never demote or alter historical submissions)
     if pair.verification_status == VehicleInstallationPair.VerificationStatus.SUBMITTED:
         return pair
 
-    # If pair is incomplete, keep INCOMPLETE status
+    # If pair is incomplete, keep INCOMPLETE status and clear order
     if not pair.is_complete:
         pair.verification_status = VehicleInstallationPair.VerificationStatus.INCOMPLETE
         pair.match_type = VehicleInstallationPair.MatchType.NONE
@@ -124,19 +148,16 @@ def match_pair_to_order(
         return pair
 
     if registry is None:
-        registry = _active_registry()
+        registry = _active_registry(account_email=pair.account_email)
     if active_orders is None:
         from core.matcher.prior_guided import get_active_orders_cache
-        active_orders = get_active_orders_cache()
-
-    if not registry and not active_orders:
-        return pair
+        active_orders = get_active_orders_cache(account_email=pair.account_email)
 
     outcome = find_best_match(pair.registration_number_detected, active_orders=active_orders, registry=registry, order_map=order_map)
     pair.match_score = outcome.score
     pair.match_type = outcome.match_type
 
-    if outcome.match_type in (VehicleInstallationPair.MatchType.EXACT, VehicleInstallationPair.MatchType.FUZZY):
+    if outcome.match_type in (VehicleInstallationPair.MatchType.EXACT, VehicleInstallationPair.MatchType.FUZZY) and outcome.order:
         pair.order = outcome.order
         pair.verification_status = VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
         if outcome.order and pair.registration_number_detected != outcome.order.registration_number:
@@ -149,58 +170,72 @@ def match_pair_to_order(
             if pair.rear_image and not pair.rear_image.detected_plate:
                 pair.rear_image.detected_plate = outcome.order.registration_number
                 pair.rear_image.save(update_fields=["detected_plate"])
-    elif outcome.score < _REJECT:
+    else:
+        # No pending order is available for this plate -> flag CONFLICT as mandated
         pair.order = None
-        # Don't mark UNREGISTERED if plate is a provisional tag
-        if not pair.registration_number_detected.startswith("PAIR-"):
-            pair.verification_status = VehicleInstallationPair.VerificationStatus.UNREGISTERED
+        pair.match_type = VehicleInstallationPair.MatchType.NONE
+        pair.match_score = outcome.score if outcome else None
+        pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
+
+        from core.vision import normalizer
+        clean_plate = normalizer.canonicalize(pair.registration_number_detected) or pair.registration_number_detected
+
+        # Check if an order exists in local DB but is closed/installed/submitted/archived
+        closed_order = (
+            InstallationOrder.objects.filter(
+                Q(registration_number__iexact=clean_plate) | Q(registration_number__iexact=pair.registration_number_detected)
+            ).order_by("-updated_at").first()
+        )
+        if closed_order:
+            order_stat = closed_order.order_status or closed_order.status
+            pair.operator_note = (
+                f"Order Conflict: Order #{closed_order.order_number} for plate '{clean_plate}' is already "
+                f"{order_stat} (closed/submitted). No active pending order available."
+            )
+        else:
+            # Check if kit exists in stock but unallocated
+            kit_note = ""
             try:
                 from core.models import InstallationKit
-                from core.vision import normalizer
-                clean_plate = normalizer.canonicalize(pair.registration_number_detected)
                 kit = InstallationKit.objects.filter(
                     Q(registration_number__iexact=pair.registration_number_detected)
                     | Q(registration_number__iexact=clean_plate)
                     | Q(kit_code__iexact=f"IK-{clean_plate}")
                 ).first()
                 if kit and (kit.status or "").strip().lower() == "new":
-                    pair.operator_note = (
-                        f"UNALLOCATED: Plate {clean_plate} has Kit {kit.kit_code} "
-                        f"with status 'New' in stock at {kit.warehouse or 'warehouse'}. No ITMS order."
-                    )
+                    kit_note = f" (Kit {kit.kit_code} is in stock with status 'New' at {kit.warehouse or 'warehouse'})"
             except Exception:
                 pass
-    else:
-        # In the ambiguous 75-85 band: leave for manual operator review, don't auto-link
-        pair.order = None
-        if pair.verification_status not in (VehicleInstallationPair.VerificationStatus.CONFLICT,):
-            pair.verification_status = VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
+
+            pair.operator_note = (
+                f"Order Conflict: No pending installation order found for plate '{clean_plate}'{kit_note}. "
+                f"Vehicle plate not in active pending order list."
+            )
 
     pair.save()
     return pair
 
 
 def match_all_pending_pairs() -> int:
-    """Runs the matcher over every pair that doesn't yet have a confirmed order. Returns count processed."""
-    qs = VehicleInstallationPair.objects.filter(
-        order__isnull=True
-    ).exclude(
+    """Runs the matcher over unsubmitted pairs to ensure strictly PENDING orders are linked, setting CONFLICT if none available."""
+    from core.matcher.prior_guided import get_active_orders_cache
+    active_orders = get_active_orders_cache()
+    registry = _active_registry()
+    order_ids = [r[0] for r in registry] if registry else []
+    order_map = {o.id: o for o in InstallationOrder.objects.filter(id__in=order_ids)}
+
+    unsubmitted_qs = VehicleInstallationPair.objects.exclude(
         verification_status__in=[
             VehicleInstallationPair.VerificationStatus.SUBMITTED,
             VehicleInstallationPair.VerificationStatus.FAILED,
         ]
     )
-    from core.matcher.prior_guided import get_active_orders_cache
-    active_orders = get_active_orders_cache()
-    registry = _active_registry()
-    if not registry and not active_orders:
-        return 0
-
-    order_ids = [r[0] for r in registry]
-    order_map = {o.id: o for o in InstallationOrder.objects.filter(id__in=order_ids)}
 
     count = 0
-    for pair in qs:
+    for pair in unsubmitted_qs:
+        # If pair was linked to a non-pending order, clear it
+        if pair.order_id and pair.order_id not in order_map:
+            pair.order = None
         match_pair_to_order(pair, active_orders=active_orders, registry=registry, order_map=order_map)
         count += 1
     return count

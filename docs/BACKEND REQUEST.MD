@@ -341,3 +341,30 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
      - Preserves evidence images as unassociated candidates until the companion return walk completes.
   5. **Automated Verification**:
      - Unit test suite in `core/tests/test_mobile_companion.py` updated with tests for status check, session abort, and single-orientation finish blocking with 100% pass rate (19/19 tests passing).
+
+
+## 13. Feature: Strict Pending Order Linking & Automatic Conflict Flagging - [COMPLETED]
+- **Core Requirements Implemented**:
+  1. **Strict Pending Order Scoping (`get_pending_orders_queryset`)**:
+     - Order matching and linking across the entire backend (`order_matcher.py`, `prior_guided.py`, `association.py`, `views/pairs.py`, `tui/actions.py`) is now strictly restricted to orders awaiting installation evidence.
+     - Specifically enforces:
+       - `status == InstallationOrder.Status.PENDING`
+       - `is_archived == False`
+       - `is_active_on_itms == True`
+       - `order_status` excluded from `["Installed", "Ready for approve", "Closed", "Archived"]`
+       - `itms_stage` excluded from `["STAGE_2_APPROVE", "STAGE_3_CONFIRMATION", "ARCHIVED"]`
+       - Excludes orders already fulfilled by an existing submitted pair (`pairs__verification_status=SUBMITTED`).
+  2. **Historical Submitted Pair Protection (`core/matcher/association.py`)**:
+     - `_resolve_group()` explicitly excludes pairs with `verification_status == SUBMITTED` when looking up or creating pairs for a plate.
+     - Freshly uploaded photos for previously submitted vehicles now create brand new `VehicleInstallationPair` records rather than overwriting historical evidence or falsely showing under the "Done" (Submitted) tab.
+  3. **Automatic Conflict Flagging (`verification_status = CONFLICT`)**:
+     - When a complete pair has no active pending order available in the ITMS registry (e.g. order is already installed/closed, or vehicle plate was never registered on ITMS), the pair is automatically assigned `verification_status = CONFLICT` with `order = None`.
+     - Populates explanatory operator notes:
+       - If order was previously closed/installed: `Order Conflict: Order #... for plate '...' is already Installed (closed/submitted). No active pending order available.`
+       - If order does not exist: `Order Conflict: No pending installation order found for plate '...'. Vehicle plate not in active pending order list.`
+  4. **API & Operator Decision Guardrails (`core/views/pairs.py` & `core/tui/actions.py`)**:
+     - `POST /api/pairs/<pair_id>/action/` with `action="approve"` validates that `pair.order` is strictly pending. If no pending order exists, rejects with HTTP 400 (`NO_PENDING_ORDER`) and flags the pair as `CONFLICT`.
+     - `action="link_order"` / `action="edit_plate"` verifies that the target order is strictly pending, rejecting closed/installed orders with HTTP 400 (`ORDER_NOT_PENDING`).
+     - `api_batch_submit()` strictly excludes pairs whose linked order is not in `get_pending_orders_queryset()`.
+  5. **Automated Verification**:
+     - Regression tests added in `core/tests/test_association.py` (`test_front_and_rear_without_pending_order_marks_conflict`, `test_photos_matching_closed_order_flagged_conflict_and_not_linked`, `test_order_not_available_flagged_conflict`, `test_closed_order_flagged_conflict`) with 100% pass rate (12/12 passing).

@@ -18,6 +18,14 @@ def _make_image(plate, orientation, status=EvidenceImage.Status.PLATE_DETECTED, 
 
 
 class AssociationEngineTests(TestCase):
+    def setUp(self):
+        InstallationOrder.objects.create(
+            order_number="PO-UMA123AA-01",
+            registration_number="UMA123AA",
+            status=InstallationOrder.Status.PENDING,
+            is_active_on_itms=True,
+        )
+
     def test_front_and_rear_pair_marks_complete(self):
         _make_image("UMA123AA", EvidenceImage.Orientation.FRONT)
         _make_image("UMA123AA", EvidenceImage.Orientation.REAR)
@@ -28,6 +36,44 @@ class AssociationEngineTests(TestCase):
         pair = VehicleInstallationPair.objects.get(registration_number_detected="UMA123AA")
         self.assertTrue(pair.is_complete)
         self.assertEqual(pair.verification_status, VehicleInstallationPair.VerificationStatus.PENDING_REVIEW)
+        self.assertIsNotNone(pair.order)
+        self.assertEqual(pair.order.order_number, "PO-UMA123AA-01")
+
+    def test_front_and_rear_without_pending_order_marks_conflict(self):
+        # When photos are complete but NO pending order exists -> CONFLICT
+        _make_image("UXZ999ZZ", EvidenceImage.Orientation.FRONT)
+        _make_image("UXZ999ZZ", EvidenceImage.Orientation.REAR)
+
+        summary = association.run_association()
+
+        self.assertEqual(summary.conflicts, 1)
+        pair = VehicleInstallationPair.objects.get(registration_number_detected="UXZ999ZZ")
+        self.assertTrue(pair.is_complete)
+        self.assertEqual(pair.verification_status, VehicleInstallationPair.VerificationStatus.CONFLICT)
+        self.assertIsNone(pair.order)
+        self.assertIn("Order Conflict", pair.operator_note)
+
+    def test_photos_matching_closed_order_flagged_conflict_and_not_linked(self):
+        # Order exists but is INSTALLED (closed)
+        InstallationOrder.objects.create(
+            order_number="PO-CLOSED-99",
+            registration_number="UBA999C",
+            status=InstallationOrder.Status.INSTALLED,
+            order_status="Installed",
+            is_archived=True,
+            is_active_on_itms=False,
+        )
+        _make_image("UBA999C", EvidenceImage.Orientation.FRONT)
+        _make_image("UBA999C", EvidenceImage.Orientation.REAR)
+
+        summary = association.run_association()
+
+        self.assertEqual(summary.conflicts, 1)
+        pair = VehicleInstallationPair.objects.get(registration_number_detected="UBA999C")
+        self.assertTrue(pair.is_complete)
+        self.assertEqual(pair.verification_status, VehicleInstallationPair.VerificationStatus.CONFLICT)
+        self.assertIsNone(pair.order)
+        self.assertIn("already Installed", pair.operator_note)
 
     def test_single_image_marks_incomplete(self):
         _make_image("UBB456C", EvidenceImage.Orientation.FRONT)
@@ -63,11 +109,16 @@ class AssociationEngineTests(TestCase):
             batch_id="BATCH-UTURN-TEST-01",
             source_label="U-Turn Yard Walk",
         )
+        InstallationOrder.objects.create(
+            order_number="PO-UMA101A-01",
+            registration_number="UMA101A",
+            status=InstallationOrder.Status.PENDING,
+            is_active_on_itms=True,
+        )
         img_r1 = _make_image("UMA101A", EvidenceImage.Orientation.REAR, batch=batch)
         img_r2 = _make_image("UMA102B", EvidenceImage.Orientation.REAR, batch=batch)
         img_f1 = _make_image("UMA101A", EvidenceImage.Orientation.FRONT, batch=batch)
 
-        # Run association for this batch - must not raise NameError: is_uturn_context
         summary = association.run_association(batch_id=batch.batch_id)
         self.assertGreaterEqual(summary.complete_pairs, 1)
 
@@ -82,14 +133,31 @@ class AssociationEngineTests(TestCase):
         _make_image("UMA202Y", EvidenceImage.Orientation.REAR, batch=batch)
 
         summary = association.run_association(batch_id=batch.batch_id)
-        # Should cleanly return without crashing on is_uturn_context and not create incomplete pairs prematurely
         self.assertEqual(summary.complete_pairs, 0)
 
 
 class OrderMatcherTests(TestCase):
     def setUp(self):
-        InstallationOrder.objects.create(order_number="ORD-1", registration_number="UMA123AA")
-        InstallationOrder.objects.create(order_number="ORD-2", registration_number="UBB456C")
+        InstallationOrder.objects.create(
+            order_number="ORD-1",
+            registration_number="UMA123AA",
+            status=InstallationOrder.Status.PENDING,
+            is_active_on_itms=True,
+        )
+        InstallationOrder.objects.create(
+            order_number="ORD-2",
+            registration_number="UBB456C",
+            status=InstallationOrder.Status.PENDING,
+            is_active_on_itms=True,
+        )
+        InstallationOrder.objects.create(
+            order_number="ORD-CLOSED",
+            registration_number="UCC789D",
+            status=InstallationOrder.Status.INSTALLED,
+            order_status="Installed",
+            is_archived=True,
+            is_active_on_itms=False,
+        )
 
     def test_exact_match(self):
         pair = VehicleInstallationPair.objects.create(registration_number_detected="UMA123AA", is_complete=True)
@@ -97,19 +165,29 @@ class OrderMatcherTests(TestCase):
         pair.refresh_from_db()
         self.assertEqual(pair.match_type, VehicleInstallationPair.MatchType.EXACT)
         self.assertEqual(pair.order.order_number, "ORD-1")
+        self.assertEqual(pair.verification_status, VehicleInstallationPair.VerificationStatus.PENDING_REVIEW)
 
     def test_fuzzy_match_on_minor_ocr_typo(self):
-        # UMA1238A vs UMA123AA -- one character swapped, should still be a close fuzzy match
         pair = VehicleInstallationPair.objects.create(registration_number_detected="UMA1238A", is_complete=True)
         order_matcher.match_pair_to_order(pair)
         pair.refresh_from_db()
         self.assertIn(pair.match_type, (VehicleInstallationPair.MatchType.FUZZY, VehicleInstallationPair.MatchType.EXACT))
         if pair.order:
             self.assertEqual(pair.order.order_number, "ORD-1")
+            self.assertEqual(pair.verification_status, VehicleInstallationPair.VerificationStatus.PENDING_REVIEW)
 
-    def test_unregistered_vehicle_flagged(self):
+    def test_order_not_available_flagged_conflict(self):
         pair = VehicleInstallationPair.objects.create(registration_number_detected="ZZZ999ZZ", is_complete=True)
         order_matcher.match_pair_to_order(pair)
         pair.refresh_from_db()
-        self.assertEqual(pair.verification_status, VehicleInstallationPair.VerificationStatus.UNREGISTERED)
+        self.assertEqual(pair.verification_status, VehicleInstallationPair.VerificationStatus.CONFLICT)
         self.assertIsNone(pair.order)
+        self.assertIn("Order Conflict", pair.operator_note)
+
+    def test_closed_order_flagged_conflict(self):
+        pair = VehicleInstallationPair.objects.create(registration_number_detected="UCC789D", is_complete=True)
+        order_matcher.match_pair_to_order(pair)
+        pair.refresh_from_db()
+        self.assertEqual(pair.verification_status, VehicleInstallationPair.VerificationStatus.CONFLICT)
+        self.assertIsNone(pair.order)
+        self.assertIn("already Installed", pair.operator_note)

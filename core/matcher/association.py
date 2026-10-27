@@ -71,13 +71,19 @@ def _resolve_group(
     from core.matcher.order_matcher import match_pair_to_order
     curr_acc = get_current_itms_account()
 
-    pair, _created = VehicleInstallationPair.objects.get_or_create(
+    # Strictly never reuse or overwrite historical SUBMITTED pairs with new unsubmitted evidence
+    pair = VehicleInstallationPair.objects.filter(
         registration_number_detected=plate,
-        defaults={
-            "verification_status": VehicleInstallationPair.VerificationStatus.INCOMPLETE,
-            "account_email": curr_acc,
-        },
-    )
+    ).exclude(
+        verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED
+    ).first()
+
+    if not pair:
+        pair = VehicleInstallationPair.objects.create(
+            registration_number_detected=plate,
+            verification_status=VehicleInstallationPair.VerificationStatus.INCOMPLETE,
+            account_email=curr_acc,
+        )
     if curr_acc and not pair.account_email:
         pair.account_email = curr_acc
 
@@ -86,12 +92,6 @@ def _resolve_group(
         pair.rear_image = rears[0]
         pair.is_complete = True
         pair.operator_note = f"Auto-paired via Plate String Equality ('{plate}') | 1 Front + 1 Rear detected"
-        # Don't clobber a status an operator/matcher already advanced past review
-        if pair.verification_status in (
-            VehicleInstallationPair.VerificationStatus.INCOMPLETE,
-            VehicleInstallationPair.VerificationStatus.CONFLICT,
-        ):
-            pair.verification_status = VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
         for img in (fronts[0], rears[0]):
             img.status = EvidenceImage.Status.MATCHED
             img.save(update_fields=["status"])
@@ -100,21 +100,24 @@ def _resolve_group(
     elif len(fronts) + len(rears) == 1:
         pair.is_complete = False
         pair.verification_status = VehicleInstallationPair.VerificationStatus.INCOMPLETE
+        pair.order = None
         only = (fronts + rears)[0]
         if fronts:
             pair.front_image = only
+            pair.rear_image = None
             pair.operator_note = f"Incomplete Pair: Only 1 FRONT photo detected for plate '{plate}' (Rear photo missing)"
         else:
+            pair.front_image = None
             pair.rear_image = only
             pair.operator_note = f"Incomplete Pair: Only 1 REAR photo detected for plate '{plate}' (Front photo missing)"
         only.status = EvidenceImage.Status.INCOMPLETE
         only.save(update_fields=["status"])
-        match_pair_to_order(pair, active_orders=active_orders, registry=registry, order_map=order_map)
 
     else:
         # 2+ fronts, 2+ rears, or some other ambiguous mix
         pair.is_complete = False
         pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
+        pair.order = None
         pair.operator_note = f"Conflict: Ambiguous orientation makeup ({len(fronts)} Fronts, {len(rears)} Rears) detected for plate '{plate}'"
         for img in images:
             img.status = EvidenceImage.Status.NEEDS_REVIEW

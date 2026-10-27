@@ -323,18 +323,28 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
     if action == "approve":
         # Attempt auto-linking if order is missing (matches TUI parity)
         if pair.is_complete and not pair.order:
-            from core.matcher.order_matcher import match_pair_to_order
+            from core.matcher.order_matcher import match_pair_to_order, get_pending_orders_queryset
             match_pair_to_order(pair)
             if not pair.order:
                 clean_reg = "".join(c for c in pair.registration_number_detected.upper() if c.isalnum())
                 found_order = (
-                    InstallationOrder.objects.filter(registration_number__iexact=clean_reg)
-                    .exclude(status=InstallationOrder.Status.SUBMITTED)
+                    get_pending_orders_queryset()
+                    .filter(registration_number__iexact=clean_reg)
                     .first()
                 )
                 if found_order:
                     pair.order = found_order
                     pair.save(update_fields=["order"])
+
+        if not pair.order:
+            pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
+            pair.save(update_fields=["verification_status"])
+            return JsonResponse({
+                "success": False,
+                "error": f"Cannot approve {pair.registration_number_detected}: No pending installation order found. Order may be closed, installed, or not yet created on ITMS.",
+                "code": "NO_PENDING_ORDER",
+                "status": pair.verification_status,
+            }, status=400)
 
         was_failed = (pair.verification_status == VehicleInstallationPair.VerificationStatus.FAILED)
         pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
@@ -430,8 +440,19 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
                 except Exception as match_err:
                     logger.warning("Order matcher lookup error: %s", match_err)
 
-            # Live lookup against ITMS server if order not in local DB (TUI Parity)
-            if not target_order:
+        # Strictly validate that target order is PENDING (never link closed/installed/archived orders)
+        if target_order:
+            from core.matcher.order_matcher import get_pending_orders_queryset
+            if not get_pending_orders_queryset().filter(id=target_order.id).exists():
+                c_stat = target_order.order_status or target_order.status
+                return JsonResponse({
+                    "success": False,
+                    "error": f"Order #{target_order.order_number} for {target_order.registration_number} is already {c_stat} (closed). Only PENDING orders can be linked.",
+                    "code": "ORDER_NOT_PENDING",
+                }, status=400)
+
+        # Live lookup against ITMS server if order not in local DB (TUI Parity)
+        if not target_order:
                 try:
                     client = get_web_client(user=request.user)
                     if client.session_store.session.is_cookie_valid():
@@ -569,9 +590,10 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
             match_pair_to_order(pair)
             if not pair.order:
                 clean_reg = "".join(c for c in pair.registration_number_detected.upper() if c.isalnum())
+                from core.matcher.order_matcher import get_pending_orders_queryset
                 found_order = (
-                    InstallationOrder.objects.filter(registration_number__iexact=clean_reg)
-                    .exclude(status=InstallationOrder.Status.SUBMITTED)
+                    get_pending_orders_queryset()
+                    .filter(registration_number__iexact=clean_reg)
                     .first()
                 )
                 if found_order:
@@ -726,6 +748,13 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
         is_deleted=False,
         verification_status=VehicleInstallationPair.VerificationStatus.APPROVED,
         order__isnull=False,
+        order__status=InstallationOrder.Status.PENDING,
+        order__is_archived=False,
+        order__is_active_on_itms=True,
+    ).exclude(
+        order__order_status__in=["Installed", "Ready for approve", "Closed", "Archived"]
+    ).exclude(
+        order__itms_stage__in=["STAGE_2_APPROVE", "STAGE_3_CONFIRMATION", "ARCHIVED"]
     ).select_related("order", "front_image", "rear_image")
 
     today_q = (

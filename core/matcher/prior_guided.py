@@ -33,25 +33,11 @@ _CONFUSIONS = {
 def get_active_orders_cache(account_email: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Returns active orders awaiting installation evidence from the local database.
-    Only includes orders that are currently active on ITMS and not yet completed.
+    Only includes orders that are strictly PENDING on ITMS and not yet completed or archived.
     Filters by the active authenticated ITMS account to preserve multi-tenant isolation.
     """
-    from core.services.itms_web_client import get_current_itms_account
-    curr_email = (account_email or get_current_itms_account() or "").strip().lower()
-
-    qs = InstallationOrder.objects.filter(
-        is_active_on_itms=True,
-    ).exclude(
-        status__in=[
-            InstallationOrder.Status.SUBMITTED,
-            InstallationOrder.Status.INSTALLED,
-            InstallationOrder.Status.CANCELLED,
-        ]
-    )
-    if curr_email:
-        from django.db.models import Q
-        qs = qs.filter(Q(account_email__iexact=curr_email) | Q(account_email=""))
-
+    from core.matcher.order_matcher import get_pending_orders_queryset
+    qs = get_pending_orders_queryset(account_email=account_email)
     orders = qs.values(
         "id",
         "order_number",

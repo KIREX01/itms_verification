@@ -206,15 +206,167 @@ class UpdateService:
         return False
 
     @staticmethod
+    def _record_rollback_point() -> None:
+        """Records current Git commit or release state before applying updates."""
+        try:
+            pt_file = PROJECT_ROOT / "secure" / ".rollback_point"
+            pt_file.parent.mkdir(parents=True, exist_ok=True)
+            info = {
+                "timestamp": datetime.now().isoformat(),
+                "version": __version__,
+            }
+            if (PROJECT_ROOT / ".git").is_dir() and shutil.which("git"):
+                rev_proc = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=PROJECT_ROOT,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if rev_proc.returncode == 0:
+                    info["commit"] = rev_proc.stdout.strip()
+            pt_file.write_text(json.dumps(info, indent=2), encoding="utf-8")
+        except Exception as exc:
+            logger.debug("Could not record rollback point: %s", exc)
+
+    @staticmethod
+    def get_rollback_candidates() -> list[dict[str, Any]]:
+        """
+        Retrieves list of previous stable release tags or rollback points.
+        Returns list of dicts: [{"tag": "v1.0.9", "version": "1.0.9", "description": "Release v1.0.9"}]
+        """
+        candidates: list[dict[str, Any]] = []
+        is_git = (PROJECT_ROOT / ".git").is_dir()
+
+        if is_git and shutil.which("git"):
+            try:
+                tags_proc = subprocess.run(
+                    ["git", "tag", "-l", "v*", "--sort=-v:refname"],
+                    cwd=PROJECT_ROOT,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if tags_proc.returncode == 0:
+                    for line in tags_proc.stdout.splitlines():
+                        tag = line.strip()
+                        if tag and tag != f"v{__version__}":
+                            ver_num = tag.lstrip("v")
+                            candidates.append({
+                                "tag": tag,
+                                "version": ver_num,
+                                "description": f"Release {tag}",
+                                "type": "git_tag",
+                            })
+            except Exception as exc:
+                logger.debug("Error retrieving git tags: %s", exc)
+
+        pt_file = PROJECT_ROOT / "secure" / ".rollback_point"
+        if pt_file.is_file():
+            try:
+                data = json.loads(pt_file.read_text(encoding="utf-8"))
+                rb_ver = data.get("version")
+                rb_commit = data.get("commit")
+                if rb_ver and rb_ver != __version__:
+                    tag_name = f"v{rb_ver}"
+                    if not any(c.get("tag") == tag_name for c in candidates):
+                        candidates.insert(0, {
+                            "tag": tag_name,
+                            "version": rb_ver,
+                            "commit": rb_commit,
+                            "description": f"Pre-Update Snapshot ({tag_name})",
+                            "type": "snapshot",
+                        })
+            except Exception as exc:
+                logger.debug("Error reading rollback point file: %s", exc)
+
+        if not candidates:
+            for fallback_ver in ["1.0.9", "1.0.8", "1.0.7"]:
+                if fallback_ver != __version__:
+                    candidates.append({
+                        "tag": f"v{fallback_ver}",
+                        "version": fallback_ver,
+                        "description": f"Release v{fallback_ver}",
+                        "type": "remote_release",
+                    })
+
+        return candidates
+
+    @staticmethod
+    def rollback_version(target_identifier: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Rolls back application code to a previous release tag or snapshot point.
+        Strictly preserves operator data: database (db.sqlite3), evidence vault (media/vault/),
+        crops (media/crops/), and credentials (.env, secure/).
+        """
+        candidates = UpdateService.get_rollback_candidates()
+        if not target_identifier:
+            if candidates:
+                target_identifier = candidates[0].get("tag") or candidates[0].get("commit")
+            else:
+                target_identifier = "v1.0.9"
+
+        clean_tag = target_identifier.strip()
+        is_git = (PROJECT_ROOT / ".git").is_dir()
+
+        if is_git and shutil.which("git"):
+            try:
+                subprocess.run(["git", "fetch", "--tags", "origin"], cwd=PROJECT_ROOT, capture_output=True, timeout=30)
+                subprocess.run(["git", "stash"], cwd=PROJECT_ROOT, capture_output=True, timeout=10)
+
+                checkout_proc = subprocess.run(
+                    ["git", "checkout", clean_tag],
+                    cwd=PROJECT_ROOT,
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
+                if checkout_proc.returncode != 0:
+                    reset_proc = subprocess.run(
+                        ["git", "reset", "--hard", clean_tag],
+                        cwd=PROJECT_ROOT,
+                        capture_output=True,
+                        text=True,
+                        timeout=20,
+                    )
+                    if reset_proc.returncode != 0:
+                        return {
+                            "success": False,
+                            "error": f"Failed to checkout {clean_tag}: {checkout_proc.stderr or reset_proc.stderr}",
+                        }
+
+                post_ok, post_msg = UpdateService._run_post_update_tasks()
+                if not post_ok:
+                    return {"success": False, "error": post_msg}
+
+                if CACHE_FILE.is_file():
+                    CACHE_FILE.unlink()
+
+                return {
+                    "success": True,
+                    "target_version": clean_tag,
+                    "message": f"Successfully rolled back code to {clean_tag}. Please restart application services.",
+                    "restart_required": True,
+                }
+            except Exception as exc:
+                return {"success": False, "error": f"Git rollback error: {exc}"}
+        else:
+            archive_url = f"https://github.com/{GITHUB_REPO}/archive/refs/tags/{clean_tag}.zip"
+            return UpdateService._apply_zip_update(archive_url)
+
+    @staticmethod
     def apply_update(download_url: Optional[str] = None) -> Dict[str, Any]:
         """
         Executes a safe in-place upgrade.
-        1. If explicit download_url is provided, downloads and applies release archive.
-        2. If .git is present, pulls changes via git.
-        3. If standalone/zip, downloads release asset or main branch archive.
-        4. Runs pip install and Django migrations.
-        5. Verifies system integrity.
+        1. Records pre-update rollback snapshot.
+        2. If explicit download_url is provided, downloads and applies release archive.
+        3. If .git is present, pulls changes via git.
+        4. If standalone/zip, downloads release asset or main branch archive.
+        5. Runs pip install and Django migrations.
+        6. Verifies system integrity.
         """
+        UpdateService._record_rollback_point()
+
         if download_url:
             if not UpdateService.validate_download_url(download_url):
                 return {"success": False, "error": f"Untrusted download URL: {download_url}"}

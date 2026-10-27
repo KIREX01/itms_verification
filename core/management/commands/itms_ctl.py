@@ -60,14 +60,22 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             "action",
-            choices=["start", "stop", "restart", "status", "maintenance", "switch"],
-            help="Lifecycle action to perform",
+            nargs="?",
+            default="status",
+            choices=["start", "stop", "restart", "status", "maintenance", "switch", "tui", "rollback"],
+            help="Lifecycle action to perform (default: status)",
         )
         parser.add_argument(
             "subaction",
             nargs="?",
             default=None,
-            help="Subaction for maintenance or switch (e.g. on, off, status)",
+            help="Subaction or target version for maintenance, switch, or rollback",
+        )
+        parser.add_argument(
+            "--tui",
+            "-t",
+            action="store_true",
+            help="Launch the interactive Textual TUI interface directly",
         )
         parser.add_argument(
             "--port",
@@ -83,8 +91,13 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        action = options["action"]
-        subaction = (options.get("subaction") or "").lower()
+        if options.get("tui") or options.get("action") == "tui":
+            from django.core.management import call_command
+            call_command("run_tui")
+            return
+
+        action = options.get("action") or "status"
+        subaction = options.get("subaction") or ""
         port = options["port"]
         host = options["host"]
 
@@ -97,9 +110,33 @@ class Command(BaseCommand):
         elif action == "status":
             self.handle_status(host, port)
         elif action == "maintenance":
-            self.handle_maintenance(subaction)
+            self.handle_maintenance(subaction.lower())
         elif action == "switch":
-            self.handle_switch(subaction)
+            self.handle_switch(subaction.lower())
+        elif action == "rollback":
+            self.handle_rollback(subaction)
+
+    def handle_rollback(self, target_version: Optional[str] = None):
+        self.stdout.write(self.style.WARNING("Initiating ITMS Verification Copilot version rollback..."))
+        from core.services.update_service import UpdateService
+
+        target = target_version or "v1.0.9"
+        self.stdout.write(f"Target rollback version: {target}")
+        self.stdout.write("All operator databases, evidence photos, and credentials will be preserved.")
+
+        res = UpdateService.rollback_version(target)
+        if res.get("success"):
+            self.stdout.write(self.style.SUCCESS(f"\n[+] {res.get('message')}"))
+            self.stdout.write("Restarting application services...")
+            is_linux = platform.system() == "Linux"
+            if is_linux and has_systemd_service("itms"):
+                run_cmd(["sudo", "systemctl", "restart", "itms"])
+                self.stdout.write(self.style.SUCCESS("[+] systemd unit (itms.service) restarted successfully."))
+            elif is_linux and has_systemd_service("itms-web"):
+                run_cmd(["sudo", "systemctl", "restart", "itms-web"])
+                self.stdout.write(self.style.SUCCESS("[+] systemd unit (itms-web.service) restarted successfully."))
+        else:
+            self.stdout.write(self.style.ERROR(f"\n[!] Rollback failed: {res.get('error')}"))
 
     def handle_start(self, host: str, port: int):
         self.stdout.write(self.style.NOTICE("Initiating ITMS Verification Copilot startup..."))

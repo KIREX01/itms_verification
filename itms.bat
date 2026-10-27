@@ -1,9 +1,28 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-if exist ".venv\Scripts\python.exe" (
-    ".venv\Scripts\python.exe" manage.py itms_ctl %*
-) else (
-    python manage.py itms_ctl %*
+set "PY=.venv\Scripts\python.exe"
+if not exist "%PY%" set "PY=python"
+
+if "%~1"=="" (
+    "%PY%" manage.py run_tui
+    goto :eof
 )
+if /i "%~1"=="--tui" (
+    shift
+    "%PY%" manage.py run_tui %1 %2 %3 %4 %5 %6 %7 %8 %9
+    goto :eof
+)
+if /i "%~1"=="-t" (
+    shift
+    "%PY%" manage.py run_tui %1 %2 %3 %4 %5 %6 %7 %8 %9
+    goto :eof
+)
+if /i "%~1"=="tui" (
+    shift
+    "%PY%" manage.py run_tui %1 %2 %3 %4 %5 %6 %7 %8 %9
+    goto :eof
+)
+
+"%PY%" manage.py itms_ctl %*
 endlocal

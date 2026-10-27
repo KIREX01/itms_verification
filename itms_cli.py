@@ -635,7 +635,7 @@ def main():
             from core.version import __version__
             print(f"ITMS Verification Copilot v{__version__}")
         except (ImportError, AttributeError):
-            print("ITMS Verification Copilot v1.0.9")
+            print("ITMS Verification Copilot v1.1.0")
         return
 
     if first in ("start", "--daemon", "--bg", "-bg", "bg", "daemon"):

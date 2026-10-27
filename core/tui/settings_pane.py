@@ -30,6 +30,7 @@ from textual.widget import Widget
 from textual.widgets import Button, Input, Label, Static, Switch
 
 from core.services import config_service, vault_service
+from core.version import __version__
 
 INPUT_BOND_CODE_ID = "input-bond-code"
 INPUT_BOND_CODE_SELECTOR = "#input-bond-code"
@@ -547,6 +548,29 @@ class SettingsPane(Vertical):
                             id="settings-maintenance-feedback",
                         )
 
+                    # Card 2G: Software Releases, Updates & Version Rollback
+                    with Vertical(classes="settings-card", id="card-dev-version-control"):
+                        yield Static("[bold magenta]🚀 Software Releases, Updates & Rollback (Developer Mode)[/bold magenta]", classes="settings-card-title")
+
+                        with Horizontal(classes="settings-row"):
+                            yield Static(
+                                "[b]Active Software Version[/b]\n"
+                                f"[dim]Running release: [bold cyan]v{__version__}[/bold cyan][/dim]",
+                                classes="settings-label",
+                                id="lbl-version-status",
+                            )
+                            yield Static(f"[bold green]v{__version__}[/bold green]", classes="settings-val-badge")
+
+                        with Horizontal(classes="settings-db-buttons"):
+                            yield Button("🔍 Check for Updates", variant="primary", id="btn-check-updates")
+                            yield Button("⚡ Apply Latest Update", variant="success", id="btn-apply-update")
+                            yield Button("⏪ Rollback to Previous Version", variant="error", id="btn-rollback-version")
+
+                        yield Static(
+                            "[dim]Check GitHub for new updates, upgrade non-destructively, or rollback to a previous release tag.[/dim]",
+                            id="settings-version-feedback",
+                        )
+
             # Bottom Action Bar
             with Horizontal(id="settings-actions-bar"):
                 yield Button("💾 Save Configuration", variant="success", id="btn-save-settings")
@@ -665,6 +689,12 @@ class SettingsPane(Vertical):
             self.run_worker(self._async_sync_bonds_itms, thread=True)
         elif btn_id == "btn-generate-maintenance-html":
             self.action_regenerate_maintenance_html()
+        elif btn_id == "btn-check-updates":
+            self.action_check_updates()
+        elif btn_id == "btn-apply-update":
+            self.action_apply_update()
+        elif btn_id == "btn-rollback-version":
+            self.action_rollback_version()
 
     def action_regenerate_maintenance_html(self) -> None:
         """Regenerates the standalone maintenance HTML file from current inputs."""
@@ -1307,3 +1337,111 @@ class SettingsPane(Vertical):
         except Exception as exc:
             app.notify(f"Backup failed: {exc}", severity="error")
             app.log_message(f"Database backup error: {exc}", level="ERROR")
+
+    def action_check_updates(self) -> None:
+        """Asynchronously checks for new GitHub releases."""
+        try:
+            fb = self.query_one("#settings-version-feedback", Static)
+            fb.update("[bold cyan]Querying GitHub Releases for new updates...[/bold cyan]")
+            self.run_worker(self._async_check_updates, thread=True)
+        except Exception as exc:
+            self.app.notify(f"Update check error: {exc}", severity="error")
+
+    def _async_check_updates(self) -> None:
+        try:
+            from core.services.update_service import UpdateService
+            info = UpdateService.check_for_updates(force=True)
+            fb = self.query_one("#settings-version-feedback", Static)
+            if info.get("update_available"):
+                ver = info.get("latest_version")
+                rel = info.get("release_name") or f"v{ver}"
+                self.app.call_from_thread(
+                    fb.update,
+                    f"[bold yellow]⚠️ Update Available:[/bold yellow] [bold cyan]{rel}[/bold cyan] "
+                    f"(Current: v{__version__}). Press 'Apply Latest Update' to upgrade."
+                )
+                self.app.notify(f"Update available: {rel}!", severity="information")
+            else:
+                self.app.call_from_thread(
+                    fb.update,
+                    f"[bold green]✓ System is running the latest release (v{__version__}).[/bold green]"
+                )
+                self.app.notify(f"System is up-to-date (v{__version__}).", severity="information")
+        except Exception as exc:
+            try:
+                fb = self.query_one("#settings-version-feedback", Static)
+                self.app.call_from_thread(fb.update, f"[bold red]Update check failed: {exc}[/bold red]")
+            except Exception:
+                pass
+
+    def action_apply_update(self) -> None:
+        """Initiates safe system update."""
+        try:
+            fb = self.query_one("#settings-version-feedback", Static)
+            fb.update("[bold cyan]Applying system update in background...[/bold cyan]")
+            self.app.notify("Initiating system update. Please wait...", severity="information")
+            self.run_worker(self._async_apply_update, thread=True)
+        except Exception as exc:
+            self.app.notify(f"Update invocation error: {exc}", severity="error")
+
+    def _async_apply_update(self) -> None:
+        try:
+            from core.services.update_service import UpdateService
+            res = UpdateService.apply_update()
+            fb = self.query_one("#settings-version-feedback", Static)
+            if res.get("success"):
+                msg = res.get("message", "Update completed successfully!")
+                self.app.call_from_thread(fb.update, f"[bold green]✓ {msg}[/bold green]")
+                self.app.notify(msg, severity="information")
+            else:
+                err = res.get("error", "Update failed.")
+                self.app.call_from_thread(fb.update, f"[bold red]✗ {err}[/bold red]")
+                self.app.notify(err, severity="error")
+        except Exception as exc:
+            try:
+                fb = self.query_one("#settings-version-feedback", Static)
+                self.app.call_from_thread(fb.update, f"[bold red]Update error: {exc}[/bold red]")
+            except Exception:
+                pass
+
+    def action_rollback_version(self) -> None:
+        """Opens confirmation modal and initiates version rollback."""
+        try:
+            from core.services.update_service import UpdateService
+            from core.tui.dialogs import RollbackConfirmModal
+            candidates = UpdateService.get_rollback_candidates()
+            target_tag = candidates[0].get("tag") if candidates else "v1.0.9"
+
+            def _on_confirm(selected_target: str | None) -> None:
+                if selected_target:
+                    try:
+                        fb = self.query_one("#settings-version-feedback", Static)
+                        fb.update(f"[bold yellow]Rolling back code to {selected_target}...[/bold yellow]")
+                    except Exception:
+                        pass
+                    self.app.notify(f"Rolling back to {selected_target}...", severity="warning")
+                    self.run_worker(lambda: self._async_do_rollback(selected_target), thread=True)
+
+            self.app.push_screen(RollbackConfirmModal(target_version=target_tag, candidates=candidates), _on_confirm)
+        except Exception as exc:
+            self.app.notify(f"Rollback initialization failed: {exc}", severity="error")
+
+    def _async_do_rollback(self, target_tag: str) -> None:
+        try:
+            from core.services.update_service import UpdateService
+            res = UpdateService.rollback_version(target_tag)
+            fb = self.query_one("#settings-version-feedback", Static)
+            if res.get("success"):
+                msg = res.get("message", f"Successfully rolled back to {target_tag}!")
+                self.app.call_from_thread(fb.update, f"[bold green]✓ {msg}[/bold green]")
+                self.app.notify(f"Rollback to {target_tag} complete! Please restart services.", severity="information")
+            else:
+                err = res.get("error", "Rollback failed.")
+                self.app.call_from_thread(fb.update, f"[bold red]✗ {err}[/bold red]")
+                self.app.notify(err, severity="error")
+        except Exception as exc:
+            try:
+                fb = self.query_one("#settings-version-feedback", Static)
+                self.app.call_from_thread(fb.update, f"[bold red]Rollback error: {exc}[/bold red]")
+            except Exception:
+                pass

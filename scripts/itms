@@ -15,7 +15,23 @@ if [[ ! -x "${VENV_PYTHON}" ]]; then
     VENV_PYTHON="python3"
 fi
 
-# Auto-elevate with sudo if not root
+# Ensure terminal type is set for Textual TUI
+export TERM="${TERM:-xterm-256color}"
+
+# If no arguments or user explicitly requested TUI, launch TUI directly without sudo
+if [[ $# -eq 0 || "$1" == "--tui" || "$1" == "-t" || "$1" == "tui" ]]; then
+    if [[ "$1" == "--tui" || "$1" == "-t" || "$1" == "tui" ]]; then
+        shift
+    fi
+    exec "${VENV_PYTHON}" "${APP_DIR}/manage.py" run_tui "$@"
+fi
+
+# If action is status, run without requiring sudo
+if [[ "$1" == "status" ]]; then
+    exec "${VENV_PYTHON}" "${APP_DIR}/manage.py" itms_ctl status "${@:2}"
+fi
+
+# Auto-elevate with sudo if not root for lifecycle mutations (start, stop, restart, maintenance, switch, rollback)
 if [[ "$(id -u)" -ne 0 ]]; then
     exec sudo "${VENV_PYTHON}" "${APP_DIR}/manage.py" itms_ctl "$@"
 fi

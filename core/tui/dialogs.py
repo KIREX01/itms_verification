@@ -2290,5 +2290,46 @@ class StockPasteModal(ModalScreen[Optional[Dict[str, Any]]]):
         })
 
 
+class RollbackConfirmModal(ModalScreen[Optional[str]]):
+    """
+    Modal confirmation dialog for rolling back application code to a previous release tag.
+    Presents candidate release versions and asks for explicit operator confirmation.
+    """
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel", priority=True),
+        Binding("enter", "confirm", "Confirm Rollback"),
+    ]
 
+    def __init__(self, target_version: str = "v1.0.9", candidates: Optional[List[Dict[str, Any]]] = None):
+        super().__init__()
+        self.target_version = target_version
+        self.candidates = candidates or []
 
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="modal-container", id="rollback-modal-box"):
+            yield Static("⏪  SYSTEM VERSION ROLLBACK", classes="modal-title")
+            yield Static(
+                f"\n[bold yellow]Target Rollback Release:[/bold yellow] [bold cyan]{self.target_version}[/bold cyan]\n\n"
+                "[bold white]Guarantees & Data Safety:[/bold white]\n"
+                "  • SQLite database ([cyan]db.sqlite3[/cyan]) is [bold green]STRICTLY PRESERVED[/bold green].\n"
+                "  • Photographic evidence ([cyan]media/vault/[/cyan]) is [bold green]UNTOUCHED[/bold green].\n"
+                "  • Environment credentials ([cyan].env[/cyan], [cyan]secure/[/cyan]) are [bold green]SAFE[/bold green].\n\n"
+                "[dim]Code files will be rolled back to this release tag, and database migrations\n"
+                "will be verified before restarting application services.[/dim]\n",
+                classes="modal-body",
+            )
+            with Horizontal(classes="modal-buttons"):
+                yield Button(f"⏪ Rollback to {self.target_version}", variant="error", id="btn-confirm-rollback")
+                yield Button("Cancel (Esc)", variant="default", id="btn-cancel-rollback")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-confirm-rollback":
+            self.dismiss(self.target_version)
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def action_confirm(self) -> None:
+        self.dismiss(self.target_version)

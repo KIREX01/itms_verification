@@ -57,25 +57,50 @@ def run_cmd(cmd_list: list, timeout: int = 15) -> subprocess.CompletedProcess:
 class Command(BaseCommand):
     help = "Controls the ITMS Verification Copilot application lifecycle and maintenance modes."
 
+    def print_help(self, prog_name, subcommand):
+        self.handle_help()
+
     def add_arguments(self, parser):
         parser.add_argument(
             "action",
             nargs="?",
             default="status",
-            choices=["start", "stop", "restart", "status", "maintenance", "switch", "tui", "rollback"],
-            help="Lifecycle action to perform (default: status)",
+            choices=[
+                "start",
+                "stop",
+                "restart",
+                "status",
+                "maintenance",
+                "switch",
+                "tui",
+                "web",
+                "rollback",
+                "update",
+                "bootstrap",
+                "clear",
+                "manage",
+                "version",
+                "help",
+            ],
+            help="Command action to perform (default: status)",
         )
         parser.add_argument(
-            "subaction",
-            nargs="?",
-            default=None,
-            help="Subaction or target version for maintenance, switch, or rollback",
+            "subargs",
+            nargs="*",
+            default=[],
+            help="Subaction or target parameters (e.g. maintenance on, rollback v1.0.9, manage migrate)",
         )
         parser.add_argument(
             "--tui",
             "-t",
             action="store_true",
             help="Launch the interactive Textual TUI interface directly",
+        )
+        parser.add_argument(
+            "--web",
+            "-w",
+            action="store_true",
+            help="Launch the Web Operator Console directly",
         )
         parser.add_argument(
             "--port",
@@ -90,18 +115,41 @@ class Command(BaseCommand):
             help="Application host binding (default: 127.0.0.1)",
         )
 
+    def _restart_services_if_present(self):
+        self.stdout.write("Restarting application services...")
+        is_linux = platform.system() == "Linux"
+        if is_linux and has_systemd_service("itms"):
+            run_cmd(["sudo", "systemctl", "restart", "itms"])
+            self.stdout.write(self.style.SUCCESS("[+] systemd unit (itms.service) restarted successfully."))
+        elif is_linux and has_systemd_service("itms-web"):
+            run_cmd(["sudo", "systemctl", "restart", "itms-web"])
+            self.stdout.write(self.style.SUCCESS("[+] systemd unit (itms-web.service) restarted successfully."))
+
     def handle(self, *args, **options):
         if options.get("tui") or options.get("action") == "tui":
             from django.core.management import call_command
             call_command("run_tui")
             return
 
-        action = options.get("action") or "status"
-        subaction = options.get("subaction") or ""
+        if options.get("web") or options.get("action") == "web":
+            from django.core.management import call_command
+            host = options.get("host") or "127.0.0.1"
+            port = options.get("port") or 8000
+            subargs = options.get("subargs") or []
+            call_command("run_web", "--host", host, "--port", str(port), *subargs)
+            return
+
+        action = (options.get("action") or "status").lower()
+        subargs = options.get("subargs") or []
+        subaction = subargs[0] if subargs else ""
         port = options["port"]
         host = options["host"]
 
-        if action == "start":
+        if action in ("help", "-h", "--help"):
+            self.handle_help()
+        elif action in ("version", "-v", "--version"):
+            self.handle_version()
+        elif action == "start":
             self.handle_start(host, port)
         elif action == "stop":
             self.handle_stop(port)
@@ -115,6 +163,103 @@ class Command(BaseCommand):
             self.handle_switch(subaction.lower())
         elif action == "rollback":
             self.handle_rollback(subaction)
+        elif action == "update":
+            self.handle_update(subargs)
+        elif action == "bootstrap":
+            self.handle_bootstrap(subargs)
+        elif action == "clear":
+            self.handle_clear(subargs)
+        elif action == "manage":
+            self.handle_manage(subargs)
+        else:
+            self.handle_help()
+
+    def handle_help(self):
+        from core.version import __version__
+        guide = f"""
+======================================================================
+  ITMS VERIFICATION COPILOT v{__version__} — UNIFIED COMMAND GUIDE
+======================================================================
+
+Usage:
+  itms <command> [options]
+
+Core Operations:
+  itms                     Launch interactive Operator TUI Console (default)
+  itms tui, --tui, -t      Launch interactive Operator TUI Console
+  itms web, --web, -w      Launch Web Operator Console in foreground
+  itms status              Display system health, ports, services & database
+  itms start               Start the application service in background
+  itms stop                Stop the application service safely
+  itms restart             Restart the application service gracefully
+
+Release & Maintenance:
+  itms update              Check for and apply latest software update from GitHub
+  itms rollback [tag]      Roll back code non-destructively to previous release (e.g. v1.0.9)
+  itms bootstrap           Verify AI models, directory structure, and run migrations
+  itms maintenance [mode]  Web maintenance page: on (503) | off | status
+  itms switch [mode]       ITMS upstream connection switch: on | off | status
+  itms clear [target]      Clean temporary storage: data | crops | vault
+
+Administration & System:
+  itms manage <command>    Run any Django management command (e.g. itms manage showmigrations)
+  itms version, -v         Display installed software version
+  itms help, -h, --help    Show this command guide
+======================================================================
+"""
+        self.stdout.write(guide.strip())
+
+    def handle_version(self):
+        from core.version import __version__
+        self.stdout.write(f"ITMS Verification Copilot v{__version__}")
+
+    def handle_update(self, subargs: list):
+        self.stdout.write(self.style.NOTICE("Checking for ITMS Verification Copilot updates..."))
+        from core.services.update_service import UpdateService
+        from core.version import __version__
+
+        info = UpdateService.check_for_updates(force=True)
+        if info.get("update_available"):
+            target_ver = info.get("latest_version")
+            self.stdout.write(self.style.WARNING(f"New update available: v{target_ver} (Current: v{__version__})"))
+            self.stdout.write("Applying update non-destructively...")
+            res = UpdateService.apply_update()
+            if res.get("success"):
+                self.stdout.write(self.style.SUCCESS(f"\n[+] {res.get('message', 'Updated successfully.')}"))
+                self._restart_services_if_present()
+            else:
+                self.stdout.write(self.style.ERROR(f"\n[!] Update failed: {res.get('error')}"))
+        else:
+            self.stdout.write(self.style.SUCCESS(f"[+] System is running the latest release (v{__version__})."))
+
+    def handle_bootstrap(self, subargs: list):
+        self.stdout.write(self.style.NOTICE("Running ITMS Verification Copilot bootstrap & self-healing..."))
+        old_argv = sys.argv
+        try:
+            sys.argv = ["bootstrap.py"] + subargs
+            from scripts import bootstrap
+            bootstrap.main()
+        except Exception as exc:
+            self.stdout.write(self.style.ERROR(f"Bootstrap execution failed: {exc}"))
+        finally:
+            sys.argv = old_argv
+
+    def handle_clear(self, subargs: list):
+        self.stdout.write(self.style.NOTICE("Cleaning temporary evidence and cache storage..."))
+        from django.core.management import call_command
+        cleaned = [a for a in subargs if a.lower() != "data"]
+        try:
+            call_command("clear_data", *cleaned)
+            self.stdout.write(self.style.SUCCESS("[+] Storage cleanup completed."))
+        except Exception as exc:
+            self.stdout.write(self.style.ERROR(f"Cleanup error: {exc}"))
+
+    def handle_manage(self, subargs: list):
+        if not subargs:
+            self.stdout.write(self.style.WARNING("Usage: itms manage <command> [args...]"))
+            return
+        from django.core.management import execute_from_command_line
+        execute_from_command_line(["manage.py"] + subargs)
 
     def handle_rollback(self, target_version: Optional[str] = None):
         self.stdout.write(self.style.WARNING("Initiating ITMS Verification Copilot version rollback..."))
@@ -127,14 +272,7 @@ class Command(BaseCommand):
         res = UpdateService.rollback_version(target)
         if res.get("success"):
             self.stdout.write(self.style.SUCCESS(f"\n[+] {res.get('message')}"))
-            self.stdout.write("Restarting application services...")
-            is_linux = platform.system() == "Linux"
-            if is_linux and has_systemd_service("itms"):
-                run_cmd(["sudo", "systemctl", "restart", "itms"])
-                self.stdout.write(self.style.SUCCESS("[+] systemd unit (itms.service) restarted successfully."))
-            elif is_linux and has_systemd_service("itms-web"):
-                run_cmd(["sudo", "systemctl", "restart", "itms-web"])
-                self.stdout.write(self.style.SUCCESS("[+] systemd unit (itms-web.service) restarted successfully."))
+            self._restart_services_if_present()
         else:
             self.stdout.write(self.style.ERROR(f"\n[!] Rollback failed: {res.get('error')}"))
 

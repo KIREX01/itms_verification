@@ -616,6 +616,39 @@ LandingAuthScreen {
     padding: 0 1;
 }
 
+#settings-version-feedback {
+    height: auto;
+    min-height: 1;
+    margin-top: 1;
+    margin-bottom: 0;
+    padding: 0 1;
+}
+
+.settings-val-badge {
+    width: 16;
+    min-width: 14;
+    max-width: 20;
+    height: 3;
+    content-align: center middle;
+    text-align: center;
+    background: #111827;
+    border: round #10b981;
+    color: #10b981;
+    text-style: bold;
+}
+
+#card-dev-version-control .settings-db-buttons {
+    height: auto;
+    min-height: 3;
+    margin-top: 1;
+    margin-bottom: 0;
+}
+
+#card-dev-version-control .settings-db-buttons Button {
+    margin-right: 1;
+    margin-bottom: 1;
+}
+
 #pg-config-container {
     height: auto;
 }

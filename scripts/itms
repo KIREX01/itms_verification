@@ -26,12 +26,18 @@ if [[ $# -eq 0 || "$1" == "--tui" || "$1" == "-t" || "$1" == "tui" ]]; then
     exec "${VENV_PYTHON}" "${APP_DIR}/manage.py" run_tui "$@"
 fi
 
-# If action is status, run without requiring sudo
-if [[ "$1" == "status" ]]; then
-    exec "${VENV_PYTHON}" "${APP_DIR}/manage.py" itms_ctl status "${@:2}"
-fi
+# Informational and diagnostic commands run directly under active user session without sudo
+case "$1" in
+    help|--help|-h|status|version|--version|-v)
+        exec "${VENV_PYTHON}" "${APP_DIR}/manage.py" itms_ctl "$@"
+        ;;
+    manage)
+        shift
+        exec "${VENV_PYTHON}" "${APP_DIR}/manage.py" "$@"
+        ;;
+esac
 
-# Auto-elevate with sudo if not root for lifecycle mutations (start, stop, restart, maintenance, switch, rollback)
+# Auto-elevate with sudo if not root for lifecycle mutations (start, stop, restart, maintenance, switch, rollback, update, bootstrap, clear)
 if [[ "$(id -u)" -ne 0 ]]; then
     exec sudo "${VENV_PYTHON}" "${APP_DIR}/manage.py" itms_ctl "$@"
 fi

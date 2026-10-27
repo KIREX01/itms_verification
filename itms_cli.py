@@ -686,6 +686,30 @@ def main():
         run_update(args[1:])
         return
 
+    if first in ("rollback", "revert"):
+        import django
+        django.setup()
+        from django.core.management import call_command
+        target = args[1] if len(args) > 1 else "v1.0.9"
+        call_command("itms_ctl", "rollback", target)
+        return
+
+    if first in ("maintenance", "maint"):
+        import django
+        django.setup()
+        from django.core.management import call_command
+        sub = args[1] if len(args) > 1 else "status"
+        call_command("itms_ctl", "maintenance", sub)
+        return
+
+    if first in ("switch", "upstream"):
+        import django
+        django.setup()
+        from django.core.management import call_command
+        sub = args[1] if len(args) > 1 else "status"
+        call_command("itms_ctl", "switch", sub)
+        return
+
     if first in ("uninstall", "remove"):
         run_uninstall(args[1:])
         return

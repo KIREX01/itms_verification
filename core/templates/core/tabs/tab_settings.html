@@ -91,6 +91,20 @@
 
             <div class="settings-row">
                 <div class="settings-label-group">
+                    <span class="settings-label-title">ITMS Order Sync Cadence (seconds)</span>
+                    <span class="settings-label-desc">Background polling frequency for synchronizing live active installation orders from ITMS portal (default: 600s / 10m).</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <input type="number" id="settings-order-sync-interval-input" min="30" max="86400"
+                           value="{{ user_settings.sync_order_sync_interval_seconds.value|default:600 }}"
+                           style="width: 100px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateSetting('sync.order_sync_interval_seconds', parseInt(this.value, 10))">
+                    <span style="font-size:0.75rem; color:var(--ug-text-dim);">seconds</span>
+                </div>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label-group">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span class="settings-label-title">Shift Target Date Selection</span>
                         <span id="settings-active-shift-badge" class="badge badge-green" style="font-weight:700; font-family:var(--font-mono);">Active: Loading...</span>
@@ -194,7 +208,7 @@
                     <span class="settings-label-title">Evidence Storage &amp; Retention</span>
                     <span class="settings-label-desc">Incoming evidence is stored in the secured server vault. Original heavy photos are pruned upon confirmed ITMS submission, permanently preserving WebP previews and audit records.</span>
                 </div>
-                <span class="badge badge-secondary" style="font-size:0.75rem;">Managed via TUI Console</span>
+                <span class="badge badge-green" style="font-size:0.75rem;">● Automated</span>
             </div>
         </div>
 
@@ -220,27 +234,7 @@
             </div>
         </div>
 
-        <!-- ======================================================== -->
-        <!-- SECTION 2: ADMINISTRATIVE & ADVANCED CONFIGURATION       -->
-        <!-- ======================================================== -->
 
-        <!-- Server Administration Exclusive Card -->
-        <div class="settings-card" style="border-left: 3px solid var(--ug-yellow);">
-            <div class="settings-card-header">
-                <div class="settings-card-title">
-                    <span>🛡️ Server Administration &amp; Engineering Controls</span>
-                </div>
-                <span class="badge badge-secondary">TUI Console Exclusive</span>
-            </div>
-
-            <div class="settings-row">
-                <div class="settings-label-group">
-                    <span class="settings-label-title">Advanced Diagnostics &amp; Infrastructure Parameters</span>
-                    <span class="settings-label-desc">Database engine configuration, crawler bounds, HTTP pool tuning, and storage paths are restricted to the server console. Access them securely via <code>itms --tui</code> with the Master PIN.</span>
-                </div>
-                <span class="badge badge-yellow">Terminal Protected</span>
-            </div>
-        </div>
 
         <!-- ======================================================== -->
         <!-- SECTION 3: SYSTEM UPDATES & VERSION CONTROL              -->

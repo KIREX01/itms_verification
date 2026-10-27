@@ -136,14 +136,7 @@
                     <button type="button" class="badge {% if dry_run %}badge-yellow{% else %}badge-red{% endif %}" id="header-dryrun-badge" onclick="toggleDryRun()" style="cursor:pointer; font-family:inherit;">
                         {% if dry_run %}● Dry Run{% else %}● Live{% endif %}
                     </button>
-                    <!-- Global Application-Wide Shift Date Selector -->
-                    <div class="header-shift-control" style="display:inline-flex; align-items:center; gap:6px; background:rgba(15,23,42,0.85); border:1px solid #334155; padding:3px 8px; border-radius:6px;" title="Active Operating Shift Date (Uganda East Africa Time)">
-                        <span style="font-size:0.75rem; color:#ffffff; font-weight:700;">📅 SHIFT:</span>
-                        <select id="global-shift-select" onchange="setGlobalShiftDate(this.value)" class="form-select header-shift-select" style="min-height:30px; padding:3px 28px 3px 8px; font-size:0.78rem; font-family:var(--font-mono); font-weight:700; border-radius:4px;">
-                            <option value="">Loading shift...</option>
-                        </select>
-                        <button type="button" class="btn btn-secondary btn-sm" onclick="setGlobalShiftDate('today')" title="Reset to Live Shift (Today)" style="padding:3px 8px; font-size:0.74rem; line-height:1.2; min-height:30px; color:#ffffff;">Today</button>
-                    </div>
+
                 </div>
             </div>
 

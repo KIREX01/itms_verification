@@ -107,6 +107,7 @@ class SettingsPane(Vertical):
         # Operator settings: Shift & Synchronization
         auto_sync = cfg.get("sync", {}).get("auto_sync_enabled", True)
         sync_interval = str(cfg.get("sync", {}).get("auto_sync_interval_seconds", 60))
+        order_sync_interval = str(cfg.get("sync", {}).get("order_sync_interval_seconds", 600))
         shift_mode = str(cfg.get("sync", {}).get("shift_target_date_mode", "today"))
         manual_shift_date = str(cfg.get("sync", {}).get("manual_target_date", ""))
         export_dir = str(cfg.get("sync", {}).get("default_export_directory", "exports"))
@@ -216,6 +217,10 @@ class SettingsPane(Vertical):
                     with Horizontal(classes="settings-row"):
                         yield Static("[b]Sync Polling Interval (seconds)[/b]\n[dim]Frequency of background synchronization cycles (default: 60s)[/dim]", classes="settings-label")
                         yield Input(value=sync_interval, id="input-sync-interval", classes="settings-input")
+
+                    with Horizontal(classes="settings-row"):
+                        yield Static("[b]Order Sync Cadence (seconds)[/b]\n[dim]Cadence for polling live active installation orders from ITMS portal (default: 600s / 10m)[/dim]", classes="settings-label")
+                        yield Input(value=order_sync_interval, id="input-order-sync-interval", classes="settings-input")
 
                     with Horizontal(classes="settings-row"):
                         yield Static("[b]Shift Target Date Mode[/b]\n[dim]Reconciliation target date: 'today', 'yesterday', 'manual', or 'all'[/dim]", classes="settings-label")
@@ -1026,6 +1031,10 @@ class SettingsPane(Vertical):
             try:
                 a_sync = self.query_one("#switch-auto-sync", Switch).value
                 s_int = int(self.query_one("#input-sync-interval", Input).value.strip() or 60)
+                try:
+                    o_int = int(self.query_one("#input-order-sync-interval", Input).value.strip() or 600)
+                except Exception:
+                    o_int = 600
                 s_mode = self.query_one("#input-shift-mode", Input).value.strip().lower() or "today"
                 m_date = self.query_one("#input-manual-shift-date", Input).value.strip()
                 try:
@@ -1035,9 +1044,17 @@ class SettingsPane(Vertical):
                 cfg.setdefault("sync", {})
                 cfg["sync"]["auto_sync_enabled"] = a_sync
                 cfg["sync"]["auto_sync_interval_seconds"] = max(10, s_int)
+                cfg["sync"]["order_sync_interval_seconds"] = max(30, o_int)
                 cfg["sync"]["shift_target_date_mode"] = s_mode
                 cfg["sync"]["manual_target_date"] = m_date
                 cfg["sync"]["default_export_directory"] = e_dir
+
+                # Update live daemon cadence immediately
+                try:
+                    from core.services.order_sync import ShiftOrderSyncDaemon
+                    ShiftOrderSyncDaemon.get_instance(interval_seconds=max(30, o_int))
+                except Exception:
+                    pass
             except Exception:
                 pass
 
@@ -1243,6 +1260,10 @@ class SettingsPane(Vertical):
                 self.query_one("#switch-strict-bond", Switch).value = True
                 self.query_one("#switch-auto-sync", Switch).value = True
                 self.query_one("#input-sync-interval", Input).value = "60"
+                try:
+                    self.query_one("#input-order-sync-interval", Input).value = "600"
+                except Exception:
+                    pass
                 self.query_one("#input-shift-mode", Input).value = "today"
                 self.query_one("#input-manual-shift-date", Input).value = ""
                 try:

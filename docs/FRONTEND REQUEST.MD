@@ -1200,3 +1200,23 @@ Response:
    - Bumped assets to `?v=23` in `core/templates/core/base.html` and `core/templates/core/mobile_companion.html`.
 
      ```
+
+
+## 19. Settings Cleanup, Desktop Navigation Header Simplification & Order Sync Cadence (27 October 2026) - [COMPLETED]
+
+### 19.1 Context & User Specifications
+Operators requested three specific interface improvements:
+1. **Settings Page Cleanup**: Under the settings page where controls reside, remove the warning/card telling operators to "refer to TUI" and listing CLI commands (`itms --tui`).
+2. **Desktop Navigation Header**: Remove the date selector from the top desktop navigation header to maintain clean, unencumbered top-level branding, while preserving the mobile off-canvas drawer and dashboard date selectors.
+3. **ITMS Order Sync Cadence**: Expose the background active installation orders synchronization cadence directly in the Web UI Settings tab under Synchronization.
+
+### 19.2 Implemented Changes
+1. **Server Administration TUI Exclusive Card Removal (`core/templates/core/tabs/tab_settings.html`)**:
+   - Removed the `Server Administration Exclusive Card` that displayed `TUI Console Exclusive` and instructed operators to run `itms --tui`.
+   - Updated the Evidence Storage & Retention row badge from `Managed via TUI Console` to `● Automated`.
+2. **Desktop Navigation Date Selector Removal (`core/templates/core/base.html`)**:
+   - Removed `<div class="header-shift-control">` and `#global-shift-select` from the desktop header ribbon.
+   - Retained the mobile off-canvas drawer shift selector (`#drawer-global-shift-select`) and Dashboard shift selectors, ensuring JavaScript `querySelectorAll` gracefully adapts without errors.
+3. **ITMS Order Sync Cadence Input (`core/templates/core/tabs/tab_settings.html`)**:
+   - Added an interactive input `#settings-order-sync-interval-input` under the Synchronization card.
+   - Wired with `onchange="updateSetting('sync.order_sync_interval_seconds', parseInt(this.value, 10))"`, supporting intervals from 30s to 86400s (default: 600s).

@@ -49,10 +49,13 @@ def upload_photos_view(request: HttpRequest) -> HttpResponse:
         )
 
         results = []
+        new_images = []
 
         # Process FRONT photos
         for f in front_files:
             img, status = vault_service.ingest_uploaded_file(f, batch=batch, orientation_override="FRONT", update_batch=False)
+            if img and status == "INGESTED":
+                new_images.append(img)
             results.append({
                 "name": f.name,
                 "status": status,
@@ -64,6 +67,8 @@ def upload_photos_view(request: HttpRequest) -> HttpResponse:
         # Process REAR photos
         for f in rear_files:
             img, status = vault_service.ingest_uploaded_file(f, batch=batch, orientation_override="REAR", update_batch=False)
+            if img and status == "INGESTED":
+                new_images.append(img)
             results.append({
                 "name": f.name,
                 "status": status,
@@ -75,6 +80,8 @@ def upload_photos_view(request: HttpRequest) -> HttpResponse:
         # Process General photos (detect orientation from filename or path)
         for f in general_files:
             img, status = vault_service.ingest_uploaded_file(f, batch=batch, update_batch=False)
+            if img and status == "INGESTED":
+                new_images.append(img)
             results.append({
                 "name": f.name,
                 "status": status,
@@ -82,6 +89,13 @@ def upload_photos_view(request: HttpRequest) -> HttpResponse:
                 "id": str(img.id) if img else None,
                 "vault_file": img.vault_file if img else None,
             })
+
+        # Run vision pipeline on each newly ingested photo for ALPR plate detection
+        for new_img in new_images:
+            try:
+                vault_service.process_single_image_vision(new_img)
+            except Exception as ve:
+                logger.warning("Vision processing warning for uploaded image %s: %s", new_img.id, ve)
 
         # Aggregate batch counts in a single update instead of per-image saves
         batch.total_files = len(results)
@@ -113,10 +127,11 @@ def upload_photos_view(request: HttpRequest) -> HttpResponse:
             count_warning = f"⚠️ Incomplete upload: {rear_count} Rear photos uploaded without any Front photos."
             messages.warning(request, count_warning)
 
-        # Automatically execute initial association on newly uploaded batch
+        # Automatically execute initial association & order matching on newly uploaded batch
         try:
-            from core.matcher import association
+            from core.matcher import association, order_matcher
             association.run_association(batch_id=batch.batch_id)
+            order_matcher.match_all_pending_pairs()
         except Exception as assoc_err:
             logger.warning("Auto-association warning on upload %s: %s", batch.batch_id, assoc_err)
 
@@ -185,8 +200,11 @@ def api_upload_photos(request: HttpRequest) -> JsonResponse:
     )
 
     items = []
+    new_images = []
     for f in front_files:
         img, status = vault_service.ingest_uploaded_file(f, batch=batch, orientation_override="FRONT", update_batch=False)
+        if img and status == "INGESTED":
+            new_images.append(img)
         items.append({
             "filename": f.name,
             "status": status,
@@ -197,6 +215,8 @@ def api_upload_photos(request: HttpRequest) -> JsonResponse:
 
     for f in rear_files:
         img, status = vault_service.ingest_uploaded_file(f, batch=batch, orientation_override="REAR", update_batch=False)
+        if img and status == "INGESTED":
+            new_images.append(img)
         items.append({
             "filename": f.name,
             "status": status,
@@ -207,6 +227,8 @@ def api_upload_photos(request: HttpRequest) -> JsonResponse:
 
     for f in general_files:
         img, status = vault_service.ingest_uploaded_file(f, batch=batch, update_batch=False)
+        if img and status == "INGESTED":
+            new_images.append(img)
         items.append({
             "filename": f.name,
             "status": status,
@@ -214,6 +236,13 @@ def api_upload_photos(request: HttpRequest) -> JsonResponse:
             "id": str(img.id) if img else None,
             "vault_file": img.vault_file if img else None,
         })
+
+    # Run vision pipeline on each newly ingested photo for ALPR plate detection
+    for new_img in new_images:
+        try:
+            vault_service.process_single_image_vision(new_img)
+        except Exception as ve:
+            logger.warning("Vision processing warning for API uploaded image %s: %s", new_img.id, ve)
 
     # Aggregate batch counts in a single update
     batch.total_files = len(items)
@@ -231,10 +260,11 @@ def api_upload_photos(request: HttpRequest) -> JsonResponse:
     is_symmetric = (front_count == rear_count and front_count > 0)
     discrepancy = abs(front_count - rear_count)
 
-    # Automatic initial association
+    # Automatic initial association & order matching
     try:
-        from core.matcher import association
+        from core.matcher import association, order_matcher
         association.run_association(batch_id=batch.batch_id)
+        order_matcher.match_all_pending_pairs()
     except Exception as assoc_err:
         logger.warning("Auto-association warning on API upload %s: %s", batch.batch_id, assoc_err)
 

@@ -368,3 +368,21 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
      - `api_batch_submit()` strictly excludes pairs whose linked order is not in `get_pending_orders_queryset()`.
   5. **Automated Verification**:
      - Regression tests added in `core/tests/test_association.py` (`test_front_and_rear_without_pending_order_marks_conflict`, `test_photos_matching_closed_order_flagged_conflict_and_not_linked`, `test_order_not_available_flagged_conflict`, `test_closed_order_flagged_conflict`) with 100% pass rate (12/12 passing).
+
+
+### Backend Update: Web UI Direct Upload Vision Pipeline, TUI Order Sync Cadence & Supervisor Documentation (27 October 2026)
+- **Status:** COMPLETED & TESTED (44/44 Unit Tests Passing)
+- **Implemented Changes:**
+  1. **Web UI Direct Photo Upload ALPR Processing (`core/views/upload.py`):**
+     - Resolved root cause where directly uploaded photos in Web UI / API lacked front/rear matching because vision/ALPR processing was previously bypassed.
+     - In both `upload_photos_view` and `api_upload_photos`, all newly ingested `EvidenceImage` objects now immediately execute `vault_service.process_single_image_vision(img)`.
+     - YOLO plate detection, OCR extraction, and Ugandan plate normalization populate `detected_plate` before pairwise association executes.
+     - Following association, `order_matcher.match_all_pending_pairs()` is executed to immediately link complete pairs to pending fitment orders.
+  2. **TUI & Configuration Order Sync Cadence Control (`core/services/config_service.py`, `core/tui/settings_pane.py`):**
+     - Registered `sync.order_sync_interval_seconds` in `DEFAULT_CONFIG["sync"]` (default 600s / 10m) and `USER_SETTINGS_SCHEMA`.
+     - In TUI Settings Pane (`core/tui/settings_pane.py`), added interactive input `#input-order-sync-interval` in Card 1B (Shift Synchronization & Reconciliation).
+     - Saving settings immediately invokes `ShiftOrderSyncDaemon.get_instance(interval_seconds=...)` to update the live running background daemon without restarting.
+  3. **Supervisor Documentation (`docs/APP_OVERVIEW.md`):**
+     - Completely overhauled `docs/APP_OVERVIEW.md` to reflect current project status, live AWS EC2 production deployment, direct ALPR vision engine, 4-tier association, 9-row ledger arithmetic, mobile companion, and SOP workflows.
+  4. **Regression Tests (`core/tests/test_web_upload_and_settings.py`):**
+     - Added test suite verifying vision invocation on upload, symmetric complete pair creation, automatic order linking, and schema validation.

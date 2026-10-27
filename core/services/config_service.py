@@ -32,6 +32,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "sync": {
         "auto_sync_enabled": True,             # Background active queue & shift synchronization
         "auto_sync_interval_seconds": 60,      # Background sync cycle frequency (seconds)
+        "order_sync_interval_seconds": 600,    # Background active installation orders sync cadence (seconds, default 600s / 10m)
         "shift_target_date_mode": "today",     # "today", "yesterday", or "manual"
         "manual_target_date": "",              # e.g. "30.09.2026" or "300926"
         "default_export_directory": "exports", # Shift reconciliation spreadsheet export folder
@@ -179,6 +180,13 @@ USER_SETTINGS_SCHEMA: Dict[str, Dict[str, Any]] = {
         "description": "Time between automated background sync passes (default: 60s).",
         "type": "int",
         "default": 60,
+        "category": "Shift & Synchronization",
+    },
+    "sync.order_sync_interval_seconds": {
+        "label": "ITMS Order Sync Cadence (seconds)",
+        "description": "Background interval for polling live active installation orders from ITMS portal (default: 600s = 10 minutes).",
+        "type": "int",
+        "default": 600,
         "category": "Shift & Synchronization",
     },
     "sync.shift_target_date_mode": {

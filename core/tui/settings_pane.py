@@ -289,6 +289,14 @@ class SettingsPane(Vertical):
                         yield Input(placeholder="New 6-digit PIN", password=True, id="input-new-master-pin", classes="settings-input")
                         yield Button("💾 Set PIN", id="btn-save-master-pin", variant="warning", classes="settings-btn")
 
+                    with Horizontal(classes="settings-row"):
+                        yield Static(
+                            "[b]Device, MAC/IP Firewall & Time-Bound Email Manager[/b]\n"
+                            "[dim]Manage auto-detected MACs, shared companion devices, firewall blocks & time-bound email windows[/dim]",
+                            classes="settings-label",
+                        )
+                        yield Button("🛡️ Open Access & Firewall [9]", id="btn-open-access-manager", variant="primary", classes="settings-btn")
+
                 # Card 1C: Permissions & Developer Mode Switch
                 with Vertical(classes="settings-card"):
                     yield Static("[bold red]🛡️ Permissions & System Mode[/bold red]", classes="settings-card-title")
@@ -686,6 +694,9 @@ class SettingsPane(Vertical):
             self.action_change_vault()
         elif btn_id == "btn-save-master-pin":
             self.action_save_master_pin()
+        elif btn_id == "btn-open-access-manager":
+            if hasattr(app, "action_tab_access"):
+                app.action_tab_access()
         elif btn_id == "btn-change-reports-dir":
             self.action_change_reports_dir()
         elif btn_id == "btn-change-yolo-weights":

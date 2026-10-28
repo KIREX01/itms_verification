@@ -92,6 +92,18 @@ class OperatorActionsMixin:
         except Exception:
             pass
 
+    def action_tab_access(self):
+        tabs = self.query_one("#tabs-content", TabbedContent)
+        tabs.active = "tab-access"
+        self._set_activity_visibility(False)
+        try:
+            access_pane = self.query_one("#access-pane")
+            if hasattr(access_pane, "refresh_access_data"):
+                access_pane.refresh_access_data()
+            self.set_focus(None)
+        except Exception:
+            pass
+
 
     @work(thread=True)
     def action_drain_outbox(self) -> None:

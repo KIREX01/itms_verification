@@ -58,6 +58,7 @@ from core.tui.itms_pane import ITMSConnectionPane
 from core.tui.stock_pane import StockPane
 from core.tui.reports_pane import ReportsPane
 from core.tui.settings_pane import SettingsPane
+from core.tui.access_pane import AccessControlPane
 from core.tui.tables import TableLoaderMixin, HISTORY_FILTERS
 from core.tui.handlers import NavigationHandlersMixin
 from core.tui.actions import OperatorActionsMixin
@@ -82,6 +83,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         ("6", "tab_stock", "Stock [6/K]"),
         ("7", "tab_reports", "Reports"),
         ("8", "tab_settings", "Settings"),
+        ("9", "tab_access", "Access"),
         ("f1", "tab_dashboard", "Dashboard"),
         ("f2", "tab_itms", "ITMS"),
         ("f3", "tab_batches", "Batches"),
@@ -90,6 +92,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         ("f6", "tab_stock", "Stock"),
         ("f7", "tab_reports", "Reports"),
         ("f8", "tab_settings", "Settings"),
+        ("f9", "tab_access", "Access"),
         ("ctrl+1", "tab_dashboard", "Dashboard"),
         ("ctrl+2", "tab_itms", "ITMS"),
         ("ctrl+3", "tab_batches", "Batches"),
@@ -98,6 +101,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         ("ctrl+6", "tab_stock", "Stock"),
         ("ctrl+7", "tab_reports", "Reports"),
         ("ctrl+8", "tab_settings", "Settings"),
+        ("ctrl+9", "tab_access", "Access"),
         ("i", "native_ingest", "Add Photos (Dialog)"),
         ("w", "open_upload_ui", "Web Upload"),
         ("p", "process_vision", "Run Vision"),
@@ -208,6 +212,9 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
 
             with TabPane("SETTINGS", id="tab-settings"):
                 yield SettingsPane(id="settings-pane")
+
+            with TabPane("ACCESS", id="tab-access"):
+                yield AccessControlPane(id="access-pane")
 
 
         with Vertical(id="activity-container"):
@@ -456,12 +463,22 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
             event.stop()
             return
         elif event.key in ("f6", "ctrl+6"):
-            self.action_tab_settings()
+            self.action_tab_stock()
             event.prevent_default()
             event.stop()
             return
         elif event.key in ("f7", "ctrl+7"):
             self.action_tab_reports()
+            event.prevent_default()
+            event.stop()
+            return
+        elif event.key in ("f8", "ctrl+8"):
+            self.action_tab_settings()
+            event.prevent_default()
+            event.stop()
+            return
+        elif event.key in ("f9", "ctrl+9"):
+            self.action_tab_access()
             event.prevent_default()
             event.stop()
             return

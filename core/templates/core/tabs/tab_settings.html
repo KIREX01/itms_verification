@@ -1,19 +1,15 @@
-<!-- TAB 6: SETTINGS & SYSTEM CONFIGURATION -->
+<!-- TAB 7: ESSENTIAL OPERATOR SETTINGS -->
 <div class="tab-pane" id="pane-settings">
     <div class="settings-scroll-container">
-        
-        <!-- ======================================================== -->
-        <!-- SECTION 1: OPERATOR / USER SETTINGS (Essential Controls) -->
-        <!-- ======================================================== -->
 
-        <!-- Facility & Operating Bonded Warehouse -->
+        <!-- 1. Facility & Operating Bonded Warehouse -->
         <div class="settings-card">
             <div class="settings-card-header">
                 <div class="settings-card-title">
                     <span>🏢 Operating Facility &amp; Bonded Warehouse</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <button class="btn btn-secondary" onclick="syncBondsFromITMS()" id="btn-sync-bonds" style="padding:4px 10px; font-size:0.75rem;" title="Fetch latest bonded facilities registered in ITMS WebApp">
+                    <button class="btn btn-secondary" onclick="syncBondsFromITMS()" id="btn-sync-bonds" style="padding:4px 10px; font-size:0.75rem;" title="Fetch bonded facilities from ITMS">
                         🔄 Sync from ITMS
                     </button>
                     <span class="badge badge-yellow" id="settings-bond-badge">
@@ -25,7 +21,7 @@
             <div class="settings-row">
                 <div class="settings-label-group">
                     <span class="settings-label-title">Active Bond Facility</span>
-                    <span class="settings-label-desc">Warehouse facility for scoping plate verification, active orders, and shift reconciliation.</span>
+                    <span class="settings-label-desc">Warehouse facility for scoping plate verification, active orders, and shift stock reconciliation.</span>
                 </div>
                 <div style="min-width: 220px;">
                     <select id="settings-bond-select" class="form-control" onchange="changeActiveBond(this)"
@@ -42,10 +38,10 @@
             <div class="settings-row">
                 <div class="settings-label-group">
                     <span class="settings-label-title">Strict Bond Scoping</span>
-                    <span class="settings-label-desc">When enabled, order sync and morning kit allocations are strictly isolated to the active bond facility.</span>
+                    <span class="settings-label-desc">Isolate order sync and morning kit allocations strictly to the active bond facility.</span>
                 </div>
                 <label class="switch">
-                    <input type="checkbox" id="settings-strict-bond-toggle" 
+                    <input type="checkbox" id="settings-strict-bond-toggle"
                            {% if user_settings.bond_strict_bond_scoping.value %}checked{% endif %}
                            onchange="updateSetting('bond.strict_bond_scoping', this.checked)">
                     <span class="slider"></span>
@@ -53,71 +49,27 @@
             </div>
         </div>
 
-        <!-- Shift Synchronization & Daily Reconciliation Ledger -->
+        <!-- 2. Operating Shift Target Date -->
         <div class="settings-card">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <span>📅 Shift Synchronization &amp; Reconciliation Ledger</span>
+                    <span>📅 Operating Shift Date</span>
                 </div>
-                <span class="badge badge-cyan">Shift Operations</span>
+                <span id="settings-active-shift-badge" class="badge badge-green" style="font-weight:700; font-family:var(--font-mono);">Active: Loading...</span>
             </div>
 
             <div class="settings-row">
                 <div class="settings-label-group">
-                    <span class="settings-label-title">Background Shift Sync</span>
-                    <span class="settings-label-desc">Periodically synchronizes active queue, morning kits, and completed shift archive in the background.</span>
+                    <span class="settings-label-title">Shift Target Date</span>
+                    <span class="settings-label-desc">Active shift date for Queue, Stock Dispatch, and Reports (East Africa Time).</span>
                 </div>
-                <label class="switch">
-                    <input type="checkbox" id="settings-auto-sync-toggle" 
-                           {% if user_settings.sync_auto_sync_enabled.value %}checked{% endif %}
-                           onchange="updateSetting('sync.auto_sync_enabled', this.checked)">
-                    <span class="slider"></span>
-                </label>
-            </div>
-
-            <div class="settings-row">
-                <div class="settings-label-group">
-                    <span class="settings-label-title">Sync Cycle Frequency (seconds)</span>
-                    <span class="settings-label-desc">Interval between automated background sync passes (default: 60s, min: 15s).</span>
-                </div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <input type="number" id="settings-sync-interval-input" min="15" max="600"
-                           value="{{ user_settings.sync_auto_sync_interval_seconds.value|default:60 }}"
-                           style="width: 100px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateSetting('sync.auto_sync_interval_seconds', parseInt(this.value, 10))">
-                    <span style="font-size:0.75rem; color:var(--ug-text-dim);">seconds</span>
-                </div>
-            </div>
-
-            <div class="settings-row">
-                <div class="settings-label-group">
-                    <span class="settings-label-title">ITMS Order Sync Cadence (seconds)</span>
-                    <span class="settings-label-desc">Background polling frequency for synchronizing live active installation orders from ITMS portal (default: 600s / 10m).</span>
-                </div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <input type="number" id="settings-order-sync-interval-input" min="30" max="86400"
-                           value="{{ user_settings.sync_order_sync_interval_seconds.value|default:600 }}"
-                           style="width: 100px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateSetting('sync.order_sync_interval_seconds', parseInt(this.value, 10))">
-                    <span style="font-size:0.75rem; color:var(--ug-text-dim);">seconds</span>
-                </div>
-            </div>
-
-            <div class="settings-row">
-                <div class="settings-label-group">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <span class="settings-label-title">Shift Target Date Selection</span>
-                        <span id="settings-active-shift-badge" class="badge badge-green" style="font-weight:700; font-family:var(--font-mono);">Active: Loading...</span>
-                    </div>
-                    <span class="settings-label-desc">Ground-truth operating shift date for Reports Hub, Stock Management dispatch/reconciliation, and ITMS Order sync (locked to East Africa Time Africa/Kampala).</span>
-                </div>
-                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-                    <select id="settings-shift-mode-select" 
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <select id="settings-shift-mode-select"
                             style="padding: 6px 12px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
                             onchange="onSettingsShiftModeChanged(this.value)">
                         <option value="today" {% if user_settings.sync_shift_target_date_mode.value == 'today' %}selected{% endif %}>Today (Live Shift)</option>
                         <option value="yesterday" {% if user_settings.sync_shift_target_date_mode.value == 'yesterday' %}selected{% endif %}>Yesterday</option>
-                        <option value="manual" {% if user_settings.sync_shift_target_date_mode.value == 'manual' %}selected{% endif %}>Manual Calendar Date</option>
+                        <option value="manual" {% if user_settings.sync_shift_target_date_mode.value == 'manual' %}selected{% endif %}>Manual Date</option>
                     </select>
 
                     <input type="text" id="settings-manual-date-input" placeholder="e.g. 30.09.2026"
@@ -131,27 +83,13 @@
                            onchange="onSettingsDatePickerChanged(this.value)">
                 </div>
             </div>
-
-            <div class="settings-row">
-                <div class="settings-label-group">
-                    <span class="settings-label-title">Reconciliation CSV Export Directory</span>
-                    <span class="settings-label-desc">Directory where timestamped shift reconciliation spreadsheets and dockets are written.</span>
-                </div>
-                <div style="display:flex; gap:6px;">
-                    <input type="text" id="settings-export-dir-input"
-                           value="{{ user_settings.sync_default_export_directory.value|default:'exports' }}"
-                           style="width: 220px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem; font-family:var(--font-mono);"
-                           onchange="updateSetting('sync.default_export_directory', this.value.trim())">
-                    <button class="btn btn-secondary" style="padding: 6px 10px;" onclick="browseGenericPath('settings-export-dir-input', 'folder', 'Select Export Directory', 'sync.default_export_directory')" title="Browse for folder...">📁</button>
-                </div>
-            </div>
         </div>
 
-        <!-- Safety & Execution Mode -->
+        <!-- 3. Submission Mode & ITMS Identity -->
         <div class="settings-card">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <span>🛡️ Submission Safety &amp; Operating Mode</span>
+                    <span>🛡️ Submission Mode &amp; ITMS Identity</span>
                 </div>
                 <span class="badge {% if dry_run %}badge-yellow{% else %}badge-red{% endif %}" id="settings-dryrun-badge">
                     {% if dry_run %}● Simulation Mode (Safe){% else %}● LIVE ITMS SERVER{% endif %}
@@ -161,7 +99,7 @@
             <div class="settings-row">
                 <div class="settings-label-group">
                     <span class="settings-label-title">Dry-Run Simulation Mode</span>
-                    <span class="settings-label-desc">When enabled, submissions are validated locally without sending HTTP writes to stock.itms.ug.</span>
+                    <span class="settings-label-desc">Validate submissions locally without sending live HTTP writes to stock.itms.ug.</span>
                 </div>
                 <label class="switch">
                     <input type="checkbox" id="settings-dryrun-toggle" {% if dry_run %}checked{% endif %} onchange="toggleDryRun()">
@@ -172,10 +110,10 @@
             <div class="settings-row">
                 <div class="settings-label-group">
                     <span class="settings-label-title">Auto-Submit Step 3 Confirmation</span>
-                    <span class="settings-label-desc">Automatically complete final installation step when plate evidence photos are uploaded.</span>
+                    <span class="settings-label-desc">Automatically finalize Step 3 when vehicle evidence photos upload.</span>
                 </div>
                 <label class="switch">
-                    <input type="checkbox" id="settings-submit-step3-toggle" 
+                    <input type="checkbox" id="settings-submit-step3-toggle"
                            {% if user_settings.submission_submit_step3.value %}checked{% endif %}
                            onchange="updateSetting('submission.submit_step3', this.checked)">
                     <span class="slider"></span>
@@ -184,48 +122,7 @@
 
             <div class="settings-row">
                 <div class="settings-label-group">
-                    <span class="settings-label-title">Database Service Status</span>
-                    <span class="settings-label-desc">Primary transactional datastore for installation orders, evidence vault, and audit trails.</span>
-                </div>
-                <span class="badge badge-green">● Connected &amp; Synchronized</span>
-            </div>
-        </div>
-
-        <!-- Evidence Vault & Server Storage Policy -->
-        <div class="settings-card">
-            <div class="settings-card-header">
-                <div class="settings-card-title">
-                    <span>💾 Storage &amp; Evidence Vault Lifecycle</span>
-                </div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <span class="badge badge-green">● Server Managed</span>
-                    <span class="badge badge-yellow">Auto-Prune Active</span>
-                </div>
-            </div>
-
-            <div class="settings-row">
-                <div class="settings-label-group">
-                    <span class="settings-label-title">Evidence Storage &amp; Retention</span>
-                    <span class="settings-label-desc">Incoming evidence is stored in the secured server vault. Original heavy photos are pruned upon confirmed ITMS submission, permanently preserving WebP previews and audit records.</span>
-                </div>
-                <span class="badge badge-green" style="font-size:0.75rem;">● Automated</span>
-            </div>
-        </div>
-
-        <!-- Connected ITMS Account -->
-        <div class="settings-card">
-            <div class="settings-card-header">
-                <div class="settings-card-title">
-                    <span>🌐 Connected ITMS WebApp Identity</span>
-                </div>
-                <button class="btn btn-secondary" onclick="switchNavTab(2)" style="padding:4px 10px; font-size:0.75rem;">
-                    Manage in ITMS Tab
-                </button>
-            </div>
-
-            <div class="settings-row">
-                <div class="settings-label-group">
-                    <span class="settings-label-title">Connected Operator Account</span>
+                    <span class="settings-label-title">Connected ITMS Operator Account</span>
                     <span class="settings-label-desc" id="settings-itms-email">Loading identity...</span>
                 </div>
                 <button class="btn btn-primary" onclick="openItmsModal()">
@@ -234,143 +131,46 @@
             </div>
         </div>
 
-        <!-- ======================================================== -->
-        <!-- SECTION 2: DEVICE & EMAIL ACCESS CONTROL (IP / MAC)      -->
-        <!-- ======================================================== -->
+        <!-- 4. Time-Bound Email Invitation (Only Security Action in Web UI; Full Firewall/Device Control in TUI) -->
         <div class="settings-card" id="settings-security-card">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <span>🔒 Device &amp; Email Access Control (IP / MAC Firewall &amp; Shared Devices)</span>
+                    <span>✉️ Invite Operator (Time-Bound Email Access)</span>
                 </div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <button class="btn btn-secondary" onclick="loadSecurityOverview(true)" style="padding:4px 10px; font-size:0.75rem;">
-                        🔄 Refresh Devices
+                <span class="badge badge-yellow">Time-Bound Grant</span>
+            </div>
+
+            <div class="settings-row" style="flex-wrap:wrap; gap:12px;">
+                <div class="settings-label-group" style="flex:1; min-width:220px;">
+                    <span class="settings-label-title">Send Time-Bound Access Invitation</span>
+                    <span class="settings-label-desc">
+                        Emails a 6-digit activation code valid only for the selected duration. Device/MAC/IP firewall rules and expiry renewals are managed in the TUI.
+                    </span>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <input type="email" id="security-preapprove-email" placeholder="operator@info.kirex.online"
+                           style="width:230px; padding:7px 10px; background:var(--ug-black-surface); border:1px solid var(--ug-border); color:#fff; border-radius:var(--radius-md); font-size:0.84rem;">
+                    <select id="security-invite-duration"
+                            style="padding:7px 10px; background:var(--ug-black-surface); border:1px solid var(--ug-border); color:#fff; border-radius:var(--radius-md); font-size:0.84rem;">
+                        <option value="12">12 Hours (1 Shift)</option>
+                        <option value="24" selected>24 Hours (1 Day)</option>
+                        <option value="72">3 Days (72h)</option>
+                        <option value="168">7 Days (1 Week)</option>
+                        <option value="720">30 Days (1 Month)</option>
+                    </select>
+                    <button class="btn btn-primary" id="btn-send-email-invite" onclick="sendTimeBoundEmailInvite()" style="padding:7px 14px; font-size:0.82rem; font-weight:700;">
+                        ✉️ Send Invite
                     </button>
-                    <span class="badge badge-green" id="security-mode-badge">● Active Firewall</span>
                 </div>
             </div>
-
-            <div class="settings-row">
-                <div class="settings-label-group">
-                    <span class="settings-label-title">Strict Email Pre-Approval Gate</span>
-                    <span class="settings-label-desc">
-                        When enabled, new signups require administrator email approval or a 6-digit activation code. Existing active accounts and QR-paired mobile companion phones are never blocked.
-                    </span>
-                </div>
-                <label class="switch">
-                    <input type="checkbox" id="security-strict-email-toggle" onchange="toggleStrictEmailApproval(this.checked)">
-                    <span class="slider"></span>
-                </label>
-            </div>
-
-            <div class="settings-row">
-                <div class="settings-label-group">
-                    <span class="settings-label-title">Max Shared Devices per Operator Account</span>
-                    <span class="settings-label-desc">
-                        Allows one account to be used simultaneously by the Team Leader (Desktop) and Field Fitter (Mobile Camera / QR Scanner).
-                    </span>
-                </div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <input type="number" id="security-max-devices-input" min="2" max="15" value="4"
-                           style="width: 80px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                           onchange="updateMaxSharedDevices(parseInt(this.value, 10))">
-                    <span style="font-size:0.75rem; color:var(--ug-text-dim);">devices/account</span>
-                </div>
-            </div>
-
-            <!-- Action Bar: Pre-Approve Email OR Block IP / MAC / Device -->
-            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; padding:12px 0; border-top:1px solid var(--ug-border);">
-                <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 12px;">
-                    <div style="font-size:0.78rem; font-weight:800; color:var(--ug-yellow); margin-bottom:6px;">
-                        ✉️ Pre-Approve Operator Email &amp; Send Activation Code
-                    </div>
-                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                        <input type="email" id="security-preapprove-email" placeholder="operator@info.kirex.online"
-                               style="flex:1; min-width:160px; padding:6px 10px; background:#090d16; border:1px solid var(--ug-border); color:#fff; border-radius:6px; font-size:0.8rem;">
-                        <button class="btn btn-primary" onclick="preapproveOperatorEmail()" style="padding:6px 12px; font-size:0.78rem;">
-                            Pre-Approve
-                        </button>
-                    </div>
-                    <div id="security-preapprove-result" style="font-size:0.72rem; color:var(--ug-text-muted); margin-top:6px;"></div>
-                </div>
-
-                <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 12px;">
-                    <div style="font-size:0.78rem; font-weight:800; color:#f87171; margin-bottom:6px;">
-                        🚫 Block Unauthorized IP, CIDR, MAC Address, or Device ID
-                    </div>
-                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                        <input type="text" id="security-block-target" placeholder="e.g. 192.168.1.50 or AA:BB:CC:DD:EE:FF"
-                               style="flex:1; min-width:160px; padding:6px 10px; background:#090d16; border:1px solid var(--ug-border); color:#fff; border-radius:6px; font-size:0.8rem; font-family:var(--font-mono);">
-                        <button class="btn btn-secondary" onclick="blockNetworkTarget()" style="padding:6px 12px; font-size:0.78rem; border-color:#ef4444; color:#fca5a5;">
-                            Block Target
-                        </button>
-                    </div>
-                    <div id="security-blocked-summary" style="font-size:0.7rem; color:var(--ug-text-dim); margin-top:6px; font-family:var(--font-mono);">
-                        Blocked IPs: 0 | Blocked MACs: 0
-                    </div>
-                </div>
-            </div>
-
-            <!-- Pending Email & Access Activation Requests -->
-            <div style="margin-top:8px;">
-                <div style="font-size:0.78rem; font-weight:800; color:#e2e8f0; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
-                    <span>📩 Email Access &amp; Activation Requests</span>
-                    <a href="/access/request/" target="_blank" style="font-size:0.72rem; color:var(--ug-yellow); text-decoration:underline;">Open Self-Service Activation Portal ↗</a>
-                </div>
-                <div style="overflow-x:auto; max-height:200px; border:1px solid var(--ug-border); border-radius:6px;">
-                    <table style="width:100%; border-collapse:collapse; font-size:0.75rem;">
-                        <thead>
-                            <tr style="background:#0c1220; color:var(--ug-text-muted); text-align:left; border-bottom:1px solid var(--ug-border);">
-                                <th style="padding:6px 8px;">Email / Operator</th>
-                                <th style="padding:6px 8px;">Role / Facility</th>
-                                <th style="padding:6px 8px;">IP / MAC</th>
-                                <th style="padding:6px 8px;">Code</th>
-                                <th style="padding:6px 8px;">Status</th>
-                                <th style="padding:6px 8px; text-align:right;">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="security-requests-tbody">
-                            <tr><td colspan="6" style="padding:10px; text-align:center; color:var(--ug-text-dim);">Loading access requests...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Registered & Linked Devices (Desktop + Shared Mobile Companion) -->
-            <div style="margin-top:12px;">
-                <div style="font-size:0.78rem; font-weight:800; color:#e2e8f0; margin-bottom:6px;">
-                    📱 Linked &amp; Monitored Devices (Team Leader Desktops + QR-Paired Field Phones)
-                </div>
-                <div style="overflow-x:auto; max-height:240px; border:1px solid var(--ug-border); border-radius:6px;">
-                    <table style="width:100%; border-collapse:collapse; font-size:0.75rem;">
-                        <thead>
-                            <tr style="background:#0c1220; color:var(--ug-text-muted); text-align:left; border-bottom:1px solid var(--ug-border);">
-                                <th style="padding:6px 8px;">Device / Platform</th>
-                                <th style="padding:6px 8px;">Account / Email</th>
-                                <th style="padding:6px 8px;">IP Address</th>
-                                <th style="padding:6px 8px;">MAC Address</th>
-                                <th style="padding:6px 8px;">Linked Via</th>
-                                <th style="padding:6px 8px;">Status</th>
-                                <th style="padding:6px 8px; text-align:right;">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="security-devices-tbody">
-                            <tr><td colspan="7" style="padding:10px; text-align:center; color:var(--ug-text-dim);">Loading registered devices...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+            <div id="security-preapprove-result" style="font-size:0.76rem; color:var(--ug-text-muted); padding:2px 0 4px 0;"></div>
         </div>
 
-        <!-- ======================================================== -->
-        <!-- SECTION 3: SYSTEM UPDATES & VERSION CONTROL              -->
-        <!-- ======================================================== -->
-
-        <!-- Application Updates & Version Control (GitHub Releases) -->
+        <!-- 5. System Version & Updates -->
         <div class="settings-card">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <span>📦 Version Control &amp; System Updates</span>
+                    <span>📦 System Version &amp; Updates</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span class="badge badge-yellow" id="settings-version-badge">v{{ app_version|default:"1.0.8" }}</span>
@@ -380,9 +180,9 @@
 
             <div class="settings-row">
                 <div class="settings-label-group">
-                    <span class="settings-label-title">Installed Application Version</span>
+                    <span class="settings-label-title">Installed Version</span>
                     <span class="settings-label-desc" id="settings-update-desc">
-                        Running CLOSE Copilot v{{ app_version|default:"1.0.8" }}. Updates are distributed via GitHub Releases.
+                        Running CLOSE Copilot v{{ app_version|default:"1.0.8" }}.
                     </span>
                 </div>
                 <div style="display:flex; gap:8px;">
@@ -395,7 +195,6 @@
                 </div>
             </div>
 
-            <!-- Expandable Release Notes Box if an update is found -->
             <div id="settings-release-notes-box" style="display:none; background-color:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:14px; margin-top:6px;">
                 <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
                     <strong style="color:var(--ug-yellow); font-size:0.85rem;" id="release-notes-title">Release Notes</strong>
@@ -404,9 +203,6 @@
                     </a>
                 </div>
                 <div id="release-notes-content" style="font-family:var(--font-mono); font-size:0.75rem; color:#fff; max-height:160px; overflow-y:auto; line-height:1.4; white-space:pre-wrap;">
-                </div>
-                <div style="font-size:0.7rem; color:var(--ug-text-dim); margin-top:8px;">
-                    🛡️ Safe Update Guarantee: Your local database (db.sqlite3), evidence vault (media/), and configuration (.env) are never overwritten.
                 </div>
             </div>
         </div>

@@ -260,7 +260,7 @@ class DailyStockLedgerAdmin(admin.ModelAdmin):
 class AuthorizedDeviceAdmin(admin.ModelAdmin):
     list_display = (
         "device_name", "device_type", "user", "authorized_email",
-        "ip_address", "mac_address", "status", "linked_via", "last_seen_at",
+        "ip_address", "mac_address", "status", "linked_via", "expires_at", "last_seen_at",
     )
     list_filter = ("status", "device_type", "linked_via")
     search_fields = (
@@ -274,7 +274,7 @@ class AuthorizedDeviceAdmin(admin.ModelAdmin):
 class EmailAccessRequestAdmin(admin.ModelAdmin):
     list_display = (
         "email", "full_name", "username", "facility_code",
-        "requested_role", "status", "activation_code", "client_ip", "mac_address", "updated_at",
+        "status", "duration_hours", "expires_at", "activation_code", "client_ip", "mac_address", "updated_at",
     )
     list_filter = ("status", "requested_role", "facility_code")
     search_fields = ("email", "full_name", "username", "client_ip", "mac_address", "device_id")

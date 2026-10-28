@@ -1,16 +1,16 @@
 """
-Zero-Trust Device (IP, MAC Address & Cryptographic Fingerprint) and Email Access Control Service.
+Zero-Trust Device (IP, MAC Address & Cryptographic Fingerprint) and Time-Bound Email Access Control Service.
 
 Provides:
-1. Real-time client IP, CIDR, Layer-2 ARP MAC address resolution (on LAN/Hotspot), and
-   cryptographic device token (`itms_device_trust`) identification.
-2. Automatic trust preservation for already-linked users and devices.
+1. Real-time client IP, CIDR, Layer-2 ARP / Host NIC MAC address resolution, and
+   cryptographic device token (`itms_device_trust`) identification with automatic backfill.
+2. Automatic onboarding & trust preservation for already-active accounts and linked devices.
 3. Multi-device account sharing (e.g., Team Leader on Desktop + Fitter taking photos on
    Mobile Companion) with individual device tracking and configurable per-account device slots.
 4. Cryptographically signed QR Code Pairing Tokens (`?pair_token=...`) so phones scanning
    the Supervisor/TUI QR code are automatically authorized and linked to the shared account.
-5. Self-service Email & Device Activation Requests (`EmailAccessRequest`) with 6-digit
-   activation codes and 1-click Administrator approval or IP/MAC blocking.
+5. Time-Bound Email Invitations & Access Grants (`EmailAccessRequest` + `AuthorizedDevice.expires_at`)
+   managed centrally from the TUI (with quick email invitation available in the Web UI).
 """
 from __future__ import annotations
 
@@ -21,9 +21,12 @@ import logging
 import os
 import re
 import secrets
+import socket
 import subprocess
 import threading
 import time
+import uuid
+from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from django.conf import settings
@@ -41,10 +44,12 @@ logger = logging.getLogger(__name__)
 DEVICE_TRUST_COOKIE_NAME = "itms_device_trust"
 DEVICE_TRUST_COOKIE_MAX_AGE = 60 * 60 * 24 * 90  # 90 days
 QR_PAIR_TOKEN_TTL_SECONDS = 60 * 60 * 12  # 12 hours (full shift validity)
+DEFAULT_ACCESS_DURATION_HOURS = 24  # Default time-bound window for granted emails (24h / 1 day)
 
 _ARP_CACHE_LOCK = threading.Lock()
 _ARP_MAC_CACHE: Dict[str, Tuple[str, float]] = {}
 _ARP_CACHE_TTL = 60.0
+_LOCAL_MAC_CACHE: Optional[str] = None
 
 _MAC_REGEX = re.compile(r"([0-9A-Fa-f]{2}(?:[:\-][0-9A-Fa-f]{2}){5})")
 
@@ -57,7 +62,8 @@ def normalize_mac_address(raw_mac: Optional[str]) -> str:
     if not m:
         clean_hex = re.sub(r"[^0-9A-Fa-f]", "", str(raw_mac).strip())
         if len(clean_hex) == 12:
-            return ":".join(clean_hex[i:i + 2].upper() for i in range(0, 12, 2))
+            mac = ":".join(clean_hex[i:i + 2].upper() for i in range(0, 12, 2))
+            return "" if mac in ("00:00:00:00:00:00", "FF:FF:FF:FF:FF:FF") else mac
         return ""
     parts = re.split(r"[:\-]", m.group(1))
     if len(parts) == 6:
@@ -68,12 +74,62 @@ def normalize_mac_address(raw_mac: Optional[str]) -> str:
     return ""
 
 
+def resolve_local_host_mac_address() -> str:
+    """
+    Resolves the primary physical network interface MAC address of the local host/server.
+    Used to automatically populate MAC addresses for local workstation / TUI sessions.
+    """
+    global _LOCAL_MAC_CACHE
+    if _LOCAL_MAC_CACHE is not None:
+        return _LOCAL_MAC_CACHE
+
+    sys_net = "/sys/class/net"
+    if os.path.isdir(sys_net):
+        try:
+            for iface in sorted(os.listdir(sys_net)):
+                if iface == "lo" or iface.startswith(("docker", "veth", "br-", "virbr")):
+                    continue
+                addr_file = os.path.join(sys_net, iface, "address")
+                if os.path.isfile(addr_file):
+                    with open(addr_file, "r", encoding="utf-8") as f:
+                        cand = normalize_mac_address(f.read().strip())
+                        if cand:
+                            _LOCAL_MAC_CACHE = cand
+                            return cand
+        except Exception:
+            pass
+
+    try:
+        node = uuid.getnode()
+        hex_mac = f"{node:012X}"
+        cand = normalize_mac_address(":".join(hex_mac[i:i + 2] for i in range(0, 12, 2)))
+        _LOCAL_MAC_CACHE = cand
+        return cand
+    except Exception:
+        _LOCAL_MAC_CACHE = ""
+        return ""
+
+
+def resolve_local_host_ip() -> str:
+    """Resolves the primary outbound LAN IP of the local host, falling back to 127.0.0.1."""
+    try:
+        lan_ip = network_service.get_primary_lan_ip()
+        if lan_ip:
+            return lan_ip
+    except Exception:
+        pass
+    try:
+        return socket.gethostbyname(socket.gethostname())
+    except Exception:
+        return "127.0.0.1"
+
+
 def resolve_client_mac_address(client_ip: str, request: Optional[HttpRequest] = None) -> str:
     """
-    Resolves the client's Layer-2 MAC address:
-    1. Checks explicit headers/params (`X-Device-MAC`, `device_mac`) if provided by TUI or companion.
-    2. If client_ip is on a local LAN/Hotspot, queries `/proc/net/arp` (Linux) or `arp -a` (Windows)
-       with a 60-second in-memory cache.
+    Resolves the client's Layer-2 MAC address automatically:
+    1. Explicit headers/params (`X-Device-MAC`, `device_mac`) if provided by client/companion.
+    2. Local physical NIC MAC if `client_ip` is loopback (`127.0.0.1`, `::1`, `localhost`) or matches local host IP.
+    3. `/proc/net/arp` (Linux), `ip neigh`, or `arp -a` (Windows) for LAN/Hotspot devices (60s cache).
     """
     if request is not None:
         header_mac = (
@@ -87,7 +143,7 @@ def resolve_client_mac_address(client_ip: str, request: Optional[HttpRequest] = 
             return norm_hdr
 
     if not client_ip or client_ip in ("127.0.0.1", "::1", "localhost"):
-        return ""
+        return resolve_local_host_mac_address()
 
     if not network_service.is_private_or_loopback_ip(client_ip):
         return ""
@@ -99,7 +155,6 @@ def resolve_client_mac_address(client_ip: str, request: Optional[HttpRequest] = 
             return cached[0]
 
     resolved_mac = ""
-    # 1. Fast Linux /proc/net/arp lookup (zero subprocess overhead)
     proc_arp = "/proc/net/arp"
     if os.path.exists(proc_arp):
         try:
@@ -114,34 +169,71 @@ def resolve_client_mac_address(client_ip: str, request: Optional[HttpRequest] = 
         except Exception:
             pass
 
-    # 2. Fallback to `ip neigh` or `arp -a`
     if not resolved_mac:
         try:
-            if os.name == "nt":
-                proc = subprocess.run(
-                    ["arp", "-a", client_ip],
-                    capture_output=True,
-                    text=True,
-                    timeout=1.2,
-                    check=False,
-                )
-            else:
-                proc = subprocess.run(
-                    ["ip", "neigh", "show", client_ip],
-                    capture_output=True,
-                    text=True,
-                    timeout=1.2,
-                    check=False,
-                )
+            cmd = ["arp", "-a", client_ip] if os.name == "nt" else ["ip", "neigh", "show", client_ip]
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1.2, check=False)
             if proc.returncode == 0 and proc.stdout:
                 resolved_mac = normalize_mac_address(proc.stdout)
         except Exception:
             pass
 
+    if not resolved_mac and client_ip == resolve_local_host_ip():
+        resolved_mac = resolve_local_host_mac_address()
+
     with _ARP_CACHE_LOCK:
         _ARP_MAC_CACHE[client_ip] = (resolved_mac, now)
 
     return resolved_mac
+
+
+def parse_duration_hours(raw_duration: Any, default_hours: int = DEFAULT_ACCESS_DURATION_HOURS) -> int:
+    """
+    Parses a human duration input such as '12', '24h', '7d', '30d', '1w' into integer hours.
+    Clamped between 1 hour and 8760 hours (365 days).
+    """
+    if raw_duration is None:
+        return default_hours
+    s = str(raw_duration).strip().lower()
+    if not s:
+        return default_hours
+    m = re.match(r"^(\d+)\s*([hdwm]?)$", s)
+    if not m:
+        try:
+            val = int(float(s))
+            return max(1, min(8760, val))
+        except Exception:
+            return default_hours
+    num = int(m.group(1))
+    unit = m.group(2)
+    if unit == "d":
+        hours = num * 24
+    elif unit == "w":
+        hours = num * 24 * 7
+    elif unit == "m":
+        hours = num * 24 * 30
+    else:
+        hours = num
+    return max(1, min(8760, hours))
+
+
+def format_expiry_countdown(expires_at: Optional[Any]) -> str:
+    """Formats an `expires_at` datetime into a concise human countdown string for TUI/UI."""
+    if not expires_at:
+        return "Permanent (Core)"
+    now = timezone.now()
+    delta = expires_at - now
+    total_sec = int(delta.total_seconds())
+    if total_sec <= 0:
+        return "EXPIRED"
+    days = total_sec // 86400
+    hours = (total_sec % 86400) // 3600
+    mins = (total_sec % 3600) // 60
+    if days > 0:
+        return f"{days}d {hours}h left"
+    if hours > 0:
+        return f"{hours}h {mins}m left"
+    return f"{max(1, mins)}m left"
 
 
 def _get_hmac_secret() -> bytes:
@@ -178,14 +270,11 @@ def verify_device_trust_token(token: str) -> Optional[Dict[str, str]]:
 def generate_qr_pairing_token(user: Optional[Any] = None, **_kwargs: Any) -> str:
     """
     Generates a cryptographically signed QR pairing token (`pair_token`) for mobile companions.
-    When a phone scans the QR code on the Team Leader's screen, this token automatically
-    trusts the phone and links it to the Team Leader's shared account.
     """
     uid = ""
     if user and getattr(user, "is_authenticated", False):
         uid = str(user.pk)
     else:
-        # Fallback to primary active operator or superuser on this station
         first_op = User.objects.filter(is_active=True).order_by("-is_superuser", "id").first()
         if first_op:
             uid = str(first_op.pk)
@@ -198,9 +287,7 @@ def generate_qr_pairing_token(user: Optional[Any] = None, **_kwargs: Any) -> str
 
 
 def verify_qr_pairing_token(token: str) -> Optional[User]:
-    """
-    Verifies a `pair_token` scanned from a Desktop/TUI QR code and returns the linked User account.
-    """
+    """Verifies a `pair_token` scanned from a Desktop/TUI QR code and returns the linked User."""
     if not token or "." not in token:
         return None
     parts = str(token).strip().split(".")
@@ -221,13 +308,8 @@ def verify_qr_pairing_token(token: str) -> Optional[User]:
 
 def extract_device_identity(request: HttpRequest) -> Dict[str, str]:
     """
-    Extracts a complete, normalized device identity profile from an incoming HTTP request:
-    - client_ip
-    - mac_address (ARP on LAN or explicit header)
-    - device_id (from signed cookie, explicit client header/param, MAC, or browser fingerprint)
-    - device_type ('MOBILE' or 'DESKTOP')
-    - device_name (Human-readable OS + Browser label)
-    - fingerprint_hash
+    Extracts a complete, normalized device identity profile from an incoming HTTP request,
+    automatically filling client IP, ARP/Host MAC address, and deterministic Device ID.
     """
     client_ip = extract_client_ip(request)
     mac_address = resolve_client_mac_address(client_ip, request=request)
@@ -239,7 +321,6 @@ def extract_device_identity(request: HttpRequest) -> Dict[str, str]:
         else AuthorizedDevice.DeviceType.DESKTOP
     )
 
-    # Check client-supplied hardware traits or device_id
     explicit_dev_id = (
         request.headers.get("X-Device-ID")
         or request.POST.get("device_id")
@@ -262,10 +343,9 @@ def extract_device_identity(request: HttpRequest) -> Dict[str, str]:
         device_id = verified_cookie["device_id"]
     elif explicit_dev_id:
         device_id = re.sub(r"[^A-Za-z0-9_\-:]", "", explicit_dev_id)[:96]
-    elif mac_address:
+    elif mac_address and client_ip not in ("127.0.0.1", "::1", "localhost"):
         device_id = f"MAC-{mac_address.replace(':', '')}"
     else:
-        # Deterministic browser/station ID combining User-Agent + IP subnet/host
         ua_hash = hashlib.sha256(f"{user_agent}|{client_ip}".encode("utf-8")).hexdigest()[:16].upper()
         prefix = "MOB" if is_mobile else "DSK"
         device_id = f"{prefix}-{ua_hash}"
@@ -285,19 +365,19 @@ def extract_device_identity(request: HttpRequest) -> Dict[str, str]:
 
 def _derive_friendly_device_name(user_agent: str, is_mobile: bool, client_ip: str) -> str:
     ua_low = (user_agent or "").lower()
-    os_name = "Unknown OS"
+    os_name = "Workstation"
     if "android" in ua_low:
-        os_name = "Android Phone"
+        os_name = "Android"
     elif "iphone" in ua_low or "ipad" in ua_low:
-        os_name = "iPhone / iOS"
+        os_name = "iOS"
     elif "windows" in ua_low:
-        os_name = "Windows PC"
+        os_name = "Windows"
     elif "macintosh" in ua_low or "mac os" in ua_low:
-        os_name = "MacBook / macOS"
+        os_name = "macOS"
     elif "linux" in ua_low:
-        os_name = "Linux Workstation"
+        os_name = "Linux"
 
-    browser = "Browser"
+    browser = "Client"
     if "edg/" in ua_low:
         browser = "Edge"
     elif "chrome/" in ua_low and "edg/" not in ua_low:
@@ -312,19 +392,14 @@ def _derive_friendly_device_name(user_agent: str, is_mobile: bool, client_ip: st
 
 
 def get_security_access_config() -> Dict[str, Any]:
-    """
-    Returns current device & email access control configuration from system_config.json.
-    Defaults:
-    - require_email_approval: False by default so existing workflows/tests run smoothly,
-      can be toggled to True ('STRICT') by Admin in Settings or CLI.
-    - max_devices_per_account: 4 (allows Team Leader Desktop + up to 3 Mobile Companions).
-    """
+    """Returns current device & time-bound email access configuration."""
     cfg = config_service.load_config()
     sec = cfg.get("security_access", {})
     return {
-        "mode": sec.get("mode", "STANDARD"),  # "STANDARD" (Blocklist + Auto-Trust Active Users) or "STRICT" (Require Admin Approval for New Signups/Unlinked Devices)
+        "mode": sec.get("mode", "STANDARD"),
         "require_email_approval": bool(sec.get("require_email_approval", False)),
         "max_devices_per_account": int(sec.get("max_devices_per_account", 4) or 4),
+        "default_duration_hours": int(sec.get("default_duration_hours", DEFAULT_ACCESS_DURATION_HOURS) or DEFAULT_ACCESS_DURATION_HOURS),
     }
 
 
@@ -332,6 +407,7 @@ def update_security_access_config(
     mode: Optional[Any] = None,
     require_email_approval: Optional[bool] = None,
     max_devices_per_account: Optional[int] = None,
+    default_duration_hours: Optional[int] = None,
 ) -> Dict[str, Any]:
     if isinstance(mode, dict):
         updates = mode
@@ -340,6 +416,8 @@ def update_security_access_config(
             require_email_approval = updates.get("require_email_approval")
         if "max_devices_per_account" in updates:
             max_devices_per_account = updates.get("max_devices_per_account")
+        if "default_duration_hours" in updates:
+            default_duration_hours = updates.get("default_duration_hours")
     cfg = config_service.load_config()
     sec = cfg.get("security_access", {})
     if mode is not None:
@@ -352,9 +430,74 @@ def update_security_access_config(
         sec["mode"] = "STRICT" if sec["require_email_approval"] else "STANDARD"
     if max_devices_per_account is not None:
         sec["max_devices_per_account"] = max(1, min(20, int(max_devices_per_account)))
+    if default_duration_hours is not None:
+        sec["default_duration_hours"] = parse_duration_hours(default_duration_hours)
     cfg["security_access"] = sec
     config_service.save_config(cfg)
     return get_security_access_config()
+
+
+def sync_existing_active_accounts_and_devices() -> int:
+    """
+    Automatically onboards already-active operator accounts & linked ITMS sessions into
+    `AuthorizedDevice` and backfills missing IP and MAC addresses from local host / ARP tables.
+    Returns count of created or updated records.
+    """
+    touched = 0
+    local_ip = resolve_local_host_ip()
+    local_mac = resolve_local_host_mac_address()
+    now = timezone.now()
+
+    try:
+        # 1. Backfill missing MAC addresses on existing AuthorizedDevice rows via ARP or local NIC
+        for dev in AuthorizedDevice.objects.filter(mac_address=""):
+            if dev.ip_address:
+                resolved = resolve_client_mac_address(dev.ip_address)
+                if resolved:
+                    dev.mac_address = resolved
+                    dev.save(update_fields=["mac_address"])
+                    touched += 1
+
+        # 2. Backfill missing MAC addresses on EmailAccessRequest rows
+        for req in EmailAccessRequest.objects.filter(mac_address=""):
+            if req.client_ip:
+                resolved = resolve_client_mac_address(req.client_ip)
+                if resolved:
+                    req.mac_address = resolved
+                    req.save(update_fields=["mac_address"])
+                    touched += 1
+
+        # 3. Ensure every already-active User account has at least one registered AuthorizedDevice
+        active_users = list(User.objects.filter(is_active=True))
+        itms_emails = {
+            s.user_id: (s.itms_email or "").strip().lower()
+            for s in OperatorITMSSession.objects.filter(user__in=active_users)
+        }
+        for u in active_users:
+            has_dev = AuthorizedDevice.objects.filter(user=u).exists()
+            u_email = (u.email or itms_emails.get(u.id) or "").strip().lower()
+            if not has_dev:
+                dev_id = f"ACTIVE-USER-{u.id}"
+                AuthorizedDevice.objects.get_or_create(
+                    device_id=dev_id,
+                    defaults={
+                        "user": u,
+                        "authorized_email": u_email,
+                        "device_name": f"🖥️ Active Account ({u.username})",
+                        "device_type": AuthorizedDevice.DeviceType.TUI,
+                        "linked_via": AuthorizedDevice.LinkedVia.EXISTING_TRUSTED,
+                        "ip_address": local_ip,
+                        "mac_address": local_mac,
+                        "status": AuthorizedDevice.Status.APPROVED,
+                        "approved_at": now,
+                        "last_seen_at": now,
+                    },
+                )
+                touched += 1
+    except Exception as exc:
+        logger.debug("Active account/device auto-sync notice: %s", exc)
+
+    return touched
 
 
 def _ip_matches_rule(client_ip: str, rule_ip_or_cidr: str) -> bool:
@@ -378,9 +521,7 @@ def is_ip_or_mac_blocked(
     mac_address: str = "",
     device_id: str = "",
 ) -> Tuple[bool, Optional[AuthorizedDevice], str]:
-    """
-    Checks if the incoming client IP, CIDR subnet, MAC address, or device_id is explicitly BLOCKED or REVOKED.
-    """
+    """Checks if incoming IP, CIDR subnet, MAC address, or device_id is BLOCKED or REVOKED."""
     try:
         blocked_qs = list(
             AuthorizedDevice.objects.filter(
@@ -389,11 +530,11 @@ def is_ip_or_mac_blocked(
         )
         for dev in blocked_qs:
             if device_id and dev.device_id == device_id:
-                return True, dev, dev.block_reason or "This device ID has been blocked by an administrator."
+                return True, dev, dev.block_reason or "This device has been blocked."
             if mac_address and dev.mac_address and dev.mac_address.upper() == mac_address.upper():
-                return True, dev, dev.block_reason or f"Hardware MAC address ({mac_address}) is blocked."
+                return True, dev, dev.block_reason or f"MAC address ({mac_address}) is blocked."
             if client_ip and dev.pinned_ip_cidr and _ip_matches_rule(client_ip, dev.pinned_ip_cidr):
-                return True, dev, dev.block_reason or f"Network IP/Subnet ({dev.pinned_ip_cidr}) is blocked."
+                return True, dev, dev.block_reason or f"Network ({dev.pinned_ip_cidr}) is blocked."
             if (
                 client_ip
                 and dev.device_type == AuthorizedDevice.DeviceType.NETWORK_RULE
@@ -407,31 +548,60 @@ def is_ip_or_mac_blocked(
     return False, None, ""
 
 
+def _resolve_email_expiry_for_user(user: Optional[User], email: str = "") -> Tuple[bool, Optional[Any], str]:
+    """
+    Checks if a granted email access window has expired.
+    Returns: (is_expired, expires_at_dt, reason)
+    Core superusers are exempt from automatic lockout.
+    """
+    if user and getattr(user, "is_superuser", False):
+        return False, None, ""
+
+    target_email = (email or (user.email if user else "") or "").strip().lower()
+    if not target_email:
+        return False, None, ""
+
+    req = EmailAccessRequest.objects.filter(email__iexact=target_email).order_by("-updated_at").first()
+    if not req:
+        return False, None, ""
+
+    now = timezone.now()
+    if req.status == EmailAccessRequest.Status.EXPIRED:
+        return True, req.expires_at, f"Time-bound access for {target_email} has expired. Please request renewal."
+
+    if req.expires_at and now >= req.expires_at:
+        req.status = EmailAccessRequest.Status.EXPIRED
+        req.save(update_fields=["status", "updated_at"])
+        AuthorizedDevice.objects.filter(authorized_email__iexact=target_email).exclude(
+            status=AuthorizedDevice.Status.BLOCKED
+        ).update(status=AuthorizedDevice.Status.EXPIRED)
+        return True, req.expires_at, f"Time-bound access for {target_email} expired. Please request access renewal."
+
+    return False, req.expires_at, ""
+
+
 def register_or_refresh_authorized_device(
     request: HttpRequest,
     user: Optional[User] = None,
     linked_via: str = AuthorizedDevice.LinkedVia.DIRECT_LOGIN,
     force_approve: bool = False,
+    expires_at: Optional[Any] = None,
 ) -> Tuple[AuthorizedDevice, bool, str]:
     """
-    Registers or refreshes a device for a user account.
-    Respects:
-    - Existing linked users/devices are never blocked.
-    - Multiple devices can share one account (up to `max_devices_per_account`, e.g., Team Leader + Fitter Phone).
-    - QR-paired devices (`linked_via == QR_PAIRING`) are automatically approved.
-    Returns: (device, is_approved, message)
+    Registers or refreshes a device for an operator account, auto-filling IP and MAC address
+    and enforcing time-bound email/device expiration.
     """
     ident = extract_device_identity(request)
     dev_id = ident["device_id"]
     client_ip = ident["client_ip"]
     mac_address = ident["mac_address"]
 
-    # 1. Check explicit blocklist first
+    # 1. Explicit blocklist check
     is_blocked, blocked_dev, reason = is_ip_or_mac_blocked(client_ip, mac_address, dev_id)
     if is_blocked and blocked_dev and not force_approve:
         return blocked_dev, False, reason
 
-    target_user = user if (user and getattr(user, "is_authenticated", False)) else None
+    target_user = user if (user and getattr(user, "is_authenticated", False) or isinstance(user, User)) else None
     email = (target_user.email if target_user and target_user.email else "").strip().lower()
     if not email and target_user:
         try:
@@ -441,8 +611,41 @@ def register_or_refresh_authorized_device(
         except Exception:
             pass
 
+    # 2. Check time-bound email expiry (unless force_approve is actively renewing it)
+    email_expired, email_expires_at, exp_msg = _resolve_email_expiry_for_user(target_user, email)
+    if email_expired and not force_approve:
+        existing_exp = AuthorizedDevice.objects.filter(device_id=dev_id).first()
+        if existing_exp:
+            return existing_exp, False, exp_msg
+        dev_exp = AuthorizedDevice.objects.create(
+            device_id=dev_id,
+            user=target_user,
+            authorized_email=email,
+            device_name=ident["device_name"],
+            device_type=ident["device_type"],
+            linked_via=linked_via,
+            ip_address=client_ip,
+            mac_address=mac_address,
+            status=AuthorizedDevice.Status.EXPIRED,
+            expires_at=email_expires_at,
+        )
+        return dev_exp, False, exp_msg
+
+    effective_expires_at = expires_at or email_expires_at
+
+    # Backfill EmailAccessRequest telemetry (MAC / IP / Device ID) automatically if matching email exists
+    if email:
+        EmailAccessRequest.objects.filter(email__iexact=email, mac_address="").exclude(
+            mac_address=mac_address
+        ).update(
+            mac_address=mac_address,
+            client_ip=client_ip,
+            device_id=dev_id,
+            device_name=ident["device_name"],
+        )
+
     existing = AuthorizedDevice.objects.filter(device_id=dev_id).first()
-    if not existing and mac_address:
+    if not existing and mac_address and client_ip not in ("127.0.0.1", "::1", "localhost"):
         existing = AuthorizedDevice.objects.filter(mac_address__iexact=mac_address).first()
 
     now = timezone.now()
@@ -450,7 +653,18 @@ def register_or_refresh_authorized_device(
         if existing.status in (AuthorizedDevice.Status.BLOCKED, AuthorizedDevice.Status.REVOKED) and not force_approve:
             return existing, False, existing.block_reason or "Device is blocked by administrator."
 
-        # Check pinned IP/CIDR if configured on this approved device
+        # Check device-level time-bound expiry
+        if (
+            not force_approve
+            and not (target_user and target_user.is_superuser)
+            and existing.expires_at
+            and now >= existing.expires_at
+        ):
+            if existing.status != AuthorizedDevice.Status.EXPIRED:
+                existing.status = AuthorizedDevice.Status.EXPIRED
+                existing.save(update_fields=["status"])
+            return existing, False, "Time-bound access for this device has expired. Please request renewal."
+
         if (
             existing.status == AuthorizedDevice.Status.APPROVED
             and existing.pinned_ip_cidr
@@ -464,7 +678,7 @@ def register_or_refresh_authorized_device(
         existing.last_seen_at = now
         existing.user_agent = ident["user_agent"]
         existing.fingerprint_hash = ident["fingerprint_hash"]
-        if mac_address and not existing.mac_address:
+        if mac_address and existing.mac_address != mac_address:
             existing.mac_address = mac_address
             update_fields.append("mac_address")
         if target_user and not existing.user:
@@ -473,33 +687,36 @@ def register_or_refresh_authorized_device(
         if email and not existing.authorized_email:
             existing.authorized_email = email
             update_fields.append("authorized_email")
+        if effective_expires_at and existing.expires_at != effective_expires_at:
+            existing.expires_at = effective_expires_at
+            update_fields.append("expires_at")
         if force_approve and existing.status != AuthorizedDevice.Status.APPROVED:
             existing.status = AuthorizedDevice.Status.APPROVED
             existing.approved_at = now
             update_fields.extend(["status", "approved_at"])
         existing.save(update_fields=list(dict.fromkeys(update_fields)))
         is_ok = (existing.status == AuthorizedDevice.Status.APPROVED)
-        return existing, is_ok, "" if is_ok else "Device is pending administrator approval."
+        return existing, is_ok, "" if is_ok else "Device access is pending or expired."
 
     # New device for this account: check multi-device sharing allowance
     sec_cfg = get_security_access_config()
     max_devices = sec_cfg["max_devices_per_account"]
     if email:
-        req_obj = EmailAccessRequest.objects.filter(email__iexact=email, status=EmailAccessRequest.Status.APPROVED).first()
+        req_obj = EmailAccessRequest.objects.filter(
+            email__iexact=email,
+            status__in=[EmailAccessRequest.Status.APPROVED, EmailAccessRequest.Status.PRE_APPROVED],
+        ).first()
         if req_obj and req_obj.max_devices_allowed:
             max_devices = max(max_devices, req_obj.max_devices_allowed)
 
     active_user_devices_count = 0
     if target_user:
+        # Exclude synthetic TUI placeholder row when counting browser/mobile devices
         active_user_devices_count = AuthorizedDevice.objects.filter(
             user=target_user,
             status=AuthorizedDevice.Status.APPROVED,
-        ).count()
+        ).exclude(device_id__startswith="ACTIVE-USER-").count()
 
-    # Determine if this new device should be auto-approved:
-    # - Force approve (QR pairing / Admin approval / Pre-approved email)
-    # - Superuser or staff account
-    # - Existing linked user within their multi-device sharing limit (e.g. Team Leader + Fitter Phone)
     should_approve = bool(
         force_approve
         or linked_via == AuthorizedDevice.LinkedVia.QR_PAIRING
@@ -522,34 +739,34 @@ def register_or_refresh_authorized_device(
         user_agent=ident["user_agent"],
         status=new_status,
         approved_at=now if should_approve else None,
+        expires_at=effective_expires_at,
         last_seen_at=now,
     )
     if not should_approve and target_user:
-        # Automatically create a pending EmailAccessRequest so Admin sees the extra device request
         create_or_update_access_request(
             request=request,
             email=email or f"{target_user.username}@local",
             username=target_user.username,
             full_name=target_user.get_full_name(),
-            reason=f"Additional device #{active_user_devices_count + 1} requesting access on shared account '{target_user.username}' (limit: {max_devices}).",
+            reason=f"Additional device #{active_user_devices_count + 1} on shared account '{target_user.username}'.",
             email_verified=True,
         )
-        return dev, False, f"Account '{target_user.username}' already has {active_user_devices_count} active devices (limit: {max_devices}). Request submitted for administrator approval."
+        return dev, False, f"Account '{target_user.username}' reached {max_devices} shared devices. Approval requested."
 
     return dev, should_approve, ""
 
 
 def evaluate_request_access(request: HttpRequest) -> Dict[str, Any]:
     """
-    Evaluates whether an incoming HTTP request is permitted by Device (IP/MAC/ID) & Account security rules.
-    Also handles automatic QR Code Pairing (`?pair_token=...`) for mobile companions!
+    Evaluates whether an incoming HTTP request is permitted by IP/MAC/Device rules & Time-Bound expiry.
+    Also handles automatic QR Code Pairing (`?pair_token=...`) for mobile companions.
     """
     ident = extract_device_identity(request)
     client_ip = ident["client_ip"]
     mac_address = ident["mac_address"]
     device_id = ident["device_id"]
 
-    # 1. Check if IP, CIDR, MAC, or Device ID is explicitly BLOCKED
+    # 1. Explicit IP, CIDR, MAC, or Device ID blocklist
     is_blocked, blocked_dev, block_reason = is_ip_or_mac_blocked(client_ip, mac_address, device_id)
     if is_blocked:
         return {
@@ -560,11 +777,20 @@ def evaluate_request_access(request: HttpRequest) -> Dict[str, Any]:
             "identity": ident,
         }
 
-    # 2. Check if request carries a valid Mobile QR Pairing Token (`?pair_token=...`)
+    # 2. Mobile QR Pairing Token (`?pair_token=...`)
     pair_token = (request.GET.get("pair_token") or "").strip()
     if pair_token:
         paired_user = verify_qr_pairing_token(pair_token)
         if paired_user:
+            email_exp, _, exp_reason = _resolve_email_expiry_for_user(paired_user, paired_user.email)
+            if email_exp:
+                return {
+                    "allowed": False,
+                    "code": "ACCESS_EXPIRED",
+                    "reason": exp_reason,
+                    "device": None,
+                    "identity": ident,
+                }
             from django.contrib.auth import login as auth_login
             if not (getattr(request, "user", None) and request.user.is_authenticated):
                 auth_login(request, paired_user, backend="django.contrib.auth.backends.ModelBackend")
@@ -583,7 +809,7 @@ def evaluate_request_access(request: HttpRequest) -> Dict[str, Any]:
                 "identity": ident,
             }
 
-    # 3. If user is authenticated, verify/refresh their device registration
+    # 3. Authenticated operator session: auto-refresh MAC/IP and verify time-bound window
     user = getattr(request, "user", None)
     if user and getattr(user, "is_authenticated", False):
         dev, is_approved, msg = register_or_refresh_authorized_device(
@@ -592,10 +818,11 @@ def evaluate_request_access(request: HttpRequest) -> Dict[str, Any]:
             linked_via=AuthorizedDevice.LinkedVia.EXISTING_TRUSTED,
         )
         if not is_approved:
+            code = "ACCESS_EXPIRED" if (dev and dev.status == AuthorizedDevice.Status.EXPIRED) else "DEVICE_PENDING_APPROVAL"
             return {
                 "allowed": False,
-                "code": "DEVICE_PENDING_APPROVAL",
-                "reason": msg or "This device is awaiting administrator approval.",
+                "code": code,
+                "reason": msg or "Access is awaiting approval or has expired.",
                 "device": dev,
                 "identity": ident,
             }
@@ -634,30 +861,40 @@ def attach_device_trust_cookie(response: HttpResponse, device_id: str, identity:
 def is_email_preapproved_or_active(email: str) -> bool:
     """
     Returns True if:
-    - No users exist yet in the database (first-time setup), OR
-    - An active User or active OperatorITMSSession already exists with this email, OR
-    - An EmailAccessRequest with status PRE_APPROVED or APPROVED exists for this email, OR
-    - Strict email approval mode is disabled (`require_email_approval == False`).
+    - First-time setup (no users exist yet), OR
+    - Active User / ITMS session exists with non-expired access, OR
+    - Non-expired EmailAccessRequest (PRE_APPROVED / APPROVED) exists, OR
+    - Strict email approval gate is OFF.
     """
     if User.objects.count() == 0:
         return True
+
+    clean_email = (email or "").strip().lower()
+    now = timezone.now()
+
+    if clean_email:
+        req = EmailAccessRequest.objects.filter(
+            email__iexact=clean_email,
+            status__in=[EmailAccessRequest.Status.PRE_APPROVED, EmailAccessRequest.Status.APPROVED],
+        ).order_by("-updated_at").first()
+        if req:
+            if req.expires_at and now >= req.expires_at:
+                req.status = EmailAccessRequest.Status.EXPIRED
+                req.save(update_fields=["status", "updated_at"])
+                return False
+            return True
 
     sec_cfg = get_security_access_config()
     if not sec_cfg.get("require_email_approval", False):
         return True
 
-    clean_email = (email or "").strip().lower()
     if not clean_email:
         return False
 
     if User.objects.filter(email__iexact=clean_email, is_active=True).exists():
-        return True
+        is_exp, _, _ = _resolve_email_expiry_for_user(None, clean_email)
+        return not is_exp
     if OperatorITMSSession.objects.filter(itms_email__iexact=clean_email, is_authenticated=True).exists():
-        return True
-    if EmailAccessRequest.objects.filter(
-        email__iexact=clean_email,
-        status__in=[EmailAccessRequest.Status.PRE_APPROVED, EmailAccessRequest.Status.APPROVED],
-    ).exists():
         return True
 
     return False
@@ -673,22 +910,24 @@ def create_or_update_access_request(
     reason: str = "",
     email_verified: bool = False,
     status: Optional[str] = None,
+    duration_hours: Optional[int] = None,
+    expires_at: Optional[Any] = None,
 ) -> EmailAccessRequest:
-    """
-    Creates or updates an EmailAccessRequest and binds the requester's device metadata (IP, MAC, Device ID).
-    """
+    """Creates or updates an EmailAccessRequest and auto-attaches client IP, MAC, and Device ID."""
     clean_email = (email or "").strip().lower()
     ident = extract_device_identity(request) if request else {
         "device_id": "",
-        "client_ip": "127.0.0.1",
-        "mac_address": "",
-        "device_name": "CLI / System",
+        "client_ip": resolve_local_host_ip(),
+        "mac_address": resolve_local_host_mac_address(),
+        "device_name": "TUI / System",
         "user_agent": "",
     }
 
     existing = EmailAccessRequest.objects.filter(email__iexact=clean_email).order_by("-created_at").first()
     code = email_service.generate_2fa_code()
     token = secrets.token_urlsafe(32)
+    sec_cfg = get_security_access_config()
+    eff_hours = parse_duration_hours(duration_hours, default_hours=sec_cfg["default_duration_hours"])
 
     if existing:
         if username:
@@ -711,14 +950,25 @@ def create_or_update_access_request(
             existing.device_name = ident["device_name"]
         if email_verified:
             existing.email_verified = True
+        if duration_hours is not None:
+            existing.duration_hours = eff_hours
+        if expires_at is not None:
+            existing.expires_at = expires_at
         if status:
             existing.status = status
+            if status in (EmailAccessRequest.Status.APPROVED, EmailAccessRequest.Status.PRE_APPROVED) and not existing.expires_at:
+                existing.expires_at = timezone.now() + timedelta(hours=existing.duration_hours or eff_hours)
         if not existing.activation_code:
             existing.activation_code = code
         if not existing.activation_token:
             existing.activation_token = token
         existing.save()
         return existing
+
+    initial_status = status or EmailAccessRequest.Status.PENDING
+    initial_exp = expires_at
+    if initial_exp is None and initial_status in (EmailAccessRequest.Status.APPROVED, EmailAccessRequest.Status.PRE_APPROVED):
+        initial_exp = timezone.now() + timedelta(hours=eff_hours)
 
     return EmailAccessRequest.objects.create(
         email=clean_email,
@@ -733,7 +983,9 @@ def create_or_update_access_request(
         device_name=ident["device_name"],
         user_agent=ident["user_agent"],
         email_verified=email_verified,
-        status=status or EmailAccessRequest.Status.PENDING,
+        status=initial_status,
+        duration_hours=eff_hours,
+        expires_at=initial_exp,
         activation_code=code,
         activation_token=token,
     )
@@ -744,21 +996,30 @@ def preapprove_operator_email(
     facility_code: str = "AGM",
     requested_role: str = "OPERATOR",
     max_devices_allowed: int = 4,
+    duration_hours: Any = None,
     admin_user: Optional[User] = None,
+    send_invite_email: bool = True,
+    invite_url: str = "",
+    **_kwargs: Any,
 ) -> EmailAccessRequest:
     """
-    Pre-approves an operator email address so when they sign up (or request device activation),
-    their account and devices are automatically approved.
+    Invites / pre-approves an operator email with a mandatory **time-bound** expiration window.
     """
     clean_email = (email or "").strip().lower()
-    req = EmailAccessRequest.objects.filter(email__iexact=clean_email).first()
+    sec_cfg = get_security_access_config()
+    hours = parse_duration_hours(duration_hours, default_hours=sec_cfg["default_duration_hours"])
     now = timezone.now()
+    exp_dt = now + timedelta(hours=hours)
+
+    req = EmailAccessRequest.objects.filter(email__iexact=clean_email).first()
     if req:
         req.status = EmailAccessRequest.Status.PRE_APPROVED
         req.facility_code = facility_code or req.facility_code
         req.requested_role = requested_role or req.requested_role
         req.max_devices_allowed = max(1, int(max_devices_allowed or 4))
-        req.reviewed_by = admin_user
+        req.duration_hours = hours
+        req.expires_at = exp_dt
+        req.reviewed_by = admin_user if isinstance(admin_user, User) else None
         req.reviewed_at = now
         if not req.activation_code:
             req.activation_code = email_service.generate_2fa_code()
@@ -770,14 +1031,33 @@ def preapprove_operator_email(
             requested_role=requested_role or "OPERATOR",
             status=EmailAccessRequest.Status.PRE_APPROVED,
             max_devices_allowed=max(1, int(max_devices_allowed or 4)),
+            duration_hours=hours,
+            expires_at=exp_dt,
             activation_code=email_service.generate_2fa_code(),
             activation_token=secrets.token_urlsafe(32),
-            reviewed_by=admin_user,
+            reviewed_by=admin_user if isinstance(admin_user, User) else None,
             reviewed_at=now,
         )
 
-    # Also activate any existing inactive User with this email
     User.objects.filter(email__iexact=clean_email, is_active=False).update(is_active=True)
+    AuthorizedDevice.objects.filter(authorized_email__iexact=clean_email).exclude(
+        status=AuthorizedDevice.Status.BLOCKED
+    ).update(status=AuthorizedDevice.Status.APPROVED, expires_at=exp_dt)
+
+    if send_invite_email:
+        try:
+            exp_str = f"{timezone.localtime(exp_dt).strftime('%Y-%m-%d %H:%M')} ({hours}h)"
+            email_service.send_access_activated_email(
+                to_email=clean_email,
+                username=req.full_name or req.username or "Operator",
+                activation_code=req.activation_code,
+                login_url=invite_url or "https://close.kirex.online/signup/",
+                expires_at_display=exp_str,
+                is_invitation=True,
+            )
+        except Exception as exc:
+            logger.debug("Email invitation send notice: %s", exc)
+
     return req
 
 
@@ -785,37 +1065,47 @@ def approve_access_request(
     request_id_or_email_or_token: Any,
     admin_user: Optional[User] = None,
     max_devices_allowed: Optional[int] = None,
+    duration_hours: Any = None,
+    **_kwargs: Any,
 ) -> Tuple[bool, str, Optional[EmailAccessRequest]]:
     """
-    Approves a pending EmailAccessRequest, activates the associated User account,
-    marks the requester's AuthorizedDevice as APPROVED, and sends an activation notification email.
+    Approves a pending EmailAccessRequest with a **time-bound** expiration window (`expires_at`),
+    activates the User account, approves associated device(s), and emails the activation code.
     """
-    q_val = str(request_id_or_email_or_token or "").strip()
-    if not q_val:
-        return False, "Missing request identifier.", None
+    if isinstance(request_id_or_email_or_token, EmailAccessRequest):
+        req_obj: Optional[EmailAccessRequest] = request_id_or_email_or_token
+    else:
+        q_val = str(request_id_or_email_or_token or "").strip()
+        if not q_val:
+            return False, "Missing request identifier.", None
+        req_obj = EmailAccessRequest.objects.filter(pk=int(q_val)).first() if q_val.isdigit() else None
+        if not req_obj:
+            req_obj = EmailAccessRequest.objects.filter(
+                Q(activation_token=q_val) | Q(email__iexact=q_val) | Q(username__iexact=q_val)
+            ).order_by("-created_at").first()
 
-    req_obj: Optional[EmailAccessRequest] = None
-    if q_val.isdigit():
-        req_obj = EmailAccessRequest.objects.filter(pk=int(q_val)).first()
     if not req_obj:
-        req_obj = EmailAccessRequest.objects.filter(
-            Q(activation_token=q_val) | Q(email__iexact=q_val) | Q(username__iexact=q_val)
-        ).order_by("-created_at").first()
+        return False, "Access request not found.", None
 
-    if not req_obj:
-        return False, f"No access request found matching '{q_val}'.", None
-
+    sec_cfg = get_security_access_config()
+    hours = parse_duration_hours(
+        duration_hours if duration_hours is not None else req_obj.duration_hours,
+        default_hours=sec_cfg["default_duration_hours"],
+    )
     now = timezone.now()
+    exp_dt = now + timedelta(hours=hours)
+
     req_obj.status = EmailAccessRequest.Status.APPROVED
+    req_obj.duration_hours = hours
+    req_obj.expires_at = exp_dt
     if max_devices_allowed is not None:
         req_obj.max_devices_allowed = max(1, int(max_devices_allowed))
     if not req_obj.activation_code:
         req_obj.activation_code = email_service.generate_2fa_code()
-    req_obj.reviewed_by = admin_user
+    req_obj.reviewed_by = admin_user if isinstance(admin_user, User) else None
     req_obj.reviewed_at = now
     req_obj.save()
 
-    # Activate any matching User account
     user = User.objects.filter(
         Q(email__iexact=req_obj.email) | (Q(username__iexact=req_obj.username) if req_obj.username else Q(pk__in=[]))
     ).first()
@@ -823,7 +1113,6 @@ def approve_access_request(
         user.is_active = True
         user.save(update_fields=["is_active"])
 
-    # Approve associated device(s)
     dev_q = Q(authorized_email__iexact=req_obj.email)
     if req_obj.device_id:
         dev_q |= Q(device_id=req_obj.device_id)
@@ -835,8 +1124,9 @@ def approve_access_request(
     AuthorizedDevice.objects.filter(dev_q).update(
         status=AuthorizedDevice.Status.APPROVED,
         block_reason="",
-        approved_by=admin_user,
+        approved_by=admin_user if isinstance(admin_user, User) else None,
         approved_at=now,
+        expires_at=exp_dt,
     )
 
     if req_obj.device_id and not AuthorizedDevice.objects.filter(device_id=req_obj.device_id).exists():
@@ -847,23 +1137,114 @@ def approve_access_request(
             device_name=req_obj.device_name or "Approved Operator Device",
             linked_via=AuthorizedDevice.LinkedVia.EMAIL_ACTIVATION,
             ip_address=req_obj.client_ip,
-            mac_address=req_obj.mac_address,
+            mac_address=req_obj.mac_address or resolve_client_mac_address(req_obj.client_ip),
             status=AuthorizedDevice.Status.APPROVED,
-            approved_by=admin_user,
+            approved_by=admin_user if isinstance(admin_user, User) else None,
             approved_at=now,
+            expires_at=exp_dt,
         )
 
-    # Send activation confirmation email
+    exp_str = f"{timezone.localtime(exp_dt).strftime('%Y-%m-%d %H:%M')} ({hours}h)"
     try:
         email_service.send_access_activated_email(
             to_email=req_obj.email,
             username=req_obj.username or req_obj.full_name or "Operator",
             activation_code=req_obj.activation_code,
+            expires_at_display=exp_str,
+            is_invitation=False,
         )
     except Exception as exc:
         logger.debug("Activation email notice: %s", exc)
 
-    return True, f"Approved access for {req_obj.email} and unlocked associated device(s).", req_obj
+    return True, f"Approved {req_obj.email} for {hours}h (expires {exp_str}).", req_obj
+
+
+def extend_or_set_expiry(
+    target_email_or_device: str,
+    duration_hours: Any = 24,
+    admin_user: Optional[User] = None,
+) -> Tuple[bool, str]:
+    """Extends or sets the time-bound access expiration window (from now) for an email or device."""
+    raw = str(target_email_or_device or "").strip()
+    if not raw:
+        return False, "Target email or device ID is required."
+
+    hours = parse_duration_hours(duration_hours)
+    now = timezone.now()
+    exp_dt = now + timedelta(hours=hours)
+    exp_str = f"{timezone.localtime(exp_dt).strftime('%Y-%m-%d %H:%M')} ({hours}h)"
+
+    updated = 0
+    if "@" in raw or raw.isdigit():
+        req_qs = (
+            EmailAccessRequest.objects.filter(pk=int(raw))
+            if raw.isdigit()
+            else EmailAccessRequest.objects.filter(email__iexact=raw)
+        )
+        for req in req_qs:
+            req.status = EmailAccessRequest.Status.APPROVED
+            req.duration_hours = hours
+            req.expires_at = exp_dt
+            req.reviewed_by = admin_user if isinstance(admin_user, User) else None
+            req.reviewed_at = now
+            req.save()
+            AuthorizedDevice.objects.filter(authorized_email__iexact=req.email).exclude(
+                status=AuthorizedDevice.Status.BLOCKED
+            ).update(status=AuthorizedDevice.Status.APPROVED, expires_at=exp_dt)
+            updated += 1
+
+    dev_q = Q(device_id=raw) | Q(authorized_email__iexact=raw)
+    norm_mac = normalize_mac_address(raw)
+    if norm_mac:
+        dev_q |= Q(mac_address__iexact=norm_mac)
+    dev_cnt = AuthorizedDevice.objects.filter(dev_q).update(
+        status=AuthorizedDevice.Status.APPROVED,
+        block_reason="",
+        expires_at=exp_dt,
+    )
+    updated += dev_cnt
+
+    if updated == 0:
+        return False, f"No email or device found matching '{raw}'."
+    return True, f"Access window set to {hours}h (valid until {exp_str})."
+
+
+def expire_immediately(
+    target_email_or_device: str,
+    admin_user: Optional[User] = None,
+) -> Tuple[bool, str]:
+    """Immediately expires time-bound access for an email or device without IP-banning."""
+    raw = str(target_email_or_device or "").strip()
+    if not raw:
+        return False, "Target email or device ID is required."
+
+    now = timezone.now()
+    updated = 0
+    req_qs = (
+        EmailAccessRequest.objects.filter(pk=int(raw))
+        if raw.isdigit()
+        else EmailAccessRequest.objects.filter(email__iexact=raw)
+    )
+    for req in req_qs:
+        req.status = EmailAccessRequest.Status.EXPIRED
+        req.expires_at = now
+        req.reviewed_by = admin_user if isinstance(admin_user, User) else None
+        req.reviewed_at = now
+        req.save()
+        AuthorizedDevice.objects.filter(authorized_email__iexact=req.email).update(
+            status=AuthorizedDevice.Status.EXPIRED,
+            expires_at=now,
+        )
+        updated += 1
+
+    dev_cnt = AuthorizedDevice.objects.filter(Q(device_id=raw) | Q(authorized_email__iexact=raw)).update(
+        status=AuthorizedDevice.Status.EXPIRED,
+        expires_at=now,
+    )
+    updated += dev_cnt
+    if updated == 0:
+        return False, f"No active grant found matching '{raw}'."
+    return True, f"Immediately expired access for '{raw}'."
 
 
 def activate_with_code(
@@ -872,13 +1253,12 @@ def activate_with_code(
     activation_code: str,
 ) -> Tuple[bool, str, Optional[AuthorizedDevice]]:
     """
-    Allows an operator on a pending or new device to unlock access immediately using their
-    email and 6-digit activation_code.
+    Unlocks a device using an email and 6-digit activation code, enforcing time-bound expiry.
     """
     clean_email = (email or "").strip().lower()
     clean_code = (activation_code or "").strip()
     if not clean_email or not clean_code:
-        return False, "Both email address and activation code are required.", None
+        return False, "Email and 6-digit code are required.", None
 
     req_obj = EmailAccessRequest.objects.filter(
         email__iexact=clean_email,
@@ -888,11 +1268,30 @@ def activate_with_code(
     ).first()
 
     if not req_obj:
-        return False, "Invalid email or activation code. Please check with your supervisor.", None
+        return False, "Invalid email or activation code.", None
 
+    now = timezone.now()
+    if req_obj.status == EmailAccessRequest.Status.EXPIRED or (req_obj.expires_at and now >= req_obj.expires_at):
+        req_obj.status = EmailAccessRequest.Status.EXPIRED
+        req_obj.save(update_fields=["status", "updated_at"])
+        return False, "This activation code has expired. Please submit a new access request.", None
+
+    # Ensure time-bound window is set
+    if not req_obj.expires_at:
+        sec_cfg = get_security_access_config()
+        hours = req_obj.duration_hours or sec_cfg["default_duration_hours"]
+        req_obj.expires_at = now + timedelta(hours=hours)
+
+    ident = extract_device_identity(request)
     req_obj.status = EmailAccessRequest.Status.APPROVED
     req_obj.email_verified = True
-    req_obj.save(update_fields=["status", "email_verified", "updated_at"])
+    if ident["mac_address"]:
+        req_obj.mac_address = ident["mac_address"]
+    if ident["client_ip"]:
+        req_obj.client_ip = ident["client_ip"]
+    if ident["device_id"]:
+        req_obj.device_id = ident["device_id"]
+    req_obj.save()
 
     user = User.objects.filter(email__iexact=clean_email).first()
     if user and not user.is_active:
@@ -904,28 +1303,26 @@ def activate_with_code(
         user=user,
         linked_via=AuthorizedDevice.LinkedVia.EMAIL_ACTIVATION,
         force_approve=True,
+        expires_at=req_obj.expires_at,
     )
     if not dev.authorized_email:
         dev.authorized_email = clean_email
         dev.save(update_fields=["authorized_email"])
 
-    return True, f"Device successfully activated for {clean_email}!", dev
+    return True, f"Device activated for {clean_email} ({format_expiry_countdown(req_obj.expires_at)}).", dev
 
 
 def block_device_or_network_target(
     target: str,
-    reason: str = "Blocked by administrator",
+    reason: str = "Blocked via TUI Security",
     admin_user: Optional[User] = None,
     **_kwargs: Any,
 ) -> Tuple[bool, str, Optional[AuthorizedDevice]]:
-    """
-    Blocks a device by Device ID, MAC address (`AA:BB:CC:DD:EE:FF`), IP address, or CIDR subnet.
-    """
+    """Blocks a device by Device ID, MAC address (`AA:BB:CC:DD:EE:FF`), IP address, or CIDR subnet."""
     raw = (target or "").strip()
     if not raw:
         return False, "Target IP, MAC address, or Device ID is required.", None
 
-    # 1. Check if target matches an existing AuthorizedDevice ID or PK
     dev: Optional[AuthorizedDevice] = None
     if raw.isdigit():
         dev = AuthorizedDevice.objects.filter(pk=int(raw)).first()
@@ -938,13 +1335,12 @@ def block_device_or_network_target(
         dev.save(update_fields=["status", "block_reason", "last_seen_at"])
         return True, f"Blocked device '{dev.device_name}' ({dev.device_id}).", dev
 
-    # 2. Check if target is a MAC address
     norm_mac = normalize_mac_address(raw)
     if norm_mac:
         dev = AuthorizedDevice.objects.filter(mac_address__iexact=norm_mac).first()
         if dev:
             dev.status = AuthorizedDevice.Status.BLOCKED
-            dev.block_reason = reason or f"MAC {norm_mac} blocked by administrator"
+            dev.block_reason = reason or f"MAC {norm_mac} blocked"
             dev.save(update_fields=["status", "block_reason", "last_seen_at"])
         else:
             dev = AuthorizedDevice.objects.create(
@@ -954,19 +1350,13 @@ def block_device_or_network_target(
                 linked_via=AuthorizedDevice.LinkedVia.ADMIN_RULE,
                 mac_address=norm_mac,
                 status=AuthorizedDevice.Status.BLOCKED,
-                block_reason=reason or f"MAC {norm_mac} blocked by administrator",
-                approved_by=admin_user,
+                block_reason=reason or f"MAC {norm_mac} blocked",
+                approved_by=admin_user if isinstance(admin_user, User) else None,
             )
         return True, f"Blocked hardware MAC address {norm_mac}.", dev
 
-    # 3. Check if target is an IPv4/IPv6 address or CIDR subnet
     try:
-        if "/" in raw:
-            net = ipaddress.ip_network(raw, strict=False)
-            rule_str = str(net)
-        else:
-            addr = ipaddress.ip_address(raw)
-            rule_str = str(addr)
+        rule_str = str(ipaddress.ip_network(raw, strict=False)) if "/" in raw else str(ipaddress.ip_address(raw))
         rule_id = f"BLOCK-IP-{re.sub(r'[^0-9A-Fa-f]', '_', rule_str)}"
         dev, _ = AuthorizedDevice.objects.update_or_create(
             device_id=rule_id,
@@ -977,15 +1367,15 @@ def block_device_or_network_target(
                 "ip_address": rule_str if "/" not in rule_str else "",
                 "pinned_ip_cidr": rule_str,
                 "status": AuthorizedDevice.Status.BLOCKED,
-                "block_reason": reason or f"IP/Subnet {rule_str} blocked by administrator",
-                "approved_by": admin_user,
+                "block_reason": reason or f"IP/Subnet {rule_str} blocked",
+                "approved_by": admin_user if isinstance(admin_user, User) else None,
             },
         )
         return True, f"Blocked IP/Subnet {rule_str}.", dev
     except ValueError:
         pass
 
-    return False, f"Unrecognized target '{raw}'. Enter a valid IP, CIDR, MAC address, or Device ID.", None
+    return False, f"Invalid target '{raw}'. Enter IP, CIDR, MAC, or Device ID.", None
 
 
 def unblock_device_or_target(
@@ -1016,8 +1406,8 @@ def unblock_device_or_target(
         else:
             dev.status = AuthorizedDevice.Status.APPROVED
             dev.block_reason = ""
-            dev.approved_by = admin_user
+            dev.approved_by = admin_user if isinstance(admin_user, User) else None
             dev.approved_at = now
             dev.save(update_fields=["status", "block_reason", "approved_by", "approved_at"])
 
-    return True, f"Unblocked and approved {len(matched)} device/rule(s) matching '{raw}'."
+    return True, f"Unblocked {len(matched)} device/rule(s) matching '{raw}'."

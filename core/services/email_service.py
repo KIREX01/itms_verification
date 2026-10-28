@@ -666,33 +666,48 @@ def send_access_activated_email(
     username: str = "Operator",
     activation_code: str = "",
     login_url: str = "",
+    expires_at_display: str = "",
+    is_invitation: bool = False,
 ) -> Tuple[bool, str]:
-    """Notifies an operator that their email and device access request has been approved."""
+    """Notifies an operator that their time-bound email access or invitation has been granted."""
     if not to_email or "@" not in to_email:
         return False, "Valid recipient email required."
 
     api_key = get_resend_api_key()
     from_email = get_resend_from_email()
-    target_url = login_url or "https://close.kirex.online/login/"
+    target_url = login_url or "https://close.kirex.online/signup/"
+    heading = "✉️ Operator Invitation — CLOSE Copilot" if is_invitation else "✅ Access Approved — CLOSE Copilot"
+    exp_line_txt = f"Valid Until:     {expires_at_display}\n" if expires_at_display else ""
+    exp_line_html = (
+        f'<p style="font-size:13px;color:#fcd34d;"><strong>⏳ Time-Bound Access Valid Until:</strong> {expires_at_display}</p>'
+        if expires_at_display else ""
+    )
     text_content = (
-        f"CLOSE COPILOT - ACCESS ACTIVATED\n\n"
+        f"CLOSE COPILOT - TIME-BOUND ACCESS GRANTED\n\n"
         f"Hello {username},\n\n"
-        f"Your email ({to_email}) and device have been approved for CLOSE Copilot.\n"
+        f"Your email ({to_email}) has been granted time-bound access to CLOSE Copilot.\n"
         f"Activation Code: {activation_code}\n"
-        f"Sign In URL: {target_url}\n"
+        f"{exp_line_txt}"
+        f"Portal URL:      {target_url}\n"
     )
     if not api_key:
-        logger.info("[ACCESS ACTIVATED DEV FALLBACK] Approved %s (Code: %s)", _sanitize_log_str(to_email), _sanitize_log_str(activation_code))
-        return True, "Simulated activation email logged."
+        logger.info(
+            "[ACCESS ACTIVATED DEV FALLBACK] Granted %s (Code: %s, Expires: %s)",
+            _sanitize_log_str(to_email),
+            _sanitize_log_str(activation_code),
+            _sanitize_log_str(expires_at_display or "N/A"),
+        )
+        return True, "Simulated invitation/activation email logged."
 
     html_content = f"""<!DOCTYPE html>
 <html><body style="background:#0b0d13;color:#e1e4ea;font-family:sans-serif;padding:20px;">
   <div style="max-width:520px;margin:0 auto;background:#141722;border:1px solid #282d3d;border-radius:10px;padding:24px;">
-    <h2 style="color:#22c55e;margin-top:0;">✅ Access Approved — CLOSE Copilot</h2>
+    <h2 style="color:#ffd100;margin-top:0;">{heading}</h2>
     <p>Hello <strong>{username}</strong>,</p>
-    <p>Your operator email (<strong>{to_email}</strong>) and device have been authorized.</p>
-    <p><strong>Activation Code:</strong> <code style="font-size:20px;color:#ffd100;font-weight:bold;">{activation_code}</code></p>
-    <p style="margin-top:20px;"><a href="{target_url}" style="background:#ffd100;color:#000;padding:10px 22px;border-radius:6px;font-weight:800;text-decoration:none;">Sign In to CLOSE Copilot &rarr;</a></p>
+    <p>Your operator email (<strong>{to_email}</strong>) has been granted time-bound access to <strong>CLOSE Copilot</strong>.</p>
+    <p><strong>6-Digit Activation Code:</strong> <code style="font-size:20px;color:#ffd100;font-weight:bold;">{activation_code}</code></p>
+    {exp_line_html}
+    <p style="margin-top:20px;"><a href="{target_url}" style="background:#ffd100;color:#000;padding:10px 22px;border-radius:6px;font-weight:800;text-decoration:none;">Open CLOSE Copilot &rarr;</a></p>
   </div>
 </body></html>"""
 
@@ -702,15 +717,15 @@ def send_access_activated_email(
             json={
                 "from": from_email,
                 "to": [to_email],
-                "subject": "✅ CLOSE Copilot Access Approved",
+                "subject": "✉️ CLOSE Copilot Access Invitation" if is_invitation else "✅ CLOSE Copilot Access Approved",
                 "html": html_content,
                 "text": text_content,
             },
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             timeout=10,
         )
-        return resp.status_code in (200, 201), "Activation email sent."
+        return resp.status_code in (200, 201), "Email sent."
     except Exception as exc:
-        logger.warning("Failed sending activation email: %s", exc)
+        logger.warning("Failed sending activation/invitation email: %s", exc)
         return False, str(exc)
 

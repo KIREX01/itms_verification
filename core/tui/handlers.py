@@ -30,7 +30,7 @@ class NavigationHandlersMixin:
         try:
             activity = self.query_one("#activity-container")
             pane_id = getattr(event.pane, "id", "")
-            if pane_id in ("tab-settings", "tab-reports", "tab-stock"):
+            if pane_id in ("tab-settings", "tab-reports", "tab-stock", "tab-access"):
                 activity.display = False
                 if pane_id == "tab-reports":
                     try:
@@ -42,6 +42,13 @@ class NavigationHandlersMixin:
                         stock_p = self.query_one("#stock-pane")
                         if hasattr(stock_p, "action_refresh_stock"):
                             stock_p.action_refresh_stock()
+                    except Exception:
+                        pass
+                elif pane_id == "tab-access":
+                    try:
+                        access_p = self.query_one("#access-pane")
+                        if hasattr(access_p, "refresh_access_data"):
+                            access_p.refresh_access_data()
                     except Exception:
                         pass
                 try:

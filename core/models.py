@@ -1270,6 +1270,7 @@ class AuthorizedDevice(models.Model):
         PENDING = "PENDING", "Pending Approval"
         BLOCKED = "BLOCKED", "Blocked"
         REVOKED = "REVOKED", "Revoked"
+        EXPIRED = "EXPIRED", "Expired (Time-Bound)"
 
     class DeviceType(models.TextChoices):
         DESKTOP = "DESKTOP", "Desktop / Laptop Console"
@@ -1374,6 +1375,7 @@ class EmailAccessRequest(models.Model):
         PRE_APPROVED = "PRE_APPROVED", "Pre-Approved (Ready for Signup)"
         PENDING = "PENDING", "Pending Administrator Approval"
         APPROVED = "APPROVED", "Approved & Active"
+        EXPIRED = "EXPIRED", "Expired (Time-Bound)"
         REJECTED = "REJECTED", "Rejected"
         BLOCKED = "BLOCKED", "Blocked"
 
@@ -1400,6 +1402,16 @@ class EmailAccessRequest(models.Model):
     max_devices_allowed = models.IntegerField(
         default=4,
         help_text="Maximum concurrent devices allowed to share this account (e.g. Team Leader Desktop + Companion Phones)",
+    )
+    duration_hours = models.IntegerField(
+        default=24,
+        help_text="Time-bound access duration in hours when email is invited or approved",
+    )
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="UTC timestamp when granted email access expires",
     )
     reviewed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

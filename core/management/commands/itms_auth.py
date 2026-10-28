@@ -1,5 +1,5 @@
 """
-ITMS Web App Authentication, Connectivity & Device/Email Access Control Command.
+ITMS Web App Authentication, Connectivity & Time-Bound Device/Email Access Control Command.
 
 Use this command to:
   1. Ping https://stock.itms.ug and check server availability / SSL health.
@@ -7,9 +7,10 @@ Use this command to:
   3. Inspect active token validity and remaining TTL.
   4. Test token refresh mechanics via the refresh token.
   5. Clear stored credentials and logout.
-  6. Manage Device (IP, CIDR, MAC, Device ID) & Email Access Control from CLI.
+  6. Manage Time-Bound Email Invitations, Expirations & IP/MAC/Device Firewall from CLI.
 """
 from django.core.management.base import BaseCommand
+from django.utils import timezone
 
 from core.models import AuthorizedDevice, EmailAccessRequest
 from core.services import device_access_service
@@ -17,7 +18,7 @@ from core.services.itms_client import ITMSAuthError, ITMSConnectionError, defaul
 
 
 class Command(BaseCommand):
-    help = "Manage ITMS authentication and Device/IP/MAC & Email Access Control."
+    help = "Manage ITMS authentication and Time-Bound Device/IP/MAC & Email Access Control."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -53,18 +54,30 @@ class Command(BaseCommand):
             help="Custom login endpoint path (e.g. /api/auth/login or /site/login).",
         )
 
-        # Device & Email Access Control CLI Flags
+        # Time-Bound Email & Device/MAC/IP Access Control CLI Flags
         parser.add_argument(
             "--list-devices", action="store_true",
-            help="List registered devices, pending email access requests, and blocked IPs/MACs.",
+            help="Auto-sync active accounts/MACs and list devices, time-bound grants, and firewall rules.",
         )
         parser.add_argument(
             "--preapprove", type=str, default=None,
-            help="Pre-approve an operator email address and generate a 6-digit activation code.",
+            help="Send time-bound email invitation and generate a 6-digit activation code.",
         )
         parser.add_argument(
             "--approve", type=str, default=None,
-            help="Approve a pending email address or EmailAccessRequest ID.",
+            help="Approve a pending email address or EmailAccessRequest ID with a time-bound window.",
+        )
+        parser.add_argument(
+            "--hours", type=str, default="24h",
+            help="Time-bound access duration (e.g. 12h, 24h, 7d, 30d). Default: 24h.",
+        )
+        parser.add_argument(
+            "--extend", type=str, default=None,
+            help="Extend/set time-bound window for an email or device_id using --hours.",
+        )
+        parser.add_argument(
+            "--expire", type=str, default=None,
+            help="Immediately expire time-bound access for an email or device_id.",
         )
         parser.add_argument(
             "--block", type=str, default=None,
@@ -76,29 +89,34 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--mode", type=str, choices=["STANDARD", "STRICT"], default=None,
-            help="Set access control mode: STANDARD (blocklist + shared devices) or STRICT (require email pre-approval).",
+            help="Set access control mode: STANDARD or STRICT (require time-bound email pre-approval).",
         )
 
     def _handle_security_options(self, options) -> bool:
         handled = False
+        duration_arg = options.get("hours") or "24h"
 
         if options.get("mode"):
             mode = options["mode"].upper()
             strict = mode == "STRICT"
-            device_access_service.update_security_access_config({
-                "mode": mode,
-                "require_email_approval": strict,
-            })
+            device_access_service.update_security_access_config(
+                mode=mode,
+                require_email_approval=strict,
+            )
             self.stdout.write(self.style.SUCCESS(f"Security access mode updated to {mode} (require_email_approval={strict})."))
             handled = True
 
         if options.get("preapprove"):
             email = options["preapprove"].strip().lower()
-            req = device_access_service.preapprove_operator_email(email, reviewed_by="cli_admin")
+            req = device_access_service.preapprove_operator_email(
+                email, duration_hours=duration_arg
+            )
+            exp_str = timezone.localtime(req.expires_at).strftime("%Y-%m-%d %H:%M") if req.expires_at else "N/A"
             self.stdout.write(
                 self.style.SUCCESS(
-                    f"Pre-approved email: {req.email}\n"
+                    f"Time-bound invitation created for: {req.email}\n"
                     f"  6-Digit Activation Code: {req.activation_code}\n"
+                    f"  Duration Window        : {req.duration_hours}h (Expires: {exp_str})\n"
                     f"  Status                 : {req.status}"
                 )
             )
@@ -106,64 +124,66 @@ class Command(BaseCommand):
 
         if options.get("approve"):
             target = options["approve"].strip()
-            req = (
-                EmailAccessRequest.objects.filter(pk=int(target)).first()
-                if target.isdigit()
-                else EmailAccessRequest.objects.filter(email__iexact=target).first()
+            ok, msg, req = device_access_service.approve_access_request(
+                target, duration_hours=duration_arg
             )
-            if req:
-                device_access_service.approve_access_request(req, reviewed_by="cli_admin")
-                self.stdout.write(
-                    self.style.SUCCESS(
-                        f"Approved email access request for {req.email} (Activation Code: {req.activation_code})."
-                    )
-                )
+            if ok and req:
+                self.stdout.write(self.style.SUCCESS(f"{msg} (Activation Code: {req.activation_code})"))
             else:
-                req = device_access_service.preapprove_operator_email(target, reviewed_by="cli_admin")
+                req = device_access_service.preapprove_operator_email(target, duration_hours=duration_arg)
                 self.stdout.write(
                     self.style.SUCCESS(
-                        f"Created & approved email entry for {req.email} (Activation Code: {req.activation_code})."
+                        f"Created & approved time-bound grant for {req.email} ({req.duration_hours}h, Code: {req.activation_code})."
                     )
                 )
+            handled = True
+
+        if options.get("extend"):
+            ok, msg = device_access_service.extend_or_set_expiry(
+                options["extend"], duration_hours=duration_arg
+            )
+            self.stdout.write((self.style.SUCCESS if ok else self.style.ERROR)(msg))
+            handled = True
+
+        if options.get("expire"):
+            ok, msg = device_access_service.expire_immediately(options["expire"])
+            self.stdout.write((self.style.SUCCESS if ok else self.style.ERROR)(msg))
             handled = True
 
         if options.get("block"):
-            ok, msg = device_access_service.block_device_or_network_target(
-                options["block"], reason="Blocked via itms_auth CLI", actor="cli_admin"
+            ok, msg, _ = device_access_service.block_device_or_network_target(
+                options["block"], reason="Blocked via itms_auth CLI"
             )
-            style = self.style.SUCCESS if ok else self.style.ERROR
-            self.stdout.write(style(msg))
+            self.stdout.write((self.style.SUCCESS if ok else self.style.ERROR)(msg))
             handled = True
 
         if options.get("unblock"):
-            ok, msg = device_access_service.unblock_device_or_target(
-                options["unblock"], actor="cli_admin"
-            )
-            style = self.style.SUCCESS if ok else self.style.ERROR
-            self.stdout.write(style(msg))
+            ok, msg = device_access_service.unblock_device_or_target(options["unblock"])
+            self.stdout.write((self.style.SUCCESS if ok else self.style.ERROR)(msg))
             handled = True
 
         if options.get("list_devices"):
+            synced = device_access_service.sync_existing_active_accounts_and_devices()
             cfg = device_access_service.get_security_access_config()
             self.stdout.write("")
-            self.stdout.write("=== Device & Email Access Control Status ===")
+            self.stdout.write(f"=== Device, MAC/IP & Time-Bound Email Status (Auto-Synced: {synced}) ===")
             self.stdout.write(f"Mode                   : {cfg.get('mode')} (Strict Email Approval: {cfg.get('require_email_approval')})")
             self.stdout.write(f"Max Devices / Account  : {cfg.get('max_devices_per_account')}")
-            self.stdout.write(f"Blocked IPs            : {', '.join(cfg.get('blocked_ips') or []) or 'None'}")
-            self.stdout.write(f"Blocked Subnets (CIDR) : {', '.join(cfg.get('blocked_cidrs') or []) or 'None'}")
-            self.stdout.write(f"Blocked MAC Addresses  : {', '.join(cfg.get('blocked_macs') or []) or 'None'}")
+            self.stdout.write(f"Default Grant Window   : {cfg.get('default_duration_hours')}h")
             self.stdout.write("")
-            self.stdout.write("--- Email Access Requests ---")
-            for r in EmailAccessRequest.objects.all()[:30]:
+            self.stdout.write("--- Time-Bound Email Grants & Requests ---")
+            for r in EmailAccessRequest.objects.all()[:40]:
+                left = device_access_service.format_expiry_countdown(r.expires_at)
                 self.stdout.write(
-                    f"  [{r.id}] {r.email:<30} | Status: {r.status:<12} | Code: {r.activation_code or '-':<6} | IP: {r.ip_address or '-'} | MAC: {r.mac_address or '-'}"
+                    f"  [{r.id}] {r.email:<28} | {r.status:<12} | Code: {r.activation_code or '-':<6} | Left: {left:<14} | IP: {r.client_ip or '-'} | MAC: {r.mac_address or '-'}"
                 )
             self.stdout.write("")
-            self.stdout.write("--- Registered & Monitored Devices ---")
-            for d in AuthorizedDevice.objects.select_related("user").all()[:40]:
+            self.stdout.write("--- Active Accounts, Linked Devices & Firewall Rules ---")
+            for d in AuthorizedDevice.objects.select_related("user").all()[:60]:
                 uname = d.user.username if d.user else "-"
+                left = device_access_service.format_expiry_countdown(d.expires_at)
                 self.stdout.write(
-                    f"  [{d.status:<8}] {d.device_name:<24} | User: {uname:<14} | IP: {d.ip_address or '-':<15} | MAC: {d.mac_address or '-':<17} | Via: {d.linked_via} | ID: {d.device_id[:12]}"
+                    f"  [{d.status:<8}] {d.device_name:<24} | User: {uname:<14} | IP: {d.ip_address or '-':<15} | MAC: {d.mac_address or '-':<17} | Left: {left:<14} | ID: {d.device_id[:16]}"
                 )
             handled = True
 
@@ -174,8 +194,6 @@ class Command(BaseCommand):
             return
 
         client = default_client
-
-        # If no specific action specified, default to showing status and pinging
         no_action = not any([
             options["ping"], options["login"], options["status"],
             options["refresh"], options["logout"],
@@ -246,6 +264,6 @@ class Command(BaseCommand):
             self.stdout.write(f"Has Access Token    : {'YES' if status['has_access_token'] else 'NO'}")
             self.stdout.write(f"Access Token Valid  : {'YES' if status['access_token_valid'] else 'NO / Expired'}")
             self.stdout.write(f"Has Refresh Token   : {'YES' if status['has_refresh_token'] else 'NO'}")
-            if status['expires_in_seconds'] is not None:
+            if status["expires_in_seconds"] is not None:
                 self.stdout.write(f"Expires In          : {status['expires_in_seconds']} seconds")
             self.stdout.write(f"Token Storage File  : {status['token_file']}")

@@ -1,8 +1,12 @@
+from datetime import timedelta
+from pathlib import Path
 from unittest.mock import patch
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from core.models import AuthorizedDevice, EmailAccessRequest
 from core.services import device_access_service
@@ -12,17 +16,11 @@ User = get_user_model()
 
 class DeviceAndEmailAccessControlTests(TestCase):
     def setUp(self):
-        # Reset security config to clean state before each test
         device_access_service.update_security_access_config({
-            "enabled": True,
             "mode": "STANDARD",
             "require_email_approval": False,
             "max_devices_per_account": 4,
-            "blocked_ips": [],
-            "blocked_cidrs": [],
-            "blocked_macs": [],
-            "allowed_ips": [],
-            "allowed_cidrs": [],
+            "default_duration_hours": 24,
         })
         self.user = User.objects.create_user(
             username="team_leader_ug",
@@ -49,21 +47,18 @@ class DeviceAndEmailAccessControlTests(TestCase):
             HTTP_X_DEVICE_MAC="DD:EE:FF:44:55:66",
         )
 
-        # 1. Team Leader logs in on Desktop
         resp1 = desktop_client.post(reverse("core:login"), {
             "username": "team_leader_ug",
             "password": "SecurePassword123!",
         })
         self.assertEqual(resp1.status_code, 302)
 
-        # 2. Fitter logs in on Mobile using the same account
         resp2 = mobile_client.post(reverse("core:login"), {
             "username": "team_leader_ug",
             "password": "SecurePassword123!",
         })
         self.assertEqual(resp2.status_code, 302)
 
-        # Both devices are registered as APPROVED for the same account
         devices = AuthorizedDevice.objects.filter(
             user=self.user,
             status=AuthorizedDevice.Status.APPROVED,
@@ -73,9 +68,26 @@ class DeviceAndEmailAccessControlTests(TestCase):
         self.assertIn("AA:BB:CC:11:22:33", macs)
         self.assertIn("DD:EE:FF:44:55:66", macs)
 
-        # Both can access protected endpoints concurrently
         self.assertEqual(desktop_client.get(reverse("core:api_stats")).status_code, 200)
         self.assertEqual(mobile_client.get(reverse("core:mobile_companion")).status_code, 200)
+
+    def test_auto_sync_existing_active_accounts_and_auto_fill_mac(self):
+        """
+        Already-active operator accounts are automatically registered into AuthorizedDevice
+        with their host/ARP IP and MAC address auto-populated.
+        """
+        self.assertEqual(AuthorizedDevice.objects.filter(user=self.user).count(), 0)
+        touched = device_access_service.sync_existing_active_accounts_and_devices()
+        self.assertGreaterEqual(touched, 1)
+
+        dev = AuthorizedDevice.objects.filter(user=self.user).first()
+        self.assertIsNotNone(dev)
+        self.assertEqual(dev.status, AuthorizedDevice.Status.APPROVED)
+        self.assertTrue(bool(dev.ip_address))
+        # Local host physical NIC / UUID MAC is automatically resolved and filled
+        expected_local_mac = device_access_service.resolve_local_host_mac_address()
+        if expected_local_mac:
+            self.assertEqual(dev.mac_address, expected_local_mac)
 
     def test_qr_code_pairing_token_auto_authorizes_mobile_companion(self):
         """
@@ -95,7 +107,6 @@ class DeviceAndEmailAccessControlTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn("itms_device_trust", resp.cookies)
 
-        # Verify the device was recorded as QR_PAIRING + APPROVED
         dev = AuthorizedDevice.objects.filter(mac_address="12:34:56:78:9A:BC").first()
         self.assertIsNotNone(dev)
         self.assertEqual(dev.status, AuthorizedDevice.Status.APPROVED)
@@ -114,42 +125,91 @@ class DeviceAndEmailAccessControlTests(TestCase):
         )
         bad_client.force_login(self.user)
 
-        # Initially allowed
         self.assertEqual(bad_client.get(reverse("core:api_stats")).status_code, 200)
 
-        # Block by MAC address
         ok, _, _ = device_access_service.block_device_or_network_target(
             "de-ad-be-ef-00-01",
             reason="Unauthorized external laptop",
-            actor="admin",
         )
         self.assertTrue(ok)
 
-        # API returns 403 JSON with DEVICE_BLOCKED
         api_resp = bad_client.get(reverse("core:api_stats"))
         self.assertEqual(api_resp.status_code, 403)
         api_data = api_resp.json()
         err_code = api_data.get("code") or (api_data.get("errors") or [{}])[0].get("code")
         self.assertIn(err_code, ("DEVICE_BLOCKED", "DEVICE_ACCESS_BLOCKED"))
 
-        # Browser page returns 403 access_request.html
         web_resp = bad_client.get(reverse("core:dashboard"))
         self.assertEqual(web_resp.status_code, 403)
-        self.assertContains(web_resp, "DEVICE &amp; EMAIL", status_code=403)
+        self.assertContains(web_resp, "VERIFICATION", status_code=403)
 
-        # Self-service /access/request/ remains open (200) even when blocked
         req_page = bad_client.get(reverse("core:access_request"))
         self.assertEqual(req_page.status_code, 200)
 
-        # Unblock MAC and verify access restored
         device_access_service.unblock_device_or_target("DE:AD:BE:EF:00:01")
         self.assertEqual(bad_client.get(reverse("core:api_stats")).status_code, 200)
 
-        # Block by IP address
         device_access_service.block_device_or_network_target("203.0.113.55")
         self.assertEqual(bad_client.get(reverse("core:api_stats")).status_code, 403)
         device_access_service.unblock_device_or_target("203.0.113.55")
         self.assertEqual(bad_client.get(reverse("core:api_stats")).status_code, 200)
+
+    @patch("core.services.email_service.send_access_activated_email")
+    def test_time_bound_email_invitation_expiration_and_renewal(self, mock_invite_email):
+        """
+        Every email granted access is time-bound (`duration_hours` + `expires_at`),
+        automatically blocks with 403 ACCESS_EXPIRED once elapsed, and can be renewed or expired via TUI.
+        """
+        mock_invite_email.return_value = (True, "Sent")
+
+        # 1. Invite email via Web UI / API for 12 hours
+        admin_client = Client()
+        admin_client.force_login(self.user)
+        invite_resp = admin_client.post(
+            reverse("core:api_security_action"),
+            data='{"action": "preapprove_email", "email": "shift_op@info.kirex.online", "duration_hours": 12}',
+            content_type="application/json",
+        )
+        self.assertEqual(invite_resp.status_code, 200)
+        payload = invite_resp.json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["duration_hours"], 12)
+        mock_invite_email.assert_called_once()
+
+        shift_user = User.objects.create_user(
+            username="shift_op",
+            email="shift_op@info.kirex.online",
+            password="ShiftPassword123!",
+            is_active=True,
+        )
+        op_client = Client(
+            HTTP_USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            REMOTE_ADDR="192.168.10.44",
+            HTTP_X_DEVICE_MAC="AA:22:33:44:55:66",
+        )
+        op_client.force_login(shift_user)
+
+        # Within the 12h window -> 200 OK
+        self.assertEqual(op_client.get(reverse("core:api_stats")).status_code, 200)
+
+        # Simulate window elapsing in the past -> automatic 403 ACCESS_EXPIRED
+        past_dt = timezone.now() - timedelta(minutes=5)
+        EmailAccessRequest.objects.filter(email="shift_op@info.kirex.online").update(expires_at=past_dt)
+        AuthorizedDevice.objects.filter(user=shift_user).update(expires_at=past_dt)
+
+        exp_resp = op_client.get(reverse("core:api_stats"))
+        self.assertEqual(exp_resp.status_code, 403)
+        self.assertEqual(exp_resp.json().get("code"), "ACCESS_EXPIRED")
+
+        # Extend window from TUI service ("7d" -> 168h) -> access immediately restored!
+        ok, _ = device_access_service.extend_or_set_expiry("shift_op@info.kirex.online", duration_hours="7d")
+        self.assertTrue(ok)
+        self.assertEqual(op_client.get(reverse("core:api_stats")).status_code, 200)
+
+        # Expire immediately from TUI -> blocked again with ACCESS_EXPIRED
+        ok_exp, _ = device_access_service.expire_immediately("shift_op@info.kirex.online")
+        self.assertTrue(ok_exp)
+        self.assertEqual(op_client.get(reverse("core:api_stats")).status_code, 403)
 
     @patch("core.services.email_service.send_2fa_verification_code")
     @patch("core.services.email_service.send_access_request_admin_alert")
@@ -157,12 +217,6 @@ class DeviceAndEmailAccessControlTests(TestCase):
     def test_strict_email_approval_and_activation_code_unlock(
         self, mock_activated_email, mock_admin_alert, mock_2fa_email
     ):
-        """
-        In STRICT mode:
-        1. Unapproved email signup completes 2FA but lands in PENDING (is_active=False).
-        2. Admin approval (or entering the 6-digit activation code at /access/activate/)
-           activates the account and authorizes the device.
-        """
         mock_2fa_email.return_value = (True, "Sent")
         mock_admin_alert.return_value = (True, "Sent")
         mock_activated_email.return_value = (True, "Sent")
@@ -178,7 +232,6 @@ class DeviceAndEmailAccessControlTests(TestCase):
             HTTP_X_DEVICE_MAC="AA:11:22:33:44:55",
         )
 
-        # Step 1: Sign up with an unapproved email
         resp = new_client.post(reverse("core:signup"), {
             "username": "new_fitter",
             "full_name": "Grace Auma",
@@ -189,12 +242,10 @@ class DeviceAndEmailAccessControlTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         pending = new_client.session["pending_signup"]
 
-        # Step 2: Verify 2FA OTP
         verify_resp = new_client.post(reverse("core:signup_verify"), {
             "action": "verify",
             "code": pending["code"],
         })
-        # Renders access_request.html (or redirects to /access/request/) because strict mode requires email approval
         self.assertIn(verify_resp.status_code, (200, 302))
 
         created_user = User.objects.get(username="new_fitter")
@@ -203,12 +254,11 @@ class DeviceAndEmailAccessControlTests(TestCase):
         access_req = EmailAccessRequest.objects.get(email="grace@info.kirex.online")
         self.assertEqual(access_req.status, EmailAccessRequest.Status.PENDING)
 
-        # Step 3: Admin approves the request via /api/security/action/
         admin_client = Client()
         admin_client.force_login(self.user)
         action_resp = admin_client.post(
             reverse("core:api_security_action"),
-            data='{"action": "approve_request", "request_id": %d}' % access_req.id,
+            data='{"action": "approve_request", "request_id": %d, "duration_hours": 24}' % access_req.id,
             content_type="application/json",
         )
         self.assertEqual(action_resp.status_code, 200)
@@ -218,8 +268,8 @@ class DeviceAndEmailAccessControlTests(TestCase):
         created_user.refresh_from_db()
         self.assertTrue(created_user.is_active)
         self.assertEqual(access_req.status, EmailAccessRequest.Status.APPROVED)
+        self.assertIsNotNone(access_req.expires_at)
 
-        # Step 4: Operator unlocks device with 6-digit activation code at /access/activate/
         unlock_resp = new_client.post(reverse("core:access_activate"), {
             "email": "grace@info.kirex.online",
             "activation_code": access_req.activation_code,
@@ -227,3 +277,23 @@ class DeviceAndEmailAccessControlTests(TestCase):
         self.assertEqual(unlock_resp.status_code, 302)
         self.assertEqual(unlock_resp["Location"], reverse("core:dashboard"))
         self.assertIn("itms_device_trust", unlock_resp.cookies)
+
+    def test_web_settings_minimal_and_tui_access_pane_instantiates(self):
+        """
+        Ensures Web UI Settings tab keeps ONLY Time-Bound Email Invitation (no firewall/device tables)
+        and TUI AccessControlPane instantiates cleanly.
+        """
+        tab_settings_path = Path(settings.BASE_DIR) / "core" / "templates" / "core" / "tabs" / "tab_settings.html"
+        html = tab_settings_path.read_text(encoding="utf-8")
+        self.assertIn("sendTimeBoundEmailInvite()", html)
+        self.assertIn("security-invite-duration", html)
+        self.assertNotIn("security-devices-tbody", html)
+        self.assertNotIn("security-requests-tbody", html)
+        self.assertNotIn("security-block-target", html)
+
+        from core.tui.access_pane import AccessControlPane
+        from core.tui.app import ITMSOperatorApp
+        pane = AccessControlPane(id="access-pane")
+        self.assertIsNotNone(pane)
+        app = ITMSOperatorApp()
+        self.assertTrue(hasattr(app, "action_tab_access"))

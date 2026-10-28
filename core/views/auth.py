@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
+from typing import Optional
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.models import User
+from django.db.models import Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.templatetags.static import static
@@ -16,8 +19,6 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_POST
 
-import json
-from django.db.models import Q
 from core.models import AuthorizedDevice, EmailAccessRequest
 from core.services import auth_service, device_access_service, device_service, email_service
 
@@ -36,7 +37,6 @@ def _redirect_after_auth(request: HttpRequest, next_url: str = "") -> HttpRespon
     if next_url and next_url != "/":
         return redirect(next_url)
 
-    # Device-aware routing
     if device_service.is_mobile_device(request):
         return redirect("core:mobile_companion")
     return redirect("core:dashboard")
@@ -63,7 +63,6 @@ def login_view(request: HttpRequest) -> HttpResponse:
 
         user, err = auth_service.authenticate_operator(username, password)
         if user is None:
-            # Check if account exists but is inactive (pending email/device approval)
             inactive_user = User.objects.filter(username=username, is_active=False).first()
             if inactive_user:
                 ident = device_access_service.extract_device_identity(request)
@@ -88,7 +87,7 @@ def login_view(request: HttpRequest) -> HttpResponse:
             ident = device_access_service.extract_device_identity(request)
             return render(request, "core/access_request.html", {
                 "blocked_code": "DEVICE_PENDING_APPROVAL",
-                "blocked_reason": dev_msg or "This device requires administrator approval before signing in.",
+                "blocked_reason": dev_msg or "This device or time-bound access window requires renewal.",
                 "device_identity": ident,
                 "device_obj": dev,
                 "prefill_email": user.email,
@@ -99,7 +98,6 @@ def login_view(request: HttpRequest) -> HttpResponse:
         resp = _redirect_after_auth(request, next_url)
         return device_access_service.attach_device_trust_cookie(resp, dev.device_id, user.email or user.username)
 
-    # If no users exist in the active database yet, prompt first-time onboarding
     if User.objects.count() == 0:
         return redirect("core:signup")
 
@@ -146,7 +144,6 @@ def signup_view(request: HttpRequest) -> HttpResponse:
                 "form_data": request.POST,
             })
 
-        # Initiate 2FA Email Verification
         enable_2fa = getattr(settings, "SIGNUP_2FA_ENABLED", True)
         if enable_2fa:
             code = email_service.generate_2fa_code()
@@ -156,21 +153,22 @@ def signup_view(request: HttpRequest) -> HttpResponse:
                 "email": email,
                 "password": password,
                 "code": code,
-                "expires_at": time.time() + 600,  # 10 minutes
+                "expires_at": time.time() + 600,
                 "last_sent_at": time.time(),
             }
             request.session.modified = True
 
             logo_url = request.build_absolute_uri(static("core/logos/android-chrome-192x192.png"))
             verify_url = request.build_absolute_uri(reverse("core:signup_verify")) + f"?code={code}"
-            ok, msg = email_service.send_2fa_verification_code(email, code, username=username, verify_url=verify_url, logo_url=logo_url)
+            ok, msg = email_service.send_2fa_verification_code(
+                email, code, username=username, verify_url=verify_url, logo_url=logo_url
+            )
             if not ok:
                 logger.warning("Failed to send 2FA email on signup: %s", msg)
                 messages.warning(request, f"Email delivery notice: {msg}")
 
             return redirect("core:signup_verify")
 
-        # Direct creation if 2FA is explicitly disabled
         preapproved = device_access_service.is_email_preapproved_or_active(email)
         user, err = auth_service.create_operator_account(
             username=username,
@@ -214,15 +212,24 @@ def signup_view(request: HttpRequest) -> HttpResponse:
             )
             messages.warning(
                 request,
-                "Your account has been created and is awaiting administrator email & device approval.",
+                "Account created and awaiting administrator time-bound activation.",
             )
             return redirect("core:access_request")
 
+        req_approved = device_access_service.create_or_update_access_request(
+            request=request,
+            email=email,
+            username=user.username,
+            full_name=full_name,
+            email_verified=True,
+            status=EmailAccessRequest.Status.APPROVED,
+        )
         dev, _, _ = device_access_service.register_or_refresh_authorized_device(
             request,
             user=user,
             linked_via=AuthorizedDevice.LinkedVia.EMAIL_ACTIVATION,
             force_approve=True,
+            expires_at=None if user.is_superuser else req_approved.expires_at,
         )
         auth_login(request, user)
         auth_service.save_remembered_session(user, remember=True)
@@ -253,7 +260,9 @@ def _process_signup_resend(request: HttpRequest, pending: dict, email: str, user
 
     logo_url = request.build_absolute_uri(static("core/logos/android-chrome-192x192.png"))
     verify_url = request.build_absolute_uri(reverse("core:signup_verify")) + f"?code={new_code}"
-    ok, msg = email_service.send_2fa_verification_code(email, new_code, username=username, verify_url=verify_url, logo_url=logo_url)
+    ok, msg = email_service.send_2fa_verification_code(
+        email, new_code, username=username, verify_url=verify_url, logo_url=logo_url
+    )
     return render(request, SIGNUP_VERIFY_TEMPLATE, {
         "email": email,
         "message": "A new 6-digit security code has been sent to your email.",
@@ -300,7 +309,6 @@ def signup_verify_view(request: HttpRequest) -> HttpResponse:
                 "error": otp_err,
             })
 
-        # Code is valid! Check if email is pre-approved or if Strict Approval Mode holds new signups
         is_preapproved = device_access_service.is_email_preapproved_or_active(email)
         user, err = auth_service.create_operator_account(
             username=pending["username"],
@@ -350,7 +358,9 @@ def signup_verify_view(request: HttpRequest) -> HttpResponse:
                 .exclude(email="")
                 .values_list("email", flat=True)
             )
-            approve_url = request.build_absolute_uri(reverse("core:access_review_token", args=[req_obj.activation_token]))
+            approve_url = request.build_absolute_uri(
+                reverse("core:access_review_token", args=[req_obj.activation_token])
+            )
             email_service.send_access_request_admin_alert(
                 admin_emails=admin_emails,
                 requester_email=email,
@@ -363,14 +373,13 @@ def signup_verify_view(request: HttpRequest) -> HttpResponse:
             )
             return render(request, "core/access_request.html", {
                 "blocked_code": "EMAIL_PENDING_APPROVAL",
-                "blocked_reason": f"Your email ({email}) has been verified! Your account and device are now queued for administrator activation.",
+                "blocked_reason": f"Email ({email}) verified. Awaiting administrator activation.",
                 "device_identity": ident,
                 "prefill_email": email,
                 "request_submitted": True,
             })
 
-        # Pre-approved or standard mode: mark EmailAccessRequest & AuthorizedDevice APPROVED and log in
-        device_access_service.create_or_update_access_request(
+        req_approved = device_access_service.create_or_update_access_request(
             request=request,
             email=email,
             username=user.username,
@@ -383,6 +392,7 @@ def signup_verify_view(request: HttpRequest) -> HttpResponse:
             user=user,
             linked_via=AuthorizedDevice.LinkedVia.EMAIL_ACTIVATION,
             force_approve=True,
+            expires_at=None if user.is_superuser else req_approved.expires_at,
         )
         auth_login(request, user)
         auth_service.save_remembered_session(user, remember=True)
@@ -407,9 +417,8 @@ def logout_view(request: HttpRequest) -> HttpResponse:
 
 def access_request_view(request: HttpRequest) -> HttpResponse:
     """
-    Self-service Email & Device Access Request and Activation Portal.
-    Reachable even when a device or IP is blocked or pending approval so legitimate
-    operators can request activation for their email/device or unlock with a 6-digit code.
+    Concise self-service Email & Device Access Request and Activation Portal.
+    Auto-captures IP, MAC, and Device ID in the background so the user only fills essential fields.
     """
     ident = device_access_service.extract_device_identity(request)
     message = ""
@@ -421,11 +430,11 @@ def access_request_view(request: HttpRequest) -> HttpResponse:
         full_name = (request.POST.get("full_name") or "").strip()
         username = (request.POST.get("username") or "").strip()
         facility_code = (request.POST.get("facility_code") or "AGM").strip().upper()
-        requested_role = (request.POST.get("requested_role") or "OPERATOR").strip().upper()
+        requested_role = (request.POST.get("requested_role") or "SHARED_TEAM").strip().upper()
         reason = (request.POST.get("reason") or "").strip()
 
         if not email or "@" not in email:
-            error = "A valid operator email address is required to request activation."
+            error = "Enter a valid work email address."
         else:
             req_obj = device_access_service.create_or_update_access_request(
                 request=request,
@@ -434,7 +443,7 @@ def access_request_view(request: HttpRequest) -> HttpResponse:
                 full_name=full_name,
                 facility_code=facility_code,
                 requested_role=requested_role,
-                reason=reason or "Self-service device/email access request",
+                reason=reason or "Access request",
                 status=EmailAccessRequest.Status.PENDING,
             )
             admin_emails = list(
@@ -442,7 +451,9 @@ def access_request_view(request: HttpRequest) -> HttpResponse:
                 .exclude(email="")
                 .values_list("email", flat=True)
             )
-            approve_url = request.build_absolute_uri(reverse("core:access_review_token", args=[req_obj.activation_token]))
+            approve_url = request.build_absolute_uri(
+                reverse("core:access_review_token", args=[req_obj.activation_token])
+            )
             email_service.send_access_request_admin_alert(
                 admin_emails=admin_emails,
                 requester_email=email,
@@ -454,11 +465,12 @@ def access_request_view(request: HttpRequest) -> HttpResponse:
                 approve_url=approve_url,
             )
             request_submitted = True
-            message = f"Activation request submitted for {email}! An administrator has been notified."
+            message = f"Request sent for {email}. Check your email for your 6-digit code once approved."
 
     return render(request, "core/access_request.html", {
         "device_identity": ident,
         "message": message,
+        "success_message": message,
         "error": error,
         "request_submitted": request_submitted,
         "prefill_email": request.GET.get("email", ""),
@@ -467,7 +479,7 @@ def access_request_view(request: HttpRequest) -> HttpResponse:
 
 @require_POST
 def access_activate_view(request: HttpRequest) -> HttpResponse:
-    """Unlocks a device and activates an email using a 6-digit activation code."""
+    """Unlocks a device and activates a time-bound email grant using a 6-digit activation code."""
     email = (request.POST.get("email") or "").strip().lower()
     code = (request.POST.get("activation_code") or "").strip()
     ident = device_access_service.extract_device_identity(request)
@@ -496,6 +508,7 @@ def access_activate_view(request: HttpRequest) -> HttpResponse:
 def access_review_token_view(request: HttpRequest, token: str) -> HttpResponse:
     """One-click email approval endpoint for administrators."""
     action = (request.GET.get("action") or "approve").strip().lower()
+    hours = request.GET.get("hours")
     req_obj = EmailAccessRequest.objects.filter(activation_token=token).first()
     if not req_obj:
         return HttpResponse("Invalid or expired access review token.", status=404, content_type="text/plain")
@@ -512,7 +525,9 @@ def access_review_token_view(request: HttpRequest, token: str) -> HttpResponse:
             )
         messages.warning(request, f"Blocked access request and device for {req_obj.email}.")
     else:
-        ok, msg, _ = device_access_service.approve_access_request(token, admin_user=admin_user)
+        ok, msg, _ = device_access_service.approve_access_request(
+            token, admin_user=admin_user, duration_hours=hours
+        )
         if ok:
             messages.success(request, msg)
         else:
@@ -525,10 +540,11 @@ def access_review_token_view(request: HttpRequest, token: str) -> HttpResponse:
 
 @require_GET
 def api_security_overview(request: HttpRequest) -> JsonResponse:
-    """Returns device registry, email access requests, and security configuration for the Settings UI."""
+    """Returns auto-synced device registry, time-bound email grants, and security configuration."""
     if not (getattr(request, "user", None) and request.user.is_authenticated):
         return JsonResponse({"success": False, "error": "Authentication required."}, status=401)
 
+    device_access_service.sync_existing_active_accounts_and_devices()
     sec_cfg = device_access_service.get_security_access_config()
     current_ident = device_access_service.extract_device_identity(request)
 
@@ -542,11 +558,14 @@ def api_security_overview(request: HttpRequest) -> JsonResponse:
             "linked_via": d.linked_via,
             "username": d.user.username if d.user else "",
             "email": d.authorized_email or (d.user.email if d.user else ""),
+            "authorized_email": d.authorized_email or (d.user.email if d.user else ""),
             "ip_address": d.ip_address,
             "pinned_ip_cidr": d.pinned_ip_cidr,
             "mac_address": d.mac_address,
             "status": d.status,
             "block_reason": d.block_reason,
+            "expires_at": timezone.localtime(d.expires_at).strftime("%Y-%m-%d %H:%M") if d.expires_at else "",
+            "expires_countdown": device_access_service.format_expiry_countdown(d.expires_at),
             "is_current_device": (d.device_id == current_ident.get("device_id")),
             "last_seen_at": d.last_seen_at.strftime("%Y-%m-%d %H:%M:%S") if d.last_seen_at else "",
         }
@@ -566,11 +585,15 @@ def api_security_overview(request: HttpRequest) -> JsonResponse:
             "device_id": r.device_id,
             "mac_address": r.mac_address,
             "client_ip": r.client_ip,
+            "ip_address": r.client_ip,
             "device_name": r.device_name,
             "email_verified": r.email_verified,
             "status": r.status,
             "activation_code": r.activation_code,
             "max_devices_allowed": r.max_devices_allowed,
+            "duration_hours": r.duration_hours,
+            "expires_at": timezone.localtime(r.expires_at).strftime("%Y-%m-%d %H:%M") if r.expires_at else "",
+            "expires_countdown": device_access_service.format_expiry_countdown(r.expires_at),
             "created_at": r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "",
         }
         for r in requests_qs
@@ -585,6 +608,7 @@ def api_security_overview(request: HttpRequest) -> JsonResponse:
         "summary": {
             "approved_devices": sum(1 for d in devices_list if d["status"] == "APPROVED"),
             "blocked_devices": sum(1 for d in devices_list if d["status"] in ("BLOCKED", "REVOKED")),
+            "expired_devices": sum(1 for d in devices_list if d["status"] == "EXPIRED"),
             "pending_requests": sum(1 for r in requests_list if r["status"] == "PENDING"),
             "preapproved_emails": sum(1 for r in requests_list if r["status"] in ("PRE_APPROVED", "APPROVED")),
         },
@@ -594,14 +618,13 @@ def api_security_overview(request: HttpRequest) -> JsonResponse:
 @require_POST
 def api_security_action(request: HttpRequest) -> JsonResponse:
     """
-    Executes administrator security actions:
-    - set_mode: Toggle STANDARD vs STRICT mode and max_devices_per_account
-    - preapprove_email: Add email to pre-approved list
-    - approve_request: Approve a pending EmailAccessRequest & unlock device
-    - reject_request: Reject a pending EmailAccessRequest
-    - block_target: Block an IP, CIDR, MAC address, or Device ID
-    - unblock_target: Unblock & approve a device/IP/MAC
-    - pin_ip: Pin an AuthorizedDevice to a specific IP or CIDR subnet
+    Executes security & time-bound access actions:
+    - preapprove_email: Send time-bound email invitation & 6-digit activation code
+    - set_mode / update_config: Update policy settings
+    - approve_request: Approve pending EmailAccessRequest with time-bound duration
+    - extend_expiry: Extend or set time-bound window for email or device
+    - expire_now: Immediately expire time-bound access
+    - reject_request / block_target / unblock_target / pin_ip / sync_active
     """
     user = getattr(request, "user", None)
     if not (user and user.is_authenticated):
@@ -621,44 +644,79 @@ def api_security_action(request: HttpRequest) -> JsonResponse:
         or request.POST.get("request_id")
         or ""
     ).strip()
+    raw_duration = body.get("duration_hours") or request.POST.get("duration_hours")
 
     if action in ("set_mode", "update_config"):
         mode = body.get("mode") or request.POST.get("mode")
         req_approval = body.get("require_email_approval")
         max_devs = body.get("max_devices_per_account") or request.POST.get("max_devices_per_account")
+        def_hours = body.get("default_duration_hours") or request.POST.get("default_duration_hours")
         cfg = device_access_service.update_security_access_config(
             mode=mode,
             require_email_approval=req_approval if req_approval is not None else None,
             max_devices_per_account=int(max_devs) if max_devs else None,
+            default_duration_hours=def_hours if def_hours else None,
         )
-        return JsonResponse({"success": True, "message": f"Updated security mode to {cfg['mode']} (Max {cfg['max_devices_per_account']} devices/account).", "config": cfg})
+        return JsonResponse({
+            "success": True,
+            "message": f"Policy updated: {cfg['mode']} (Max {cfg['max_devices_per_account']} devices, Default {cfg['default_duration_hours']}h).",
+            "config": cfg,
+        })
 
     if action == "preapprove_email":
         email = (body.get("email") or request.POST.get("email") or target).strip().lower()
         if not email or "@" not in email:
             return JsonResponse({"success": False, "error": "Valid email address required."}, status=400)
         facility = (body.get("facility_code") or request.POST.get("facility_code") or "AGM").strip().upper()
-        role = (body.get("requested_role") or request.POST.get("requested_role") or "OPERATOR").strip().upper()
+        role = (body.get("requested_role") or request.POST.get("requested_role") or "SHARED_TEAM").strip().upper()
         max_devs = int(body.get("max_devices_allowed") or request.POST.get("max_devices_allowed") or 4)
+        invite_url = request.build_absolute_uri(reverse("core:signup"))
         req_obj = device_access_service.preapprove_operator_email(
             email=email,
             facility_code=facility,
             requested_role=role,
             max_devices_allowed=max_devs,
+            duration_hours=raw_duration,
             admin_user=user,
+            send_invite_email=True,
+            invite_url=invite_url,
         )
+        exp_str = timezone.localtime(req_obj.expires_at).strftime("%Y-%m-%d %H:%M") if req_obj.expires_at else ""
         return JsonResponse({
             "success": True,
-            "message": f"Pre-approved {email} (Activation Code: {req_obj.activation_code}, Max {req_obj.max_devices_allowed} devices).",
+            "message": f"Time-bound invite sent to {email} ({req_obj.duration_hours}h window, Code: {req_obj.activation_code}).",
             "activation_code": req_obj.activation_code,
+            "duration_hours": req_obj.duration_hours,
+            "expires_at": exp_str,
+            "expires_countdown": device_access_service.format_expiry_countdown(req_obj.expires_at),
         })
 
     if action == "approve_request":
-        ok, msg, req_obj = device_access_service.approve_access_request(target, admin_user=user)
+        ok, msg, _ = device_access_service.approve_access_request(
+            target, admin_user=user, duration_hours=raw_duration
+        )
         return JsonResponse({"success": ok, "message": msg, "error": "" if ok else msg}, status=200 if ok else 400)
 
+    if action == "extend_expiry":
+        ok, msg = device_access_service.extend_or_set_expiry(
+            target, duration_hours=raw_duration or 24, admin_user=user
+        )
+        return JsonResponse({"success": ok, "message": msg, "error": "" if ok else msg}, status=200 if ok else 400)
+
+    if action == "expire_now":
+        ok, msg = device_access_service.expire_immediately(target, admin_user=user)
+        return JsonResponse({"success": ok, "message": msg, "error": "" if ok else msg}, status=200 if ok else 400)
+
+    if action == "sync_active":
+        count = device_access_service.sync_existing_active_accounts_and_devices()
+        return JsonResponse({"success": True, "message": f"Synchronized active accounts & auto-filled MAC/IPs ({count} updated)."})
+
     if action == "reject_request":
-        req_obj = EmailAccessRequest.objects.filter(pk=int(target)).first() if target.isdigit() else EmailAccessRequest.objects.filter(email__iexact=target).first()
+        req_obj = (
+            EmailAccessRequest.objects.filter(pk=int(target)).first()
+            if target.isdigit()
+            else EmailAccessRequest.objects.filter(email__iexact=target).first()
+        )
         if not req_obj:
             return JsonResponse({"success": False, "error": "Request not found."}, status=404)
         req_obj.status = EmailAccessRequest.Status.REJECTED
@@ -678,12 +736,18 @@ def api_security_action(request: HttpRequest) -> JsonResponse:
 
     if action == "pin_ip":
         cidr = (body.get("pinned_ip_cidr") or request.POST.get("pinned_ip_cidr") or "").strip()
-        dev = AuthorizedDevice.objects.filter(pk=int(target)).first() if target.isdigit() else AuthorizedDevice.objects.filter(device_id=target).first()
+        dev = (
+            AuthorizedDevice.objects.filter(pk=int(target)).first()
+            if target.isdigit()
+            else AuthorizedDevice.objects.filter(device_id=target).first()
+        )
         if not dev:
             return JsonResponse({"success": False, "error": "Device not found."}, status=404)
         dev.pinned_ip_cidr = cidr
         dev.save(update_fields=["pinned_ip_cidr"])
-        return JsonResponse({"success": True, "message": f"Updated IP restriction on {dev.device_name} to '{cidr or 'Any (Roaming Allowed)'}'."})
+        return JsonResponse({
+            "success": True,
+            "message": f"Updated IP restriction on {dev.device_name} to '{cidr or 'Any (Roaming Allowed)'}'.",
+        })
 
     return JsonResponse({"success": False, "error": f"Unknown security action '{action}'."}, status=400)
-

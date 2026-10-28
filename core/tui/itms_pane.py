@@ -1379,7 +1379,7 @@ class ITMSConnectionPane(Vertical):
 
         try:
             res = self.client.fetch_and_sync_all_kits(
-                max_pages=35,
+                max_pages=int(config_service.get_setting("crawl.max_kit_pages", 100) or 100),
                 delay=0.12,
                 log_callback=_on_log,
                 allow_local_fallback=False,
@@ -1432,7 +1432,7 @@ class ITMSConnectionPane(Vertical):
             res = kit_provisioning_service.sync_and_provision_warehouse_kits(
                 target_date_suffix=None,
                 sync_itms=True,
-                max_pages=100,
+                max_pages=int(config_service.get_setting("crawl.max_kit_pages", 100) or 100),
                 log_callback=_on_log,
             )
             count = res.get("new_kits_ready_count", 0)

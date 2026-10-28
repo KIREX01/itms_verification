@@ -295,3 +295,95 @@ class QuickInstallApiEndpointTests(TestCase):
         self.assertEqual(sub_kwargs["front_plate_id"], "001182812")
         self.assertEqual(sub_kwargs["rear_plate_id"], "001182813")
         self.assertEqual(sub_kwargs["tracker_id"], "8BAE470808CF")
+
+    def test_quick_install_fast_tracks_vision_and_marks_verified(self):
+        url = reverse("core:api_itms_order_install", kwargs={"order_ident": self.order.order_number})
+        front_img = _create_test_image("FRONT")
+        rear_img = _create_test_image("REAR")
+
+        with patch("core.services.vault_service.process_single_image_vision") as mock_vision, \
+             patch("core.services.submission_worker.submit_pair") as mock_sub:
+            mock_sub.return_value = SubmissionOutcome(
+                pair_id=1,
+                success=True,
+                token="FAST-TRACK-TOKEN",
+                dry_run=True,
+            )
+
+            resp = self.http_client.post(url, {
+                "action": "submit",
+                "front_photo": front_img,
+                "rear_photo": rear_img,
+                "dry_run": "true",
+            })
+
+        self.assertEqual(resp.status_code, 200)
+        # Verify heavy blocking vision was bypassed to prevent freeze
+        mock_vision.assert_not_called()
+        # Verify pair was created and marked approved with order registration
+        pair = VehicleInstallationPair.objects.filter(order=self.order).first()
+        self.assertIsNotNone(pair)
+        self.assertEqual(pair.registration_number_detected, self.order.registration_number)
+        self.assertEqual(pair.front_image.status, EvidenceImage.Status.PLATE_DETECTED)
+        self.assertEqual(pair.rear_image.status, EvidenceImage.Status.PLATE_DETECTED)
+
+    def test_kit_sync_honors_200_pages_from_tui_config(self):
+        from core.services.order_sync import OrderSyncService
+        sync_svc = OrderSyncService()
+
+        with patch.object(config_service, "get_setting") as mock_get_setting, \
+             patch.object(sync_svc.client, "fetch_installation_kits") as mock_fetch, \
+             patch.object(sync_svc.client, "sync_kits_to_local_db") as mock_sync:
+            mock_get_setting.side_effect = lambda k, default=None, **kwargs: 200 if k == "crawl.max_kit_pages" else (default if default is not None else True)
+            mock_fetch.return_value = {
+                "success": True,
+                "kits": [{"kit_code": f"IK-{i}", "registration_number": f"UMA {i}A"} for i in range(20)],
+                "has_next_page": True,
+            }
+            mock_sync.return_value = {"created": 20, "updated": 0}
+
+            # Call without max_pages so it loads from crawl.max_kit_pages (200)
+            res = sync_svc.sync_installation_kits_scoped(max_pages=None, force=True)
+
+            self.assertTrue(res.get("success"))
+            # Fetch should have continued past page 100 up to page 200
+            self.assertEqual(res.get("pages_fetched"), 200)
+            self.assertEqual(mock_fetch.call_count, 200)
+
+    def test_execute_workflow_succeeds_even_if_archive_indexing_is_pending(self):
+        client = get_web_client()
+        with patch.object(client, "detect_order_stage") as mock_detect, \
+             patch.object(client, "fetch_installation_step1") as mock_s1_fetch, \
+             patch.object(client, "submit_installation_step1") as mock_s1_sub, \
+             patch.object(client, "fetch_approve_step2") as mock_s2_fetch, \
+             patch.object(client, "upload_installation_step2_photos") as mock_s2_up, \
+             patch.object(client, "fetch_confirmation_step3") as mock_s3_fetch, \
+             patch.object(client, "submit_confirmation_step3") as mock_s3_sub, \
+             patch.object(client, "verify_order_archived") as mock_verif:
+
+            mock_detect.return_value = {
+                "success": True,
+                "stage": "STAGE_1_INSTALLATION",
+                "order_uuid": "dummy-order-uuid-1234",
+            }
+            mock_s1_fetch.return_value = {"success": True, "csrf_token": "token-1"}
+            mock_s1_sub.return_value = {"success": True}
+            mock_s2_fetch.return_value = {"success": True, "csrf_token": "token-2"}
+            mock_s2_up.return_value = {"success": True, "step3_ready": True}
+            mock_s3_fetch.return_value = {"success": True, "csrf_token": "token-3"}
+            mock_s3_sub.return_value = {"success": True, "redirect_url": "/installation-orders/index"}
+            # Archive verification times out on immediate check
+            mock_verif.return_value = {"success": False, "verified": False, "error": "Order not confirmed in ITMS Archive."}
+
+            res = client.execute_installation_order_workflow(
+                order_identifier=self.order.order_number,
+                front_photo_path="dummy_front.jpg",
+                rear_photo_path="dummy_rear.jpg",
+                dry_run=False,
+                submit_step3=True,
+            )
+
+            # Workflow should succeed as Step 3 was submitted, rather than reporting failure!
+            self.assertTrue(res.get("success"))
+            self.assertTrue(res.get("is_finalized"))
+            self.assertTrue(res.get("pending_archive_confirmation"))

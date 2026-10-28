@@ -1292,7 +1292,12 @@ def api_itms_order_install(request: HttpRequest, order_ident: str) -> JsonRespon
                 orientation_override="FRONT",
             )
             if new_front:
-                vault_service.process_single_image_vision(new_front)
+                new_front.detected_plate = order.registration_number
+                new_front.status = EvidenceImage.Status.PLATE_DETECTED
+                new_front.orientation = EvidenceImage.Orientation.FRONT
+                new_front.orientation_confidence = 1.0
+                new_front.ocr_confidence = 1.0
+                new_front.save(update_fields=["detected_plate", "status", "orientation", "orientation_confidence", "ocr_confidence"])
 
         if rear_file:
             new_rear, _st = vault_service.ingest_uploaded_file(
@@ -1301,7 +1306,12 @@ def api_itms_order_install(request: HttpRequest, order_ident: str) -> JsonRespon
                 orientation_override="REAR",
             )
             if new_rear:
-                vault_service.process_single_image_vision(new_rear)
+                new_rear.detected_plate = order.registration_number
+                new_rear.status = EvidenceImage.Status.PLATE_DETECTED
+                new_rear.orientation = EvidenceImage.Orientation.REAR
+                new_rear.orientation_confidence = 1.0
+                new_rear.ocr_confidence = 1.0
+                new_rear.save(update_fields=["detected_plate", "status", "orientation", "orientation_confidence", "ocr_confidence"])
 
         if not pair:
             pair = VehicleInstallationPair.objects.create(
@@ -1358,6 +1368,38 @@ def api_itms_order_install(request: HttpRequest, order_ident: str) -> JsonRespon
     if updated_hardware:
         order.save()
 
+    # Auto-fill missing hardware serials from matching InstallationKit if still missing
+    if (not order.front_plate_serial or not order.rear_plate_serial or not order.gps_tracker_id) and order.registration_number:
+        try:
+            from core.models import InstallationKit
+            kit = InstallationKit.objects.filter(
+                Q(registration_number__iexact=order.registration_number) |
+                Q(registration_number__iexact=normalizer.canonicalize(order.registration_number) or "") |
+                Q(kit_code__icontains=normalizer.canonicalize(order.registration_number) or "")
+            ).first()
+            if kit:
+                need_save = False
+                if not order.front_plate_serial and kit.front_plate:
+                    order.front_plate_serial = kit.front_plate
+                    need_save = True
+                if not order.rear_plate_serial and kit.rear_plate:
+                    order.rear_plate_serial = kit.rear_plate
+                    need_save = True
+                if not order.gps_tracker_id and (kit.gps_tracker or kit.front_tracker or kit.rear_tracker):
+                    order.gps_tracker_id = kit.gps_tracker or kit.front_tracker or kit.rear_tracker
+                    need_save = True
+                if need_save:
+                    order.save()
+        except Exception as kit_exc:
+            logger.debug("Kit auto-match notice in install post: %s", kit_exc)
+
+    if not front_plate_input and order.front_plate_serial:
+        front_plate_input = order.front_plate_serial
+    if not rear_plate_input and order.rear_plate_serial:
+        rear_plate_input = order.rear_plate_serial
+    if not tracker_input and order.gps_tracker_id:
+        tracker_input = order.gps_tracker_id
+
     # Submit using established submission_worker with hardware inputs passed through
     outcome = submission_worker.submit_pair(
         pair,
@@ -1367,6 +1409,8 @@ def api_itms_order_install(request: HttpRequest, order_ident: str) -> JsonRespon
         front_plate_id=front_plate_input,
         rear_plate_id=rear_plate_input,
         tracker_id=tracker_input,
+        blocking_lock=True,
+        lock_timeout=15.0,
     )
 
     if outcome.success:

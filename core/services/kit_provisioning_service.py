@@ -68,7 +68,7 @@ def sync_and_provision_warehouse_kits(
             max_pages = int(config_service.get_setting("crawl.max_kit_pages", 100) or 100)
         except Exception:
             max_pages = 100
-    max_pages = max(int(max_pages), 100)
+    max_pages = max(1, min(int(max_pages), 1000))
 
     candidate_plates: Set[str] = set()
 
@@ -789,7 +789,12 @@ class MorningKitSyncDaemon:
                     pass
 
         while not self._stop_event.is_set():
-            # Wait for 3-hour interval or stop event
+            # Refresh kit sync interval dynamically from configuration
+            try:
+                from core.services import config_service
+                self.interval = max(int(config_service.get_setting("sync.kit_sync_interval_seconds", self.interval) or self.interval), MIN_KIT_SYNC_INTERVAL_SECONDS)
+            except Exception:
+                pass
             if self._stop_event.wait(timeout=self.interval):
                 break
             try:

@@ -424,7 +424,7 @@ class OrderSyncService:
             "created": created_count,
             "updated": updated_count,
             "disappeared_from_active": disappeared_count,
-            "pages_fetched": page,
+            "pages_fetched": max(1, page - 1) if page > limit_pages else page,
             "duration_ms": duration_ms,
         }
 
@@ -436,7 +436,7 @@ class OrderSyncService:
             "created": created_count,
             "updated": updated_count,
             "disappeared_from_active": disappeared_count,
-            "pages_fetched": page,
+            "pages_fetched": max(1, page - 1) if page > limit_pages else page,
             "duration_ms": duration_ms,
             "message": (
                 f"Synced {len(seen_order_numbers)} active orders ({created_count} new, "
@@ -595,7 +595,7 @@ class OrderSyncService:
             "synced": True,
             "target_date": target_dt_str,
             "total_fetched": len(all_today_orders),
-            "pages_fetched": page,
+            "pages_fetched": max(1, page - 1) if page > limit_pages else page,
             "created": sync_res.get("created", 0),
             "updated": sync_res.get("updated", 0),
             "installed_verified": sync_res.get("installed_verified", 0),
@@ -686,7 +686,12 @@ class OrderSyncService:
 
         search_val = plate_or_code or ""
         page = 1
-        safe_max_pages = max(1, min(int(max_pages or 50), 100))
+        if max_pages is None:
+            try:
+                max_pages = int(config_service.get_setting("crawl.max_kit_pages", 100) or 100)
+            except Exception:
+                max_pages = 100
+        safe_max_pages = max(1, min(int(max_pages), 1000))
         limit_pages = 1 if plate_or_code else safe_max_pages
 
         while page <= limit_pages:
@@ -716,7 +721,7 @@ class OrderSyncService:
             "total_fetched": len(all_kits),
             "created": sync_res.get("created", 0),
             "updated": sync_res.get("updated", 0),
-            "pages_fetched": page,
+            "pages_fetched": max(1, page - 1) if page > limit_pages else page,
             "duration_ms": duration_ms,
             "message": f"Synced {len(all_kits)} installation kits ({sync_res.get('created', 0)} new, {sync_res.get('updated', 0)} updated) across {page} page(s) in {duration_ms}ms.",
         }
@@ -765,7 +770,7 @@ class OrderSyncService:
         )
 
         # Step 3: Installation kits & Morning Stock Provisioning
-        kits_res = self.sync_installation_kits_scoped(max_pages=5, force=force)
+        kits_res = self.sync_installation_kits_scoped(max_pages=None, force=force)
         try:
             from core.services import kit_provisioning_service
             prov_res = kit_provisioning_service.sync_and_provision_warehouse_kits(
@@ -920,12 +925,15 @@ class ShiftOrderSyncDaemon:
             return cls._instance
 
     @classmethod
-    def get_tick_interval_seconds(cls, now_dt: Optional[datetime] = None) -> int:
+    def get_tick_interval_seconds(cls, now_dt: Optional[datetime] = None, max_cadence: Optional[int] = None) -> int:
         """Returns 180s (3m) during active shift hours (06:00–22:00) and 900s (15m) overnight."""
         local_dt = timezone.localtime(now_dt) if now_dt else timezone.localtime()
-        if 6 <= local_dt.hour < 22:
-            return cls.ACTIVE_TICK_SECONDS
-        return cls.OVERNIGHT_TICK_SECONDS
+
+
+        base_tick = cls.ACTIVE_TICK_SECONDS if (6 <= local_dt.hour < 22) else cls.OVERNIGHT_TICK_SECONDS
+        if max_cadence and max_cadence > 0:
+            return max(10, min(base_tick, int(max_cadence)))
+        return base_tick
 
     def notify_day_orders_detected(self, date_suffix: Optional[str] = None) -> None:
         """
@@ -1007,6 +1015,14 @@ class ShiftOrderSyncDaemon:
         now_ts = time.time()
         pending_triggers = set(self._pending_day_triggers)
         self._pending_day_triggers.clear()
+
+        # Dynamically reload latest sync intervals from configuration (TUI / settings)
+        try:
+            self.orders_interval = max(30, int(config_service.get_setting("sync.order_sync_interval_seconds", self.orders_interval) or self.orders_interval))
+            self.archive_interval = max(60, int(config_service.get_setting("sync.archive_sync_interval_seconds", self.archive_interval) or self.archive_interval))
+            self.kits_interval = max(300, int(config_service.get_setting("sync.kit_sync_interval_seconds", self.kits_interval) or self.kits_interval))
+        except Exception:
+            pass
 
         orders_due = force or bool(pending_triggers) or (self._last_orders_sync_ts == 0.0) or ((now_ts - self._last_orders_sync_ts) >= self.orders_interval)
         archive_due = force or (self._last_archive_sync_ts == 0.0) or ((now_ts - self._last_archive_sync_ts) >= self.archive_interval)
@@ -1105,7 +1121,7 @@ class ShiftOrderSyncDaemon:
         # 3. Installation Kits & Blocked Plates Resolution (3-hour cadence or triggered by new day's orders)
         kits_res: Dict[str, Any] = {}
         if kits_due:
-            kits_res = sync_svc.sync_installation_kits_scoped(max_pages=10, force=True)
+            kits_res = sync_svc.sync_installation_kits_scoped(max_pages=None, force=True)
             for sfx in sorted(target_suffixes):
                 try:
                     prov_res = kit_provisioning_service.sync_and_provision_warehouse_kits(
@@ -1223,7 +1239,7 @@ class ShiftOrderSyncDaemon:
                 close_old_connections()
 
         while not self._stop_event.is_set():
-            wait_sec = float(self.get_tick_interval_seconds())
+            wait_sec = float(self.get_tick_interval_seconds(max_cadence=self.orders_interval))
             self._wake_event.wait(timeout=wait_sec)
             self._wake_event.clear()
             if self._stop_event.is_set():

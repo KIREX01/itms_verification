@@ -108,6 +108,7 @@ class SettingsPane(Vertical):
         auto_sync = cfg.get("sync", {}).get("auto_sync_enabled", True)
         sync_interval = str(cfg.get("sync", {}).get("auto_sync_interval_seconds", 60))
         order_sync_interval = str(cfg.get("sync", {}).get("order_sync_interval_seconds", 600))
+        kit_sync_interval = str(cfg.get("sync", {}).get("kit_sync_interval_seconds", 10800))
         shift_mode = str(cfg.get("sync", {}).get("shift_target_date_mode", "today"))
         manual_shift_date = str(cfg.get("sync", {}).get("manual_target_date", ""))
         export_dir = str(cfg.get("sync", {}).get("default_export_directory", "exports"))
@@ -221,6 +222,10 @@ class SettingsPane(Vertical):
                     with Horizontal(classes="settings-row"):
                         yield Static("[b]Order Sync Cadence (seconds)[/b]\n[dim]Cadence for polling live active installation orders from ITMS portal (default: 600s / 10m)[/dim]", classes="settings-label")
                         yield Input(value=order_sync_interval, id="input-order-sync-interval", classes="settings-input")
+
+                    with Horizontal(classes="settings-row"):
+                        yield Static("[b]Kit Sync Cadence (seconds)[/b]\n[dim]Cadence for background installation kit catalog sync from ITMS (default: 10800s / 3h)[/dim]", classes="settings-label")
+                        yield Input(value=kit_sync_interval, id="input-kit-sync-interval", classes="settings-input")
 
                     with Horizontal(classes="settings-row"):
                         yield Static("[b]Shift Target Date Mode[/b]\n[dim]Reconciliation target date: 'today', 'yesterday', 'manual', or 'all'[/dim]", classes="settings-label")
@@ -1056,6 +1061,11 @@ class SettingsPane(Vertical):
                 cfg["sync"]["auto_sync_enabled"] = a_sync
                 cfg["sync"]["auto_sync_interval_seconds"] = max(10, s_int)
                 cfg["sync"]["order_sync_interval_seconds"] = max(30, o_int)
+                try:
+                    k_int = int(self.query_one("#input-kit-sync-interval", Input).value.strip() or 10800)
+                except Exception:
+                    k_int = int(config_service.get_setting("sync.kit_sync_interval_seconds", 10800))
+                cfg["sync"]["kit_sync_interval_seconds"] = max(300, k_int)
                 cfg["sync"]["shift_target_date_mode"] = s_mode
                 cfg["sync"]["manual_target_date"] = m_date
                 cfg["sync"]["default_export_directory"] = e_dir
@@ -1063,7 +1073,11 @@ class SettingsPane(Vertical):
                 # Update live daemon cadence immediately
                 try:
                     from core.services.order_sync import ShiftOrderSyncDaemon
-                    ShiftOrderSyncDaemon.get_instance(interval_seconds=max(30, o_int))
+                    from core.services.kit_provisioning_service import MorningKitSyncDaemon
+                    daemon = ShiftOrderSyncDaemon.get_instance(interval_seconds=max(30, o_int))
+                    daemon.kits_interval = max(300, k_int)
+                    daemon.notify_day_orders_detected(None)
+                    MorningKitSyncDaemon.get_instance(interval_seconds=max(300, k_int))
                 except Exception:
                     pass
             except Exception:

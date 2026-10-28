@@ -297,6 +297,11 @@ async function inspectPlate(plate, fallbackError = null) {
                         void card.offsetWidth;
                         card.classList.add('inspector-flash-success');
                     }
+                    const feedback = document.getElementById('stock-feedback-alert');
+                    if (feedback && feedback.classList.contains('alert-danger')) {
+                        feedback.className = 'alert alert-success';
+                        feedback.innerText = `✓ ${data.plate || cleanPlate}: ${data.stock_status.badge} — ${data.stock_status.desc}`;
+                    }
                 }
             }
 
@@ -809,32 +814,134 @@ async function checkStockPasteAvailability() {
     }
 }
 
-async function checkShiftBlockedPlates() {
+let lastResolvedStockPlates = [];
+
+function updateResolvedBlockedBanner(resolvedPlates) {
+    if (Array.isArray(resolvedPlates) && resolvedPlates.length > 0) {
+        resolvedPlates.forEach(p => {
+            if (p && !lastResolvedStockPlates.includes(p)) {
+                lastResolvedStockPlates.push(p);
+            }
+        });
+    }
+    const banner = document.getElementById('not-on-stock-resolved-banner');
+    const txt = document.getElementById('not-on-stock-resolved-text');
+    if (!banner || !txt) return;
+    if (lastResolvedStockPlates.length > 0) {
+        banner.style.display = 'flex';
+        txt.innerText = `✅ Now Available on Stock (${lastResolvedStockPlates.length}): ${lastResolvedStockPlates.join(', ')} — Ready for use or dispatch!`;
+    } else {
+        banner.style.display = 'none';
+    }
+}
+
+async function dispatchResolvedStockPlates() {
+    if (!lastResolvedStockPlates.length) return;
+    const platesToDispatch = [...lastResolvedStockPlates];
     try {
-        const res = await fetch(`/api/stock/blocked-plates/?date_suffix=${currentStockDateSuffix}`);
+        const res = await fetch('/api/stock/dispatch/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getStockCsrfToken()
+            },
+            body: JSON.stringify({
+                plates: platesToDispatch,
+                plate_category: currentStockCategory,
+                date_suffix: currentStockDateSuffix,
+                auto_create_kits: true
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            lastResolvedStockPlates = [];
+            updateResolvedBlockedBanner([]);
+            notify(`✓ Dispatched ${platesToDispatch.length} newly available kit(s) to floor!`, 'success');
+            await refreshStockDashboard();
+        } else {
+            notify(data.error || 'Could not dispatch resolved kits.', 'error');
+        }
+    } catch (e) {
+        notify(`Dispatch error: ${e.message}`, 'error');
+    }
+}
+
+async function recheckBlockedPlatesLive() {
+    const btn = document.getElementById('btn-recheck-blocked-stock');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '⏳ Checking ITMS Live...';
+    }
+    try {
+        await checkShiftBlockedPlates(true, true);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = '🔄 Re-Check ITMS Stock';
+        }
+    }
+}
+
+async function checkShiftBlockedPlates(recheckLive = false, refreshModalIfOpen = false) {
+    try {
+        const url = `/api/stock/blocked-plates/?date_suffix=${currentStockDateSuffix}${recheckLive ? '&recheck=1' : ''}`;
+        const res = await fetch(url);
         const data = await res.json();
         const btn = document.getElementById('btn-view-blocked-stock');
         const lbl = document.getElementById('lbl-blocked-stock-count');
 
-        if (data.success && data.docket && data.docket.count > 0) {
-            lastNotOnStockData = data.docket;
-            if (lbl) lbl.innerText = data.docket.count;
-            if (btn) btn.style.display = 'inline-flex';
-        } else if (btn) {
-            btn.style.display = 'none';
+        if (data.success) {
+            const resolved = Array.isArray(data.resolved_plates) ? data.resolved_plates : [];
+            if (resolved.length > 0) {
+                updateResolvedBlockedBanner(resolved);
+                notify(`✅ ${resolved.length} kit(s) added to stock & now available: ${resolved.join(', ')}`, 'success');
+            } else if (recheckLive && refreshModalIfOpen) {
+                notify('Checked ITMS live: Remaining kits are still awaiting stock transfer.', 'info');
+            }
+
+            if (data.docket && data.docket.count > 0) {
+                lastNotOnStockData = data.docket;
+                if (lbl) lbl.innerText = data.docket.count;
+                if (btn) btn.style.display = 'inline-flex';
+            } else {
+                lastNotOnStockData = data.docket || { count: 0, items: [], plates: [] };
+                if (lbl) lbl.innerText = '0';
+                if (btn) btn.style.display = 'none';
+            }
+
+            const modal = document.getElementById('stock-not-on-stock-modal');
+            if (refreshModalIfOpen || (modal && modal.classList.contains('active') && resolved.length > 0)) {
+                await openNotOnStockModal(lastNotOnStockData);
+            }
         }
     } catch (e) {
         console.debug('checkShiftBlockedPlates notice:', e);
     }
 }
 
+// Background polling: continuously re-check blocked ('Not on Stock') plates against ITMS when any exist
+if (!window._stockBlockedLivePollTimer) {
+    window._stockBlockedLivePollTimer = setInterval(() => {
+        const btn = document.getElementById('btn-view-blocked-stock');
+        const hasBlocked = btn && btn.style.display !== 'none';
+        if (hasBlocked) {
+            void checkShiftBlockedPlates(true, false);
+        }
+    }, 45000);
+}
+
 async function openNotOnStockModal(data) {
     if (!data) {
         try {
-            const res = await fetch(`/api/stock/blocked-plates/?date_suffix=${currentStockDateSuffix}`);
+            const res = await fetch(`/api/stock/blocked-plates/?date_suffix=${currentStockDateSuffix}&recheck=1`);
             const resData = await res.json();
-            if (resData.success && resData.docket) {
-                data = resData.docket;
+            if (resData.success) {
+                if (Array.isArray(resData.resolved_plates) && resData.resolved_plates.length > 0) {
+                    updateResolvedBlockedBanner(resData.resolved_plates);
+                }
+                if (resData.docket) {
+                    data = resData.docket;
+                }
             }
         } catch (e) {
             console.error(e);
@@ -844,11 +951,12 @@ async function openNotOnStockModal(data) {
         }
     }
 
-    if (!data) {
+    if (!data && lastResolvedStockPlates.length === 0) {
         notify('No blocked or unlisted plates recorded for this shift.', 'info');
         return;
     }
 
+    updateResolvedBlockedBanner([]);
     lastNotOnStockData = data;
 
         let count = 0;

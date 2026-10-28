@@ -647,7 +647,7 @@ function updateMobileStockStatusBadge(cleanPlate, stockStatus, category, isBlock
 
     // Viewport aim-frame glow classes
     if (viewport) {
-        viewport.classList.remove("detected-on-stock", "detected-not-on-stock", "detected-dispatched", "detected-installed", "detected");
+        viewport.classList.remove("detected-error", "detected-on-stock", "detected-not-on-stock", "detected-dispatched", "detected-installed", "detected");
         if (isBlocked) {
             viewport.classList.add("detected-not-on-stock");
         } else if (statusCode === "DISPATCHED") {
@@ -658,7 +658,7 @@ function updateMobileStockStatusBadge(cleanPlate, stockStatus, category, isBlock
             viewport.classList.add("detected-on-stock");
         }
         setTimeout(() => {
-            if (viewport) viewport.classList.remove("detected-on-stock", "detected-not-on-stock", "detected-dispatched", "detected-installed", "detected");
+            if (viewport) viewport.classList.remove("detected-error", "detected-on-stock", "detected-not-on-stock", "detected-dispatched", "detected-installed", "detected");
         }, 1200);
     }
 
@@ -670,22 +670,27 @@ function updateMobileStockStatusBadge(cleanPlate, stockStatus, category, isBlock
         if (descDiv) descDiv.textContent = badgeDesc;
 
         if (isBlocked) {
+            liveBadge.style.background = "rgba(185, 28, 28, 0.96)";
             liveBadge.style.borderColor = "#ef4444";
             statusPill.style.background = "#dc2626";
             statusPill.style.color = "#ffffff";
         } else if (statusCode === "DISPATCHED") {
+            liveBadge.style.background = "rgba(15, 23, 42, 0.96)";
             liveBadge.style.borderColor = "#f59e0b";
             statusPill.style.background = "#d97706";
             statusPill.style.color = "#ffffff";
         } else if (statusCode === "ALREADY_INSTALLED") {
+            liveBadge.style.background = "rgba(15, 23, 42, 0.96)";
             liveBadge.style.borderColor = "#3b82f6";
             statusPill.style.background = "#2563eb";
             statusPill.style.color = "#ffffff";
         } else {
+            liveBadge.style.background = "rgba(15, 23, 42, 0.96)";
             liveBadge.style.borderColor = "#22c55e";
             statusPill.style.background = "#16a34a";
             statusPill.style.color = "#ffffff";
         }
+        liveBadge.style.color = "#ffffff";
 
         liveBadge.style.display = "block";
         if (window._liveBadgeTimer) clearTimeout(window._liveBadgeTimer);
@@ -697,6 +702,8 @@ function updateMobileStockStatusBadge(cleanPlate, stockStatus, category, isBlock
     // Persistent Inspector Card
     if (insCard && insPlate) {
         insCard.style.display = "block";
+        insCard.style.background = isBlocked ? "rgba(127, 29, 29, 0.28)" : "#161b22";
+        insCard.style.borderColor = isBlocked ? "#ef4444" : "#22c55e";
         insPlate.textContent = cleanPlate;
         if (insCat) {
             insCat.textContent = category || "PSV";
@@ -1081,24 +1088,30 @@ async function handleStockBarcodeDetected(rawCode) {
     const isAlreadySynced = MobileState.stock.syncedSessionPlates.has(cleanPlate);
     const isBlocked = MobileState.stock.blockedPlates.includes(cleanPlate);
 
-    if (isAlreadyInQueue || isAlreadySynced || isBlocked) {
+    if (isAlreadyInQueue || isAlreadySynced) {
         MobileState.stock.recentScansCooldown.set(cleanPlate, now);
 
         showScanDetectionBanner(`DUPLICATE: ${cleanPlate}`, true);
         playScanBeep(false);
         if (navigator.vibrate) navigator.vibrate([140, 70, 140]);
 
-        let dupType = "already in queue";
-        if (isBlocked) {
-            dupType = "BLOCKED (not in stock)";
-        } else if (isAlreadySynced) {
-            dupType = "already synced to server";
-        }
+        const dupType = isAlreadySynced ? "already synced to server" : "already in queue";
         showMobileToast(`⚠️ Duplicate: Plate ${cleanPlate} ${dupType}!`, true);
         return;
     }
 
-    // 3. New Valid Plate Detection!
+    // If plate was previously blocked as 'Not on Stock' within the last 5 seconds, debounce as duplicate;
+    // after 5 seconds, allow re-scanning to check live ITMS in case it has since been added to stock!
+    if (isBlocked && (now - lastSeen < 5000)) {
+        MobileState.stock.recentScansCooldown.set(cleanPlate, now);
+        showScanDetectionBanner(`NOT ON STOCK: ${cleanPlate}`, true);
+        playScanBeep(false);
+        if (navigator.vibrate) navigator.vibrate([140, 70, 140]);
+        showMobileToast(`⚠️ Plate ${cleanPlate} is BLOCKED (not in stock)!`, true);
+        return;
+    }
+
+    // 3. New Valid Plate Detection (or Re-Checking Previously Blocked Plate)!
     MobileState.stock.recentScansCooldown.set(cleanPlate, now);
     playScanBeep(true);
     if (navigator.vibrate) navigator.vibrate(60);
@@ -1109,7 +1122,7 @@ async function handleStockBarcodeDetected(rawCode) {
     // Instant local stock inspection
     const suffix = MobileState.stock.shiftSuffix || "";
     try {
-        const inspectRes = await fetch(`/api/stock/inspect/?plate=${encodeURIComponent(cleanPlate)}&date_suffix=${encodeURIComponent(suffix)}`);
+        const inspectRes = await fetch(`/api/stock/inspect/?plate=${encodeURIComponent(cleanPlate)}&date_suffix=${encodeURIComponent(suffix)}&check_itms_live=true`);
         const inspectData = await inspectRes.json();
 
         if (inspectData.success) {
@@ -1117,11 +1130,7 @@ async function handleStockBarcodeDetected(rawCode) {
                 MobileState.stock.shiftSuffix = inspectData.date_suffix;
             }
             if (Array.isArray(inspectData.blocked_plates)) {
-                inspectData.blocked_plates.forEach(p => {
-                    if (p && !MobileState.stock.blockedPlates.includes(p)) {
-                        MobileState.stock.blockedPlates.push(p);
-                    }
-                });
+                MobileState.stock.blockedPlates = inspectData.blocked_plates.filter(Boolean);
             }
 
             const stockStatus = inspectData.stock_status || {};
@@ -1142,6 +1151,14 @@ async function handleStockBarcodeDetected(rawCode) {
                 renderBlockedPlatesTray();
                 showMobileToast(`🚫 Plate ${cleanPlate} NOT ON STOCK! Set physical box aside!`, true);
                 return;
+            }
+
+            // If plate was previously blocked and is now ON STOCK, update tray & notify!
+            if (isBlocked && !isItemBlocked) {
+                MobileState.stock.blockedPlates = MobileState.stock.blockedPlates.filter(p => p !== cleanPlate);
+                saveStockQueueToStorage();
+                renderBlockedPlatesTray();
+                showMobileToast(`✅ Plate ${cleanPlate} is now AVAILABLE ON STOCK & Dispatched!`);
             }
 
             // Plate is valid / on stock
@@ -1237,42 +1254,59 @@ function saveStockQueueToStorage() {
     }
 }
 
-async function syncBlockedPlatesWithServer() {
+async function syncBlockedPlatesWithServer(recheckLive = false) {
     const suffix = MobileState.stock.shiftSuffix || "";
     try {
-        let resp;
-        if (MobileState.stock.blockedPlates.length > 0) {
-            resp = await fetch("/api/stock/blocked-plates/", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    action: "add",
-                    plates: MobileState.stock.blockedPlates,
-                    date_suffix: suffix,
-                }),
-            });
-        } else {
-            resp = await fetch(`/api/stock/blocked-plates/?date_suffix=${encodeURIComponent(suffix)}`);
-        }
+        const url = `/api/stock/blocked-plates/?date_suffix=${encodeURIComponent(suffix)}${recheckLive ? "&recheck=1" : ""}`;
+        const resp = await fetch(url);
         if (!resp.ok) return;
         const data = await resp.json();
         if (data && data.success && Array.isArray(data.blocked_plates)) {
             if (data.date_suffix) {
                 MobileState.stock.shiftSuffix = data.date_suffix;
             }
-            const merged = [...MobileState.stock.blockedPlates];
-            data.blocked_plates.forEach(p => {
-                if (p && !merged.includes(p)) {
-                    merged.push(p);
+            const resolved = Array.isArray(data.resolved_plates) ? data.resolved_plates : [];
+            if (resolved.length > 0) {
+                resolved.forEach(p => MobileState.stock.recentScansCooldown.delete(p));
+                const banner = document.getElementById("mobile-resolved-banner");
+                if (banner) {
+                    banner.style.display = "block";
+                    banner.textContent = `✅ Now Available on Stock (Ready for Use/Dispatch): ${resolved.join(", ")}`;
                 }
-            });
-            MobileState.stock.blockedPlates = merged;
+                showMobileToast(`✅ ${resolved.length} kit(s) now AVAILABLE ON STOCK: ${resolved.join(", ")}!`);
+            }
+            MobileState.stock.blockedPlates = data.blocked_plates.filter(Boolean);
             saveStockQueueToStorage();
             renderBlockedPlatesTray();
         }
     } catch (err) {
         console.debug("Blocked plates sync notice:", err);
     }
+}
+
+async function recheckMobileBlockedPlates() {
+    const btn = document.getElementById("btn-mobile-recheck-blocked");
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = "⏳ Checking...";
+    }
+    try {
+        await syncBlockedPlatesWithServer(true);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = "🔄 Re-Check Stock";
+        }
+    }
+}
+
+// Periodically re-check blocked ('Not on Stock') plates in the background so once added to stock they reflect available
+if (!window._mobileBlockedRecheckTimer) {
+    window._mobileBlockedRecheckTimer = setInterval(() => {
+        if (MobileState.stock && MobileState.stock.blockedPlates && MobileState.stock.blockedPlates.length > 0) {
+            void syncBlockedPlatesWithServer(true);
+        }
+    }, 30000);
 }
 
 function loadStockQueueFromStorage() {

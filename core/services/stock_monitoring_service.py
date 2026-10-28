@@ -129,6 +129,7 @@ def extract_single_plate(text: Any) -> Optional[str]:
 
 
 AUTO_INSPECT_STAGED_NOTE = "[AUTO_INSPECT_STAGED]"
+AUTO_ORDER_DISPATCH_NOTE = "[AUTO_REGISTERED_FROM_ORDER]"
 _ENRICH_LOCK = threading.Lock()
 
 
@@ -603,9 +604,14 @@ def record_dispatch_scans(
                         registration_number__in=verified_plates,
                     )
                 )
-                staged_rows = [r for r in existing_rows if r.notes == AUTO_INSPECT_STAGED_NOTE]
+                staged_rows = [
+                    r for r in existing_rows
+                    if (r.notes or "").strip() in (AUTO_INSPECT_STAGED_NOTE, AUTO_ORDER_DISPATCH_NOTE)
+                ]
                 confirmed_existing = {
-                    r.registration_number for r in existing_rows if r.notes != AUTO_INSPECT_STAGED_NOTE
+                    r.registration_number
+                    for r in existing_rows
+                    if (r.notes or "").strip() not in (AUTO_INSPECT_STAGED_NOTE, AUTO_ORDER_DISPATCH_NOTE)
                 }
                 staged_plates = {r.registration_number for r in staged_rows}
 
@@ -1438,6 +1444,9 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
     sched_pmo_display = ledger.scheduled_pmo if (ledger.scheduled_psv > 0 or ledger.scheduled_pmo > 0) else 0
 
     # 6. Floor Dispatched & Returns Reconciliation (Graduated Discrepancy Scale)
+    # Automatically register any active orders or archives for this shift that were not initially scanned at safe room
+    auto_register_dispatched_from_orders(suffix)
+
     dispatches_qs = StockDispatchScan.objects.filter(
         Q(work_date_suffix=suffix) | Q(work_date=work_d)
     ).filter(
@@ -1508,11 +1517,13 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         StockDispatchScan.objects.bulk_update(scans_to_update, ["status"])
 
     # Identify Spiked / Undispatched plates:
-    # Orders appearing in ITMS (installed or active pending) whose plate was NEVER scanned at safe room dispatch
+    # Orders appearing in ITMS (installed or active pending) whose plate was NEVER manually scanned at safe room dispatch
     spiked_installed: List[str] = []
     spiked_pending: List[str] = []
     for c_plate, order in scoped_order_by_plate.items():
-        if c_plate not in dispatched_plates_map:
+        scan_obj = dispatched_plates_map.get(c_plate)
+        is_auto_registered = bool(scan_obj and (scan_obj.notes or "").strip() == AUTO_ORDER_DISPATCH_NOTE)
+        if c_plate not in dispatched_plates_map or is_auto_registered:
             orig_plate = order.registration_number
             if order.is_archived or (order.order_status or "").strip().lower() == "installed":
                 spiked_installed.append(orig_plate)
@@ -2206,50 +2217,29 @@ def clear_blocked_plates_for_date(target_date_suffix: Optional[str] = None) -> i
     return deleted_count
 
 
-def resolve_transferred_blocked_plates(
+def remove_blocked_plates(
+    plates: Iterable[str],
     target_date_suffix: Optional[str] = None,
-    check_itms_live: bool = False,
-) -> Dict[str, Any]:
+) -> List[str]:
     """
-    Re-checks plates currently recorded in StockBlockedScan ('Not on Stock') for a shift.
-    If any blocked plate has since been transferred into ITMS warehouse stock (found in
-    InstallationKit with status 'New' / verified on stock), removes it from the blocked list.
+    Removes specific plates from StockBlockedScan and the blocked plates cache file for the shift.
+    Returns the remaining blocked plates list.
     """
     _, suffix = resolve_date_and_suffix(target_date_suffix)
+    to_remove = set(parse_plate_input(plates))
+    if not to_remove:
+        return get_blocked_plates_for_date(suffix)
+
     current_blocked = get_blocked_plates_for_date(suffix)
-    if not current_blocked:
-        return {
-            "work_date_suffix": suffix,
-            "resolved_plates": [],
-            "remaining_plates": [],
-            "resolved_count": 0,
-        }
-
-    from core.services import kit_provisioning_service
-    allow_live = bool(check_itms_live and len(current_blocked) <= 40)
-    verify_res = kit_provisioning_service.verify_scanned_kits_stock(
-        current_blocked,
-        check_itms_live=allow_live,
-    )
-    now_in_stock = set(parse_plate_input(verify_res.get("verified_plates", [])))
-    if not now_in_stock:
-        return {
-            "work_date_suffix": suffix,
-            "resolved_plates": [],
-            "remaining_plates": current_blocked,
-            "resolved_count": 0,
-        }
-
-    resolved = [p for p in current_blocked if p in now_in_stock]
-    remaining = [p for p in current_blocked if p not in now_in_stock]
+    remaining = [p for p in current_blocked if p not in to_remove]
 
     try:
         StockBlockedScan.objects.filter(
             work_date_suffix=suffix,
-            registration_number__in=resolved,
+            registration_number__in=list(to_remove),
         ).delete()
     except Exception as exc:
-        logger.warning("Error deleting resolved blocked plates from DB: %s", exc)
+        logger.warning("Error removing specific blocked plates from DB: %s", exc)
 
     cache_file = get_blocked_plates_cache_file(suffix)
     try:
@@ -2268,7 +2258,184 @@ def resolve_transferred_blocked_plates(
         elif cache_file.exists():
             cache_file.unlink()
     except Exception as exc:
-        logger.warning("Error updating blocked plates cache file after resolution: %s", exc)
+        logger.warning("Error updating blocked plates cache file after removal: %s", exc)
+
+    return remaining
+
+
+def auto_register_dispatched_from_orders(
+    target_date_suffix: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Automatically registers kits from active orders and archives for the shift into
+    StockDispatchScan if they were not initially scanned at safe room dispatch
+    (e.g., when the ground team quickly begins fitting before safe room scanning).
+    Also clears any such plates from StockBlockedScan if they were previously blocked.
+    """
+    work_d, suffix = resolve_date_and_suffix(target_date_suffix)
+    active_bond = bond_service.get_active_bond()
+    active_bond_code = (active_bond.get("code") or "AGM").strip().upper()
+
+    orders_qs = list(InstallationOrder.objects.filter(order_number__endswith=suffix))
+    scoped_orders: List[InstallationOrder] = [
+        o for o in orders_qs
+        if bond_service.classify_order_bond_scope(o, active_code=active_bond_code) == "ACTIVE_BOND"
+        and o.registration_number
+    ]
+    if not scoped_orders:
+        return {
+            "work_date_suffix": suffix,
+            "auto_registered_plates": [],
+            "auto_registered_count": 0,
+        }
+
+    existing_dispatches = set(
+        normalizer.canonicalize(p)
+        for p in StockDispatchScan.objects.filter(
+            Q(work_date_suffix=suffix) | Q(work_date=work_d)
+        ).values_list("registration_number", flat=True)
+        if p
+    )
+    existing_returns = set(
+        normalizer.canonicalize(p)
+        for p in StockReturnScan.objects.filter(
+            Q(work_date_suffix=suffix) | Q(work_date=work_d)
+        ).values_list("registration_number", flat=True)
+        if p
+    )
+
+    pmo_plates_known: Set[str] = set()
+    for p in StockDeliveryItem.objects.filter(plate_category=PlateCategory.PMO).values_list("registration_number", flat=True):
+        if p:
+            pmo_plates_known.add(normalizer.canonicalize(p))
+
+    scans_to_create: List[StockDispatchScan] = []
+    auto_registered_plates: List[str] = []
+    seen_canon: Set[str] = set()
+
+    for order in scoped_orders:
+        c_plate = normalizer.canonicalize(order.registration_number)
+        if not c_plate or c_plate in seen_canon:
+            continue
+        seen_canon.add(c_plate)
+        if c_plate in existing_dispatches or c_plate in existing_returns:
+            continue
+
+        is_pmo = (c_plate in pmo_plates_known) or ("PMO" in c_plate.upper())
+        cat = PlateCategory.PMO if is_pmo else PlateCategory.PSV
+        is_inst = bool(order.is_archived or (order.order_status or "").strip().lower() == "installed")
+        scan_status = (
+            StockDispatchScan.Status.RECONCILED_INSTALLED
+            if is_inst
+            else StockDispatchScan.Status.ON_LINE_ACTIVE
+        )
+        op_name = (order.installation_officer or "").strip() or "Auto-Registered (Order Sync)"
+
+        scans_to_create.append(
+            StockDispatchScan(
+                registration_number=c_plate,
+                plate_category=cat,
+                work_date=work_d,
+                work_date_suffix=suffix,
+                bond_code=active_bond_code,
+                operator_name=op_name,
+                status=scan_status,
+                notes=AUTO_ORDER_DISPATCH_NOTE,
+            )
+        )
+        auto_registered_plates.append(c_plate)
+
+    if scans_to_create:
+        try:
+            StockDispatchScan.objects.bulk_create(scans_to_create, ignore_conflicts=True)
+            remove_blocked_plates(auto_registered_plates, target_date_suffix=suffix)
+            logger.info(
+                "Auto-registered %d unscanned order/archive kit(s) into StockDispatchScan for shift %s: %s",
+                len(auto_registered_plates),
+                suffix,
+                ", ".join(auto_registered_plates[:20]),
+            )
+        except Exception as exc:
+            logger.warning("Error auto-registering dispatched kits from orders for %s: %s", suffix, exc)
+
+    return {
+        "work_date_suffix": suffix,
+        "auto_registered_plates": auto_registered_plates,
+        "auto_registered_count": len(auto_registered_plates),
+    }
+
+
+def resolve_transferred_blocked_plates(
+    target_date_suffix: Optional[str] = None,
+    check_itms_live: bool = False,
+) -> Dict[str, Any]:
+    """
+    Re-checks plates currently recorded in StockBlockedScan ('Not on Stock') for a shift.
+    If any blocked plate has since been transferred into ITMS warehouse stock (found in
+    InstallationKit with status 'New' / verified on stock) or has an active/archived order,
+    removes it from the blocked list and marks its local InstallationKit as available for
+    use or dispatch.
+    """
+    _, suffix = resolve_date_and_suffix(target_date_suffix)
+    current_blocked = get_blocked_plates_for_date(suffix)
+    if not current_blocked:
+        return {
+            "work_date_suffix": suffix,
+            "resolved_plates": [],
+            "remaining_plates": [],
+            "resolved_count": 0,
+        }
+
+    # 1. Check if any blocked plate now has an active or archived order in ITMS
+    order_plates_canon: Set[str] = set()
+    try:
+        orders_q = Q()
+        for p in current_blocked:
+            sp = format_display_plate(p)
+            orders_q |= Q(registration_number__iexact=p)
+            if sp and sp != p:
+                orders_q |= Q(registration_number__iexact=sp)
+        if orders_q:
+            for reg in InstallationOrder.objects.filter(orders_q).values_list("registration_number", flat=True):
+                if reg:
+                    order_plates_canon.add(normalizer.canonicalize(reg))
+    except Exception:
+        pass
+
+    from core.services import kit_provisioning_service
+    allow_live = bool(check_itms_live and len(current_blocked) <= 200)
+    verify_res = kit_provisioning_service.verify_scanned_kits_stock(
+        current_blocked,
+        check_itms_live=allow_live,
+        max_live_itms_queries=200,
+    )
+    now_in_stock = set(parse_plate_input(verify_res.get("verified_plates", []))) | order_plates_canon
+    if not now_in_stock:
+        return {
+            "work_date_suffix": suffix,
+            "resolved_plates": [],
+            "remaining_plates": current_blocked,
+            "resolved_count": 0,
+        }
+
+    resolved = [p for p in current_blocked if p in now_in_stock]
+    remaining = remove_blocked_plates(resolved, target_date_suffix=suffix)
+
+    # Ensure resolved kits are marked Available ('New') in InstallationKit if not already dispatched/installed
+    try:
+        InstallationKit.objects.filter(
+            get_kits_matching_plates_q(resolved)
+        ).exclude(
+            status__in=["Installed", "Archived", "Dispatched", "Allocated"]
+        ).update(status="New")
+    except Exception as exc:
+        logger.debug("Notice updating InstallationKit status for resolved plates: %s", exc)
+
+    if order_plates_canon:
+        try:
+            auto_register_dispatched_from_orders(suffix)
+        except Exception:
+            pass
 
     logger.info(
         "Auto-resolved %d previously blocked plate(s) now found in ITMS stock for shift %s: %s",
@@ -2876,6 +3043,7 @@ def generate_category_csv_content(category: str, target_date_suffix: Optional[st
         return out.getvalue()
 
     if cat_lower in ("dispatched", "counted", "morning"):
+        auto_register_dispatched_from_orders(suffix)
         dispatches = (
             StockDispatchScan.objects.filter(work_date_suffix=suffix)
             .only("registration_number", "plate_category", "dispatched_at", "operator_name", "status", "bond_code")
@@ -3250,7 +3418,8 @@ def reconcile_and_update_shift(
                     StockReturnScan.objects.bulk_create(returns_to_add)
                     new_returns_count = len(returns_to_add)
 
-        # 3. Retrieve all dispatches and returns for this shift
+        # 3. Auto-register any active/archived orders not initially scanned at safe room, then retrieve all dispatches
+        auto_register_dispatched_from_orders(suffix)
         dispatches_qs = list(
             StockDispatchScan.objects.filter(work_date_suffix=suffix)
             .filter(Q(bond_code__iexact=active_bond_code) | Q(bond_code="") | Q(bond_code__isnull=True))

@@ -644,6 +644,7 @@ def api_stock_blocked_plates(request: HttpRequest) -> JsonResponse:
 
     try:
         user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
+        check_itms_live = request.GET.get("recheck", "").lower() in ("1", "true", "yes") or request.GET.get("check_itms_live", "").lower() in ("1", "true", "yes")
         if request.method == "POST":
             plates_raw = None
             reason = "NOT ON ITMS STOCK"
@@ -657,6 +658,8 @@ def api_stock_blocked_plates(request: HttpRequest) -> JsonResponse:
                     reason = body.get("reason") or reason
                     operator_name = body.get("operator_name") or operator_name
                     action = (body.get("action") or "add").strip().lower()
+                    if "check_itms_live" in body or "recheck" in body:
+                        check_itms_live = bool(body.get("check_itms_live") or body.get("recheck"))
                 except Exception:
                     pass
             if not plates_raw:
@@ -670,6 +673,8 @@ def api_stock_blocked_plates(request: HttpRequest) -> JsonResponse:
                 reason = request.POST.get("reason", reason)
                 operator_name = request.POST.get("operator_name", operator_name)
                 action = (request.POST.get("action") or action).strip().lower()
+                if "check_itms_live" in request.POST or "recheck" in request.POST:
+                    check_itms_live = request.POST.get("check_itms_live", "").lower() in ("1", "true", "yes") or request.POST.get("recheck", "").lower() in ("1", "true", "yes")
 
             if action == "clear":
                 cleared = stock_monitoring_service.clear_blocked_plates_for_date(date_suffix)
@@ -677,13 +682,18 @@ def api_stock_blocked_plates(request: HttpRequest) -> JsonResponse:
                 return JsonResponse({
                     "success": True,
                     "cleared_count": cleared,
+                    "resolved_plates": [],
+                    "resolved_count": 0,
                     "date_suffix": docket.get("work_date_suffix"),
                     "blocked_plates": docket.get("plates", []),
                     "count": docket.get("count", 0),
                     "docket": docket,
                 })
 
-            if plates_raw:
+            if action == "recheck":
+                check_itms_live = True
+
+            if plates_raw and action != "recheck":
                 stock_monitoring_service.record_blocked_plates(
                     plates_raw,
                     target_date_suffix=date_suffix,
@@ -692,12 +702,18 @@ def api_stock_blocked_plates(request: HttpRequest) -> JsonResponse:
                     scanned_by=user,
                 )
 
+        resolve_res = stock_monitoring_service.resolve_transferred_blocked_plates(
+            target_date_suffix=date_suffix,
+            check_itms_live=check_itms_live,
+        )
         docket = stock_monitoring_service.get_stock_transfer_request_docket(date_suffix)
         return JsonResponse({
             "success": True,
             "date_suffix": docket.get("work_date_suffix"),
             "blocked_plates": docket.get("plates", []),
             "count": docket.get("count", 0),
+            "resolved_plates": resolve_res.get("resolved_plates", []),
+            "resolved_count": resolve_res.get("resolved_count", 0),
             "docket": docket,
         })
     except Exception as exc:
@@ -1026,6 +1042,8 @@ def api_stock_shift_details(request: HttpRequest) -> JsonResponse:
         or None
     )
     _, suffix = stock_monitoring_service.resolve_date_and_suffix(date_suffix)
+    stock_monitoring_service.auto_register_dispatched_from_orders(suffix)
+    resolve_res = stock_monitoring_service.resolve_transferred_blocked_plates(suffix, check_itms_live=False)
 
     # 1. Dispatches (up to 2000 rows so large 500+ kit shifts are never truncated at 150)
     dispatches = list(StockDispatchScan.objects.filter(work_date_suffix=suffix).order_by("-dispatched_at")[:2000].values(
@@ -1120,6 +1138,7 @@ def api_stock_shift_details(request: HttpRequest) -> JsonResponse:
         "audits": audits,
         "blocked_plates": blocked_plates,
         "blocked_count": len(blocked_plates),
+        "resolved_blocked_plates": resolve_res.get("resolved_plates", []),
         "dispatch_summary": {
             "total": total_dispatched,
             "psv": psv_dispatched,
@@ -1263,6 +1282,7 @@ def api_stock_inspect(request: HttpRequest) -> JsonResponse:
     # Persist blocked / not-on-stock plate to server immediately so Mobile Companion & Web UI match
     record_blocked_param = request.GET.get("record_blocked", "true").strip().lower()
     should_record_blocked = record_blocked_param not in ("0", "false", "no")
+    resolve_res: Dict[str, Any] = {"resolved_plates": []}
     if is_blocked and should_record_blocked:
         blocked_plates = stock_monitoring_service.record_blocked_plates(
             [clean_p],
@@ -1272,6 +1292,14 @@ def api_stock_inspect(request: HttpRequest) -> JsonResponse:
             scanned_by=user,
             plate_category=category,
         )
+    elif not is_blocked:
+        prev_blocked = stock_monitoring_service.get_blocked_plates_for_date(resolved_suffix)
+        blocked_plates = stock_monitoring_service.remove_blocked_plates(
+            [clean_p],
+            target_date_suffix=resolved_suffix,
+        )
+        if clean_p in prev_blocked:
+            resolve_res = {"resolved_plates": [clean_p]}
     else:
         blocked_plates = stock_monitoring_service.get_blocked_plates_for_date(resolved_suffix)
 
@@ -1408,6 +1436,7 @@ def api_stock_inspect(request: HttpRequest) -> JsonResponse:
         "date_suffix": resolved_suffix,
         "blocked_plates": blocked_plates,
         "blocked_count": len(blocked_plates),
+        "resolved_blocked_plates": resolve_res.get("resolved_plates", []),
         "dispatch_summary": {
             "total": total_dispatched,
             "psv": psv_dispatched,

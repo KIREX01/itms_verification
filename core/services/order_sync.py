@@ -1013,9 +1013,23 @@ class ShiftOrderSyncDaemon:
         kits_due = force or (self._last_kits_sync_ts == 0.0) or ((now_ts - self._last_kits_sync_ts) >= self.kits_interval)
 
         if not (orders_due or archive_due or kits_due):
+            # Even on idle heartbeat ticks, keep checking if any 'Not on Stock' blocked plates have been added to ITMS stock
+            resolved_idle: Dict[str, Any] = {}
+            for sfx in {s for s in (date_service.get_active_shift_suffix(), date_service.format_date_suffix(timezone.localdate())) if s}:
+                try:
+                    if stock_monitoring_service.get_blocked_plates_for_date(sfx):
+                        b_res = stock_monitoring_service.resolve_transferred_blocked_plates(
+                            target_date_suffix=sfx,
+                            check_itms_live=True,
+                        )
+                        if b_res.get("resolved_count", 0) > 0:
+                            resolved_idle[sfx] = b_res
+                except Exception:
+                    pass
             return {
                 "success": True,
                 "status": "idle_tick",
+                "resolved_blocked": resolved_idle,
                 "message": "No scheduled sync tasks due on this heartbeat tick.",
             }
 
@@ -1112,7 +1126,7 @@ class ShiftOrderSyncDaemon:
             try:
                 b_res = stock_monitoring_service.resolve_transferred_blocked_plates(
                     target_date_suffix=sfx,
-                    check_itms_live=kits_due,
+                    check_itms_live=True,
                 )
                 if b_res.get("resolved_count", 0) > 0:
                     resolved_blocked[sfx] = b_res

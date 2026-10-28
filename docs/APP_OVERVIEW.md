@@ -152,17 +152,21 @@ $$\mathbf{Closing\ Balance} = 	ext{Opening} + 	ext{Received} + 	ext{Transfer In}
 $$\mathbf{Net\ Physically\ on\ Line} = 	ext{Dispatched Scans} - 	ext{Returned Scans}$$
 $$\mathbf{Unallocated\ Floor\ Discrepancy} = \mathbf{Net\ Physically\ on\ Line} - 	ext{ITMS Archived Orders} - 	ext{ITMS Active Orders}$$
 
-#### The "Set Aside" Pre-Dispatch Verification Workflow (`docs/SYSTEM_ARCHITECTURE_AND_DATAFLOW.md`):
+#### The "Set Aside" Pre-Dispatch Verification & Auto-Registration Workflow (`docs/SYSTEM_ARCHITECTURE_AND_DATAFLOW.md`):
 When safe room keepers scan plate barcodes during morning dispatch, each barcode is checked against synchronized ITMS stock:
-1. If present and not installed: Allowed for dispatch (`ON_LINE_ACTIVE`).
-2. If already installed: Blocked (`ALREADY_INSTALLED`).
-3. If not registered on ITMS stock: **BLOCKED (`SET_ASIDE_TRIGGERED`)**. The physical plate is set aside in the safe room, an alert is sent to the ITMS Stock Transfer Officer, and a replacement kit is issued—preventing unrecorded bikes on the road.
+1. **On Stock (`ON_LINE_ACTIVE`):** Shows a clean green status pill on a dark slate popup background and stages/dispatches the kit to the floor.
+2. **Already Installed (`ALREADY_INSTALLED`):** Blocked from duplicate installation.
+3. **Not on Stock (`SET_ASIDE_TRIGGERED`):** Shows a red alert popup and adds the plate to the **Blocked / Set Aside** tray while alerting the ITMS Stock Transfer Officer. Subsequent scans of valid on-stock kits cleanly reset the scanner popup back to dark slate + green.
+4. **Continuous "Not on Stock" Re-Verification:** Both the background daemon (`ShiftOrderSyncDaemon`) and the Web/Mobile UI continuously re-check previously blocked kits against live ITMS stock. As soon as a kit is transferred into stock, it is automatically cleared from the blocked list, marked available (`status="New"`), and surfaced with a 1-click **Dispatch Available Kits** action.
+5. **Auto-Registration of Unscanned Active & Archive Orders:** When ground teams start fitting immediately before safe room scanning, any active or archived shift orders not yet in `StockDispatchScan` are automatically registered into Dispatched Kits (`auto_register_dispatched_from_orders`) so shift dispatch totals and reconciliation ledgers stay 100% complete.
 
 ### 3.6 Mobile Field Companion (`/mobile/`)
 *(Detailed in `docs/MOBILE_CAMERA_CONNECTION_AND_VERIFICATION.md`)*
 - **Zero-Install PWA:** Runs directly on any smartphone browser on the local depot network (`http://<ip>:8000/mobile/`), utilizing HTML5 camera hardware with autofocus, sensor flash, and full optical resolution.
 - **Dynamic Multi-Network Discovery:** Automatically detects and adapts across `LAPTOP_HOTSPOT` (`192.168.137.1`), `PHONE_HOTSPOT`, and `WIFI_LAN`. Compact ISO/IEC 18004 Unicode QR codes on the TUI and Web dashboards let technicians pair their phones in seconds.
-- **On-Conveyor Guided Mode:** Single smart shutter button guiding technicians through Front $ightarrow$ Rear $ightarrow$ Auto-Lock, associating photos instantly via client-side session tokens.
+- **On-Conveyor Guided Mode:** Single smart shutter button guiding technicians through Front $
+ightarrow$ Rear $
+ightarrow$ Auto-Lock, associating photos instantly via client-side session tokens.
 - **Off-Conveyor U-Turn Yard Walk:** Enables continuous photo capture during row walks, streaming photos to the server with trajectory metadata.
 - **Hardware Telemetry:** Monitors phone battery level, local storage, and round-trip network ping in real time.
 

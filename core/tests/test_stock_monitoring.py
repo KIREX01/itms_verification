@@ -2178,7 +2178,63 @@ class StockMonitoringTests(TestCase):
         self.assertEqual(sorted(res_batch["rejected_not_on_stock"]), ["UZZ901NS", "UZZ902NS"])
         self.assertEqual(res_batch["dispatch_summary"]["total"], 5)  # 1 + 4
         stock_monitoring_service.clear_blocked_plates_for_date(self.test_suffix)
-        stock_monitoring_service.clear_blocked_plates_for_date(self.test_suffix)
+
+    def test_auto_register_dispatched_from_orders_and_blocked_resolution(self):
+        """
+        Verifies:
+        1. Active and archived orders that were not initially scanned at safe room dispatch
+           are automatically registered into StockDispatchScan when shift details or
+           reconciliation are computed.
+        2. Previously blocked ('Not on Stock') plates are continuously re-checked and
+           automatically cleared from StockBlockedScan once added to stock (or inspected).
+        """
+        # Create 1 active order and 1 archived order without any prior StockDispatchScan
+        InstallationOrder.objects.create(
+            order_number=f"PO-UMA701AR-{self.test_suffix}",
+            registration_number="UMA 701AR",
+            order_status="Ready for installation",
+            is_archived=False,
+            warehouse_name="AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)",
+        )
+        InstallationOrder.objects.create(
+            order_number=f"PO-UMA702AR-{self.test_suffix}",
+            registration_number="UMA 702AR",
+            order_status="Installed",
+            is_archived=True,
+            warehouse_name="AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)",
+        )
+
+        # Calling /api/stock/shift/details/ should auto-register both into StockDispatchScan
+        resp_details = self.client.get(f"/api/stock/shift/details/?date_suffix={self.test_suffix}")
+        self.assertEqual(resp_details.status_code, 200)
+        details_data = resp_details.json()
+        self.assertTrue(details_data["success"])
+        disp_plates = {d["registration_number"] for d in details_data["dispatches"]}
+        self.assertIn("UMA701AR", disp_plates)
+        self.assertIn("UMA702AR", disp_plates)
+        self.assertEqual(details_data["dispatch_summary"]["total"], 2)
+
+        # Now test blocked plate resolution when kit is added to stock
+        stock_monitoring_service.record_blocked_plates(["UMA703BK"], target_date_suffix=self.test_suffix)
+        self.assertIn("UMA703BK", stock_monitoring_service.get_blocked_plates_for_date(self.test_suffix))
+
+        # Add kit to stock
+        InstallationKit.objects.create(
+            kit_code="IK-UMA703BK",
+            registration_number="UMA 703BK",
+            status="New",
+            warehouse="AGM SPIRO",
+        )
+
+        # Calling /api/stock/blocked-plates/?recheck=1 should resolve UMA703BK and report it in resolved_plates
+        resp_blocked = self.client.get(f"/api/stock/blocked-plates/?date_suffix={self.test_suffix}&recheck=1")
+        self.assertEqual(resp_blocked.status_code, 200)
+        b_data = resp_blocked.json()
+        self.assertTrue(b_data["success"])
+        self.assertIn("UMA703BK", b_data["resolved_plates"])
+        self.assertEqual(b_data["count"], 0)
+        self.assertNotIn("UMA703BK", stock_monitoring_service.get_blocked_plates_for_date(self.test_suffix))
+
 
 
 

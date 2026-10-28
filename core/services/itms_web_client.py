@@ -326,6 +326,7 @@ class ITMSWebSessionStore:
             sess = OperatorITMSSession.objects.filter(user=self.user).first()
             if sess:
                 return sess
+            return None
         # Unauthenticated CLI, system daemon, or fallback to active session:
         return (
             OperatorITMSSession.objects.filter(is_authenticated=True).order_by("-saved_at").first()
@@ -378,6 +379,8 @@ class ITMSWebSessionStore:
             if loaded is not None and loaded.is_authenticated:
                 self._session = loaded
                 return self._session
+            self._session = ITMSWebSessionData()
+            return self._session
 
         # For unauthenticated CLI or system daemon mode or fallback:
         loaded = self._load_from_db() or self._load_from_disk()

@@ -31,6 +31,8 @@ PUBLIC_EXACT_PATHS = {
     "/signup/",
     "/signup/verify/",
     "/logout/",
+    "/access/request/",
+    "/access/activate/",
     "/api/itms/status/",  # Safe connectivity and heartbeat probe
 }
 
@@ -39,24 +41,84 @@ PUBLIC_PREFIXES = (
     "/login/",
     "/signup/",
     "/logout/",
+    "/access/",
     "/static/",
     "/favicon.ico",
     "/admin/",
 )
 
+# Paths always reachable even when a device/IP/MAC is blocked or pending approval
+# so legitimate operators can submit an email activation request or enter an unlock code:
+ACCESS_PORTAL_PREFIXES = (
+    "/access/",
+    "/logout/",
+    "/static/",
+    "/favicon.ico",
+)
+
 
 class ApiAuthMiddleware:
-    """Enforces authentication across all API, media, and private application routes."""
+    """Enforces authentication and zero-trust device/IP/MAC access control across routes."""
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
         self.get_response = get_response
 
+    def _finalize_response(self, request: HttpRequest, response: HttpResponse) -> HttpResponse:
+        cookie_meta = getattr(request, "_attach_device_trust_cookie", None)
+        if cookie_meta and isinstance(cookie_meta, tuple) and len(cookie_meta) == 2:
+            try:
+                from core.services import device_access_service
+                device_access_service.attach_device_trust_cookie(response, cookie_meta[0], cookie_meta[1])
+            except Exception:
+                pass
+        return response
+
     def __call__(self, request: HttpRequest) -> HttpResponse:
         path = request.path
 
-        # 1. Allow whitelisted static, admin, and authentication routes
+        # 0. Evaluate Zero-Trust Device (IP / MAC / Device ID) & QR Pairing access
+        if not any(path.startswith(p) for p in ACCESS_PORTAL_PREFIXES):
+            verdict = None
+            try:
+                from core.services import device_access_service
+                verdict = device_access_service.evaluate_request_access(request)
+            except Exception as exc:
+                logger.debug("Device access guard evaluation notice: %s", exc)
+
+            if verdict and not verdict.get("allowed", True):
+                err_code = verdict.get("code", "DEVICE_ACCESS_DENIED")
+                err_msg = verdict.get("reason", "Unauthorized device or IP address.")
+                if path.startswith("/api/"):
+                    error = create_error_detail(
+                        code=err_code,
+                        message=err_msg,
+                        field="device",
+                    )
+                    return format_api_response(
+                        errors=[error],
+                        status_code=403,
+                        request=request,
+                    )
+                if path.startswith("/media/"):
+                    return HttpResponse("Forbidden: Device not authorized", status=403, content_type="text/plain")
+
+                from django.shortcuts import render
+                ident = verdict.get("identity", {})
+                return render(
+                    request,
+                    "core/access_request.html",
+                    {
+                        "blocked_code": err_code,
+                        "blocked_reason": err_msg,
+                        "device_identity": ident,
+                        "device_obj": verdict.get("device"),
+                    },
+                    status=403,
+                )
+
+        # 1. Allow whitelisted static, admin, access portal, and authentication routes
         if path in PUBLIC_EXACT_PATHS or any(path.startswith(prefix) for prefix in PUBLIC_PREFIXES):
-            return self.get_response(request)
+            return self._finalize_response(request, self.get_response(request))
 
         # 2. Check user authentication
         user = getattr(request, "user", None)
@@ -93,4 +155,4 @@ class ApiAuthMiddleware:
                 return redirect("/")
 
         # Authenticated user - proceed normally
-        return self.get_response(request)
+        return self._finalize_response(request, self.get_response(request))

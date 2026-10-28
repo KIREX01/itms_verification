@@ -581,3 +581,136 @@ def send_stock_reconciliation_report_email(
     except Exception as exc:
         logger.exception("Failed to dispatch stock report email")
         return False, f"Network error sending report: {exc}", clean_recipients
+
+
+def send_access_request_admin_alert(
+    admin_emails: list[str],
+    requester_email: str,
+    requester_name: str = "",
+    client_ip: str = "",
+    mac_address: str = "",
+    device_name: str = "",
+    activation_code: str = "",
+    approve_url: str = "",
+) -> Tuple[bool, str]:
+    """
+    Sends an alert email to administrator(s) when a new operator email or unrecognized device
+    requests access activation. Includes 1-click approval link and the 6-digit activation code.
+    """
+    clean_admins = [str(e).strip() for e in (admin_emails or []) if e and "@" in str(e)]
+    if not clean_admins:
+        return False, "No administrator email configured."
+
+    api_key = get_resend_api_key()
+    from_email = get_resend_from_email()
+    text_content = (
+        f"CLOSE COPILOT - DEVICE & EMAIL ACCESS REQUEST\n\n"
+        f"Requester Email: {requester_email}\n"
+        f"Name / Username: {requester_name or 'Operator'}\n"
+        f"Device Name:     {device_name or 'Unknown'}\n"
+        f"Client IP:       {client_ip or 'N/A'}\n"
+        f"MAC Address:     {mac_address or 'N/A (Cloud/Remote)'}\n"
+        f"Activation Code: {activation_code}\n"
+        f"Approve Link:    {approve_url}\n"
+    )
+    if not api_key:
+        logger.warning(
+            "[ACCESS REQUEST DEV FALLBACK] Simulated admin alert for %s (Code: %s)",
+            _sanitize_log_str(requester_email),
+            _sanitize_log_str(activation_code),
+        )
+        return True, "Simulated admin alert logged."
+
+    approve_btn = (
+        f'<p style="margin:18px 0;"><a href="{approve_url}" style="background:#ffd100;color:#000;padding:10px 20px;border-radius:6px;font-weight:800;text-decoration:none;">✅ Approve Email &amp; Device</a></p>'
+        if approve_url else ""
+    )
+    html_content = f"""<!DOCTYPE html>
+<html><body style="background:#0b0d13;color:#e1e4ea;font-family:sans-serif;padding:20px;">
+  <div style="max-width:520px;margin:0 auto;background:#141722;border:1px solid #282d3d;border-radius:10px;padding:24px;">
+    <h2 style="color:#ffd100;margin-top:0;">🛡️ New Device / Email Access Request</h2>
+    <p>An operator has requested access activation on <strong>CLOSE Copilot</strong>:</p>
+    <ul style="line-height:1.7;">
+      <li><strong>Email:</strong> {requester_email}</li>
+      <li><strong>Operator:</strong> {requester_name or '—'}</li>
+      <li><strong>Device:</strong> {device_name or '—'}</li>
+      <li><strong>IP Address:</strong> <code>{client_ip or '—'}</code></li>
+      <li><strong>MAC Address:</strong> <code>{mac_address or 'N/A'}</code></li>
+      <li><strong>6-Digit Activation Code:</strong> <strong style="color:#ffd100;font-size:18px;">{activation_code}</strong></li>
+    </ul>
+    {approve_btn}
+  </div>
+</body></html>"""
+
+    try:
+        resp = requests.post(
+            "https://api.resend.com/emails",
+            json={
+                "from": from_email,
+                "to": clean_admins,
+                "subject": f"🛡️ Access Request: {requester_email} ({client_ip})",
+                "html": html_content,
+                "text": text_content,
+            },
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            timeout=10,
+        )
+        return resp.status_code in (200, 201), "Admin alert sent."
+    except Exception as exc:
+        logger.warning("Failed sending admin access alert: %s", exc)
+        return False, str(exc)
+
+
+def send_access_activated_email(
+    to_email: str,
+    username: str = "Operator",
+    activation_code: str = "",
+    login_url: str = "",
+) -> Tuple[bool, str]:
+    """Notifies an operator that their email and device access request has been approved."""
+    if not to_email or "@" not in to_email:
+        return False, "Valid recipient email required."
+
+    api_key = get_resend_api_key()
+    from_email = get_resend_from_email()
+    target_url = login_url or "https://close.kirex.online/login/"
+    text_content = (
+        f"CLOSE COPILOT - ACCESS ACTIVATED\n\n"
+        f"Hello {username},\n\n"
+        f"Your email ({to_email}) and device have been approved for CLOSE Copilot.\n"
+        f"Activation Code: {activation_code}\n"
+        f"Sign In URL: {target_url}\n"
+    )
+    if not api_key:
+        logger.info("[ACCESS ACTIVATED DEV FALLBACK] Approved %s (Code: %s)", _sanitize_log_str(to_email), _sanitize_log_str(activation_code))
+        return True, "Simulated activation email logged."
+
+    html_content = f"""<!DOCTYPE html>
+<html><body style="background:#0b0d13;color:#e1e4ea;font-family:sans-serif;padding:20px;">
+  <div style="max-width:520px;margin:0 auto;background:#141722;border:1px solid #282d3d;border-radius:10px;padding:24px;">
+    <h2 style="color:#22c55e;margin-top:0;">✅ Access Approved — CLOSE Copilot</h2>
+    <p>Hello <strong>{username}</strong>,</p>
+    <p>Your operator email (<strong>{to_email}</strong>) and device have been authorized.</p>
+    <p><strong>Activation Code:</strong> <code style="font-size:20px;color:#ffd100;font-weight:bold;">{activation_code}</code></p>
+    <p style="margin-top:20px;"><a href="{target_url}" style="background:#ffd100;color:#000;padding:10px 22px;border-radius:6px;font-weight:800;text-decoration:none;">Sign In to CLOSE Copilot &rarr;</a></p>
+  </div>
+</body></html>"""
+
+    try:
+        resp = requests.post(
+            "https://api.resend.com/emails",
+            json={
+                "from": from_email,
+                "to": [to_email],
+                "subject": "✅ CLOSE Copilot Access Approved",
+                "html": html_content,
+                "text": text_content,
+            },
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            timeout=10,
+        )
+        return resp.status_code in (200, 201), "Activation email sent."
+    except Exception as exc:
+        logger.warning("Failed sending activation email: %s", exc)
+        return False, str(exc)
+

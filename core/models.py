@@ -1257,3 +1257,172 @@ class FacilitySyncMetadata(models.Model):
     def __str__(self):
         return f"Sync Metadata for {self.facility_code} ({self.total_kits} kits, {self.total_orders} orders)"
 
+
+class AuthorizedDevice(models.Model):
+    """
+    Registry of known, approved, pending, or blocked client devices and network rules.
+    Supports multi-device account sharing (e.g., Team Leader Desktop + Fitter Mobile Companion
+    paired via QR code) while allowing granular blocking by Device ID, IP/CIDR, or MAC address.
+    """
+
+    class Status(models.TextChoices):
+        APPROVED = "APPROVED", "Approved"
+        PENDING = "PENDING", "Pending Approval"
+        BLOCKED = "BLOCKED", "Blocked"
+        REVOKED = "REVOKED", "Revoked"
+
+    class DeviceType(models.TextChoices):
+        DESKTOP = "DESKTOP", "Desktop / Laptop Console"
+        MOBILE = "MOBILE", "Mobile Companion"
+        TUI = "TUI", "Terminal UI (TUI)"
+        NETWORK_RULE = "NETWORK_RULE", "IP / MAC Firewall Rule"
+
+    class LinkedVia(models.TextChoices):
+        EXISTING_TRUSTED = "EXISTING_TRUSTED", "Existing Linked Account"
+        DIRECT_LOGIN = "DIRECT_LOGIN", "Authenticated Operator Login"
+        QR_PAIRING = "QR_PAIRING", "Mobile QR Code Scan"
+        EMAIL_ACTIVATION = "EMAIL_ACTIVATION", "Email Activation Request"
+        ADMIN_RULE = "ADMIN_RULE", "Administrator Manual Rule"
+
+    LinkMethod = LinkedVia
+
+    device_id = models.CharField(
+        max_length=128,
+        unique=True,
+        db_index=True,
+        help_text="Deterministic hardware/browser device token or firewall rule ID",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="authorized_devices",
+        help_text="Operator account using this device (multiple devices can share one account)",
+    )
+    authorized_email = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    device_name = models.CharField(max_length=150, default="Operator Station")
+    device_type = models.CharField(
+        max_length=24,
+        choices=DeviceType.choices,
+        default=DeviceType.DESKTOP,
+        db_index=True,
+    )
+    linked_via = models.CharField(
+        max_length=24,
+        choices=LinkedVia.choices,
+        default=LinkedVia.DIRECT_LOGIN,
+    )
+    ip_address = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    pinned_ip_cidr = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Optional pinned IP or CIDR subnet for strict restriction or block rule",
+    )
+    mac_address = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Normalized hardware MAC address (AA:BB:CC:DD:EE:FF) when available via LAN ARP or TUI",
+    )
+    fingerprint_hash = models.CharField(max_length=128, blank=True, default="")
+    user_agent = models.TextField(blank=True, default="")
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.APPROVED,
+        db_index=True,
+    )
+    block_reason = models.CharField(max_length=255, blank=True, default="")
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="approved_device_records",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    last_seen_at = models.DateTimeField(default=timezone.now, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-last_seen_at"]
+        verbose_name = "Authorized Device"
+        verbose_name_plural = "Authorized Devices"
+        indexes = [
+            models.Index(fields=["status", "ip_address"]),
+            models.Index(fields=["status", "mac_address"]),
+            models.Index(fields=["user", "status"]),
+        ]
+
+    def __str__(self):
+        owner = self.user.username if self.user else (self.authorized_email or "Unassigned")
+        return f"{self.device_name} [{self.ip_address or 'No IP'} | {self.mac_address or self.device_id[:12]}] ({self.status} - {owner})"
+
+
+class EmailAccessRequest(models.Model):
+    """
+    Tracks pre-approved operator emails and self-service signup / device activation requests.
+    Allows new or unrecognized devices/emails to request activation and unlock via a 6-digit code
+    or 1-click administrator approval.
+    """
+
+    class Status(models.TextChoices):
+        PRE_APPROVED = "PRE_APPROVED", "Pre-Approved (Ready for Signup)"
+        PENDING = "PENDING", "Pending Administrator Approval"
+        APPROVED = "APPROVED", "Approved & Active"
+        REJECTED = "REJECTED", "Rejected"
+        BLOCKED = "BLOCKED", "Blocked"
+
+    email = models.CharField(max_length=255, db_index=True)
+    username = models.CharField(max_length=150, blank=True, default="")
+    full_name = models.CharField(max_length=150, blank=True, default="")
+    facility_code = models.CharField(max_length=32, default="AGM")
+    requested_role = models.CharField(max_length=32, default="OPERATOR")
+    reason = models.TextField(blank=True, default="")
+    device_id = models.CharField(max_length=128, blank=True, default="", db_index=True)
+    mac_address = models.CharField(max_length=32, blank=True, default="", db_index=True)
+    client_ip = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    device_name = models.CharField(max_length=150, blank=True, default="")
+    user_agent = models.TextField(blank=True, default="")
+    email_verified = models.BooleanField(default=False)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    activation_code = models.CharField(max_length=16, blank=True, default="", db_index=True)
+    activation_token = models.CharField(max_length=128, unique=True, db_index=True)
+    max_devices_allowed = models.IntegerField(
+        default=4,
+        help_text="Maximum concurrent devices allowed to share this account (e.g. Team Leader Desktop + Companion Phones)",
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="reviewed_access_requests",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Email Access Request"
+        verbose_name_plural = "Email Access Requests"
+
+    def __str__(self):
+        return f"Access Request: {self.email} ({self.status}) [{self.client_ip}]"
+
+    @property
+    def ip_address(self) -> str:
+        return self.client_ip
+
+
+

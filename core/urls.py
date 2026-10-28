@@ -16,6 +16,11 @@ urlpatterns = [
     path("signup/", views.signup_view, name="signup"),
     path("signup/verify/", views.signup_verify_view, name="signup_verify"),
     path("logout/", views.logout_view, name="logout"),
+    path("access/request/", views.access_request_view, name="access_request"),
+    path("access/activate/", views.access_activate_view, name="access_activate"),
+    path("access/review/<str:token>/", views.access_review_token_view, name="access_review_token"),
+    path("api/security/overview/", views.api_security_overview, name="api_security_overview"),
+    path("api/security/action/", views.api_security_action, name="api_security_action"),
 
     # Operator Web Dashboard
     path("", views.dashboard_view, name="dashboard"),

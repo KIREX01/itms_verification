@@ -17,6 +17,11 @@ from .auth import (
     signup_view,
     signup_verify_view,
     logout_view,
+    access_request_view,
+    access_activate_view,
+    access_review_token_view,
+    api_security_overview,
+    api_security_action,
 )
 
 from .dashboard import (
@@ -176,6 +181,11 @@ __all__ = [
     "dashboard_view",
     "login_view",
     "logout_view",
+    "access_request_view",
+    "access_activate_view",
+    "access_review_token_view",
+    "api_security_overview",
+    "api_security_action",
     "serve_media",
     "signup_view",
     "signup_verify_view",

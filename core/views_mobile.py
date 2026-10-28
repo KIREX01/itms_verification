@@ -170,6 +170,24 @@ def api_network_info(request: HttpRequest) -> JsonResponse:
         use_https = True
 
     info = network_service.get_mobile_connection_info(port=port, use_https=use_https, request=request)
+    try:
+        from core.services import device_access_service
+        user = getattr(request, "user", None)
+        if user and getattr(user, "is_authenticated", False):
+            pair_token = device_access_service.generate_qr_pairing_token(user=user)
+            if pair_token:
+                info["pair_token"] = pair_token
+                sep = "&" if "?" in info.get("primary_url", "") else "?"
+                info["primary_url"] = f"{info['primary_url']}{sep}pair_token={pair_token}"
+                info["https_primary_url"] = f"{info['https_primary_url']}{sep}pair_token={pair_token}"
+                info["http_primary_url"] = f"{info['http_primary_url']}{sep}pair_token={pair_token}"
+                for c in info.get("candidate_urls", []):
+                    c_sep = "&" if "?" in c.get("url", "") else "?"
+                    c["url"] = f"{c['url']}{c_sep}pair_token={pair_token}"
+                    c["https_url"] = f"{c['https_url']}{c_sep}pair_token={pair_token}"
+                    c["http_url"] = f"{c['http_url']}{c_sep}pair_token={pair_token}"
+    except Exception as exc:
+        logger.debug("QR pair_token generation notice: %s", exc)
     return JsonResponse(info)
 
 

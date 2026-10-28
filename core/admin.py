@@ -6,7 +6,9 @@ from django.utils import timezone
 from django.utils.html import format_html
 
 from core.models import (
+    AuthorizedDevice,
     DailyStockLedger,
+    EmailAccessRequest,
     EvidenceImage,
     FacilitySyncMetadata,
     IngestionBatch,
@@ -252,3 +254,29 @@ class DailyStockLedgerAdmin(admin.ModelAdmin):
     list_filter = ("is_closed", "warehouse_name", "work_date")
     search_fields = ("warehouse_name", "work_date")
     readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(AuthorizedDevice)
+class AuthorizedDeviceAdmin(admin.ModelAdmin):
+    list_display = (
+        "device_name", "device_type", "user", "authorized_email",
+        "ip_address", "mac_address", "status", "linked_via", "last_seen_at",
+    )
+    list_filter = ("status", "device_type", "linked_via")
+    search_fields = (
+        "device_name", "device_id", "authorized_email",
+        "ip_address", "mac_address", "user__username",
+    )
+    readonly_fields = ("created_at", "last_seen_at")
+
+
+@admin.register(EmailAccessRequest)
+class EmailAccessRequestAdmin(admin.ModelAdmin):
+    list_display = (
+        "email", "full_name", "username", "facility_code",
+        "requested_role", "status", "activation_code", "client_ip", "mac_address", "updated_at",
+    )
+    list_filter = ("status", "requested_role", "facility_code")
+    search_fields = ("email", "full_name", "username", "client_ip", "mac_address", "device_id")
+    readonly_fields = ("created_at", "updated_at", "reviewed_at")
+

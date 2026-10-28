@@ -234,7 +234,133 @@
             </div>
         </div>
 
+        <!-- ======================================================== -->
+        <!-- SECTION 2: DEVICE & EMAIL ACCESS CONTROL (IP / MAC)      -->
+        <!-- ======================================================== -->
+        <div class="settings-card" id="settings-security-card">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <span>🔒 Device &amp; Email Access Control (IP / MAC Firewall &amp; Shared Devices)</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <button class="btn btn-secondary" onclick="loadSecurityOverview(true)" style="padding:4px 10px; font-size:0.75rem;">
+                        🔄 Refresh Devices
+                    </button>
+                    <span class="badge badge-green" id="security-mode-badge">● Active Firewall</span>
+                </div>
+            </div>
 
+            <div class="settings-row">
+                <div class="settings-label-group">
+                    <span class="settings-label-title">Strict Email Pre-Approval Gate</span>
+                    <span class="settings-label-desc">
+                        When enabled, new signups require administrator email approval or a 6-digit activation code. Existing active accounts and QR-paired mobile companion phones are never blocked.
+                    </span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="security-strict-email-toggle" onchange="toggleStrictEmailApproval(this.checked)">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label-group">
+                    <span class="settings-label-title">Max Shared Devices per Operator Account</span>
+                    <span class="settings-label-desc">
+                        Allows one account to be used simultaneously by the Team Leader (Desktop) and Field Fitter (Mobile Camera / QR Scanner).
+                    </span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <input type="number" id="security-max-devices-input" min="2" max="15" value="4"
+                           style="width: 80px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
+                           onchange="updateMaxSharedDevices(parseInt(this.value, 10))">
+                    <span style="font-size:0.75rem; color:var(--ug-text-dim);">devices/account</span>
+                </div>
+            </div>
+
+            <!-- Action Bar: Pre-Approve Email OR Block IP / MAC / Device -->
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; padding:12px 0; border-top:1px solid var(--ug-border);">
+                <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 12px;">
+                    <div style="font-size:0.78rem; font-weight:800; color:var(--ug-yellow); margin-bottom:6px;">
+                        ✉️ Pre-Approve Operator Email &amp; Send Activation Code
+                    </div>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                        <input type="email" id="security-preapprove-email" placeholder="operator@info.kirex.online"
+                               style="flex:1; min-width:160px; padding:6px 10px; background:#090d16; border:1px solid var(--ug-border); color:#fff; border-radius:6px; font-size:0.8rem;">
+                        <button class="btn btn-primary" onclick="preapproveOperatorEmail()" style="padding:6px 12px; font-size:0.78rem;">
+                            Pre-Approve
+                        </button>
+                    </div>
+                    <div id="security-preapprove-result" style="font-size:0.72rem; color:var(--ug-text-muted); margin-top:6px;"></div>
+                </div>
+
+                <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:10px 12px;">
+                    <div style="font-size:0.78rem; font-weight:800; color:#f87171; margin-bottom:6px;">
+                        🚫 Block Unauthorized IP, CIDR, MAC Address, or Device ID
+                    </div>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                        <input type="text" id="security-block-target" placeholder="e.g. 192.168.1.50 or AA:BB:CC:DD:EE:FF"
+                               style="flex:1; min-width:160px; padding:6px 10px; background:#090d16; border:1px solid var(--ug-border); color:#fff; border-radius:6px; font-size:0.8rem; font-family:var(--font-mono);">
+                        <button class="btn btn-secondary" onclick="blockNetworkTarget()" style="padding:6px 12px; font-size:0.78rem; border-color:#ef4444; color:#fca5a5;">
+                            Block Target
+                        </button>
+                    </div>
+                    <div id="security-blocked-summary" style="font-size:0.7rem; color:var(--ug-text-dim); margin-top:6px; font-family:var(--font-mono);">
+                        Blocked IPs: 0 | Blocked MACs: 0
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pending Email & Access Activation Requests -->
+            <div style="margin-top:8px;">
+                <div style="font-size:0.78rem; font-weight:800; color:#e2e8f0; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+                    <span>📩 Email Access &amp; Activation Requests</span>
+                    <a href="/access/request/" target="_blank" style="font-size:0.72rem; color:var(--ug-yellow); text-decoration:underline;">Open Self-Service Activation Portal ↗</a>
+                </div>
+                <div style="overflow-x:auto; max-height:200px; border:1px solid var(--ug-border); border-radius:6px;">
+                    <table style="width:100%; border-collapse:collapse; font-size:0.75rem;">
+                        <thead>
+                            <tr style="background:#0c1220; color:var(--ug-text-muted); text-align:left; border-bottom:1px solid var(--ug-border);">
+                                <th style="padding:6px 8px;">Email / Operator</th>
+                                <th style="padding:6px 8px;">Role / Facility</th>
+                                <th style="padding:6px 8px;">IP / MAC</th>
+                                <th style="padding:6px 8px;">Code</th>
+                                <th style="padding:6px 8px;">Status</th>
+                                <th style="padding:6px 8px; text-align:right;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="security-requests-tbody">
+                            <tr><td colspan="6" style="padding:10px; text-align:center; color:var(--ug-text-dim);">Loading access requests...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Registered & Linked Devices (Desktop + Shared Mobile Companion) -->
+            <div style="margin-top:12px;">
+                <div style="font-size:0.78rem; font-weight:800; color:#e2e8f0; margin-bottom:6px;">
+                    📱 Linked &amp; Monitored Devices (Team Leader Desktops + QR-Paired Field Phones)
+                </div>
+                <div style="overflow-x:auto; max-height:240px; border:1px solid var(--ug-border); border-radius:6px;">
+                    <table style="width:100%; border-collapse:collapse; font-size:0.75rem;">
+                        <thead>
+                            <tr style="background:#0c1220; color:var(--ug-text-muted); text-align:left; border-bottom:1px solid var(--ug-border);">
+                                <th style="padding:6px 8px;">Device / Platform</th>
+                                <th style="padding:6px 8px;">Account / Email</th>
+                                <th style="padding:6px 8px;">IP Address</th>
+                                <th style="padding:6px 8px;">MAC Address</th>
+                                <th style="padding:6px 8px;">Linked Via</th>
+                                <th style="padding:6px 8px;">Status</th>
+                                <th style="padding:6px 8px; text-align:right;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="security-devices-tbody">
+                            <tr><td colspan="7" style="padding:10px; text-align:center; color:var(--ug-text-dim);">Loading registered devices...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
 
         <!-- ======================================================== -->
         <!-- SECTION 3: SYSTEM UPDATES & VERSION CONTROL              -->

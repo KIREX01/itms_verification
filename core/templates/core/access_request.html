@@ -1,0 +1,176 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Device &amp; Email Access Activation - CLOSE Copilot</title>
+
+    <link rel="shortcut icon" href="{% static 'core/logos/favicon.ico' %}">
+    <link rel="icon" type="image/x-icon" href="{% static 'core/logos/favicon.ico' %}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{% static 'core/logos/favicon-32x32.png' %}">
+    <link rel="icon" type="image/png" sizes="16x16" href="{% static 'core/logos/favicon-16x16.png' %}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{% static 'core/logos/apple-touch-icon.png' %}">
+    <link rel="manifest" href="{% static 'core/logos/site.webmanifest' %}">
+
+    <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/auth.css' %}">
+</head>
+<body>
+
+    <!-- Uganda National Flag Ribbon -->
+    <div class="uganda-flag-ribbon"></div>
+
+    <div class="auth-page-wrapper">
+        <div class="auth-card-box auth-card-wide" style="max-width:680px;">
+            <div class="auth-card-head">
+                <div style="display:flex; justify-content:center; margin-bottom:12px;">
+                    <img src="{% static 'core/logos/android-chrome-192x192.png' %}" alt="ITMS Logo" style="width:58px; height:58px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,0.5); border:1px solid var(--ug-border); object-fit:contain; background:#0c0f17;">
+                </div>
+                <h1 style="font-size:1.3rem; font-weight:800; color:#ffffff; letter-spacing:0.5px; margin:0;">
+                    🛡️ DEVICE &amp; EMAIL <span style="color:var(--ug-yellow);">ACCESS CONTROL</span>
+                </h1>
+                <p style="font-size:0.76rem; color:var(--ug-text-muted); margin-top:4px;">
+                    Authorize your workstation or field companion device &bull; Request Email Activation
+                </p>
+            </div>
+
+            <div class="auth-card-body">
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="alert-banner {% if message.tags == 'error' %}error{% elif message.tags == 'warning' %}warning{% else %}info{% endif %}" style="margin-bottom:12px;">
+                            <span>{{ message }}</span>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+
+                {% if error %}
+                    <div class="alert-banner error" style="margin-bottom:12px;">
+                        <span>⚠️ {{ error }}</span>
+                    </div>
+                {% endif %}
+
+                {% if success_message %}
+                    <div class="alert-banner" style="margin-bottom:12px; background:rgba(16,185,129,0.14); border:1px solid rgba(16,185,129,0.45); color:#6ee7b7; padding:10px 12px; border-radius:8px; font-size:0.82rem;">
+                        <span>✅ {{ success_message }}</span>
+                    </div>
+                {% endif %}
+
+                {% if blocked_reason %}
+                    <div class="alert-banner error" style="margin-bottom:14px;">
+                        <div>
+                            <div style="font-weight:800; margin-bottom:3px;">🔒 Device / Account Access Restricted</div>
+                            <div style="font-size:0.78rem; opacity:0.92;">{{ blocked_reason }}</div>
+                        </div>
+                    </div>
+                {% endif %}
+
+                <!-- Detected Network & Hardware Telemetry Box -->
+                <div style="background:rgba(15, 23, 42, 0.75); border:1px solid var(--ug-border); border-radius:8px; padding:10px 12px; margin-bottom:16px; font-size:0.75rem;">
+                    <div style="font-weight:800; color:var(--ug-yellow); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px;">
+                        📡 Detected Device Telemetry
+                    </div>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:6px; color:var(--ug-text-secondary);">
+                        <div><strong style="color:#fff;">IP Address:</strong> <code style="color:#93c5fd;">{{ device_identity.client_ip|default:"Unknown" }}</code></div>
+                        <div><strong style="color:#fff;">MAC Address:</strong> <code style="color:#fcd34d;">{{ device_identity.mac_address|default:"LAN / Not Exposed" }}</code></div>
+                        <div><strong style="color:#fff;">Device ID:</strong> <code>{{ device_identity.device_id|default:"-" }}</code></div>
+                        <div><strong style="color:#fff;">Platform:</strong> {{ device_identity.device_name|default:"Browser" }} ({{ device_identity.device_type|default:"DESKTOP" }})</div>
+                    </div>
+                    <div style="margin-top:6px; font-size:0.7rem; color:var(--ug-text-muted);">
+                        💡 <strong>Tip for Field Teams:</strong> One operator account can be shared across both the <strong>Team Leader Desktop</strong> and the <strong>Fitter Mobile Companion</strong> (scan the QR code on the Desktop or TUI to pair automatically).
+                    </div>
+                </div>
+
+                <!-- Card 1: Unlock immediately with 6-Digit Activation Code -->
+                <div style="background:rgba(250, 204, 21, 0.05); border:1px solid rgba(250, 204, 21, 0.3); border-radius:8px; padding:12px 14px; margin-bottom:18px;">
+                    <div style="font-size:0.84rem; font-weight:800; color:var(--ug-yellow); margin-bottom:4px;">
+                        🔑 Already Have a 6-Digit Activation Code?
+                    </div>
+                    <p style="font-size:0.74rem; color:var(--ug-text-muted); margin:0 0 10px 0;">
+                        Enter your operator email and the 6-digit activation code sent by the administrator to immediately authorize this device.
+                    </p>
+                    <form method="POST" action="{% url 'core:access_activate' %}" style="display:grid; grid-template-columns:1fr 140px auto; gap:8px; align-items:end;">
+                        {% csrf_token %}
+                        <div class="form-field" style="margin:0;">
+                            <label for="activate_email" style="font-size:0.7rem;">Authorized Email *</label>
+                            <input type="email" id="activate_email" name="email" value="{{ prefill_email|default:'' }}" required placeholder="operator@info.kirex.online">
+                        </div>
+                        <div class="form-field" style="margin:0;">
+                            <label for="activation_code" style="font-size:0.7rem;">6-Digit Code *</label>
+                            <input type="text" id="activation_code" name="activation_code" maxlength="6" pattern="[0-9]{6}" required placeholder="123456" style="letter-spacing:3px; font-weight:800; text-align:center;">
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="padding:10px 14px; font-weight:800; white-space:nowrap;">
+                            Unlock Device
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Card 2: Submit Request to Activate Email & Device -->
+                <div style="border-top:1px solid var(--ug-border); padding-top:14px;">
+                    <div style="font-size:0.86rem; font-weight:800; color:#ffffff; margin-bottom:4px;">
+                        📩 Request Email &amp; Device Access Activation
+                    </div>
+                    <p style="font-size:0.74rem; color:var(--ug-text-muted); margin:0 0 12px 0;">
+                        Submit your email and device details below. The system administrator will receive an instant notification and you will receive an activation code by email once approved.
+                    </p>
+
+                    <form method="POST" action="{% url 'core:access_request' %}" style="display:flex; flex-direction:column; gap:12px;">
+                        {% csrf_token %}
+                        <div class="form-row">
+                            <div class="form-field">
+                                <label for="req_email">Work Email to Activate *</label>
+                                <input type="email" id="req_email" name="email" value="{{ prefill_email|default:'' }}" required placeholder="e.g. operator@info.kirex.online">
+                            </div>
+                            <div class="form-field">
+                                <label for="req_full_name">Full Name *</label>
+                                <input type="text" id="req_full_name" name="full_name" value="" required placeholder="e.g. Okello Samuel">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-field">
+                                <label for="req_username">Operator Username (if existing)</label>
+                                <input type="text" id="req_username" name="username" value="" placeholder="e.g. okello_s">
+                            </div>
+                            <div class="form-field">
+                                <label for="req_facility">Bond / Facility</label>
+                                <input type="text" id="req_facility" name="facility_code" value="AGM" placeholder="e.g. KAMPALA / MALABA">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-field">
+                                <label for="req_role">Device / Operator Role</label>
+                                <select id="req_role" name="requested_role" style="background:#0c0f17; color:#fff; border:1px solid var(--ug-border); border-radius:6px; padding:9px 10px; font-size:0.82rem;">
+                                    <option value="SHARED_TEAM">Shared Account (Team Leader + Photo Fitter)</option>
+                                    <option value="TEAM_LEADER">Team Leader (Desktop Verification Console)</option>
+                                    <option value="FITTER_CAMERA">Field Fitter (Mobile Camera / QR Scanner)</option>
+                                </select>
+                            </div>
+                            <div class="form-field">
+                                <label for="req_reason">Reason / Shift Note</label>
+                                <input type="text" id="req_reason" name="reason" value="" placeholder="e.g. New phone for field photo capture">
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-secondary" style="width:100%; justify-content:center; padding:11px; font-weight:800; border:1px solid var(--ug-yellow); color:var(--ug-yellow);">
+                            Submit Email &amp; Device Activation Request 📨
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <div class="auth-card-footer" style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+                <div>
+                    Already authorized? <a href="{% url 'core:login' %}">Sign In to Console</a>
+                </div>
+                <div>
+                    New Operator? <a href="{% url 'core:signup' %}">Create Account (2FA)</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>

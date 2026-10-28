@@ -1,7 +1,7 @@
 /**
  * ITMS CLOSING SYSTEM - TAB 6: SETTINGS & SYSTEM CONFIGURATION
  * Manages simulation mode toggling, database telemetry display,
- * and GitHub Releases automated update detection and in-place upgrade.
+ * device/IP/MAC firewall & email access control, and GitHub Releases updates.
  */
 
 async function toggleDryRun() {
@@ -338,6 +338,7 @@ async function saveVaultFolder() {
 
 document.addEventListener("DOMContentLoaded", () => {
     loadVaultSettings();
+    loadSecurityOverview(false);
 });
 
 async function updateSetting(key, value) {
@@ -509,5 +510,186 @@ function onSettingsDatePickerChanged(isoVal) {
     }
     if (typeof setGlobalShiftDate === "function") {
         void setGlobalShiftDate(isoVal);
+    }
+}
+
+// ============================================================================
+// Device & Email Access Control (IP / MAC Firewall & Shared Devices)
+// ============================================================================
+
+async function loadSecurityOverview(notify = false) {
+    const reqTbody = document.getElementById("security-requests-tbody");
+    const devTbody = document.getElementById("security-devices-tbody");
+    if (!reqTbody && !devTbody) return;
+
+    try {
+        const res = await fetch("/api/security/overview/");
+        const data = await res.json();
+        if (!data.success) return;
+
+        const cfg = data.config || {};
+        const strictChk = document.getElementById("security-strict-email-toggle");
+        if (strictChk) strictChk.checked = Boolean(cfg.require_email_approval);
+
+        const maxDevInput = document.getElementById("security-max-devices-input");
+        if (maxDevInput && cfg.max_devices_per_account) {
+            maxDevInput.value = cfg.max_devices_per_account;
+        }
+
+        const modeBadge = document.getElementById("security-mode-badge");
+        if (modeBadge) {
+            modeBadge.className = cfg.require_email_approval ? "badge badge-yellow" : "badge badge-green";
+            modeBadge.innerText = cfg.require_email_approval ? "● Strict Pre-Approval" : "● Active Firewall";
+        }
+
+        const blockedSummary = document.getElementById("security-blocked-summary");
+        if (blockedSummary) {
+            const ips = (cfg.blocked_ips || []).length;
+            const macs = (cfg.blocked_macs || []).length;
+            const cidrs = (cfg.blocked_cidrs || []).length;
+            blockedSummary.innerText = `Blocked IPs: ${ips} | Blocked Subnets: ${cidrs} | Blocked MACs: ${macs}`;
+        }
+
+        _renderSecurityRequestsTable(reqTbody, data.access_requests || []);
+        _renderSecurityDevicesTable(devTbody, data.devices || []);
+
+        if (notify) {
+            showToast("Security & device access registry refreshed.", "info");
+        }
+    } catch (err) {
+        console.warn("Failed to load security overview:", err);
+    }
+}
+
+function _renderSecurityRequestsTable(tbody, requests) {
+    if (!tbody) return;
+    if (!requests.length) {
+        tbody.innerHTML = `<tr><td colspan="6" style="padding:10px; text-align:center; color:var(--ug-text-dim);">No pending or recent email activation requests.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = requests.map(r => {
+        const badgeCls = (r.status === "APPROVED" || r.status === "PRE_APPROVED")
+            ? "badge-green"
+            : (r.status === "PENDING" ? "badge-yellow" : "badge-red");
+        const ipMac = `${escapeHtml(r.ip_address || "-")} / ${escapeHtml(r.mac_address || "-")}`;
+        return `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:6px 8px;">
+                <div style="font-weight:700; color:#fff;">${escapeHtml(r.email)}</div>
+                <div style="font-size:0.68rem; color:var(--ug-text-muted);">${escapeHtml(r.full_name || r.username || "")}</div>
+            </td>
+            <td style="padding:6px 8px;">${escapeHtml(r.requested_role || "SHARED_TEAM")} (${escapeHtml(r.facility_code || "DEFAULT")})</td>
+            <td style="padding:6px 8px; font-family:var(--font-mono); font-size:0.7rem;">${ipMac}</td>
+            <td style="padding:6px 8px; font-family:var(--font-mono); font-weight:800; color:var(--ug-yellow);">${escapeHtml(r.activation_code || "-")}</td>
+            <td style="padding:6px 8px;"><span class="badge ${badgeCls}" style="font-size:0.65rem;">${escapeHtml(r.status)}</span></td>
+            <td style="padding:6px 8px; text-align:right; white-space:nowrap;">
+                ${r.status !== "APPROVED" ? `<button class="btn btn-primary" style="padding:3px 8px; font-size:0.68rem;" onclick="securityDeviceAction('approve_request', {request_id: ${r.id}})">Approve</button>` : ""}
+                ${r.status !== "REJECTED" ? `<button class="btn btn-secondary" style="padding:3px 8px; font-size:0.68rem; border-color:#ef4444; color:#fca5a5;" onclick="securityDeviceAction('reject_request', {request_id: ${r.id}})">Reject</button>` : ""}
+            </td>
+        </tr>`;
+    }).join("");
+}
+
+function _renderSecurityDevicesTable(tbody, devices) {
+    if (!tbody) return;
+    if (!devices.length) {
+        tbody.innerHTML = `<tr><td colspan="7" style="padding:10px; text-align:center; color:var(--ug-text-dim);">No devices recorded yet.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = devices.map(d => {
+        const badgeCls = d.status === "APPROVED"
+            ? "badge-green"
+            : (d.status === "PENDING" ? "badge-yellow" : "badge-red");
+        const isBlocked = d.status === "BLOCKED";
+        return `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:6px 8px;">
+                <div style="font-weight:700; color:#fff;">${escapeHtml(d.device_name || d.device_type)}</div>
+                <div style="font-size:0.66rem; color:var(--ug-text-dim); font-family:var(--font-mono);">${escapeHtml((d.device_id || "").slice(0, 14))}</div>
+            </td>
+            <td style="padding:6px 8px;">
+                <div style="color:#e2e8f0;">${escapeHtml(d.username || "-")}</div>
+                <div style="font-size:0.68rem; color:var(--ug-text-muted);">${escapeHtml(d.authorized_email || "")}</div>
+            </td>
+            <td style="padding:6px 8px; font-family:var(--font-mono); color:#93c5fd;">${escapeHtml(d.ip_address || "-")}</td>
+            <td style="padding:6px 8px; font-family:var(--font-mono); color:#fcd34d;">${escapeHtml(d.mac_address || "LAN/Hidden")}</td>
+            <td style="padding:6px 8px;"><span class="badge badge-cyan" style="font-size:0.65rem;">${escapeHtml(d.linked_via || "LOGIN")}</span></td>
+            <td style="padding:6px 8px;"><span class="badge ${badgeCls}" style="font-size:0.65rem;">${escapeHtml(d.status)}</span></td>
+            <td style="padding:6px 8px; text-align:right; white-space:nowrap;">
+                ${isBlocked
+                    ? `<button class="btn btn-primary" style="padding:3px 8px; font-size:0.68rem;" onclick="securityDeviceAction('unblock_target', {target: '${escapeHtml(d.device_id)}'})">Unblock</button>`
+                    : `<button class="btn btn-secondary" style="padding:3px 8px; font-size:0.68rem; border-color:#ef4444; color:#fca5a5;" onclick="securityDeviceAction('block_target', {target: '${escapeHtml(d.device_id)}'})">Block Device</button>`
+                }
+                ${d.ip_address && !isBlocked
+                    ? `<button class="btn btn-secondary" style="padding:3px 8px; font-size:0.68rem;" title="Block IP ${escapeHtml(d.ip_address)}" onclick="securityDeviceAction('block_target', {target: '${escapeHtml(d.ip_address)}'})">Block IP</button>`
+                    : ""
+                }
+            </td>
+        </tr>`;
+    }).join("");
+}
+
+async function securityDeviceAction(action, payload = {}) {
+    try {
+        const res = await fetch("/api/security/action/", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action, ...payload }),
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(data.message || "Security policy updated.", "success");
+            await loadSecurityOverview(false);
+        } else {
+            showToast(data.error || "Action failed.", "error");
+        }
+        return data;
+    } catch (err) {
+        showToast("Security action error: " + err, "error");
+        return { success: false };
+    }
+}
+
+async function toggleStrictEmailApproval(enabled) {
+    await securityDeviceAction("update_config", {
+        require_email_approval: Boolean(enabled),
+        mode: enabled ? "STRICT" : "STANDARD",
+    });
+}
+
+async function updateMaxSharedDevices(maxCount) {
+    if (!maxCount || maxCount < 1) return;
+    await securityDeviceAction("update_config", {
+        max_devices_per_account: maxCount,
+    });
+}
+
+async function preapproveOperatorEmail() {
+    const input = document.getElementById("security-preapprove-email");
+    const resultEl = document.getElementById("security-preapprove-result");
+    if (!input || !input.value.trim()) {
+        showToast("Enter an email address to pre-approve.", "warning");
+        return;
+    }
+    const email = input.value.trim();
+    const data = await securityDeviceAction("preapprove_email", { email });
+    if (data && data.success) {
+        input.value = "";
+        if (resultEl) {
+            resultEl.innerHTML = `✅ Pre-approved <strong>${escapeHtml(email)}</strong> &bull; Activation Code: <strong style="color:var(--ug-yellow); font-family:var(--font-mono);">${escapeHtml(data.activation_code || "")}</strong>`;
+        }
+    }
+}
+
+async function blockNetworkTarget() {
+    const input = document.getElementById("security-block-target");
+    if (!input || !input.value.trim()) {
+        showToast("Enter an IP, CIDR subnet, MAC address, or Device ID to block.", "warning");
+        return;
+    }
+    const target = input.value.trim();
+    const data = await securityDeviceAction("block_target", { target });
+    if (data && data.success) {
+        input.value = "";
     }
 }

@@ -88,9 +88,12 @@
                 </form>
             </div>
 
-            <div class="auth-card-footer">
+            <div class="auth-card-footer" style="display:flex; flex-direction:column; gap:6px;">
                 <div>
                     New operator on this terminal? <a href="{% url 'core:signup' %}">Create Account</a>
+                </div>
+                <div style="font-size:0.74rem;">
+                    Device restricted or need email activation? <a href="{% url 'core:access_request' %}" style="color:var(--ug-yellow);">Request Access / Enter Code</a>
                 </div>
             </div>
         </div>

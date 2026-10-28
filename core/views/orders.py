@@ -164,8 +164,30 @@ def api_itms_warehouses(request: HttpRequest) -> JsonResponse:
             return JsonResponse({"success": False, "error": "Warehouse/Bond code is required."}, status=400)
 
         ok = bond_service.set_active_bond(code, name or None)
-        if ok and request.user and getattr(request.user, "is_authenticated", False):
-            scoped_order_service.switch_operator_facility(user=request.user, new_facility=code)
+        if ok:
+            from core.models import Warehouse, OperatorITMSSession, FacilitySyncMetadata
+            wh = Warehouse.objects.filter(Q(code__iexact=code) | Q(warehouse_uuid=code)).first()
+            Warehouse.objects.all().update(is_active_bond=False)
+            if wh:
+                wh.is_active_bond = True
+                wh.save(update_fields=["is_active_bond"])
+                FacilitySyncMetadata.objects.update_or_create(
+                    facility_code=wh.code,
+                    defaults={
+                        "warehouse_uuid": wh.warehouse_uuid,
+                        "warehouse_name": wh.name,
+                        "warehouse": wh,
+                    },
+                )
+            if request.user and getattr(request.user, "is_authenticated", False):
+                scoped_order_service.switch_operator_facility(user=request.user, new_facility=code)
+                if wh:
+                    OperatorITMSSession.objects.filter(user=request.user).update(
+                        active_warehouse_uuid=wh.warehouse_uuid,
+                        active_warehouse=wh,
+                        active_bond_code=wh.code,
+                        active_bond_name=wh.name,
+                    )
 
         return JsonResponse({
             "success": ok,

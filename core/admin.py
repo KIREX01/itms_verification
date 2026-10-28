@@ -25,6 +25,7 @@ from core.models import (
     StockReturnScan,
     SubmissionAuditLog,
     VehicleInstallationPair,
+    Warehouse,
 )
 
 User = get_user_model()
@@ -97,13 +98,24 @@ class OperatorITMSSessionAdmin(admin.ModelAdmin):
         return f"{len(keys)} session cookies: {', '.join(keys)}"
 
 
+@admin.register(Warehouse)
+class WarehouseAdmin(admin.ModelAdmin):
+    list_display = (
+        "code", "name", "warehouse_uuid", "status", "company",
+        "city", "group_name", "is_active_bond", "synced_at",
+    )
+    list_filter = ("status", "group_name", "company", "is_active_bond")
+    search_fields = ("code", "name", "warehouse_uuid", "address", "city", "company", "designation_number")
+    readonly_fields = ("synced_at",)
+
+
 @admin.register(FacilitySyncMetadata)
 class FacilitySyncMetadataAdmin(admin.ModelAdmin):
     list_display = (
-        "facility_code", "total_kits", "total_orders",
+        "facility_code", "warehouse_name", "warehouse_uuid", "total_kits", "total_orders",
         "last_kits_synced_at", "last_orders_synced_at", "synced_by_operator",
     )
-    search_fields = ("facility_code", "synced_by_operator")
+    search_fields = ("facility_code", "warehouse_name", "warehouse_uuid", "synced_by_operator")
 
 
 @admin.register(IngestionBatch)

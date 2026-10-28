@@ -553,7 +553,9 @@ class _WarehouseHTMLParser(HTMLParser):
 def _derive_facility_code(name_clean: str, existing_codes: Iterable[str]) -> str:
     """Derives a concise facility code and avoids collision with existing codes."""
     upper_name = name_clean.upper()
-    if "AGM" in upper_name or "SPIRO" in upper_name:
+    if "STORAGE" in upper_name:
+        code = "AGM_STORAGE"
+    elif "INSTALLATION" in upper_name or ("AGM" in upper_name and "STORAGE" not in upper_name) or "SPIRO" in upper_name:
         code = "AGM"
     elif "NAGURU" in upper_name:
         code = "NAGURU"
@@ -1213,6 +1215,10 @@ class ITMSWebClient:
                 self.session_store.save(session_data)
                 self.reset_session()
                 logger.info("Successfully authenticated to ITMS WebApp as %s", email)
+                try:
+                    self.fetch_warehouses_from_itms()
+                except Exception as wh_err:
+                    logger.warning("Auto-sync warehouses on login notice: %s", wh_err)
                 return True, f"Successfully authenticated as {email}.", session_data.to_dict()
 
             elif post_resp.status_code == 200:
@@ -1704,6 +1710,66 @@ class ITMSWebClient:
             "total": len(orders),
         }
 
+    def parse_warehouses_html(self, html: str) -> List[Dict[str, Any]]:
+        """
+        Parses ITMS Warehouses table HTML from https://stock.itms.ug/warehouses.
+        Extracts row UUIDs (data-key), transaction URLs (data-url), and facility columns:
+        [#, Name, Address, Zip, City, Designation number, Company, Status, Group, Created date].
+        """
+        if not html:
+            return []
+
+        rows = re.findall(r'<tr([^>]*)>(.*?)</tr>', html, re.DOTALL | re.IGNORECASE)
+        warehouses: List[Dict[str, Any]] = []
+
+        for tr_attrs, row_html in rows:
+            tds = re.findall(r'<td[^>]*>(.*?)</td>', row_html, re.DOTALL | re.IGNORECASE)
+            clean_tds = [re.sub(r'<[^>]+>', '', td).strip() for td in tds]
+            if not clean_tds:
+                continue
+
+            key_match = re.search(r'data-key=["\']([^"\']+)["\']', tr_attrs)
+            url_match = re.search(r'data-url=["\']([^"\']+)["\']', tr_attrs)
+            wh_uuid = key_match.group(1).strip() if key_match else ""
+            detail_url = url_match.group(1).strip() if url_match else ""
+
+            if not wh_uuid and detail_url:
+                u_m = re.search(r'/warehouse/([0-9a-fA-F-]+)/', detail_url)
+                if u_m:
+                    wh_uuid = u_m.group(1).strip()
+
+            if len(clean_tds) >= 2:
+                # Standard ITMS Warehouses grid view columns:
+                # 0: #, 1: Name, 2: Address, 3: Zip, 4: City, 5: Designation, 6: Company, 7: Status, 8: Group, 9: Created date
+                name = clean_tds[1] if len(clean_tds) > 1 else clean_tds[0]
+                addr = clean_tds[2] if len(clean_tds) > 2 else ""
+                zip_c = clean_tds[3] if len(clean_tds) > 3 else ""
+                city = clean_tds[4] if len(clean_tds) > 4 else "Kampala"
+                desig = clean_tds[5] if len(clean_tds) > 5 else ""
+                comp = clean_tds[6] if len(clean_tds) > 6 else "VGS LTD"
+                status = clean_tds[7] if len(clean_tds) > 7 else "Active"
+                grp = clean_tds[8] if len(clean_tds) > 8 else ""
+                c_date = clean_tds[9] if len(clean_tds) > 9 else ""
+
+                if not wh_uuid:
+                    wh_uuid = _derive_facility_code(name, []).lower()
+
+                warehouses.append({
+                    "warehouse_uuid": wh_uuid,
+                    "name": name,
+                    "address": addr,
+                    "zip_code": zip_c,
+                    "city": city or "Kampala",
+                    "designation_number": desig,
+                    "company": comp or "VGS LTD",
+                    "status": status or "Active",
+                    "group_name": grp,
+                    "created_date_itms": c_date,
+                    "itms_url": detail_url,
+                })
+
+        return warehouses
+
     def _scrape_live_warehouses(self, url: str) -> list[tuple[str, str]]:
         if not self.session_store.session.is_cookie_valid():
             return []
@@ -1733,63 +1799,251 @@ class ITMSWebClient:
     def fetch_warehouses_from_itms(self) -> Dict[str, Any]:
         """
         Dynamically extracts bonded warehouse / installation facilities from ITMS WebApp.
-        Queries the installation orders filter dropdown (/installation-orders/index),
-        extracts warehouse options, and enriches with order and kit warehouse data.
-        Updates config.json with discovered facilities.
+        Queries https://stock.itms.ug/warehouses and https://stock.itms.ug/warehouses/ajax-search.
+        Saves discovered facilities into the Warehouse database model, links FacilitySyncMetadata
+        and OperatorITMSSession to the active warehouse, and persists to config.json.
         """
         import html as _html
+        from core.models import Warehouse, FacilitySyncMetadata, OperatorITMSSession, OperatorProfile
+        from core.services import config_service
+
         session_data = self.session_store.session
-        url = f"{self.base_url}/installation-orders/index"
+        warehouses_url = f"{self.base_url}/warehouses"
+        ajax_url = f"{self.base_url}/warehouses/ajax-search?status[0]=10&status[1]=9"
 
-        discovered: Dict[str, Dict[str, Any]] = {}
+        discovered_raw: List[Dict[str, Any]] = []
 
-        def _add_facility(name: str, wh_id: str = ""):
-            name_clean = _html.unescape(str(name or "")).strip()
-            if not name_clean or name_clean.lower() in ("all", "select warehouse", "any", "prompt", "--"):
-                return
-            upper_name = name_clean.upper()
-            existing_codes = [c for c, f in discovered.items() if f["name"].upper() != upper_name]
-            code = _derive_facility_code(name_clean, existing_codes)
-            discovered[code] = {
-                "code": code,
-                "name": name_clean,
-                "warehouse_id": str(wh_id).strip() or code.lower(),
-                "source": "ITMS_LIVE",
-            }
+        # 1. Fetch live table from /warehouses
+        if session_data.is_cookie_valid():
+            try:
+                resp = self._request_with_retry("GET", warehouses_url, timeout=self.timeout)
+                if resp.status_code == 200:
+                    parsed = self.parse_warehouses_html(resp.text)
+                    discovered_raw.extend(parsed)
+            except Exception as exc:
+                logger.warning("Error fetching warehouses table from %s: %s", warehouses_url, exc)
 
-        # 1. Live scrape of ITMS filter dropdown
-        for lbl, val in self._scrape_live_warehouses(url):
-            _add_facility(name=lbl, wh_id=val)
+            # 2. Also query Select2 AJAX search endpoint for any extra options
+            try:
+                ajax_resp = self._request_with_retry(
+                    "GET",
+                    ajax_url,
+                    headers={"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"},
+                    timeout=self.timeout,
+                )
+                if ajax_resp.status_code == 200:
+                    try:
+                        ajax_data = ajax_resp.json()
+                        results = ajax_data.get("results", []) if isinstance(ajax_data, dict) else (ajax_data if isinstance(ajax_data, list) else [])
+                        existing_uuids = {w.get("warehouse_uuid") for w in discovered_raw if w.get("warehouse_uuid")}
+                        for item in results:
+                            wh_id = str(item.get("id") or "").strip()
+                            text = str(item.get("text") or "").strip()
+                            if wh_id and wh_id not in existing_uuids and text:
+                                discovered_raw.append({
+                                    "warehouse_uuid": wh_id,
+                                    "name": text,
+                                    "address": "",
+                                    "zip_code": "",
+                                    "city": "Kampala",
+                                    "designation_number": "",
+                                    "company": "VGS LTD",
+                                    "status": "Active",
+                                    "group_name": "",
+                                    "created_date_itms": "",
+                                    "itms_url": f"/warehouse/{wh_id}/transactions",
+                                })
+                                existing_uuids.add(wh_id)
+                    except Exception as json_err:
+                        logger.debug("Could not parse warehouses ajax JSON: %s", json_err)
+            except Exception as exc:
+                logger.debug("Error querying warehouses ajax endpoint: %s", exc)
 
-        # 2. Enrich from local database orders and kits
+        # 3. Fallback to order/kit scraping if live scrape returned nothing
+        if not discovered_raw:
+            fallback_opts = self._scrape_live_warehouses(f"{self.base_url}/installation-orders/index")
+            for lbl, val in fallback_opts:
+                discovered_raw.append({
+                    "warehouse_uuid": val or _derive_facility_code(lbl, []).lower(),
+                    "name": lbl,
+                    "address": "",
+                    "zip_code": "",
+                    "city": "Kampala",
+                    "designation_number": "",
+                    "company": "VGS LTD",
+                    "status": "Active",
+                    "group_name": "",
+                    "created_date_itms": "",
+                    "itms_url": "",
+                })
+
         for name_val, id_val in self._collect_db_warehouses():
-            _add_facility(name=name_val, wh_id=id_val)
+            clean_n = _html.unescape(str(name_val or "")).strip()
+            if clean_n and not any(w["name"].strip().upper() == clean_n.upper() for w in discovered_raw):
+                discovered_raw.append({
+                    "warehouse_uuid": id_val or _derive_facility_code(clean_n, []).lower(),
+                    "name": clean_n,
+                    "address": "",
+                    "zip_code": "",
+                    "city": "Kampala",
+                    "designation_number": "",
+                    "company": "VGS LTD",
+                    "status": "Active",
+                    "group_name": "",
+                    "created_date_itms": "",
+                    "itms_url": "",
+                })
 
-        # 3. Fallback to default bonds if empty
-        if not discovered:
+        # 4. Default bonds fallback if completely empty
+        if not discovered_raw:
             default_bonds = config_service.DEFAULT_CONFIG["bond"]["available_bonds"]
             for b in default_bonds:
-                discovered[b["code"]] = dict(b)
+                discovered_raw.append({
+                    "warehouse_uuid": b.get("warehouse_id", b["code"].lower()),
+                    "name": b["name"],
+                    "address": "",
+                    "zip_code": "",
+                    "city": "Kampala",
+                    "designation_number": "",
+                    "company": "VGS LTD",
+                    "status": "Active",
+                    "group_name": "",
+                    "created_date_itms": "",
+                    "itms_url": "",
+                })
+
+        # 5. Save/Update records in Warehouse model & build unified list
+        existing_codes: List[str] = []
+        facility_list: List[Dict[str, Any]] = []
+        created_wh_count = 0
+        updated_wh_count = 0
+
+        # Current active bond code from config or session
+        current_active = config_service.get_active_bond()
+        current_active_code = current_active.get("code", "AGM").upper()
+
+        active_wh_instance: Optional[Warehouse] = None
+
+        for item in discovered_raw:
+            raw_name = _html.unescape(str(item.get("name") or "")).strip()
+            if not raw_name or raw_name.lower() in ("all", "select warehouse", "any", "prompt", "--"):
+                continue
+
+            wh_uuid = str(item.get("warehouse_uuid") or "").strip()
+            upper_name = raw_name.upper()
+
+            # Assign normalized code
+            if "STORAGE" in upper_name:
+                code = "AGM_STORAGE"
+            elif "INSTALLATION" in upper_name or ("AGM" in upper_name and "STORAGE" not in upper_name) or "SPIRO" in upper_name:
+                code = "AGM"
+            else:
+                code = _derive_facility_code(raw_name, existing_codes)
+
+            if code in existing_codes and code != "AGM":
+                code = _derive_facility_code(raw_name, existing_codes)
+            existing_codes.append(code)
+
+            is_active = (code.upper() == current_active_code)
+
+            wh_defaults = {
+                "code": code,
+                "name": raw_name,
+                "address": item.get("address", ""),
+                "zip_code": item.get("zip_code", ""),
+                "city": item.get("city", "Kampala"),
+                "designation_number": item.get("designation_number", ""),
+                "company": item.get("company", "VGS LTD"),
+                "status": item.get("status", "Active"),
+                "group_name": item.get("group_name", ""),
+                "itms_url": item.get("itms_url", ""),
+                "created_date_itms": item.get("created_date_itms", ""),
+                "is_active_bond": is_active,
+                "raw_metadata": item,
+            }
+
+            try:
+                wh_obj, created = Warehouse.objects.update_or_create(
+                    warehouse_uuid=wh_uuid,
+                    defaults=wh_defaults,
+                )
+                if created:
+                    created_wh_count += 1
+                else:
+                    updated_wh_count += 1
+
+                if is_active or (not active_wh_instance and code == "AGM"):
+                    active_wh_instance = wh_obj
+
+                # Update FacilitySyncMetadata for this facility
+                FacilitySyncMetadata.objects.update_or_create(
+                    facility_code=code,
+                    defaults={
+                        "warehouse_uuid": wh_obj.warehouse_uuid,
+                        "warehouse_name": wh_obj.name,
+                        "warehouse": wh_obj,
+                        "synced_by_operator": self.user if (self.user and getattr(self.user, "is_authenticated", False)) else None,
+                    },
+                )
+            except Exception as db_err:
+                logger.warning("Could not persist Warehouse model %s (%s): %s", code, wh_uuid, db_err)
+
+            facility_list.append({
+                "code": code,
+                "name": raw_name,
+                "warehouse_id": wh_uuid,
+                "warehouse_uuid": wh_uuid,
+                "address": item.get("address", ""),
+                "city": item.get("city", "Kampala"),
+                "company": item.get("company", "VGS LTD"),
+                "status": item.get("status", "Active"),
+                "group_name": item.get("group_name", ""),
+                "itms_url": item.get("itms_url", ""),
+                "source": "ITMS_LIVE",
+            })
 
         # Sort so AGM is always first
-        facility_list = list(discovered.values())
         facility_list.sort(key=lambda x: (0 if x.get("code") == "AGM" else 1, x.get("name", "")))
 
-        # 4. Persist to config.json
+        # 6. Update config.json
         config_service.set_setting("bond.available_bonds", facility_list)
 
-        # Check active bond validity
-        active_bond = config_service.get_active_bond()
-        if not any(f["code"] == active_bond.get("code") for f in facility_list) and facility_list:
-            config_service.set_active_bond(facility_list[0]["code"], facility_list[0]["name"])
-            active_bond = config_service.get_active_bond()
+        # 7. Link OperatorITMSSession & OperatorProfile if user is present
+        if active_wh_instance:
+            if not any(f["code"] == current_active.get("code") for f in facility_list):
+                config_service.set_active_bond(active_wh_instance.code, active_wh_instance.name)
+                current_active = config_service.get_active_bond()
+
+            if self.user and getattr(self.user, "is_authenticated", False):
+                try:
+                    sess_qs = OperatorITMSSession.objects.filter(user=self.user)
+                    sess_qs.update(
+                        active_warehouse_uuid=active_wh_instance.warehouse_uuid,
+                        active_warehouse=active_wh_instance,
+                        active_bond_code=active_wh_instance.code,
+                        active_bond_name=active_wh_instance.name,
+                    )
+                except Exception as sess_err:
+                    logger.debug("Notice linking OperatorITMSSession to warehouse: %s", sess_err)
+
+                try:
+                    prof_qs = OperatorProfile.objects.filter(user=self.user)
+                    prof_qs.update(
+                        active_facility=active_wh_instance.code,
+                        allowed_facilities=list({f["code"] for f in facility_list}),
+                    )
+                except Exception as prof_err:
+                    logger.debug("Notice updating OperatorProfile facilities: %s", prof_err)
 
         return {
             "success": True,
             "count": len(facility_list),
+            "created": created_wh_count,
+            "updated": updated_wh_count,
             "warehouses": facility_list,
-            "active_bond": active_bond,
-            "message": f"Successfully synchronized {len(facility_list)} warehouse facility(ies) from ITMS.",
+            "active_bond": config_service.get_active_bond(),
+            "active_warehouse_uuid": active_wh_instance.warehouse_uuid if active_wh_instance else "",
+            "message": f"Successfully synchronized {len(facility_list)} warehouse facility(ies) from ITMS into database.",
         }
 
     # ──────────────────────────────────────────────────────────────────────────

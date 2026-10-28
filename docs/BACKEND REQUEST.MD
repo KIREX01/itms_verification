@@ -386,3 +386,28 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
      - Completely overhauled `docs/APP_OVERVIEW.md` to reflect current project status, live AWS EC2 production deployment, direct ALPR vision engine, 4-tier association, 9-row ledger arithmetic, mobile companion, and SOP workflows.
   4. **Regression Tests (`core/tests/test_web_upload_and_settings.py`):**
      - Added test suite verifying vision invocation on upload, symmetric complete pair creation, automatic order linking, and schema validation.
+
+
+### Backend Update: Warehouse Model, Facility Sync Metadata & ITMS Account Linkage (28 October 2026)
+- **Status:** COMPLETED & TESTED (4/4 Warehouse Sync Tests Passing, 0 System Check Issues)
+- **Root Cause Identified & Fixed:**
+  - The warehouse table was missing from the local database schema, relying only on transient JSON values in `config.json`.
+  - The crawler previously queried `/installation-orders/index` for `<select id="warehousesearch-id">`, which was populated client-side via Select2 AJAX (`/warehouses/ajax-search?status[0]=10&status[1]=9`). Static HTML scraping returned zero elements, silently falling back to dummy IDs (`"24"`, `"22"`).
+- **Implemented Architecture Changes:**
+  1. **New Database Model `Warehouse` (`core/models.py` & Migration `0028`):**
+     - Stores `warehouse_uuid` (unique, indexed), normalized `code` (e.g. `AGM`, `AGM_STORAGE`), full facility `name`, `address`, `city`, `zip_code`, `company` (`VGS LTD`), `designation_number`, `status` (`Active`), `group_name` (`MC DEALER`), `itms_url`, `created_date_itms`, and `is_active_bond`.
+     - Registered with full list displays, filtering, and search in Django Admin (`core/admin.py`).
+  2. **Facility Sync Metadata & Session Linkage (`core/models.py`, `core/services/scoped_order_service.py`):**
+     - Enhanced `FacilitySyncMetadata` with `warehouse_uuid`, `warehouse_name`, and foreign key `warehouse = ForeignKey(Warehouse)`.
+     - Enhanced `OperatorITMSSession` with `active_warehouse_uuid` and `active_warehouse = ForeignKey(Warehouse)`.
+     - Auto-links `FacilitySyncMetadata` and `OperatorITMSSession` so the system accurately reflects which physical warehouse the ITMS account and facility sync caches are attached to.
+  3. **Direct ITMS Web Scraper & API Crawler (`core/services/itms_web_client.py`):**
+     - Implemented `parse_warehouses_html(html)` targeting `https://stock.itms.ug/warehouses` and parsing `#w4` grid view table rows (`data-key` UUID, transaction URLs, and columns 0 through 9).
+     - Added Select2 AJAX endpoint querying (`/warehouses/ajax-search?status[0]=10&status[1]=9`) with `X-Requested-With: XMLHttpRequest` headers to enrich facility discovery.
+     - Automatically calls `fetch_warehouses_from_itms()` on successful login (`client.login()`), persisting facilities directly to the database without manual user intervention.
+  4. **Bond Service Source of Truth (`core/services/bond_service.py` & `core/views/orders.py`):**
+     - `get_all_discovered_warehouses()` now queries `Warehouse.objects.all()` as the primary database source of truth.
+     - `POST /api/itms/warehouses/` atomically updates `Warehouse.is_active_bond`, syncs `FacilitySyncMetadata`, and binds the active warehouse to the user's `OperatorITMSSession`.
+  5. **Regression Verification (`core/tests/test_warehouse_sync.py`):**
+     - Comprehensive unit test suite added covering HTML parsing, database upserts, foreign key linkage, `bond_service` priority, and REST API switching.
+

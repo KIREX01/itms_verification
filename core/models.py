@@ -1149,6 +1149,37 @@ class DailyStockLedger(models.Model):
         )
 
 
+class Warehouse(models.Model):
+    """
+    Bonded warehouse and installation facility tracked directly from ITMS (https://stock.itms.ug/warehouses).
+    Stores facility UUIDs, official company affiliations, designation numbers, addresses, and groups.
+    Links ITMS operator sessions and facility sync metadata to the official facility entity.
+    """
+    warehouse_uuid = models.CharField(max_length=64, unique=True, db_index=True)
+    code = models.CharField(max_length=32, db_index=True)
+    name = models.CharField(max_length=255)
+    address = models.CharField(max_length=255, blank=True, default="")
+    zip_code = models.CharField(max_length=32, blank=True, default="")
+    city = models.CharField(max_length=64, blank=True, default="Kampala")
+    designation_number = models.CharField(max_length=64, blank=True, default="")
+    company = models.CharField(max_length=128, blank=True, default="VGS LTD")
+    status = models.CharField(max_length=32, default="Active")
+    group_name = models.CharField(max_length=64, blank=True, default="")
+    itms_url = models.CharField(max_length=255, blank=True, default="")
+    created_date_itms = models.CharField(max_length=32, blank=True, default="")
+    is_active_bond = models.BooleanField(default=False)
+    synced_at = models.DateTimeField(auto_now=True)
+    raw_metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "Warehouse"
+        verbose_name_plural = "Warehouses"
+        ordering = ["code", "name"]
+
+    def __str__(self):
+        return f"{self.code} - {self.name} ({self.status})"
+
+
 class OperatorITMSSession(models.Model):
     """
     Persisted ITMS WebApp session credentials for an individual operator.
@@ -1173,6 +1204,14 @@ class OperatorITMSSession(models.Model):
     last_status_message = models.CharField(max_length=500, blank=True, default="")
     active_bond_code = models.CharField(max_length=64, default="AGM")
     active_bond_name = models.CharField(max_length=255, default="AGM Bonded Warehouse")
+    active_warehouse_uuid = models.CharField(max_length=64, blank=True, default="")
+    active_warehouse = models.ForeignKey(
+        Warehouse,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="operator_sessions",
+    )
 
     class Meta:
         verbose_name = "Operator ITMS Session"
@@ -1222,8 +1261,18 @@ class FacilitySyncMetadata(models.Model):
     """
     Tracks facility-level synchronization status and timestamps for cache deduplication.
     Prevents redundant network strain when multiple operators are stationed at the same bond.
+    Reflects the exact bonded warehouse entity and UUID linked to the facility.
     """
     facility_code = models.CharField(max_length=32, primary_key=True)
+    warehouse_uuid = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    warehouse_name = models.CharField(max_length=255, blank=True, default="")
+    warehouse = models.ForeignKey(
+        Warehouse,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="sync_metadata",
+    )
     last_kits_synced_at = models.DateTimeField(null=True, blank=True)
     last_orders_synced_at = models.DateTimeField(null=True, blank=True)
     total_kits = models.IntegerField(default=0)

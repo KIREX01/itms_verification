@@ -152,6 +152,13 @@ def record_facility_kits_synced(
     meta.total_kits = max(0, total_kits)
     if operator and getattr(operator, "is_authenticated", False):
         meta.synced_by_operator = operator
+    if not meta.warehouse:
+        from core.models import Warehouse
+        wh = Warehouse.objects.filter(code=meta.facility_code).first()
+        if wh:
+            meta.warehouse = wh
+            meta.warehouse_uuid = wh.warehouse_uuid
+            meta.warehouse_name = wh.name
     meta.save()
     return meta
 
@@ -167,6 +174,13 @@ def record_facility_orders_synced(
     meta.total_orders = max(0, total_orders)
     if operator and getattr(operator, "is_authenticated", False):
         meta.synced_by_operator = operator
+    if not meta.warehouse:
+        from core.models import Warehouse
+        wh = Warehouse.objects.filter(code=meta.facility_code).first()
+        if wh:
+            meta.warehouse = wh
+            meta.warehouse_uuid = wh.warehouse_uuid
+            meta.warehouse_name = wh.name
     meta.save()
     return meta
 

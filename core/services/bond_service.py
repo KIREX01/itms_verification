@@ -37,13 +37,47 @@ def set_active_bond(code: str, name: Optional[str] = None) -> bool:
 def get_all_discovered_warehouses() -> List[Dict[str, Any]]:
     """
     Returns unified list of bonded warehouse facilities by combining:
-    1. Pre-configured standard bonds (AGM, Naguru, Eagle, CFAO, Motor Center, MOWT, Yuvraj, Kawempe, Markh, Maybach).
-    2. Dynamic warehouses discovered in local InstallationOrder and InstallationKit tables.
+    1. Warehouse model entities in the database (synced from https://stock.itms.ug/warehouses).
+    2. Pre-configured standard bonds from config.json.
+    3. Dynamic warehouses discovered in local InstallationOrder and InstallationKit tables.
     """
+    result_map: Dict[str, Dict[str, Any]] = {}
+
+    # 1. Query database Warehouse model (primary source of truth)
+    try:
+        from core.models import Warehouse
+        db_warehouses = Warehouse.objects.all().order_by("code", "name")
+        for wh in db_warehouses:
+            code_key = wh.code.upper()
+            result_map[code_key] = {
+                "code": wh.code,
+                "name": wh.name,
+                "warehouse_id": wh.warehouse_uuid,
+                "warehouse_uuid": wh.warehouse_uuid,
+                "address": wh.address,
+                "city": wh.city,
+                "zip_code": wh.zip_code,
+                "company": wh.company,
+                "status": wh.status,
+                "group_name": wh.group_name,
+                "itms_url": wh.itms_url,
+                "is_active_bond": wh.is_active_bond,
+                "source": "DATABASE_WAREHOUSE",
+            }
+    except Exception as exc:
+        logger.warning("Error loading warehouses from Warehouse model: %s", exc)
+
+    # 2. Layer with config.json available bonds
     known_bonds = config_service.get_available_bonds()
-    result_map: Dict[str, Dict[str, Any]] = {
-        b["code"].upper(): dict(b) for b in known_bonds if "code" in b
-    }
+    for b in known_bonds:
+        if "code" in b:
+            code_upper = b["code"].upper()
+            if code_upper not in result_map:
+                result_map[code_upper] = dict(b)
+            else:
+                for k, v in b.items():
+                    if k not in result_map[code_upper] or not result_map[code_upper][k]:
+                        result_map[code_upper][k] = v
 
     try:
         from core.models import InstallationOrder, InstallationKit

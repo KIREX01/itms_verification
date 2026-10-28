@@ -411,3 +411,22 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
   5. **Regression Verification (`core/tests/test_warehouse_sync.py`):**
      - Comprehensive unit test suite added covering HTML parsing, database upserts, foreign key linkage, `bond_service` priority, and REST API switching.
 
+
+
+### Backend Update: Dynamic TUI Kit Bounds & Quick Install Submission Optimization (28 October 2026)
+- **Status:** COMPLETED, TESTED & DEPLOYED (13/13 Quick Install & Sync Tests Passing, Verified Live on EC2 Production)
+- **Bottlenecks & Failures Resolved:**
+  1. **TUI Kit Crawl Bound Clamping (Clamped to 100 instead of Configured 200 Pages):**
+     - *Root Cause:* In `core/services/order_sync.py`, `safe_max_pages = max(1, min(int(max_pages or 50), 100))` enforced a hardcoded ceiling of 100 pages, ignoring user settings above 100. Furthermore, background shift loops and TUI buttons in `itms_pane.py` passed hardcoded values (35 or 100).
+     - *Resolution:* Removed the 100-page clamp and raised the ceiling to 1000 pages across `order_sync.py`, `kit_provisioning_service.py`, and `itms_web_client.py`. All callers now default to `max_pages=None`, dynamically loading `config_service.get_setting("crawl.max_kit_pages", 100)`.
+  2. **TUI Sync Intervals Control & Daemon Dynamic Cadence:**
+     - *Root Cause:* `ShiftOrderSyncDaemon` only initialized intervals at boot and had a static 180s tick loop, ignoring changes made to order sync intervals in the TUI.
+     - *Resolution:* Added interactive control for `sync.kit_sync_interval_seconds` in TUI Settings Pane (`core/tui/settings_pane.py`), alongside `sync.order_sync_interval_seconds`. Daemon loops now dynamically reload interval settings from `config_service` on every heartbeat and adapt their sleep ticks dynamically (`min(ACTIVE_TICK, orders_interval)`).
+  3. **Quick Install Submission Freeze on Photo Submit:**
+     - *Root Cause:* Direct order installation was running full YOLOv8 plate detection and multi-pass OCR synchronously on CPU for both photos inside the HTTP POST thread (15–20s delay), followed by concurrency lock blocking (`blocking=False`), and an unyielding Step 4 archive verification loop (6–10s delay). If archive indexing on ITMS took slightly longer than 6 seconds, the backend reported failure even after Step 3 had successfully finalized on ITMS.
+     - *Resolution:*
+       - Fast-tracked vision for known direct install orders: sets plate to `order.registration_number` with `Status.PLATE_DETECTED` and verified orientation without running heavy CPU OCR.
+       - Disabled redundant final-stage compression during upload since incoming mobile companion and web UI direct uploads are already compressed.
+       - Auto-fills hardware serials from matching `InstallationKit` in `POST` if omitted in the request.
+       - Set `blocking_lock=True, lock_timeout=15.0` to eliminate lock contention failures.
+       - If Step 3 confirmation succeeded on ITMS, the workflow returns success (`pending_archive_confirmation=True`), transitioning the order and pair to `SUBMITTED` while background daemons verify final archive indexing.

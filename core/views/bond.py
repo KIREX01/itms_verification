@@ -1032,120 +1032,144 @@ def api_stock_kits_readiness(request: HttpRequest) -> JsonResponse:
 @require_itms_envelope(allow_expired=True)
 def api_stock_shift_details(request: HttpRequest) -> JsonResponse:
     """Returns detailed lists of dispatches, movements, and audits for the web UI."""
-    from django.utils import timezone
-    from core.models import StockDispatchScan, StockDelivery, StockBondTransfer, StockReturnScan, SafeAuditScan, InstallationKit
-    from core.services import stock_monitoring_service
     date_suffix = (
         request.GET.get("date")
         or request.GET.get("date_suffix")
         or request.GET.get("suffix")
         or None
     )
-    _, suffix = stock_monitoring_service.resolve_date_and_suffix(date_suffix)
-    stock_monitoring_service.auto_register_dispatched_from_orders(suffix)
-    resolve_res = stock_monitoring_service.resolve_transferred_blocked_plates(suffix, check_itms_live=False)
+    try:
+        from django.utils import timezone
+        from core.models import (
+            StockDispatchScan,
+            StockDelivery,
+            StockDeliveryItem,
+            StockBondTransfer,
+            StockReturnScan,
+            SafeAuditScan,
+            InstallationKit,
+        )
+        from core.services import stock_monitoring_service
+        _, suffix = stock_monitoring_service.resolve_date_and_suffix(date_suffix)
+        stock_monitoring_service.auto_register_dispatched_from_orders(suffix)
+        resolve_res = stock_monitoring_service.resolve_transferred_blocked_plates(suffix, check_itms_live=False)
 
-    # 1. Dispatches (up to 2000 rows so large 500+ kit shifts are never truncated at 150)
-    dispatches = list(StockDispatchScan.objects.filter(work_date_suffix=suffix).order_by("-dispatched_at")[:2000].values(
-        "id", "registration_number", "plate_category", "dispatched_at", "status", "operator_name"
-    ))
-    if dispatches:
-        disp_plates = [d["registration_number"] for d in dispatches if d.get("registration_number")]
-        disp_kits_lookup = stock_monitoring_service.build_kit_lookup_map(disp_plates)
-        for d in dispatches:
-            reg = d.get("registration_number", "")
-            matched_k = disp_kits_lookup.get(reg)
-            d["gps_tracker"] = (getattr(matched_k, "gps_tracker", "") or getattr(matched_k, "gps_tracker_id", "") or "-") if matched_k else "-" 
-    
-    # 2. Movements
-    movements = []
-    dels = StockDelivery.objects.filter(target_date_suffix=suffix).order_by("-created_at")[:50]
-    for d in dels:
-        items = list(StockDeliveryItem.objects.filter(delivery=d).values_list("registration_number", flat=True)[:5])
-        sample = ", ".join(items)
-        if d.total_plates_count > 5:
-            sample += f" (+{d.total_plates_count - 5} more)"
-        movements.append({
-            "type": "DELIVERY",
-            "time": d.created_at.strftime("%H:%M:%S") if d.created_at else "",
-            "category": d.plate_category,
-            "partner": d.supplier,
-            "ref": d.paper_note_reference or d.delivery_number,
-            "count": d.total_plates_count,
-            "sample_plates": sample or "—",
-            "sort_time": d.created_at
-        })
-    transfers = StockBondTransfer.objects.filter(target_date_suffix=suffix).order_by("-created_at")[:50]
-    for t in transfers:
-        movements.append({
-            "type": t.transfer_type,
-            "time": t.created_at.strftime("%H:%M:%S") if t.created_at else "",
-            "category": t.plate_category,
-            "partner": t.other_bond_name,
-            "ref": t.transfer_number,
-            "count": t.plates_count,
-            "sample_plates": "—",
-            "sort_time": t.created_at
-        })
-    returns = StockReturnScan.objects.filter(work_date_suffix=suffix).order_by("-returned_at")[:50]
-    for r in returns:
-        movements.append({
-            "type": "RETURN",
-            "time": r.returned_at.strftime("%H:%M:%S") if r.returned_at else "",
-            "category": r.plate_category,
-            "partner": r.reason,
-            "ref": r.registration_number,
-            "count": 1,
-            "sample_plates": r.registration_number,
-            "sort_time": r.returned_at
-        })
-    movements.sort(key=lambda x: x["sort_time"] or timezone.now(), reverse=True)
-    for m in movements:
-        m.pop("sort_time", None)
+        # 1. Dispatches (up to 2000 rows so large 500+ kit shifts are never truncated at 150)
+        dispatches = list(StockDispatchScan.objects.filter(work_date_suffix=suffix).order_by("-dispatched_at")[:2000].values(
+            "id", "registration_number", "plate_category", "dispatched_at", "status", "operator_name"
+        ))
+        if dispatches:
+            disp_plates = [d["registration_number"] for d in dispatches if d.get("registration_number")]
+            disp_kits_lookup = stock_monitoring_service.build_kit_lookup_map(disp_plates)
+            for d in dispatches:
+                reg = d.get("registration_number", "")
+                matched_k = disp_kits_lookup.get(reg)
+                d["gps_tracker"] = (getattr(matched_k, "gps_tracker", "") or getattr(matched_k, "gps_tracker_id", "") or "-") if matched_k else "-" 
 
-    # 3. Audits
-    audits_qs = SafeAuditScan.objects.filter(work_date_suffix=suffix).order_by("-scanned_at")[:150]
-    audit_plates = [a.registration_number for a in audits_qs]
-    kit_map = stock_monitoring_service.build_kit_lookup_map(audit_plates)
-    audits = []
-    for a in audits_qs:
-        p = a.registration_number
-        kit = kit_map.get(p)
-        gps = (getattr(kit, "gps_tracker", "") or getattr(kit, "gps_tracker_id", "") or "—") if kit else "—"
-        front_ble = (getattr(kit, "front_tracker", "") or getattr(kit, "ble_beacon_front", "") or "—") if kit else "—"
-        rear_ble = (getattr(kit, "rear_tracker", "") or getattr(kit, "ble_beacon_rear", "") or "—") if kit else "—"
-        stat = "✓ AUDITED" if (kit and (gps != "—" or front_ble != "—")) else "⏳ AWAITING LINK"
-        audits.append({
-            "plate": p,
-            "status": stat,
-            "kit_code": kit.kit_code if kit else f"IK-{p}",
-            "gps_tracker": gps,
-            "front_ble": front_ble,
-            "rear_ble": rear_ble,
+        # 2. Movements
+        movements = []
+        dels = StockDelivery.objects.filter(target_date_suffix=suffix).order_by("-created_at")[:50]
+        for d in dels:
+            items = list(StockDeliveryItem.objects.filter(delivery=d).values_list("registration_number", flat=True)[:5])
+            sample = ", ".join(items)
+            if d.total_plates_count > 5:
+                sample += f" (+{d.total_plates_count - 5} more)"
+            movements.append({
+                "type": "DELIVERY",
+                "time": d.created_at.strftime("%H:%M:%S") if d.created_at else "",
+                "category": d.plate_category,
+                "partner": d.supplier,
+                "ref": d.paper_note_reference or d.delivery_number,
+                "count": d.total_plates_count,
+                "sample_plates": sample or "—",
+                "sort_time": d.created_at
+            })
+        transfers = StockBondTransfer.objects.filter(target_date_suffix=suffix).order_by("-created_at")[:50]
+        for t in transfers:
+            movements.append({
+                "type": t.transfer_type,
+                "time": t.created_at.strftime("%H:%M:%S") if t.created_at else "",
+                "category": t.plate_category,
+                "partner": t.other_bond_name,
+                "ref": t.transfer_number,
+                "count": t.plates_count,
+                "sample_plates": "—",
+                "sort_time": t.created_at
+            })
+        returns = StockReturnScan.objects.filter(work_date_suffix=suffix).order_by("-returned_at")[:50]
+        for r in returns:
+            movements.append({
+                "type": "RETURN",
+                "time": r.returned_at.strftime("%H:%M:%S") if r.returned_at else "",
+                "category": r.plate_category,
+                "partner": r.reason,
+                "ref": r.registration_number,
+                "count": 1,
+                "sample_plates": r.registration_number,
+                "sort_time": r.returned_at
+            })
+        movements.sort(key=lambda x: x["sort_time"] or timezone.now(), reverse=True)
+        for m in movements:
+            m.pop("sort_time", None)
+
+        # 3. Audits
+        audits_qs = SafeAuditScan.objects.filter(work_date_suffix=suffix).order_by("-scanned_at")[:150]
+        audit_plates = [a.registration_number for a in audits_qs]
+        kit_map = stock_monitoring_service.build_kit_lookup_map(audit_plates)
+        audits = []
+        for a in audits_qs:
+            p = a.registration_number
+            kit = kit_map.get(p)
+            gps = (getattr(kit, "gps_tracker", "") or getattr(kit, "gps_tracker_id", "") or "—") if kit else "—"
+            front_ble = (getattr(kit, "front_tracker", "") or getattr(kit, "ble_beacon_front", "") or "—") if kit else "—"
+            rear_ble = (getattr(kit, "rear_tracker", "") or getattr(kit, "ble_beacon_rear", "") or "—") if kit else "—"
+            stat = "✓ AUDITED" if (kit and (gps != "—" or front_ble != "—")) else "⏳ AWAITING LINK"
+            audits.append({
+                "plate": p,
+                "status": stat,
+                "kit_code": kit.kit_code if kit else f"IK-{p}",
+                "gps_tracker": gps,
+                "front_ble": front_ble,
+                "rear_ble": rear_ble,
+            })
+
+        # Summary metrics for quick UI footer updates
+        total_dispatched = StockDispatchScan.objects.filter(work_date_suffix=suffix).count()
+        psv_dispatched = StockDispatchScan.objects.filter(work_date_suffix=suffix, plate_category="PSV").count()
+        pmo_dispatched = StockDispatchScan.objects.filter(work_date_suffix=suffix, plate_category="PMO").count()
+        blocked_plates = stock_monitoring_service.get_blocked_plates_for_date(suffix)
+
+        return JsonResponse({
+            "success": True,
+            "date_suffix": suffix,
+            "dispatches": dispatches,
+            "movements": movements,
+            "audits": audits,
+            "blocked_plates": blocked_plates,
+            "blocked_count": len(blocked_plates),
+            "resolved_blocked_plates": resolve_res.get("resolved_plates", []),
+            "dispatch_summary": {
+                "total": total_dispatched,
+                "psv": psv_dispatched,
+                "pmo": pmo_dispatched,
+            },
+            "audit_count": len(audits),
         })
-
-    # Summary metrics for quick UI footer updates
-    total_dispatched = StockDispatchScan.objects.filter(work_date_suffix=suffix).count()
-    psv_dispatched = StockDispatchScan.objects.filter(work_date_suffix=suffix, plate_category="PSV").count()
-    pmo_dispatched = StockDispatchScan.objects.filter(work_date_suffix=suffix, plate_category="PMO").count()
-    blocked_plates = stock_monitoring_service.get_blocked_plates_for_date(suffix)
-
-    return JsonResponse({
-        "success": True,
-        "date_suffix": suffix,
-        "dispatches": dispatches,
-        "movements": movements,
-        "audits": audits,
-        "blocked_plates": blocked_plates,
-        "blocked_count": len(blocked_plates),
-        "resolved_blocked_plates": resolve_res.get("resolved_plates", []),
-        "dispatch_summary": {
-            "total": total_dispatched,
-            "psv": psv_dispatched,
-            "pmo": pmo_dispatched,
-        },
-        "audit_count": len(audits),
-    })
+    except Exception as exc:
+        logger.exception("api_stock_shift_details unexpected error: %s", exc)
+        return JsonResponse({
+            "success": False,
+            "error": str(exc),
+            "date_suffix": date_suffix or "",
+            "dispatches": [],
+            "movements": [],
+            "audits": [],
+            "blocked_plates": [],
+            "blocked_count": 0,
+            "resolved_blocked_plates": [],
+            "dispatch_summary": {"total": 0, "psv": 0, "pmo": 0},
+            "audit_count": 0,
+        }, status=200)
 
 
 @require_GET

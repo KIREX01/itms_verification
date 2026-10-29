@@ -437,9 +437,14 @@ class StockPane(Vertical):
         table = self.query_one("#table-stock-dispatch", DataTable)
         table.clear()
 
-        scans = StockDispatchScan.objects.filter(
-            work_date_suffix=self.target_date_suffix
-        ).order_by("-dispatched_at")
+        from django.db.models import Q
+        from core.services import stock_monitoring_service
+        work_d, clean_suf = stock_monitoring_service.resolve_date_and_suffix(self.target_date_suffix)
+        date_q = Q(work_date_suffix=self.target_date_suffix) | Q(work_date_suffix=clean_suf)
+        if work_d:
+            date_q |= Q(work_date=work_d)
+
+        scans = StockDispatchScan.objects.filter(date_q).order_by("-dispatched_at")
 
         dispatched_count = scans.count()
         psv_cnt = scans.filter(plate_category="PSV").count()
@@ -452,34 +457,45 @@ class StockPane(Vertical):
             pass
 
         if not scans.exists():
-            table.add_row("—", "—", "No plates dispatched today yet. Scan barcode or press [V] to paste Excel column.", "—", "—", "—", "—", "—")
+            table.add_row("—", "—", "No plates dispatched today yet. Scan barcode or press [V] to paste Excel column.", "—", "—", "—", "—", "—", key="empty_disp")
             return
 
-        plate_numbers = [s.registration_number for s in scans[:150]]
+        # Up to 2000 rows so large 500+ kit shifts are displayed without truncation
+        top_scans = list(scans[:2000])
+        plate_numbers = [s.registration_number for s in top_scans if s.registration_number]
         kit_map = {k.registration_number: k for k in InstallationKit.objects.filter(registration_number__in=plate_numbers)}
 
-        for idx, scan in enumerate(scans[:150]):
-            plate = scan.registration_number
+        seen_keys = set()
+        for idx, scan in enumerate(top_scans):
+            plate = scan.registration_number or "—"
             cat = scan.plate_category
             cat_badge = "[bold white on dark_blue] PSV [/]" if cat == "PSV" else "[bold black on gold1] PMO [/]"
             time_str = scan.dispatched_at.strftime("%H:%M:%S") if scan.dispatched_at else "—"
             kit = kit_map.get(plate)
             kit_code = kit.kit_code if kit else "—"
             gps = (getattr(kit, "gps_tracker", "") or getattr(kit, "gps_tracker_id", "") or "—") if kit else "—"
-            status = "[bold green]ON LINE[/bold green]" if scan.status == StockDispatchScan.Status.ON_LINE_ACTIVE else escape(scan.status)
-            operator = escape(getattr(scan, "operator_name", "") or getattr(scan, "operator_username", "Operator"))
+            status = "[bold green]ON LINE[/bold green]" if scan.status == StockDispatchScan.Status.ON_LINE_ACTIVE else escape(str(scan.status or ""))
+            operator = escape(str(getattr(scan, "operator_name", "") or getattr(scan, "operator_username", "") or "Operator"))
 
-            table.add_row(
-                f"#{idx + 1}",
-                f"[dim]{time_str}[/dim]",
-                f"[bold yellow]{escape(plate)}[/bold yellow]",
-                cat_badge,
-                f"[bold cyan]{escape(kit_code)}[/bold cyan]",
-                f"[dim]{escape(gps)}[/dim]",
-                status,
-                f"[dim]{operator}[/dim]",
-                key=plate,
-            )
+            row_key = f"{plate}#{scan.id}"
+            if row_key in seen_keys:
+                row_key = f"{plate}#{scan.id}#{idx}"
+            seen_keys.add(row_key)
+
+            try:
+                table.add_row(
+                    f"#{idx + 1}",
+                    f"[dim]{time_str}[/dim]",
+                    f"[bold yellow]{escape(plate)}[/bold yellow]",
+                    cat_badge,
+                    f"[bold cyan]{escape(kit_code)}[/bold cyan]",
+                    f"[dim]{escape(gps)}[/dim]",
+                    status,
+                    f"[dim]{operator}[/dim]",
+                    key=row_key,
+                )
+            except Exception as row_exc:
+                pass
 
     def _render_movements_table(self) -> None:
         table = self.query_one("#table-stock-movements", DataTable)
@@ -519,7 +535,7 @@ class StockPane(Vertical):
                 f"[cyan]{escape(ref_str)}[/cyan]",
                 f"[bold white]{d.total_plates_count:,}[/bold white]",
                 f"[dim]{escape(sample or '—')}[/dim]",
-                key=first_key,
+                key=f'deliv_{d.id}_{row_idx}',
             )
             row_idx += 1
 
@@ -537,7 +553,7 @@ class StockPane(Vertical):
                 f"[cyan]{escape(t.transfer_number)}[/cyan]",
                 f"[bold white]{t.plates_count:,}[/bold white]",
                 "—",
-                key=t.transfer_number,
+                key=f'trans_{t.id}_{row_idx}',
             )
             row_idx += 1
 
@@ -553,7 +569,7 @@ class StockPane(Vertical):
                 "—",
                 "1",
                 f"[bold yellow]{escape(r.registration_number)}[/bold yellow]",
-                key=r.registration_number,
+                key=f'ret_{r.id}_{row_idx}_{r.registration_number}',
             )
             row_idx += 1
 
@@ -599,7 +615,7 @@ class StockPane(Vertical):
                     f"[cyan]{gps}[/cyan]",
                     f"[dim]{front_ble}[/dim]",
                     f"[dim]{rear_ble}[/dim]",
-                    key=p,
+                    key=f'{p}#audit_{a.id}_{idx}',
                 )
             return
 
@@ -620,7 +636,7 @@ class StockPane(Vertical):
                         f"[cyan]{p_info.get('gps_tracker', '—')}[/cyan]",
                         f"[dim]{p_info.get('front_ble', '—')}[/dim]",
                         f"[dim]{p_info.get('rear_ble', '—')}[/dim]",
-                        key=plate,
+                        key=f'{plate}#prof_{row_idx}',
                     )
                     row_idx += 1
             if unreg:
@@ -633,7 +649,7 @@ class StockPane(Vertical):
                         "—",
                         "—",
                         "—",
-                        key=u_plate,
+                        key=f'{u_plate}#unreg_{row_idx}',
                     )
                     row_idx += 1
             return
@@ -651,7 +667,7 @@ class StockPane(Vertical):
                     item.plate_serial or "—",
                     "—",
                     "—",
-                    key=p,
+                    key=f'{p}#audit_{a.id}_{idx}',
                 )
             return
 
@@ -1294,6 +1310,8 @@ class StockPane(Vertical):
         key_str = str(row_key.value if hasattr(row_key, "value") else row_key)
         from core.services import stock_monitoring_service
         plate = stock_monitoring_service.extract_single_plate(key_str)
+        if not plate and "#" in key_str:
+            plate = stock_monitoring_service.extract_single_plate(key_str.split("#")[0])
         if plate:
             try:
                 self.query_one("#inspector-stock", InspectorPane).show_stock_kit_details(plate)

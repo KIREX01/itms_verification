@@ -424,7 +424,7 @@ class OrderSyncService:
             "created": created_count,
             "updated": updated_count,
             "disappeared_from_active": disappeared_count,
-            "pages_fetched": max(1, page - 1) if page > limit_pages else page,
+            "pages_fetched": max(1, page - 1) if page > max_pages else page,
             "duration_ms": duration_ms,
         }
 
@@ -436,7 +436,7 @@ class OrderSyncService:
             "created": created_count,
             "updated": updated_count,
             "disappeared_from_active": disappeared_count,
-            "pages_fetched": max(1, page - 1) if page > limit_pages else page,
+            "pages_fetched": max(1, page - 1) if page > max_pages else page,
             "duration_ms": duration_ms,
             "message": (
                 f"Synced {len(seen_order_numbers)} active orders ({created_count} new, "
@@ -595,7 +595,7 @@ class OrderSyncService:
             "synced": True,
             "target_date": target_dt_str,
             "total_fetched": len(all_today_orders),
-            "pages_fetched": max(1, page - 1) if page > limit_pages else page,
+            "pages_fetched": max(1, page - 1) if page > max_pages else page,
             "created": sync_res.get("created", 0),
             "updated": sync_res.get("updated", 0),
             "installed_verified": sync_res.get("installed_verified", 0),
@@ -721,7 +721,7 @@ class OrderSyncService:
             "total_fetched": len(all_kits),
             "created": sync_res.get("created", 0),
             "updated": sync_res.get("updated", 0),
-            "pages_fetched": max(1, page - 1) if page > limit_pages else page,
+            "pages_fetched": max(1, page - 1) if page > max_pages else page,
             "duration_ms": duration_ms,
             "message": f"Synced {len(all_kits)} installation kits ({sync_res.get('created', 0)} new, {sync_res.get('updated', 0)} updated) across {page} page(s) in {duration_ms}ms.",
         }

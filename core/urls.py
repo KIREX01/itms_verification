@@ -87,6 +87,7 @@ urlpatterns = [
     path("api/mobile/upload/", views_mobile.api_mobile_upload, name="api_mobile_upload"),
     path("api/mobile/uturn/session_status/", views_mobile.api_mobile_uturn_status, name="api_mobile_uturn_status"),
     path("api/mobile/uturn/abort_session/", views_mobile.api_mobile_uturn_abort, name="api_mobile_uturn_abort"),
+    path("api/mobile/uturn/undo_snap/", views_mobile.api_mobile_uturn_undo_snap, name="api_mobile_uturn_undo_snap"),
     path("api/mobile/uturn/finish_batch/", views_mobile.api_mobile_uturn_finish, name="api_mobile_uturn_finish"),
     path("api/network/info/", views_mobile.api_network_info, name="api_network_info"),
 

@@ -304,6 +304,29 @@ def api_mobile_upload(request: HttpRequest) -> JsonResponse:
         )
 
     # Ingest the uploaded photo into the Evidence Vault
+    is_replacement = request.POST.get("is_replacement", "false").lower() in ("true", "1")
+    replace_seq = request.POST.get("replace_sequence_number", "").strip()
+
+    # If this is a U-Turn replacement upload, purge any previous unsubmitted image for this sequence & orientation
+    if mode == "uturn" and is_replacement and batch:
+        target_seq = replace_seq or str(sequence_num)
+        expected_filename = f"uturn_{orientation.lower()}_{target_seq}.jpg"
+        old_img = EvidenceImage.objects.filter(
+            batch=batch,
+            orientation=orientation,
+        ).filter(
+            Q(original_source_path__endswith=expected_filename) |
+            Q(vault_file__endswith=expected_filename)
+        ).exclude(status=EvidenceImage.Status.SUBMITTED).first()
+
+        if old_img:
+            vault_service.purge_evidence_file(old_img)
+            old_img.delete()
+            batch.total_files = max(0, batch.total_files - 1)
+            batch.ingested_count = max(0, batch.ingested_count - 1)
+            batch.save(update_fields=["total_files", "ingested_count"])
+            logger.info("Purged previous U-turn image %s before ingesting replacement", expected_filename)
+
     image, status = vault_service.ingest_uploaded_file(
         photo_file,
         batch=batch,
@@ -522,6 +545,54 @@ def api_mobile_uturn_abort(request: HttpRequest) -> JsonResponse:
         "deleted_pairs": deleted_pairs,
         "deleted_images": deleted_images,
     })
+
+
+@csrf_exempt
+@require_POST
+def api_mobile_uturn_undo_snap(request: HttpRequest) -> JsonResponse:
+    """
+    Removes a single unsubmitted snap from an active U-Turn batch when operator taps 'Retake Last'.
+    Ensures the server batch does not keep an orphan photo in case it was already synced via outbox.
+    """
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
+    uturn_session_id = request.POST.get("uturn_session_id", "").strip()
+    orientation = request.POST.get("orientation", "").upper().strip()
+    seq_raw = request.POST.get("sequence_number", "").strip()
+
+    if not uturn_session_id:
+        return JsonResponse({"success": False, "error": "uturn_session_id required"}, status=400)
+
+    batch = IngestionBatch.objects.filter(
+        source_type=IngestionBatch.SourceType.MOBILE,
+        source_label__contains=uturn_session_id,
+    ).first()
+
+    if not batch:
+        return JsonResponse({"success": True, "message": "Batch not found; nothing to delete."})
+
+    expected_filename = f"uturn_{orientation.lower()}_{seq_raw}.jpg" if seq_raw else ""
+    qs = EvidenceImage.objects.filter(batch=batch).exclude(status=EvidenceImage.Status.SUBMITTED)
+    if orientation:
+        qs = qs.filter(orientation=orientation)
+    if expected_filename:
+        target_img = qs.filter(
+            Q(original_source_path__endswith=expected_filename) | Q(vault_file__endswith=expected_filename)
+        ).first() or qs.order_by("-captured_at").first()
+    else:
+        target_img = qs.order_by("-captured_at").first()
+
+    if target_img:
+        vault_service.purge_evidence_file(target_img)
+        target_img.delete()
+        batch.total_files = max(0, batch.total_files - 1)
+        batch.ingested_count = max(0, batch.ingested_count - 1)
+        batch.save(update_fields=["total_files", "ingested_count"])
+        logger.info("Deleted U-turn snap %s for session %s (seq %s)", expected_filename, uturn_session_id, seq_raw)
+        return JsonResponse({"success": True, "deleted": True, "sequence_number": seq_raw})
+
+    return JsonResponse({"success": True, "deleted": False, "message": "No matching image found."})
 
 
 @require_POST

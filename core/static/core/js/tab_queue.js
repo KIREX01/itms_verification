@@ -284,6 +284,34 @@ async function selectPair(pairId) {
                 if (btnQuickLink) btnQuickLink.innerText = "🔗 Link Order";
             }
 
+            // Telematics & Hardware Details Card
+            const hwCard = document.getElementById("queue-hardware-card");
+            if (hwCard) {
+                const hw = p.hardware || (p.order ? {
+                    service_type: p.order.service_type,
+                    vin: p.order.vin,
+                    old_registration_number: p.order.old_registration_number,
+                    registration_number: p.order.registration_number,
+                    front_plate: p.order.front_plate_serial,
+                    rear_plate: p.order.rear_plate_serial,
+                    gps_tracker: p.order.gps_tracker_id,
+                    front_beacon: p.order.front_beacon_id,
+                    rear_beacon: p.order.rear_beacon_id,
+                } : {});
+
+                setText("hw-service-type", hw.service_type || "First Time Registration");
+                setText("hw-vin", hw.vin || "—");
+                setText("hw-old-plate", hw.old_registration_number || "—");
+                setText("hw-reg-num", hw.registration_number || p.registration_number_detected || "—");
+                setText("hw-front-plate", hw.front_plate || (p.kit && p.kit.front_plate) || "—");
+                setText("hw-rear-plate", hw.rear_plate || (p.kit && p.kit.rear_plate) || "—");
+                setText("hw-gps-tracker", hw.gps_tracker || (p.kit && p.kit.gps_tracker) || "—");
+                setText("hw-front-beacon", hw.front_beacon || (p.kit && p.kit.front_tracker) || "—");
+                setText("hw-rear-beacon", hw.rear_beacon || (p.kit && p.kit.rear_tracker) || "—");
+
+                hwCard.style.display = "block";
+            }
+
             // Evidence photos
             const front = p.front || p.front_image;
             const rear = p.rear || p.rear_image;
@@ -1027,7 +1055,7 @@ async function loadBatchCandidates() {
                 const isSelected = activeReplaceContext.selectedCandidateId === c.id;
                 return `
                     <div class="candidate-tile ${isSelected ? 'selected' : ''}" onclick="selectBatchCandidate('${escapeHtml(c.id)}')" id="cand-tile-${escapeHtml(c.id)}" style="background:#111622; border:1px solid rgba(255,255,255,0.15); border-radius:6px; overflow:hidden; cursor:pointer;">
-                        <div style="height:95px; background:#05070a; display:flex; align-items:center; justify-content:center; overflow:hidden;">
+                        <div style="height:160px; background:#05070a; display:flex; align-items:center; justify-content:center; overflow:hidden;">
                             <img src="${escapeHtml(c.thumb_url || c.url)}" alt="Candidate" style="width:100%; height:100%; object-fit:contain;">
                         </div>
                         <div style="padding:6px 8px; font-size:0.72rem; display:flex; flex-direction:column; gap:3px;">

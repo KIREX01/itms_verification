@@ -141,9 +141,14 @@
 }
 
 .detail-banner-card {
+    position: sticky;
+    top: 0;
+    z-index: 120;
     background-color: var(--ug-black-card);
     border: 1px solid var(--ug-border);
+    border-bottom: 2px solid var(--ug-yellow);
     border-radius: var(--radius-lg);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
     padding: 12px 18px;
     display: flex;
     align-items: center;
@@ -365,6 +370,12 @@
     }
     
     .detail-banner-card {
+        position: sticky;
+        top: 0;
+        z-index: 120;
+        background-color: var(--ug-black-card);
+        border-bottom: 2px solid var(--ug-yellow);
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
         flex-direction: column;
         align-items: flex-start;
         gap: 12px;

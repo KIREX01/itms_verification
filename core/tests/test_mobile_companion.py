@@ -766,3 +766,80 @@ class TestMobileCompanion:
         assert succ_data["pairs_count"] == 2
         assert succ_data["rear_count"] == 2
         assert succ_data["front_count"] == 2
+
+    def test_uturn_replace_photo_in_place(self):
+        """Verify that uploading with is_replacement replaces the previous photo in-place without incrementing total photos."""
+        session_id = "UTURN-REPLACE-TEST-01"
+        upload_url = reverse("core:api_mobile_upload")
+
+        # Snap photo 1 and photo 2
+        for i in range(1, 3):
+            f = io.BytesIO(_create_test_image_bytes(color=(10 * i, 20, 30)))
+            f.name = f"uturn_rear_{i}.jpg"
+            resp = self.client.post(upload_url, {
+                "photo": f,
+                "mode": "uturn",
+                "orientation": "REAR",
+                "sequence_number": str(i),
+                "uturn_session_id": session_id,
+                "uturn_batch_index": "1",
+            })
+            assert resp.status_code == 200
+
+        batch = IngestionBatch.objects.get(source_label__contains=session_id)
+        assert batch.images.count() == 2
+
+        # Replace photo 2 in-place
+        f_rep = io.BytesIO(_create_test_image_bytes(color=(200, 200, 200)))
+        f_rep.name = "uturn_rear_2.jpg"
+        rep_resp = self.client.post(upload_url, {
+            "photo": f_rep,
+            "mode": "uturn",
+            "orientation": "REAR",
+            "sequence_number": "2",
+            "is_replacement": "true",
+            "replace_sequence_number": "2",
+            "uturn_session_id": session_id,
+            "uturn_batch_index": "1",
+        })
+        assert rep_resp.status_code == 200
+
+        # Verify batch STILL has exactly 2 photos, NOT 3
+        assert batch.images.count() == 2
+        rears = list(batch.images.filter(orientation="REAR"))
+        assert len(rears) == 2
+
+    def test_uturn_undo_snap(self):
+        """Verify that api_mobile_uturn_undo_snap deletes the unsubmitted photo from the batch."""
+        session_id = "UTURN-UNDO-TEST-02"
+        upload_url = reverse("core:api_mobile_upload")
+        undo_url = reverse("core:api_mobile_uturn_undo_snap")
+
+        # Snap 1 photo
+        f = io.BytesIO(_create_test_image_bytes(color=(50, 60, 70)))
+        f.name = "uturn_rear_1.jpg"
+        self.client.post(upload_url, {
+            "photo": f,
+            "mode": "uturn",
+            "orientation": "REAR",
+            "sequence_number": "1",
+            "uturn_session_id": session_id,
+            "uturn_batch_index": "1",
+        })
+
+        batch = IngestionBatch.objects.get(source_label__contains=session_id)
+        assert batch.images.count() == 1
+
+        # Undo snap
+        undo_resp = self.client.post(undo_url, {
+            "uturn_session_id": session_id,
+            "orientation": "REAR",
+            "sequence_number": "1",
+        })
+        assert undo_resp.status_code == 200
+        undo_data = undo_resp.json()
+        assert undo_data["success"] is True
+        assert undo_data["deleted"] is True
+
+        # Verify batch now has 0 photos
+        assert batch.images.count() == 0

@@ -1222,7 +1222,7 @@ Operators requested three specific interface improvements:
    - Wired with `onchange="updateSetting('sync.order_sync_interval_seconds', parseInt(this.value, 10))"`, supporting intervals from 30s to 86400s (default: 600s).
 
 
-## 20. Queue Review Studio & Replace Image Modal UI Refinements (02 November 2026) - [BACKEND READY / FRONTEND SPECIFICATION]
+## 20. Queue Review Studio & Replace Image Modal UI Refinements (02 November 2026) - [COMPLETED]
 
 ### 20.1 Overview & Requirements
 Operators identified usability bottlenecks during queue review and photo batch candidate replacement:
@@ -1460,3 +1460,14 @@ if (hwCard) {
   hwCard.style.display = 'block';
 }
 ```
+
+
+### 20.4 Implementation & Verification Summary (Completed)
+- **Queue Studio Sticky Header**: Configured \.detail-banner-card\ in \core/static/core/css/tab_queue.css\ with \position: sticky; top: 0; z-index: 120; border-bottom: 2px solid var(--ug-yellow); box-shadow: 0 4px 14px rgba(0,0,0,0.45);\ across desktop and mobile viewports.
+- **Hardware Telematics Top Card**: Integrated \#queue-hardware-card\ directly below \.detail-banner-card\ in \core/templates/core/tabs/tab_queue.html\ with 3 columns (Order Details, Plate Details, Tracker Details). Wired in \core/static/core/js/tab_queue.js\ to bind \p.hardware\ or \p.order\ dynamically.
+- **Candidate Grid 3-in-Row**: Updated \#modal-replace-image\ container in \core/templates/core/modals.html\ and grid styling to \grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; max-height: 480px;\. Increased image candidate height to ppx\ with \object-fit: contain\ in \core/static/core/js/tab_queue.js\.
+- **Mobile Off-Conveyor (U-Turn) In-Place Replacement**:
+  - \core/views_mobile.py\: Added \is_replacement\ and eplace_sequence_number\ handling in \pi_mobile_upload\. Purges old unsubmitted image in vault before ingesting new photo to preserve exact counts and trajectory alignment.
+  - \core/views_mobile.py\: Added \pi_mobile_uturn_undo_snap\ endpoint for 'Retake Last'.
+  - \core/static/core/js/mobile_companion.js\: Added \MobileState.inspectedContext\ and \MobileState.uturn.replacingTile\. Retaking from photo inspector replaces tile in-place without incrementing photo counts or shifting trajectory index.
+- **Automated Tests**: Unit tests \	est_uturn_replace_photo_in_place\ and \	est_uturn_undo_snap\ in \core/tests/test_mobile_companion.py\ passed with 100% success.

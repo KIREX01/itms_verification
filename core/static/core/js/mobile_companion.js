@@ -450,6 +450,12 @@ async function drainOutboxQueue() {
         if (item.batch_label) {
             formData.append("batch_label", item.batch_label);
         }
+        if (item.is_replacement) {
+            formData.append("is_replacement", "true");
+        }
+        if (item.replace_sequence_number) {
+            formData.append("replace_sequence_number", String(item.replace_sequence_number));
+        }
 
         try {
             const resp = await fetch("/api/mobile/upload/", {
@@ -1866,8 +1872,9 @@ function handlePreviewCardClick(orientation) {
     }
 }
 
-function openPhotoInspector(orientation, url, customTitle) {
+function openPhotoInspector(orientation, url, customTitle, context = null) {
     MobileState.inspectedOrientation = orientation;
+    MobileState.inspectedContext = context;
     const modal = document.getElementById("photo-lightbox-modal");
     const img = document.getElementById("lightbox-img");
     const title = document.getElementById("lightbox-title");
@@ -1892,6 +1899,15 @@ function openPhotoInspector(orientation, url, customTitle) {
         if (expPill) expPill.className = "metric-pill good";
     }
 
+    const btnRetake = document.getElementById("lightbox-btn-retake");
+    if (btnRetake) {
+        if (context && context.mode === "uturn" && context.seqNum) {
+            btnRetake.innerHTML = `📸 Replace ${context.orientation} #${context.seqNum}`;
+        } else {
+            btnRetake.innerHTML = `📸 Retake Photo`;
+        }
+    }
+
     if (modal) modal.style.display = "flex";
 }
 
@@ -1901,11 +1917,16 @@ function closePhotoInspector() {
 }
 
 function handleLightboxRetake() {
+    const ctx = MobileState.inspectedContext;
     closePhotoInspector();
-    const orientation = MobileState.inspectedOrientation || "FRONT";
     if (MobileState.mode === "conveyor") {
+        const orientation = MobileState.inspectedOrientation || "FRONT";
         triggerNativeCapture(orientation);
     } else {
+        if (ctx && ctx.mode === "uturn") {
+            MobileState.uturn.replacingTile = { ...ctx };
+            showMobileToast(`📸 Retaking ${ctx.orientation} #${ctx.seqNum}...`);
+        }
         triggerUturnCapture();
     }
 }
@@ -2189,6 +2210,19 @@ function restoreUturnPreviewTiles(tiles) {
     slice.forEach(t => {
         const tile = document.createElement("div");
         tile.className = "mini-tile";
+        tile.dataset.orientation = t.orientation;
+        tile.dataset.seqNum = t.seqNum;
+        if (t.id) tile.dataset.id = t.id;
+        tile.onclick = () => {
+            const blobUrl = t.file ? URL.createObjectURL(t.file) : "";
+            openPhotoInspector(t.orientation, blobUrl, `U-Turn ${t.orientation} #${t.seqNum}`, {
+                mode: "uturn",
+                orientation: t.orientation,
+                seqNum: t.seqNum,
+                id: t.id,
+                tileElement: tile
+            });
+        };
         tile.innerHTML = `
             <div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#1e293b; color:#94a3b8; font-size:0.75rem; font-weight:700;">
                 ${t.orientation === 'FRONT' ? '🚙 FRONT' : '🏍️ REAR'}
@@ -2305,9 +2339,94 @@ async function handleNativeUturnFileCaptured(inputElem) {
 
     const rawFile = inputElem.files[0];
     const file = await compressImageForUpload(rawFile);
-    const orientation = MobileState.uturn.phase;
+    const replacing = MobileState.uturn.replacingTile;
+    MobileState.uturn.replacingTile = null; // Clear flag immediately
+
     const nowIso = new Date().toISOString();
 
+    if (replacing) {
+        // IN-PLACE REPLACEMENT: Do NOT increment counters or sequence
+        const orientation = replacing.orientation;
+        const seqNum = replacing.seqNum;
+        const itemId = replacing.id || `uturn_${Date.now()}_${orientation}_${seqNum}`;
+
+        // 1. Delete old pending item from Outbox (IndexedDB)
+        if (replacing.id) {
+            try {
+                const db = await openOutboxDB();
+                const tx = db.transaction(STORE_NAME, "readwrite");
+                await tx.objectStore(STORE_NAME).delete(replacing.id);
+            } catch (err) {
+                console.warn("Could not delete old outbox item:", err);
+            }
+        }
+
+        // 2. Prepare replacement outbox item
+        const outboxItem = {
+            id: itemId,
+            mode: "uturn",
+            orientation: orientation,
+            sequence_number: seqNum,
+            blob: file,
+            filename: `uturn_${orientation.toLowerCase()}_${seqNum}.jpg`,
+            captured_at: nowIso,
+            status: "pending",
+            uturn_session_id: MobileState.uturn.walkSessionId,
+            uturn_batch_index: MobileState.uturn.batchIndex,
+            batch_label: `U-Turn Walk Batch #${MobileState.uturn.batchIndex}`,
+            is_replacement: true,
+            replace_sequence_number: String(seqNum),
+        };
+
+        // 3. Update in recentTiles array
+        if (Array.isArray(MobileState.uturn.recentTiles)) {
+            const rIdx = MobileState.uturn.recentTiles.findIndex(
+                t => t.id === replacing.id || (t.orientation === orientation && t.seqNum === seqNum)
+            );
+            if (rIdx !== -1) {
+                MobileState.uturn.recentTiles[rIdx] = {
+                    id: itemId,
+                    orientation: orientation,
+                    seqNum: seqNum,
+                    file: file
+                };
+            }
+        }
+
+        // 4. Update the DOM tile in recent strip
+        const newUrl = URL.createObjectURL(file);
+        let targetTile = replacing.tileElement;
+        if (!targetTile || !targetTile.parentNode) {
+            targetTile = document.querySelector(`.mini-tile[data-orientation="${orientation}"][data-seq-num="${seqNum}"]`);
+        }
+        if (targetTile) {
+            const img = targetTile.querySelector("img");
+            if (img) img.src = newUrl;
+            targetTile.dataset.id = itemId;
+            targetTile.onclick = () => openPhotoInspector(orientation, newUrl, `U-Turn ${orientation} #${seqNum}`, {
+                mode: "uturn",
+                orientation: orientation,
+                seqNum: seqNum,
+                id: itemId,
+                tileElement: targetTile
+            });
+            targetTile.style.boxShadow = "0 0 0 2px #10b981";
+            setTimeout(() => { if (targetTile) targetTile.style.boxShadow = "none"; }, 2500);
+        }
+
+        saveUturnSessionState();
+        await savePhotoToOutbox(outboxItem);
+        await refreshOutboxCount();
+        updateUturnShutterCounter();
+
+        showMobileToast(`✓ Replaced ${orientation} #${seqNum} successfully!`);
+        if (navigator.vibrate) navigator.vibrate(100);
+        drainOutboxQueue();
+        return;
+    }
+
+    // NORMAL APPEND (New photo in sequence)
+    const orientation = MobileState.uturn.phase;
     if (orientation === "REAR") {
         MobileState.uturn.rearCount += 1;
     } else {
@@ -2356,7 +2475,7 @@ async function handleNativeUturnFileCaptured(inputElem) {
     if (btnUndo) btnUndo.style.display = "inline-flex";
 
     // Add mini preview tile
-    addMiniPreviewTile(file, orientation, seqNum);
+    addMiniPreviewTile(file, orientation, seqNum, itemId);
     updateUturnShutterCounter();
 
     if (navigator.vibrate) navigator.vibrate(100);
@@ -2364,7 +2483,7 @@ async function handleNativeUturnFileCaptured(inputElem) {
     drainOutboxQueue();
 }
 
-function addMiniPreviewTile(file, orientation, seqNum) {
+function addMiniPreviewTile(file, orientation, seqNum, itemId = null) {
     const strip = document.getElementById("uturn-recent-strip");
     if (!strip) return;
 
@@ -2375,7 +2494,17 @@ function addMiniPreviewTile(file, orientation, seqNum) {
     const url = URL.createObjectURL(file);
     const tile = document.createElement("div");
     tile.className = "mini-tile";
-    tile.onclick = () => openPhotoInspector(orientation, url, `U-Turn ${orientation} #${seqNum}`);
+    tile.dataset.orientation = orientation;
+    tile.dataset.seqNum = seqNum;
+    if (itemId) tile.dataset.id = itemId;
+
+    tile.onclick = () => openPhotoInspector(orientation, url, `U-Turn ${orientation} #${seqNum}`, {
+        mode: "uturn",
+        orientation: orientation,
+        seqNum: seqNum,
+        id: itemId,
+        tileElement: tile
+    });
     tile.innerHTML = `
         <img src="${url}" alt="${orientation}">
         <span class="mini-tile-badge" style="background:${orientation === 'FRONT' ? '#0284c7' : '#10b981'}">${orientation[0]}${seqNum}</span>
@@ -2411,6 +2540,15 @@ async function undoLastUturnSnap() {
     } catch (err) {
         console.warn("Failed to delete from IndexedDB:", err);
     }
+
+    // Also tell server to purge unsubmitted photo if it was already uploaded
+    try {
+        fetch("/api/mobile/uturn/undo_snap/", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: `uturn_session_id=${encodeURIComponent(MobileState.uturn.walkSessionId)}&orientation=${encodeURIComponent(last.orientation)}&sequence_number=${encodeURIComponent(last.seqNum)}`
+        }).catch(() => {});
+    } catch (e) {}
 
     // Remove first child from preview strip
     const strip = document.getElementById("uturn-recent-strip");

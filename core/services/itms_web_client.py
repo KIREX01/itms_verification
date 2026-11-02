@@ -1678,9 +1678,18 @@ class ITMSWebClient:
             # ONLY when legitimately fetched from archive and confirmed as Installed!
             if is_archived and is_installed and local_status == InstallationOrder.Status.INSTALLED:
                 verified_installed_count += 1
-                pairs = VehicleInstallationPair.objects.filter(
-                    models.Q(order=obj) | models.Q(registration_number_detected=canonical_reg)
-                )
+                pairs = list(VehicleInstallationPair.objects.filter(
+                    order=obj,
+                    is_deleted=False,
+                ).select_related("front_image", "rear_image"))
+                if not pairs and canonical_reg:
+                    unlinked = VehicleInstallationPair.objects.filter(
+                        order__isnull=True,
+                        is_deleted=False,
+                        registration_number_detected=canonical_reg,
+                    ).select_related("front_image", "rear_image").first()
+                    if unlinked:
+                        pairs = [unlinked]
                 now = timezone.now()
                 for pair in pairs:
                     if pair.verification_status != VehicleInstallationPair.VerificationStatus.SUBMITTED:
@@ -5225,9 +5234,9 @@ class ITMSWebClient:
                 # Update Pair
                 pair_qs = None
                 if pair_id:
-                    pair_qs = VehicleInstallationPair.objects.filter(id=pair_id)
+                    pair_qs = VehicleInstallationPair.objects.filter(id=pair_id, is_deleted=False)
                 elif order_obj:
-                    pair_qs = VehicleInstallationPair.objects.filter(order=order_obj)
+                    pair_qs = VehicleInstallationPair.objects.filter(order=order_obj, is_deleted=False)
 
                 if pair_qs:
                     for p in pair_qs:

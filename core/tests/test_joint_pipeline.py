@@ -103,4 +103,18 @@ class ProcessVisionPipelineFlowTests(TestCase):
         self.assertIsNotNone(pair)
         self.assertTrue(pair.is_complete)
         self.assertEqual(pair.registration_number_detected, "UMA291PK")
+        # Newly created pairs without matching order start in CONFLICT
+        self.assertEqual(pair.verification_status, VehicleInstallationPair.VerificationStatus.CONFLICT)
+        self.assertIsNone(pair.order)
+
+        # When matching order arrives, transitions to PENDING_REVIEW
+        order = InstallationOrder.objects.create(
+            order_number="PO-UMA291PK",
+            registration_number="UMA291PK",
+            status=InstallationOrder.Status.PENDING,
+        )
+        from core.matcher.order_matcher import match_pair_to_order
+        match_pair_to_order(pair)
+        pair.refresh_from_db()
+        self.assertEqual(pair.order, order)
         self.assertEqual(pair.verification_status, VehicleInstallationPair.VerificationStatus.PENDING_REVIEW)

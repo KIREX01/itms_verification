@@ -363,8 +363,18 @@ class OrderSyncService:
                         # Cross-verify and mark any matching vehicle installation pairs as SUBMITTED
                         # Prevents local operators from attempting to submit photos to an already closed order!
                         pairs = list(VehicleInstallationPair.objects.filter(
-                            Q(order=dis_order) | Q(registration_number_detected=dis_order.registration_number)
+                            order=dis_order,
+                            is_deleted=False,
                         ).select_related("front_image", "rear_image"))
+                        if not pairs and dis_order.registration_number:
+                            clean_reg = dis_order.registration_number.replace(" ", "").upper()
+                            unlinked = VehicleInstallationPair.objects.filter(
+                                order__isnull=True,
+                                is_deleted=False,
+                                registration_number_detected=clean_reg,
+                            ).select_related("front_image", "rear_image").first()
+                            if unlinked:
+                                pairs = [unlinked]
                         now = timezone.now()
                         pairs_to_update = []
                         images_to_update = []

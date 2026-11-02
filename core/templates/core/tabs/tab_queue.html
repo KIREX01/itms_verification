@@ -50,11 +50,12 @@
                 <!-- Status Filter Pills (Subnavigation for Quick Access) -->
                 <div class="queue-subnav-strip" style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
                     <div class="queue-filter-pills" style="flex:1; display:flex; gap:4px; background-color:#0c1017; padding:4px; border-radius:6px; border:1px solid rgba(255,255,255,0.08); overflow-x:auto;">
-                        <button type="button" class="queue-filter-pill active" data-filter="ALL" onclick="setWorkQueueFilter('ALL')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:800; color:#ffffff !important; background-color:#1e293b !important; border:1px solid #fcdc04 !important; border-radius:4px; cursor:pointer; min-height:32px;">All</button>
-                        <button type="button" class="queue-filter-pill" data-filter="PENDING" onclick="setWorkQueueFilter('PENDING')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; color:rgba(255,255,255,0.75) !important; background-color:transparent; border:1px solid transparent; border-radius:4px; cursor:pointer; min-height:32px;">Review</button>
-                        <button type="button" class="queue-filter-pill" data-filter="APPROVED" onclick="setWorkQueueFilter('APPROVED')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; color:rgba(255,255,255,0.75) !important; background-color:transparent; border:1px solid transparent; border-radius:4px; cursor:pointer; min-height:32px;">Approved</button>
-                        <button type="button" class="queue-filter-pill" data-filter="ISSUES" onclick="setWorkQueueFilter('ISSUES')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; color:rgba(255,255,255,0.75) !important; background-color:transparent; border:1px solid transparent; border-radius:4px; cursor:pointer; min-height:32px;">Issues</button>
-                        <button type="button" class="queue-filter-pill" data-filter="SUBMITTED" onclick="setWorkQueueFilter('SUBMITTED')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; color:rgba(255,255,255,0.75) !important; background-color:transparent; border:1px solid transparent; border-radius:4px; cursor:pointer; min-height:32px;">Done</button>
+                        <button type="button" class="queue-filter-pill active" data-filter="ALL" onclick="setWorkQueueFilter('ALL')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:800; cursor:pointer; min-height:32px;">All (<span id="cnt-all">0</span>)</button>
+                        <button type="button" class="queue-filter-pill" data-filter="CONFLICT" onclick="setWorkQueueFilter('CONFLICT')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; color:#ef4444 !important; cursor:pointer; min-height:32px;">⚠️ Conflict (<span id="cnt-conflict">0</span>)</button>
+                        <button type="button" class="queue-filter-pill" data-filter="PENDING" onclick="setWorkQueueFilter('PENDING')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; cursor:pointer; min-height:32px;">Review (<span id="cnt-review">0</span>)</button>
+                        <button type="button" class="queue-filter-pill" data-filter="APPROVED" onclick="setWorkQueueFilter('APPROVED')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; cursor:pointer; min-height:32px;">Approved (<span id="cnt-approved">0</span>)</button>
+                        <button type="button" class="queue-filter-pill" data-filter="ISSUES" onclick="setWorkQueueFilter('ISSUES')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; cursor:pointer; min-height:32px;">Issues (<span id="cnt-issues">0</span>)</button>
+                        <button type="button" class="queue-filter-pill" data-filter="SUBMITTED" onclick="setWorkQueueFilter('SUBMITTED')" style="flex:1; text-align:center; padding:6px 4px; font-size:0.75rem; font-weight:700; cursor:pointer; min-height:32px;">Done (<span id="cnt-done">0</span>)</button>
                     </div>
                     <button type="button" class="mobile-filter-funnel-btn" id="btn-queue-filter-funnel" onclick="toggleMobileFilterPanel('queue-filter-drawer', this)" title="Filter Queue by batch, search, or scope" aria-label="Toggle Filters">
                         <svg class="funnel-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
@@ -132,6 +133,20 @@
 
             <!-- Active Inspection Detail Container -->
             <div id="queue-studio-content" style="display:none; flex-direction:column; gap:14px;">
+                <!-- Conflict / Unlinked Order Warning Banner -->
+                <div id="qdetail-conflict-banner" style="display:none; background:rgba(239,68,68,0.15); border:1px solid #ef4444; border-radius:var(--radius-md); padding:10px 14px; margin-bottom:8px; align-items:center; justify-content:space-between; gap:12px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <span style="font-size:1.3rem;">⚠️</span>
+                        <div>
+                            <div style="font-size:0.85rem; font-weight:800; color:#ef4444;" id="qdetail-conflict-title">Order Unassigned / Missing</div>
+                            <div style="font-size:0.75rem; color:#e2e8f0;" id="qdetail-conflict-msg">This pair lacks a linked ITMS order. All new upload batches start in Conflict until linked to an active unassigned order.</div>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" onclick="openLinkOrderModal()" style="background:#ef4444; border-color:#dc2626; color:#fff; padding:6px 14px; font-size:0.78rem; font-weight:800; white-space:nowrap;">
+                        🔗 Link Order
+                    </button>
+                </div>
+
                 <!-- Header Banner -->
                 <div class="detail-banner-card">
                     <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">

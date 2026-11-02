@@ -87,8 +87,10 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
     elif scope == "CARRYOVER":
         qs = qs.exclude(today_q)
 
-    if status_filter == "PENDING":
-        qs = qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW)
+    if status_filter == "CONFLICT":
+        qs = qs.filter(Q(verification_status=VehicleInstallationPair.VerificationStatus.CONFLICT) | Q(order__isnull=True))
+    elif status_filter == "PENDING":
+        qs = qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW, order__isnull=False)
     elif status_filter == "APPROVED":
         qs = qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.APPROVED)
     elif status_filter == "SUBMITTED":
@@ -407,8 +409,28 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
             pair.save(update_fields=["verification_status"])
             return JsonResponse({
                 "success": False,
-                "error": f"Cannot approve {pair.registration_number_detected}: No pending installation order found. Order may be closed, installed, or not yet created on ITMS.",
+                "error": f"Cannot approve {pair.registration_number_detected}: No pending installation order found. Order may be closed, installed, or not yet created on ITMS. Pair set to CONFLICT.",
                 "code": "NO_PENDING_ORDER",
+                "status": pair.verification_status,
+            }, status=400)
+
+        # Safeguard: Verify order is not already claimed by another active pair
+        other_pair = (
+            VehicleInstallationPair.objects.filter(
+                is_deleted=False,
+                order=pair.order,
+            ).exclude(id=pair.id).first()
+        )
+        if other_pair:
+            claimed_order = pair.order
+            pair.order = None
+            pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
+            pair.operator_note = f"Order Conflict: Order #{claimed_order.order_number} is already claimed by Pair #{other_pair.id}."
+            pair.save(update_fields=["order", "verification_status", "operator_note"])
+            return JsonResponse({
+                "success": False,
+                "error": f"Cannot approve: Order #{claimed_order.order_number} is already claimed by Pair #{other_pair.id}. Pair unlinked and set to CONFLICT.",
+                "code": "ORDER_ALREADY_ASSIGNED",
                 "status": pair.verification_status,
             }, status=400)
 
@@ -506,15 +528,29 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
                 except Exception as match_err:
                     logger.warning("Order matcher lookup error: %s", match_err)
 
-        # Strictly validate that target order is PENDING (never link closed/installed/archived orders)
+        # Strictly validate that target order is PENDING and UNASSIGNED
         if target_order:
+            # Prevent duplicate order linking across pairs
+            other_pair = (
+                VehicleInstallationPair.objects.filter(
+                    is_deleted=False,
+                    order=target_order,
+                ).exclude(id=pair.id).first()
+            )
+            if other_pair:
+                return JsonResponse({
+                    "success": False,
+                    "error": f"Order #{target_order.order_number} ({target_order.registration_number}) is already assigned to Pair #{other_pair.id} ({other_pair.registration_number_detected}). Each order can only be assigned to one vehicle pair.",
+                    "code": "ORDER_ALREADY_ASSIGNED",
+                }, status=400)
+
             from core.matcher.order_matcher import get_pending_orders_queryset
-            if not get_pending_orders_queryset().filter(id=target_order.id).exists():
+            if not get_pending_orders_queryset(exclude_pair_id=pair.id).filter(id=target_order.id).exists():
                 c_stat = target_order.order_status or target_order.status
                 return JsonResponse({
                     "success": False,
-                    "error": f"Order #{target_order.order_number} for {target_order.registration_number} is already {c_stat} (closed). Only PENDING orders can be linked.",
-                    "code": "ORDER_NOT_PENDING",
+                    "error": f"Order #{target_order.order_number} for {target_order.registration_number} is already {c_stat} (closed/claimed). Only unassigned PENDING orders can be linked.",
+                    "code": "ORDER_NOT_AVAILABLE",
                 }, status=400)
 
         # Live lookup against ITMS server if order not in local DB (TUI Parity)
@@ -560,13 +596,10 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
                 pair.rear_image.detected_plate = canonical_plate
                 pair.rear_image.save(update_fields=["detected_plate"])
 
-        if new_status == "NEEDS_REVIEW":
-            new_status = VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
-
-        if new_status and new_status in VehicleInstallationPair.VerificationStatus.values:
-            pair.verification_status = new_status
+        if target_order:
+            pair.verification_status = VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
         else:
-            pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
+            pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
 
         pair.refresh_completeness()
 
@@ -620,7 +653,11 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
         pair.matched_via = VehicleInstallationPair.MatchedVia.MANUAL
         pair.match_score = 0.0
         pair.is_manual_override = True
-        update_cols = ["order", "match_type", "matched_via", "match_score", "is_manual_override"]
+        pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
+        pair.operator_note = (
+            f"Order Conflict: Order #{prev_order.order_number if prev_order else 'N/A'} was unlinked by operator."
+        )
+        update_cols = ["order", "match_type", "matched_via", "match_score", "is_manual_override", "verification_status", "operator_note"]
         if operator_user:
             pair.operator = operator_user
             update_cols.append("operator")
@@ -636,11 +673,12 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
             operator_email=operator_email,
             action=SubmissionAuditLog.Action.OPERATOR_OVERRIDE,
             result=SubmissionAuditLog.ResultStatus.SUCCESS,
-            message=f"Operator unlinked order #{prev_order.order_number if prev_order else 'N/A'} via Web Console.",
+            message=f"Operator unlinked order #{prev_order.order_number if prev_order else 'N/A'} via Web Console. Pair transitioned to CONFLICT.",
         )
         return JsonResponse({
             "success": True,
-            "message": "Order unlinked from pair.",
+            "message": "Order unlinked from pair. Status transitioned to CONFLICT.",
+            "verification_status": pair.verification_status,
         })
 
     elif action == "submit":

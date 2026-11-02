@@ -30,14 +30,14 @@ _CONFUSIONS = {
 }
 
 
-def get_active_orders_cache(account_email: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_active_orders_cache(account_email: Optional[str] = None, exclude_pair_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Returns active orders awaiting installation evidence from the local database.
-    Only includes orders that are strictly PENDING on ITMS and not yet completed or archived.
+    Only includes orders that are strictly PENDING on ITMS and not yet completed, claimed, or archived.
     Filters by the active authenticated ITMS account to preserve multi-tenant isolation.
     """
     from core.matcher.order_matcher import get_pending_orders_queryset
-    qs = get_pending_orders_queryset(account_email=account_email)
+    qs = get_pending_orders_queryset(account_email=account_email, exclude_pair_id=exclude_pair_id)
     orders = qs.values(
         "id",
         "order_number",
@@ -179,19 +179,21 @@ def disambiguate_plate_with_orders(
                         }
                         continue
 
-        # Case D: High-Similarity Fuzzy Ratio (>= 88%)
-        ratio = fuzz.ratio(clean_candidate, order_reg)
-        if ratio >= 88.0 and ratio > highest_score:
-            highest_score = ratio
-            best_match = {
-                "resolved_plate": order_reg,
-                "order_id": order["id"],
-                "order_number": order["order_number"],
-                "score": float(ratio),
-                "match_type": "FUZZY",
-                "was_corrected": True,
-                "reason": f"Fuzzy similarity match ({ratio:.1f}%) against order #{order['order_number']}",
-            }
+        # Case D: High-Similarity Fuzzy Ratio (>= 88%) ONLY for noisy/malformed OCR text (never overwrite a valid plate)
+        is_candidate_valid = normalizer.is_valid_plate(clean_candidate)
+        if not is_candidate_valid:
+            ratio = fuzz.ratio(clean_candidate, order_reg)
+            if ratio >= 88.0 and ratio > highest_score:
+                highest_score = ratio
+                best_match = {
+                    "resolved_plate": order_reg,
+                    "order_id": order["id"],
+                    "order_number": order["order_number"],
+                    "score": float(ratio),
+                    "match_type": "FUZZY",
+                    "was_corrected": True,
+                    "reason": f"Fuzzy similarity match ({ratio:.1f}%) against order #{order['order_number']}",
+                }
 
     if best_match and best_match["score"] >= 88.0:
         return best_match

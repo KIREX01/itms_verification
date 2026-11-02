@@ -482,7 +482,7 @@ class DualStreamVisionEngine:
         if pair is None:
             pair, _ = VehicleInstallationPair.objects.get_or_create(
                 registration_number_detected=consensus_plate or "UNKNOWN",
-                defaults={"verification_status": VehicleInstallationPair.VerificationStatus.PENDING_REVIEW},
+                defaults={"verification_status": VehicleInstallationPair.VerificationStatus.CONFLICT},
             )
 
         pair.front_image = front_img
@@ -514,10 +514,14 @@ class DualStreamVisionEngine:
             match_pair_to_order(pair)
             if pair.order:
                 details.append(f"Linked to InstallationOrder: {pair.order.order_number}")
-
-            pair.verification_status = VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
-            audit_action = SubmissionAuditLog.Action.VALIDATE
-            audit_res = SubmissionAuditLog.ResultStatus.SUCCESS
+                pair.verification_status = VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
+                audit_action = SubmissionAuditLog.Action.VALIDATE
+                audit_res = SubmissionAuditLog.ResultStatus.SUCCESS
+            else:
+                pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
+                details.append("No active unassigned pending order found; flagged as CONFLICT.")
+                audit_action = SubmissionAuditLog.Action.VALIDATE
+                audit_res = SubmissionAuditLog.ResultStatus.FAILURE
         else:
             pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
             if not is_homogenous:

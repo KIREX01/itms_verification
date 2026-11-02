@@ -429,7 +429,7 @@ def _align_and_pair_candidates(
             account_email=pair_email,
             is_complete=True,
             operator_note=full_note,
-            verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW,
+            verification_status=VehicleInstallationPair.VerificationStatus.CONFLICT,
         )
 
         r_img.status = EvidenceImage.Status.MATCHED
@@ -817,7 +817,7 @@ def manually_link_pair(
     else:
         pair, _ = VehicleInstallationPair.objects.get_or_create(
             registration_number_detected=plate,
-            defaults={"verification_status": VehicleInstallationPair.VerificationStatus.PENDING_REVIEW},
+            defaults={"verification_status": VehicleInstallationPair.VerificationStatus.CONFLICT},
         )
 
     # Clean up other incomplete pairs that previously held either image
@@ -828,9 +828,9 @@ def manually_link_pair(
     pair.front_image = front_image
     pair.rear_image = rear_image
     pair.is_complete = True
-    pair.verification_status = VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
+    pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
 
-    # Match order
+    # Match order (will transition to PENDING_REVIEW if unassigned order is linked, or remain CONFLICT)
     match_pair_to_order(pair)
     pair.save()
 

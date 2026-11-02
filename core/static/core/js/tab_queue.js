@@ -60,8 +60,23 @@ async function fetchPairs() {
                 }
             }
 
+            // Update queue filter counts
+            const cntAll = pairsData.length;
+            const cntConflict = pairsData.filter(p => p.verification_status === "CONFLICT" || (!p.order && !p.order_number)).length;
+            const cntReview = pairsData.filter(p => p.verification_status === "PENDING_REVIEW" && (p.order || p.order_number)).length;
+            const cntApproved = pairsData.filter(p => p.verification_status === "APPROVED").length;
+            const cntIssues = pairsData.filter(p => ["INCOMPLETE", "FAILED", "UNREGISTERED"].includes(p.verification_status)).length;
+            const cntDone = pairsData.filter(p => p.verification_status === "SUBMITTED").length;
+
+            setText("cnt-all", cntAll);
+            setText("cnt-conflict", cntConflict);
+            setText("cnt-review", cntReview);
+            setText("cnt-approved", cntApproved);
+            setText("cnt-issues", cntIssues);
+            setText("cnt-done", cntDone);
+
             // Update queue approved counter & quick batch submit button
-            const approvedCount = pairsData.filter(p => p.verification_status === "APPROVED").length;
+            const approvedCount = cntApproved;
             const approvedBtn = document.getElementById("btn-queue-batch-submit");
             const approvedText = document.getElementById("queue-approved-count-text");
             if (approvedBtn) {
@@ -103,10 +118,17 @@ function getFilteredQueuePairs() {
 
     return pairsData.filter(p => {
         // Tab status filter
-        if (currentQueueFilter === "PENDING" && p.verification_status !== "PENDING_REVIEW") return false;
-        if (currentQueueFilter === "APPROVED" && p.verification_status !== "APPROVED") return false;
-        if (currentQueueFilter === "SUBMITTED" && p.verification_status !== "SUBMITTED") return false;
-        if (currentQueueFilter === "ISSUES" && !["INCOMPLETE", "CONFLICT", "FAILED", "UNREGISTERED"].includes(p.verification_status)) return false;
+        if (currentQueueFilter === "CONFLICT") {
+            if (p.verification_status !== "CONFLICT" && (p.order || p.order_number)) return false;
+        } else if (currentQueueFilter === "PENDING") {
+            if (p.verification_status !== "PENDING_REVIEW" || (!p.order && !p.order_number)) return false;
+        } else if (currentQueueFilter === "APPROVED") {
+            if (p.verification_status !== "APPROVED") return false;
+        } else if (currentQueueFilter === "SUBMITTED") {
+            if (p.verification_status !== "SUBMITTED") return false;
+        } else if (currentQueueFilter === "ISSUES") {
+            if (!["INCOMPLETE", "FAILED", "UNREGISTERED"].includes(p.verification_status)) return false;
+        }
 
         // Batch filter
         if (currentQueueBatchFilter === "LATEST" && !p.is_latest_batch) return false;
@@ -192,6 +214,26 @@ function renderQueueCards() {
         const isSelected = p.id === selectedPairId;
         const plate = escapeHtml(p.registration_number_detected || "NO PLATE");
         const status = p.verification_status || "PENDING";
+        const hasOrder = !!(p.order || p.order_number);
+        let badgeCls = "badge-yellow";
+        let displayStatus = status;
+        if (status === "CONFLICT" || !hasOrder) {
+            badgeCls = "badge-danger";
+            displayStatus = "⚠️ CONFLICT";
+        } else if (status === "APPROVED") {
+            badgeCls = "badge-green";
+            displayStatus = "★ APPROVED";
+        } else if (status === "SUBMITTED") {
+            badgeCls = "badge-green";
+            displayStatus = "✓ DONE";
+        } else if (status === "PENDING_REVIEW") {
+            badgeCls = "badge-yellow";
+            displayStatus = "REVIEW";
+        } else if (["INCOMPLETE", "FAILED", "UNREGISTERED"].includes(status)) {
+            badgeCls = "badge-danger";
+            displayStatus = status;
+        }
+
         const orderNo = p.order ? `#${p.order.order_number}` : (p.order_number ? `#${p.order_number}` : "No order");
         const batchBadge = p.is_latest_batch
             ? `<span class="badge badge-green" style="font-size:0.58rem; padding:1px 5px;" title="Latest Ingested Batch Today">🔥 TODAY</span>`
@@ -207,7 +249,7 @@ function renderQueueCards() {
                     <span class="item-plate-text">${plate}</span>
                     
                 </div>
-                <span class="badge badge-yellow" style="font-size:0.65rem;">${status}</span>
+                <span class="badge ${badgeCls}" style="font-size:0.65rem;">${displayStatus}</span>
             </div>
             <div style="display:flex; align-items:center; justify-content:space-between; font-size:0.75rem; color:var(--ug-text-dim);">
                 <span>${escapeHtml(orderNo)}</span>
@@ -246,7 +288,38 @@ async function selectPair(pairId) {
             document.getElementById("queue-studio-content").style.display = "flex";
 
             setText("qdetail-plate", p.registration_number_detected || "---");
-            setText("qdetail-status", p.verification_status);
+            const stEl = document.getElementById("qdetail-status");
+            const hasOrder = !!p.order;
+            const isConflict = p.verification_status === "CONFLICT" || !hasOrder;
+            if (stEl) {
+                if (isConflict) {
+                    stEl.className = "badge badge-danger";
+                    stEl.innerText = "⚠️ CONFLICT";
+                } else if (p.verification_status === "APPROVED") {
+                    stEl.className = "badge badge-green";
+                    stEl.innerText = "★ APPROVED";
+                } else if (p.verification_status === "SUBMITTED") {
+                    stEl.className = "badge badge-green";
+                    stEl.innerText = "✓ DONE";
+                } else {
+                    stEl.className = "badge badge-yellow";
+                    stEl.innerText = p.verification_status;
+                }
+            }
+
+            // Conflict warning banner toggle
+            const conflictBanner = document.getElementById("qdetail-conflict-banner");
+            if (conflictBanner) {
+                if (isConflict) {
+                    conflictBanner.style.display = "flex";
+                    const titleEl = document.getElementById("qdetail-conflict-title");
+                    const msgEl = document.getElementById("qdetail-conflict-msg");
+                    if (titleEl) titleEl.innerText = p.conflict_reason || (p.order ? "Pair Conflict" : "Order Unassigned / Missing");
+                    if (msgEl) msgEl.innerText = p.operator_note || (!p.order ? "All uploaded pairs start in Conflict until linked to an active unassigned order." : "Conflict detected on this pair.");
+                } else {
+                    conflictBanner.style.display = "none";
+                }
+            }
 
             // Update Batch Badge in Header
             const batchBadgeEl = document.getElementById("qdetail-batch-badge");
@@ -400,6 +473,11 @@ async function executePairAction(action) {
     }
 
     if (action === "approve") {
+        if (!selectedPairDetail || !selectedPairDetail.order) {
+            showToast("Cannot approve: vehicle pair has no linked ITMS order. Please link an order first.", "warning");
+            openLinkOrderModal();
+            return;
+        }
         const pairIdToApprove = selectedPairId;
         const pairObj = pairsData.find(p => p.id === pairIdToApprove);
         const prevStatus = pairObj ? pairObj.verification_status : "PENDING_REVIEW";

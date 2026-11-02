@@ -14,6 +14,7 @@ from core.matcher import order_matcher
 from core.models import (
     EvidenceImage,
     IngestionBatch,
+    InstallationKit,
     InstallationOrder,
     SubmissionAuditLog,
     VehicleInstallationPair,
@@ -163,9 +164,27 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
             "order": {
                 "order_number": p.order.order_number,
                 "registration_number": p.order.registration_number,
-                "vin": p.order.vin,
+                "service_type": p.order.service_type or "First Time Registration",
+                "vin": p.order.vin or "—",
+                "old_registration_number": p.order.old_registration_number or "—",
                 "status": p.order.status,
+                "front_plate_serial": p.order.front_plate_serial or "—",
+                "rear_plate_serial": p.order.rear_plate_serial or "—",
+                "gps_tracker_id": p.order.gps_tracker_id or "—",
+                "front_beacon_id": p.order.front_beacon_id or "—",
+                "rear_beacon_id": p.order.rear_beacon_id or "—",
             } if p.order else None,
+            "hardware": {
+                "service_type": (p.order.service_type if p.order else "") or "First Time Registration",
+                "vin": (p.order.vin if p.order else "") or "—",
+                "old_registration_number": (p.order.old_registration_number if p.order else "") or "—",
+                "registration_number": (p.order.registration_number if p.order else p.registration_number_detected) or "—",
+                "front_plate": (p.order.front_plate_serial if p.order else "") or "—",
+                "rear_plate": (p.order.rear_plate_serial if p.order else "") or "—",
+                "gps_tracker": (p.order.gps_tracker_id if p.order else "") or "—",
+                "front_beacon": (p.order.front_beacon_id if p.order else "") or "—",
+                "rear_beacon": (p.order.rear_beacon_id if p.order else "") or "—",
+            },
             "updated_at": p.updated_at.strftime("%H:%M:%S") if p.updated_at else "",
         })
 
@@ -257,6 +276,23 @@ def api_pair_detail(request: HttpRequest, pair_id: int) -> JsonResponse:
         except (TypeError, ValueError, AttributeError) as exc:
             logger.debug("Failed calculating time delta for pair %s: %s", pair_id, exc)
 
+    order_obj = pair.order
+    kit = None
+    reg_to_check = (order_obj.registration_number if order_obj else pair.registration_number_detected) or ""
+    if reg_to_check:
+        clean_reg = normalizer.canonicalize(reg_to_check) or reg_to_check.upper().replace(" ", "")
+        kit = InstallationKit.objects.filter(
+            Q(registration_number__iexact=reg_to_check) |
+            Q(registration_number__iexact=clean_reg) |
+            Q(kit_code__icontains=clean_reg)
+        ).first()
+
+    front_plate_val = (order_obj.front_plate_serial if order_obj and order_obj.front_plate_serial else (kit.front_plate if kit else "")) or "—"
+    rear_plate_val = (order_obj.rear_plate_serial if order_obj and order_obj.rear_plate_serial else (kit.rear_plate if kit else "")) or "—"
+    gps_tracker_val = (order_obj.gps_tracker_id if order_obj and order_obj.gps_tracker_id else (kit.gps_tracker if kit else "")) or "—"
+    front_beacon_val = (order_obj.front_beacon_id if order_obj and order_obj.front_beacon_id else (kit.front_tracker or getattr(kit, "front_tracker_mac", "") if kit else "")) or "—"
+    rear_beacon_val = (order_obj.rear_beacon_id if order_obj and order_obj.rear_beacon_id else (kit.rear_tracker or getattr(kit, "rear_tracker_mac", "") if kit else "")) or "—"
+
     return JsonResponse({
         "success": True,
         "pair": {
@@ -277,14 +313,44 @@ def api_pair_detail(request: HttpRequest, pair_id: int) -> JsonResponse:
             "is_latest_batch": bool(batch_obj and latest_batch and batch_obj.id == latest_batch.id),
             "is_carryover": bool(latest_batch and (not batch_obj or batch_obj.id != latest_batch.id)),
             "order": {
-                "id": pair.order.id,
-                "order_number": pair.order.order_number,
-                "registration_number": pair.order.registration_number,
-                "vin": pair.order.vin,
-                "warehouse_name": pair.order.warehouse_name,
-                "installation_officer": pair.order.installation_officer,
-                "status": pair.order.status,
-            } if pair.order else None,
+                "id": order_obj.id,
+                "order_number": order_obj.order_number,
+                "registration_number": order_obj.registration_number,
+                "service_type": order_obj.service_type or "First Time Registration",
+                "vin": order_obj.vin or "—",
+                "old_registration_number": order_obj.old_registration_number or "—",
+                "sales_order": order_obj.sales_order or "—",
+                "warehouse_name": order_obj.warehouse_name or "Uganda Hub",
+                "installation_officer": order_obj.installation_officer or "Station Officer",
+                "status": order_obj.status,
+                "front_plate_serial": front_plate_val,
+                "rear_plate_serial": rear_plate_val,
+                "gps_tracker_id": gps_tracker_val,
+                "front_beacon_id": front_beacon_val,
+                "rear_beacon_id": rear_beacon_val,
+            } if order_obj else None,
+            "hardware": {
+                "service_type": (order_obj.service_type if order_obj else "") or "First Time Registration",
+                "vin": (order_obj.vin if order_obj else "") or "—",
+                "old_registration_number": (order_obj.old_registration_number if order_obj else "") or "—",
+                "registration_number": (order_obj.registration_number if order_obj else pair.registration_number_detected) or "—",
+                "front_plate": front_plate_val,
+                "rear_plate": rear_plate_val,
+                "gps_tracker": gps_tracker_val,
+                "front_beacon": front_beacon_val,
+                "rear_beacon": rear_beacon_val,
+            },
+            "kit": {
+                "id": kit.id,
+                "kit_code": kit.kit_code,
+                "front_plate": kit.front_plate or "—",
+                "rear_plate": kit.rear_plate or "—",
+                "gps_tracker": kit.gps_tracker or "—",
+                "front_tracker": kit.front_tracker or getattr(kit, "front_tracker_mac", "") or "—",
+                "rear_tracker": kit.rear_tracker or getattr(kit, "rear_tracker_mac", "") or "—",
+                "warehouse": kit.warehouse or "—",
+                "status": kit.status or "New",
+            } if kit else None,
         }
     })
 

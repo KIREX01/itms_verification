@@ -1220,3 +1220,243 @@ Operators requested three specific interface improvements:
 3. **ITMS Order Sync Cadence Input (`core/templates/core/tabs/tab_settings.html`)**:
    - Added an interactive input `#settings-order-sync-interval-input` under the Synchronization card.
    - Wired with `onchange="updateSetting('sync.order_sync_interval_seconds', parseInt(this.value, 10))"`, supporting intervals from 30s to 86400s (default: 600s).
+
+
+## 20. Queue Review Studio & Replace Image Modal UI Refinements (02 November 2026) - [BACKEND READY / FRONTEND SPECIFICATION]
+
+### 20.1 Overview & Requirements
+Operators identified usability bottlenecks during queue review and photo batch candidate replacement:
+1. **Replace Image Candidate Grid**:
+   - In `#modal-replace-image` ("Pick from Batch" tab), candidate thumbnails are too small (previously 5–6 items crammed per row with 95px height), making it difficult to discern subtle plate details.
+   - **Requirement**: Display a **maximum of three (3) images per row** with increased container height (160px–180px) and proper aspect ratio preservation (`object-fit: contain`).
+2. **Queue Review / Inspection Studio Sticky Header**:
+   - When inspecting high-resolution evidence in `.inspection-studio-pane` (especially on mobile/tablets or vertical scrolling on laptops), operators have to scroll extensively to reach the "◀ Back to Queue" or modal close buttons.
+   - **Requirement**: A **fixed/sticky top header** (`position: sticky; top: 0; z-index: 100`) so the navigation and Back action remain visible at all times.
+3. **Hardware & Order Details Card at Top of Inspection Studio**:
+   - Add a prominent, structured telematics & hardware specification card at the top of the Queue inspection pane (directly below the sticky banner) showing:
+     - **Order Details**: Service Type (`First Time Registration`), Vehicle VIN/Chassis No., Old Plate Number (`—`).
+     - **Plate Details**: Registration Number, Front Plate Serial, Rear Plate Serial.
+     - **Tracker Details**: GPS Tracker ID, Front Beacon ID/MAC, Rear Beacon ID/MAC.
+
+---
+
+### 20.2 Backend Implementation Summary (Completed)
+The backend REST APIs `/api/pairs/<pair_id>/` and `/api/pairs/` have been updated in `core/views/pairs.py` to supply full hardware and telematics context:
+- Enriched `data.pair.order` with `service_type`, `vin`, `old_registration_number`, `front_plate_serial`, `rear_plate_serial`, `gps_tracker_id`, `front_beacon_id`, and `rear_beacon_id`.
+- Added `data.pair.hardware` convenience block returning normalized string values with fallback to `InstallationKit` if order hardware fields are blank or unlinked.
+- Added `data.pair.kit` convenience block returning associated kit telematics (`front_plate`, `rear_plate`, `gps_tracker`, `front_tracker`, `rear_tracker`, `warehouse`, `status`).
+
+**Example API Response (`GET /api/pairs/<pair_id>/`)**:
+```json
+{
+  "success": true,
+  "pair": {
+    "id": 142,
+    "registration_number_detected": "UMA 959GH",
+    "hardware": {
+      "service_type": "First Time Registration",
+      "vin": "LB5DJ3R23SZ835915",
+      "old_registration_number": "—",
+      "registration_number": "UMA 959GH",
+      "front_plate": "000389975",
+      "rear_plate": "000389976",
+      "gps_tracker": "8BAE470304CC",
+      "front_beacon": "8ADC470655DF",
+      "rear_beacon": "8ADC4706645F"
+    },
+    "kit": {
+      "id": 84,
+      "kit_code": "IK-UMA959GH",
+      "front_plate": "000389975",
+      "rear_plate": "000389976",
+      "gps_tracker": "8BAE470304CC",
+      "front_tracker": "8ADC470655DF",
+      "rear_tracker": "8ADC4706645F",
+      "warehouse": "AGM Bonded Warehouse",
+      "status": "Assigned"
+    }
+  }
+}
+```
+
+---
+
+### 20.3 Frontend UI Integration Specifications
+
+#### 1. Replace Image Candidate Grid (`core/templates/core/modals.html` & `core/static/core/css/tab_queue.css`)
+- **Target Container**: `#replace-candidates-grid`
+- **Target Styles**:
+```css
+/* Ensure maximum 3 cards per row with readable thumbnail height */
+#replace-candidates-grid {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 14px !important;
+  max-height: 480px;
+  overflow-y: auto;
+  padding: 8px 4px;
+}
+
+@media (max-width: 768px) {
+  #replace-candidates-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+.replace-candidate-card {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: #0a0d14;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.18s ease, transform 0.15s ease, box-shadow 0.18s ease;
+}
+
+.replace-candidate-card:hover {
+  border-color: var(--ug-yellow, #f59e0b);
+  transform: translateY(-2px);
+}
+
+.replace-candidate-card.selected {
+  border-color: var(--ug-yellow, #f59e0b);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.4);
+}
+
+.replace-candidate-img {
+  width: 100%;
+  height: 160px;
+  object-fit: contain;
+  background: #05070a;
+  display: block;
+}
+
+.replace-candidate-meta {
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--ug-text-secondary, #94a3b8);
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+```
+
+#### 2. Fixed Sticky Top Header in Queue Inspection Studio (`core/static/core/css/tab_queue.css`)
+- **Target Selector**: `.inspection-studio-pane .detail-banner-card`
+- **Target Styles**:
+```css
+/* Sticky top bar keeps Back/Close and pair summary permanently pinned */
+.inspection-studio-pane .detail-banner-card {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 120 !important;
+  background: var(--ug-black-card, #10141d) !important;
+  border-bottom: 2px solid var(--ug-yellow, #f59e0b) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5) !important;
+  margin-bottom: 16px !important;
+  padding: 12px 18px !important;
+}
+
+/* Ensure studio scrollable viewport allows sticky children */
+.inspection-studio-pane {
+  overflow-y: auto;
+  position: relative;
+}
+```
+
+#### 3. Top Hardware & Telematics Details Card (`core/templates/core/tabs/tab_queue.html` & `core/static/core/js/tab_queue.js`)
+- **HTML Template Structure** (Insert directly below `.detail-banner-card` inside `.inspection-studio-pane`):
+```html
+<div class="card hardware-telematics-card mb-3" id="queue-hardware-card" style="display: none; background: #0c1017; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;">
+  <div class="card-body p-3">
+    <div class="row g-3">
+      <!-- Column 1: Order Details -->
+      <div class="col-md-4 border-end border-secondary border-opacity-25">
+        <h6 class="text-uppercase text-muted fw-bold mb-2" style="font-size: 11px; letter-spacing: 0.5px; color: var(--ug-yellow, #f59e0b) !important;">
+          📋 Order Details
+        </h6>
+        <div class="mb-1 d-flex justify-content-between">
+          <span class="text-muted small">Service Type:</span>
+          <span class="fw-semibold small text-light" id="hw-service-type">First Time Registration</span>
+        </div>
+        <div class="mb-1 d-flex justify-content-between">
+          <span class="text-muted small">Vehicle VIN/Chassis:</span>
+          <span class="fw-semibold small font-monospace text-light" id="hw-vin">—</span>
+        </div>
+        <div class="d-flex justify-content-between">
+          <span class="text-muted small">Old Plate Number:</span>
+          <span class="fw-semibold small text-light" id="hw-old-plate">—</span>
+        </div>
+      </div>
+
+      <!-- Column 2: Plate Details -->
+      <div class="col-md-4 border-end border-secondary border-opacity-25">
+        <h6 class="text-uppercase text-muted fw-bold mb-2" style="font-size: 11px; letter-spacing: 0.5px; color: var(--ug-yellow, #f59e0b) !important;">
+          🏷️ Plate Details
+        </h6>
+        <div class="mb-1 d-flex justify-content-between">
+          <span class="text-muted small">Registration Number:</span>
+          <span class="fw-bold small text-warning" id="hw-reg-num">—</span>
+        </div>
+        <div class="mb-1 d-flex justify-content-between">
+          <span class="text-muted small">Front Plate:</span>
+          <span class="fw-semibold small font-monospace text-light" id="hw-front-plate">—</span>
+        </div>
+        <div class="d-flex justify-content-between">
+          <span class="text-muted small">Rear Plate:</span>
+          <span class="fw-semibold small font-monospace text-light" id="hw-rear-plate">—</span>
+        </div>
+      </div>
+
+      <!-- Column 3: Tracker Details -->
+      <div class="col-md-4">
+        <h6 class="text-uppercase text-muted fw-bold mb-2" style="font-size: 11px; letter-spacing: 0.5px; color: var(--ug-yellow, #f59e0b) !important;">
+          📡 Tracker Details
+        </h6>
+        <div class="mb-1 d-flex justify-content-between">
+          <span class="text-muted small">GPS Tracker:</span>
+          <span class="fw-semibold small font-monospace text-light" id="hw-gps-tracker">—</span>
+        </div>
+        <div class="mb-1 d-flex justify-content-between">
+          <span class="text-muted small">Front Beacon:</span>
+          <span class="fw-semibold small font-monospace text-light" id="hw-front-beacon">—</span>
+        </div>
+        <div class="d-flex justify-content-between">
+          <span class="text-muted small">Rear Beacon:</span>
+          <span class="fw-semibold small font-monospace text-light" id="hw-rear-beacon">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+```
+
+- **JavaScript Data Binding (`core/static/core/js/tab_queue.js`)**:
+In `renderPairDetail(pair)` / `loadPairDetail(pairId)`:
+```javascript
+const hwCard = document.getElementById('queue-hardware-card');
+if (hwCard) {
+  const hw = pair.hardware || (pair.order ? {
+    service_type: pair.order.service_type,
+    vin: pair.order.vin,
+    old_registration_number: pair.order.old_registration_number,
+    registration_number: pair.order.registration_number,
+    front_plate: pair.order.front_plate_serial,
+    rear_plate: pair.order.rear_plate_serial,
+    gps_tracker: pair.order.gps_tracker_id,
+    front_beacon: pair.order.front_beacon_id,
+    rear_beacon: pair.order.rear_beacon_id,
+  } : {});
+
+  document.getElementById('hw-service-type').textContent = hw.service_type || 'First Time Registration';
+  document.getElementById('hw-vin').textContent = hw.vin || '—';
+  document.getElementById('hw-old-plate').textContent = hw.old_registration_number || '—';
+  document.getElementById('hw-reg-num').textContent = hw.registration_number || pair.registration_number_detected || '—';
+  document.getElementById('hw-front-plate').textContent = hw.front_plate || (pair.kit && pair.kit.front_plate) || '—';
+  document.getElementById('hw-rear-plate').textContent = hw.rear_plate || (pair.kit && pair.kit.rear_plate) || '—';
+  document.getElementById('hw-gps-tracker').textContent = hw.gps_tracker || (pair.kit && pair.kit.gps_tracker) || '—';
+  document.getElementById('hw-front-beacon').textContent = hw.front_beacon || (pair.kit && pair.kit.front_tracker) || '—';
+  document.getElementById('hw-rear-beacon').textContent = hw.rear_beacon || (pair.kit && pair.kit.rear_tracker) || '—';
+
+  hwCard.style.display = 'block';
+}
+```

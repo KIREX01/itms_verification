@@ -87,22 +87,22 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
     elif scope == "CARRYOVER":
         qs = qs.exclude(today_q)
 
-    if status_filter == "CONFLICT":
-        qs = qs.filter(Q(verification_status=VehicleInstallationPair.VerificationStatus.CONFLICT) | Q(order__isnull=True))
-    elif status_filter == "PENDING":
+    if status_filter == "PENDING":
         qs = qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW, order__isnull=False)
     elif status_filter == "APPROVED":
         qs = qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.APPROVED)
     elif status_filter == "SUBMITTED":
         qs = qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED)
-    elif status_filter == "ISSUES":
-        qs = qs.filter(verification_status__in=[
-            VehicleInstallationPair.VerificationStatus.INCOMPLETE,
-            VehicleInstallationPair.VerificationStatus.CONFLICT,
-            VehicleInstallationPair.VerificationStatus.UNREGISTERED,
-            VehicleInstallationPair.VerificationStatus.FAILED,
-            VehicleInstallationPair.VerificationStatus.OFFLINE_OUTBOX,
-        ])
+    elif status_filter in ("ISSUES", "CONFLICT"):
+        qs = qs.filter(
+            Q(verification_status__in=[
+                VehicleInstallationPair.VerificationStatus.INCOMPLETE,
+                VehicleInstallationPair.VerificationStatus.CONFLICT,
+                VehicleInstallationPair.VerificationStatus.UNREGISTERED,
+                VehicleInstallationPair.VerificationStatus.FAILED,
+                VehicleInstallationPair.VerificationStatus.OFFLINE_OUTBOX,
+            ]) | Q(order__isnull=True)
+        )
 
     # Batch scoping
     if batch_filter == "LATEST" and latest_batch:

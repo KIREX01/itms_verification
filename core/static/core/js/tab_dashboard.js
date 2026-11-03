@@ -135,6 +135,9 @@ async function fetchStats() {
 
             updateDashboardDisplay();
             initDashboardMobileQr();
+            if (typeof fetchStockDetails === "function") {
+                fetchStockDetails();
+            }
 
             // Real-time synchronization of dry-run mode from config.json
             if (data.dry_run !== undefined && typeof updateDryRunBadges === "function") {

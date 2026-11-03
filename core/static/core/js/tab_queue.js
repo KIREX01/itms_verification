@@ -60,16 +60,14 @@ async function fetchPairs() {
                 }
             }
 
-            // Update queue filter counts
+            // Update queue filter counts (All issues: conflicts, unlinked orders, incomplete, failed, unregistered)
             const cntAll = pairsData.length;
-            const cntConflict = pairsData.filter(p => p.verification_status === "CONFLICT" || (!p.order && !p.order_number)).length;
             const cntReview = pairsData.filter(p => p.verification_status === "PENDING_REVIEW" && (p.order || p.order_number)).length;
             const cntApproved = pairsData.filter(p => p.verification_status === "APPROVED").length;
-            const cntIssues = pairsData.filter(p => ["INCOMPLETE", "FAILED", "UNREGISTERED"].includes(p.verification_status)).length;
+            const cntIssues = pairsData.filter(p => ["INCOMPLETE", "CONFLICT", "FAILED", "UNREGISTERED", "OFFLINE_OUTBOX"].includes(p.verification_status) || (!p.order && !p.order_number)).length;
             const cntDone = pairsData.filter(p => p.verification_status === "SUBMITTED").length;
 
             setText("cnt-all", cntAll);
-            setText("cnt-conflict", cntConflict);
             setText("cnt-review", cntReview);
             setText("cnt-approved", cntApproved);
             setText("cnt-issues", cntIssues);
@@ -117,17 +115,16 @@ function getFilteredQueuePairs() {
     const searchVal = (document.getElementById("queue-search-input") ? document.getElementById("queue-search-input").value : "").trim().toUpperCase();
 
     return pairsData.filter(p => {
-        // Tab status filter
-        if (currentQueueFilter === "CONFLICT") {
-            if (p.verification_status !== "CONFLICT" && (p.order || p.order_number)) return false;
-        } else if (currentQueueFilter === "PENDING") {
+        // Tab status filter (All problems under ISSUES)
+        if (currentQueueFilter === "PENDING") {
             if (p.verification_status !== "PENDING_REVIEW" || (!p.order && !p.order_number)) return false;
         } else if (currentQueueFilter === "APPROVED") {
             if (p.verification_status !== "APPROVED") return false;
         } else if (currentQueueFilter === "SUBMITTED") {
             if (p.verification_status !== "SUBMITTED") return false;
-        } else if (currentQueueFilter === "ISSUES") {
-            if (!["INCOMPLETE", "FAILED", "UNREGISTERED"].includes(p.verification_status)) return false;
+        } else if (currentQueueFilter === "ISSUES" || currentQueueFilter === "CONFLICT") {
+            const isIssue = ["INCOMPLETE", "CONFLICT", "FAILED", "UNREGISTERED", "OFFLINE_OUTBOX"].includes(p.verification_status) || (!p.order && !p.order_number);
+            if (!isIssue) return false;
         }
 
         // Batch filter

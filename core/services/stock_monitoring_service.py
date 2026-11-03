@@ -1268,18 +1268,17 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         },
     )
 
-    # Auto-carry over previous shift's closing balance if newly created & 0
-    if created and ledger.opening_balance_psv == 0 and ledger.opening_balance_pmo == 0:
-        prev_ledger = (
-            DailyStockLedger.objects.filter(work_date__lt=work_d)
-            .order_by("-work_date")
-            .first()
-        )
-        if prev_ledger:
-            ledger.opening_balance_psv = max(0, prev_ledger.closing_balance_psv)
-            ledger.opening_balance_pmo = max(0, prev_ledger.closing_balance_pmo)
-            ledger.opening_stock = ledger.opening_balance_psv + ledger.opening_balance_pmo
-            ledger.save(update_fields=["opening_balance_psv", "opening_balance_pmo", "opening_stock"])
+    # Opening stock = previous day closing stock (formula rule: opening stock = previous day closing stock)
+    prev_ledger = (
+        DailyStockLedger.objects.filter(work_date__lt=work_d)
+        .order_by("-work_date")
+        .first()
+    )
+    if prev_ledger and not getattr(ledger, "override_opening", False):
+        ledger.opening_balance_psv = max(0, prev_ledger.closing_balance_psv)
+        ledger.opening_balance_pmo = max(0, prev_ledger.closing_balance_pmo)
+        ledger.opening_stock = ledger.opening_balance_psv + ledger.opening_balance_pmo
+        ledger.save(update_fields=["opening_balance_psv", "opening_balance_pmo", "opening_stock"])
 
     # 1. Inbound Deliveries (Kits Received)
     if ledger.override_received:
@@ -1365,10 +1364,8 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         else:
             cross_bond_orders.append(o)
 
-    installed_orders_qs = [
-        o for o in scoped_orders
-        if o.is_archived or (o.order_status or "").strip().lower() == "installed"
-    ]
+    # Installed kits = pending orders + archive (all scoped orders for the shift)
+    installed_orders_qs = scoped_orders
 
     if ledger.override_installed:
         installed_psv_count = ledger.kits_installed_psv
@@ -1409,20 +1406,20 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         total_installed = installed_psv_count + installed_pmo_count
 
     # 4. Closing Balance calculations:
-    # Closing = Opening + Received + Transfer In - Transfer Out - Installed
+    # closing stock = opening stock + kits received - kits installed - bond transfer out + bond transfer in
     closing_psv = (
         ledger.opening_balance_psv
         + kits_received_psv
-        + transfer_in_psv
-        - transfer_out_psv
         - installed_psv_count
+        - transfer_out_psv
+        + transfer_in_psv
     )
     closing_pmo = (
         ledger.opening_balance_pmo
         + kits_received_pmo
-        + transfer_in_pmo
-        - transfer_out_pmo
         - installed_pmo_count
+        - transfer_out_pmo
+        + transfer_in_pmo
     )
     total_closing = closing_psv + closing_pmo
 
@@ -1581,7 +1578,16 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         ledger.variance = 0
 
     ledger.last_reconciled_at = timezone.now()
-    ledger.save()
+    ledger.save(update_fields=[
+        "opening_balance_psv", "opening_balance_pmo", "opening_stock",
+        "delivered_count", "kits_received_psv", "kits_received_pmo",
+        "bond_transfer_in_total", "bond_transfer_in_psv", "bond_transfer_in_pmo",
+        "bond_transfer_out_total", "bond_transfer_out_psv", "bond_transfer_out_pmo",
+        "installed_count", "kits_installed_psv", "kits_installed_pmo",
+        "closing_balance_psv", "closing_balance_pmo", "closing_stock",
+        "dispatched_count", "returned_count", "pending_count", "unallocated_count",
+        "physical_count", "variance", "last_reconciled_at", "updated_at",
+    ])
 
     formatted_date = format_date_suffix_readable(suffix)
     pmo_dispatched_count = sum(1 for s in dispatched_plates_map.values() if s.plate_category == PlateCategory.PMO)

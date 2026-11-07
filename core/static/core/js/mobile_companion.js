@@ -108,6 +108,7 @@ const MobileState = {
     uturn: {
         batchIndex: getInitialUturnBatchIndex(),
         walkSessionId: generateUturnSessionId(getInitialUturnBatchIndex()),
+        startLeg: "REAR", // 'REAR' | 'FRONT'
         phase: "REAR", // 'REAR' | 'FRONT'
         rearCount: 0,
         frontCount: 0,
@@ -1092,7 +1093,8 @@ async function handleStockBarcodeDetected(rawCode) {
     // 2. Duplicate Detection:
     const isAlreadyInQueue = MobileState.stock.queue.some(item => (typeof item === 'string' ? item : item.plate) === cleanPlate);
     const isAlreadySynced = MobileState.stock.syncedSessionPlates.has(cleanPlate);
-    const isBlocked = MobileState.stock.blockedPlates.includes(cleanPlate);
+    const isOutboundDispatch = (MobileState.stock.subMode === "DISPATCH");
+    const isBlocked = isOutboundDispatch && MobileState.stock.blockedPlates.includes(cleanPlate);
 
     if (isAlreadyInQueue || isAlreadySynced) {
         MobileState.stock.recentScansCooldown.set(cleanPlate, now);
@@ -1108,7 +1110,7 @@ async function handleStockBarcodeDetected(rawCode) {
 
     // If plate was previously blocked as 'Not on Stock' within the last 5 seconds, debounce as duplicate;
     // after 5 seconds, allow re-scanning to check live ITMS in case it has since been added to stock!
-    if (isBlocked && (now - lastSeen < 5000)) {
+    if (isOutboundDispatch && isBlocked && (now - lastSeen < 5000)) {
         MobileState.stock.recentScansCooldown.set(cleanPlate, now);
         showScanDetectionBanner(`NOT ON STOCK: ${cleanPlate}`, true);
         playScanBeep(false);
@@ -1143,10 +1145,10 @@ async function handleStockBarcodeDetected(rawCode) {
             const isItemBlocked = Boolean(inspectData.is_blocked);
             const category = inspectData.category || MobileState.stock.category || "PSV";
 
-            // Update live stock indicators immediately
-            updateMobileStockStatusBadge(cleanPlate, stockStatus, category, isItemBlocked);
+            // Update live stock indicators immediately (only show blocked reticle for outbound dispatch)
+            updateMobileStockStatusBadge(cleanPlate, stockStatus, category, isOutboundDispatch && isItemBlocked);
 
-            if (isItemBlocked && MobileState.stock.subMode === "DISPATCH") {
+            if (isOutboundDispatch && isItemBlocked) {
                 // NOT ON STOCK: Alert operator immediately & persist to localStorage + tray
                 playScanBeep(false);
                 if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
@@ -1167,13 +1169,18 @@ async function handleStockBarcodeDetected(rawCode) {
                 showMobileToast(`✅ Plate ${cleanPlate} is now AVAILABLE ON STOCK & Dispatched!`);
             }
 
-            // Plate is valid / on stock
+            // Plate is valid / staged
+            const badge = isOutboundDispatch ? (stockStatus.badge || "🟢 ON STOCK") : "🟢 STAGED";
+            const badgeClass = isOutboundDispatch ? (stockStatus.badge_class || "badge-green") : "badge-green";
+            const statusCode = isOutboundDispatch ? (stockStatus.code || "ON_STOCK") : "STAGED";
+            const desc = isOutboundDispatch ? (stockStatus.desc || "") : `${MobileState.stock.subMode} scan recorded`;
+
             addPlateToStockQueue(cleanPlate, {
                 category: category,
-                statusBadge: stockStatus.badge || "🟢 ON STOCK",
-                badgeClass: stockStatus.badge_class || "badge-green",
-                statusCode: stockStatus.code || "ON_STOCK",
-                desc: stockStatus.desc || ""
+                statusBadge: badge,
+                badgeClass: badgeClass,
+                statusCode: statusCode,
+                desc: desc
             });
 
             // Auto-sync immediately if enabled
@@ -1878,13 +1885,75 @@ function openPhotoInspector(orientation, url, customTitle, context = null) {
     const modal = document.getElementById("photo-lightbox-modal");
     const img = document.getElementById("lightbox-img");
     const title = document.getElementById("lightbox-title");
+    const counter = document.getElementById("lightbox-counter");
     const sharpText = document.getElementById("lightbox-sharpness-text");
     const expText = document.getElementById("lightbox-exposure-text");
     const sharpPill = document.getElementById("lightbox-sharpness-pill");
     const expPill = document.getElementById("lightbox-exposure-pill");
+    const prevBtn = document.getElementById("lightbox-nav-prev");
+    const nextBtn = document.getElementById("lightbox-nav-next");
 
     if (img) img.src = url;
-    if (title) title.innerHTML = customTitle || `${orientation} Photo`;
+    if (title) {
+        const titleSpan = title.querySelector("span") || title;
+        titleSpan.innerHTML = customTitle || `${orientation} Photo`;
+    }
+
+    // Build sequential navigation list
+    let list = [];
+    let currentIdx = -1;
+
+    if (context && context.mode === "uturn") {
+        list = MobileState.uturn.recentTiles || [];
+        if (context.id) {
+            currentIdx = list.findIndex(t => t.id === context.id);
+        }
+        if (currentIdx === -1 && context.seqNum) {
+            currentIdx = list.findIndex(t => t.orientation === orientation && t.seqNum === context.seqNum);
+        }
+    } else if (MobileState.mode === "conveyor") {
+        if (MobileState.conveyor.frontUrl || MobileState.conveyor.frontBlob) {
+            list.push({
+                mode: "conveyor",
+                orientation: "FRONT",
+                url: MobileState.conveyor.frontUrl,
+                blob: MobileState.conveyor.frontBlob,
+                title: `Motorcycle #${MobileState.conveyor.sequence} • FRONT`
+            });
+        }
+        if (MobileState.conveyor.rearUrl || MobileState.conveyor.rearBlob) {
+            list.push({
+                mode: "conveyor",
+                orientation: "REAR",
+                url: MobileState.conveyor.rearUrl,
+                blob: MobileState.conveyor.rearBlob,
+                title: `Motorcycle #${MobileState.conveyor.sequence} • REAR`
+            });
+        }
+        currentIdx = list.findIndex(item => item.orientation === orientation);
+    }
+
+    MobileState.inspectedList = list;
+    MobileState.inspectedIndex = currentIdx;
+
+    if (counter) {
+        if (list.length > 0 && currentIdx !== -1) {
+            counter.textContent = `(${currentIdx + 1} of ${list.length})`;
+        } else {
+            counter.textContent = "";
+        }
+    }
+
+    if (prevBtn) {
+        prevBtn.style.display = (list.length > 1) ? "flex" : "none";
+        prevBtn.disabled = (currentIdx <= 0);
+        prevBtn.style.opacity = (currentIdx <= 0) ? "0.3" : "1";
+    }
+    if (nextBtn) {
+        nextBtn.style.display = (list.length > 1) ? "flex" : "none";
+        nextBtn.disabled = (currentIdx >= list.length - 1);
+        nextBtn.style.opacity = (currentIdx >= list.length - 1) ? "0.3" : "1";
+    }
 
     const report = MobileState.activeQualityReport;
     if (report) {
@@ -1909,6 +1978,43 @@ function openPhotoInspector(orientation, url, customTitle, context = null) {
     }
 
     if (modal) modal.style.display = "flex";
+}
+
+function navigatePhotoInspector(direction) {
+    const list = MobileState.inspectedList || [];
+    if (list.length <= 1) return;
+    const currentIdx = (MobileState.inspectedIndex !== undefined && MobileState.inspectedIndex >= 0) ? MobileState.inspectedIndex : 0;
+    const newIdx = currentIdx + direction;
+    if (newIdx < 0 || newIdx >= list.length) return;
+
+    const item = list[newIdx];
+    if (!item) return;
+
+    if (item.mode === "conveyor") {
+        let url = item.url;
+        if (!url && item.blob) {
+            url = URL.createObjectURL(item.blob);
+            if (item.orientation === "FRONT") MobileState.conveyor.frontUrl = url;
+            else MobileState.conveyor.rearUrl = url;
+        }
+        openPhotoInspector(item.orientation, url, item.title, { mode: "conveyor", orientation: item.orientation });
+    } else {
+        let itemUrl = item.url;
+        if (!itemUrl && item.file) {
+            itemUrl = URL.createObjectURL(item.file);
+            item.url = itemUrl;
+        }
+        const title = `U-Turn ${item.orientation} #${item.seqNum}`;
+        const targetTile = item.tileElement || document.querySelector(`.mini-tile[data-orientation="${item.orientation}"][data-seq-num="${item.seqNum}"]`);
+        const ctx = {
+            mode: "uturn",
+            orientation: item.orientation,
+            seqNum: item.seqNum,
+            id: item.id,
+            tileElement: targetTile
+        };
+        openPhotoInspector(item.orientation, itemUrl, title, ctx);
+    }
 }
 
 function closePhotoInspector() {
@@ -2087,6 +2193,44 @@ function advanceToNextBike() {
 // MODE 2: Off-Conveyor (U-Turn Yard Walk) Actions & State Management
 // ============================================================================
 
+function setUturnStartLeg(orientation) {
+    if (MobileState.uturn.totalPhotos > 0) {
+        showMobileToast("🔒 Start direction is locked once photos have been snapped in this batch!", true);
+        return;
+    }
+    const clean = orientation.toUpperCase() === "FRONT" ? "FRONT" : "REAR";
+    MobileState.uturn.startLeg = clean;
+    MobileState.uturn.phase = clean;
+
+    const btnRear = document.getElementById("btn-start-rear");
+    const btnFront = document.getElementById("btn-start-front");
+    if (btnRear && btnFront) {
+        if (clean === "REAR") {
+            btnRear.classList.add("active");
+            btnRear.style.border = "1px solid #38bdf8";
+            btnRear.style.background = "#1e293b";
+            btnRear.style.color = "#ffffff";
+            btnFront.classList.remove("active");
+            btnFront.style.border = "1px solid rgba(255,255,255,0.15)";
+            btnFront.style.background = "transparent";
+            btnFront.style.color = "#94a3b8";
+        } else {
+            btnFront.classList.add("active");
+            btnFront.style.border = "1px solid #38bdf8";
+            btnFront.style.background = "#1e293b";
+            btnFront.style.color = "#ffffff";
+            btnRear.classList.remove("active");
+            btnRear.style.border = "1px solid rgba(255,255,255,0.15)";
+            btnRear.style.background = "transparent";
+            btnRear.style.color = "#94a3b8";
+        }
+    }
+
+    applyUturnPhaseUI(MobileState.uturn.phase);
+    updateUturnShutterCounter();
+    saveUturnSessionState();
+}
+
 function applyUturnPhaseUI(phase) {
     const roadRear = document.getElementById("road-step-rear");
     const roadFront = document.getElementById("road-step-front");
@@ -2099,43 +2243,57 @@ function applyUturnPhaseUI(phase) {
     const turnaroundCallout = document.getElementById("turnaround-callout");
     const returnMatchBanner = document.getElementById("return-match-banner");
 
-    if (phase === "FRONT") {
-        if (roadRear) { roadRear.classList.remove("active"); roadRear.classList.add("completed"); }
-        if (roadFront) { roadFront.classList.add("active"); roadFront.classList.remove("completed"); }
+    const startLeg = MobileState.uturn.startLeg || "REAR";
+    const isOutbound = (phase === startLeg);
+    const outboundCount = (startLeg === "REAR") ? MobileState.uturn.rearCount : MobileState.uturn.frontCount;
 
+    if (startLeg === "REAR") {
+        if (phase === "FRONT") {
+            if (roadRear) { roadRear.classList.remove("active"); roadRear.classList.add("completed"); }
+            if (roadFront) { roadFront.classList.add("active"); roadFront.classList.remove("completed"); }
+        } else {
+            if (roadRear) { roadRear.classList.add("active"); roadRear.classList.remove("completed"); }
+            if (roadFront) { roadFront.classList.remove("active", "completed"); }
+        }
+    } else {
+        if (phase === "REAR") {
+            if (roadFront) { roadFront.classList.remove("active"); roadFront.classList.add("completed"); }
+            if (roadRear) { roadRear.classList.add("active"); roadRear.classList.remove("completed"); }
+        } else {
+            if (roadFront) { roadFront.classList.add("active"); roadFront.classList.remove("completed"); }
+            if (roadRear) { roadRear.classList.remove("active", "completed"); }
+        }
+    }
+
+    if (!isOutbound) {
         if (guidanceBar) guidanceBar.className = "uturn-guidance-bar return-mode";
         if (guidanceIcon) guidanceIcon.textContent = "↩️";
-        if (instruction) instruction.innerHTML = "Walking back! Photograph <strong>FRONTS</strong> in reverse order (trajectories auto-pair).";
-
-        if (shutter) {
-            shutter.classList.remove("shutter-rear");
-            shutter.classList.add("shutter-front");
-        }
-        if (shutterIcon) shutterIcon.textContent = "📸";
-        if (shutterText) shutterText.textContent = "Capture FRONT";
+        if (instruction) instruction.innerHTML = `Walking back! Photograph <strong>${phase}S</strong> in reverse order (trajectories auto-pair).`;
 
         if (turnaroundCallout) turnaroundCallout.style.display = "none";
         if (returnMatchBanner) returnMatchBanner.style.display = "flex";
     } else {
-        if (roadRear) { roadRear.classList.add("active"); roadRear.classList.remove("completed"); }
-        if (roadFront) { roadFront.classList.remove("active", "completed"); }
-
         if (guidanceBar) guidanceBar.className = "uturn-guidance-bar";
         if (guidanceIcon) guidanceIcon.textContent = "🚶";
-        if (instruction) instruction.innerHTML = "Walk down row snapping <strong>REAR</strong> plates. Tap turnaround when reaching the end.";
-
-        if (shutter) {
-            shutter.classList.remove("shutter-front");
-            shutter.classList.add("shutter-rear");
-        }
-        if (shutterIcon) shutterIcon.textContent = "📸";
-        if (shutterText) shutterText.textContent = "Capture REAR";
+        if (instruction) instruction.innerHTML = `Walk down row snapping <strong>${phase}</strong> plates. Tap turnaround when reaching the end.`;
 
         if (returnMatchBanner) returnMatchBanner.style.display = "none";
         if (turnaroundCallout) {
-            turnaroundCallout.style.display = (MobileState.uturn.rearCount > 0) ? "flex" : "none";
+            turnaroundCallout.style.display = (outboundCount > 0) ? "flex" : "none";
         }
     }
+
+    if (shutter) {
+        if (phase === "FRONT") {
+            shutter.classList.remove("shutter-rear");
+            shutter.classList.add("shutter-front");
+        } else {
+            shutter.classList.remove("shutter-front");
+            shutter.classList.add("shutter-rear");
+        }
+    }
+    if (shutterIcon) shutterIcon.textContent = "📸";
+    if (shutterText) shutterText.textContent = `Capture ${phase}`;
 }
 
 function saveUturnSessionState() {
@@ -2144,6 +2302,7 @@ function saveUturnSessionState() {
             active: MobileState.uturn.totalPhotos > 0,
             walkSessionId: MobileState.uturn.walkSessionId,
             batchIndex: MobileState.uturn.batchIndex,
+            startLeg: MobileState.uturn.startLeg || "REAR",
             phase: MobileState.uturn.phase,
             rearCount: MobileState.uturn.rearCount,
             frontCount: MobileState.uturn.frontCount,
@@ -2172,13 +2331,15 @@ async function loadUturnSessionFromStorage() {
 
         MobileState.uturn.walkSessionId = saved.walkSessionId;
         MobileState.uturn.batchIndex = saved.batchIndex || getInitialUturnBatchIndex();
-        MobileState.uturn.phase = saved.phase || "REAR";
+        MobileState.uturn.startLeg = saved.startLeg || "REAR";
+        MobileState.uturn.phase = saved.phase || MobileState.uturn.startLeg;
         MobileState.uturn.rearCount = saved.rearCount || 0;
         MobileState.uturn.frontCount = saved.frontCount || 0;
         MobileState.uturn.totalPhotos = saved.totalPhotos || 0;
         MobileState.uturn.recentTiles = saved.recentTiles || [];
 
         // Apply visual phase UI & counters
+        setUturnStartLeg(MobileState.uturn.startLeg);
         applyUturnPhaseUI(MobileState.uturn.phase);
         updateUturnBatchIndicator();
         updateUturnShutterCounter();
@@ -2275,6 +2436,11 @@ function updateUturnShutterCounter() {
     const rears = MobileState.uturn.rearCount;
     const fronts = MobileState.uturn.frontCount;
     const total = MobileState.uturn.totalPhotos;
+    const startLeg = MobileState.uturn.startLeg || "REAR";
+    const otherLeg = (startLeg === "REAR") ? "FRONT" : "REAR";
+    const isOutbound = (MobileState.uturn.phase === startLeg);
+    const outboundCount = (startLeg === "REAR") ? rears : fronts;
+    const returnCount = (startLeg === "REAR") ? fronts : rears;
 
     if (badgeRear) badgeRear.textContent = `${rears} Rears`;
     if (badgeFront) badgeFront.textContent = `${fronts} Fronts`;
@@ -2284,35 +2450,75 @@ function updateUturnShutterCounter() {
         btnAbort.style.display = (total > 0) ? "inline-flex" : "none";
     }
 
+    // Direction Lock Badge & Buttons
+    const lockBadge = document.getElementById("uturn-lock-badge");
+    const btnStartRear = document.getElementById("btn-start-rear");
+    const btnStartFront = document.getElementById("btn-start-front");
+    if (lockBadge) {
+        if (total > 0) {
+            lockBadge.textContent = "🔒 Direction Locked";
+            lockBadge.style.color = "#38bdf8";
+            lockBadge.style.background = "rgba(56,189,248,0.18)";
+            lockBadge.style.border = "1px solid rgba(56,189,248,0.4)";
+            if (btnStartRear) btnStartRear.style.opacity = "0.6";
+            if (btnStartFront) btnStartFront.style.opacity = "0.6";
+        } else {
+            lockBadge.textContent = "🔓 Unlocked (Choose Start)";
+            lockBadge.style.color = "#94a3b8";
+            lockBadge.style.background = "rgba(255,255,255,0.08)";
+            lockBadge.style.border = "none";
+            if (btnStartRear) btnStartRear.style.opacity = "1";
+            if (btnStartFront) btnStartFront.style.opacity = "1";
+        }
+    }
+
+    // Road step titles & step numbers
+    const titleRear = document.querySelector("#road-step-rear .road-title");
+    const titleFront = document.querySelector("#road-step-front .road-title");
+    const numRear = document.querySelector("#road-step-rear .step-num");
+    const numFront = document.querySelector("#road-step-front .step-num");
+    if (startLeg === "FRONT") {
+        if (titleFront) titleFront.textContent = "Going Out: FRONTS";
+        if (numFront) numFront.textContent = "1";
+        if (titleRear) titleRear.textContent = "Walking Back: REARS";
+        if (numRear) numRear.textContent = "2";
+    } else {
+        if (titleRear) titleRear.textContent = "Going Out: REARS";
+        if (numRear) numRear.textContent = "1";
+        if (titleFront) titleFront.textContent = "Walking Back: FRONTS";
+        if (numFront) numFront.textContent = "2";
+    }
+
     if (counterElem) {
-        if (MobileState.uturn.phase === "REAR") {
-            if (rears >= 100) {
+        if (isOutbound) {
+            if (outboundCount >= 100) {
                 counterElem.textContent = "100 Bikes Reached (Row Full)";
             } else {
-                counterElem.textContent = `Bike #${rears + 1} (${100 - rears} left in row)`;
+                counterElem.textContent = `Bike #${outboundCount + 1} (${100 - outboundCount} left in row)`;
             }
         } else {
-            const targetBike = rears - fronts;
-            counterElem.textContent = targetBike > 0 ? `Bike #${targetBike} (${fronts + 1} of ${rears})` : `Extra Bike #${fronts + 1}`;
+            const targetBike = outboundCount - returnCount;
+            counterElem.textContent = targetBike > 0 ? `Bike #${targetBike} (${returnCount + 1} of ${outboundCount})` : `Extra Bike #${returnCount + 1}`;
         }
     }
 
     // Match tracking bar calculation
     if (matchText && matchPercent && matchFill) {
-        const pct = rears > 0 ? Math.min(100, Math.round((fronts / rears) * 100)) : 0;
-        matchText.textContent = `Matching ${fronts} of ${rears} bikes`;
+        const pct = outboundCount > 0 ? Math.min(100, Math.round((returnCount / outboundCount) * 100)) : 0;
+        matchText.textContent = `Matching ${returnCount} of ${outboundCount} bikes`;
         matchPercent.textContent = `${pct}%`;
         matchFill.style.width = `${pct}%`;
     }
 
     if (btnFinish) {
         btnFinish.disabled = (total === 0);
-        if (rears > 0 && fronts === 0) {
+        if (outboundCount > 0 && returnCount === 0) {
             btnFinish.classList.remove("ready");
-            btnFinish.innerHTML = `<span>⚠️ Need Fronts (${rears} Rears Taken)</span>`;
-        } else if (fronts > 0 && rears === 0) {
+            const missingLeg = (startLeg === "REAR") ? "Fronts" : "Rears";
+            btnFinish.innerHTML = `<span>⚠️ Need ${missingLeg} (${outboundCount} ${startLeg}s Taken)</span>`;
+        } else if (returnCount > 0 && outboundCount === 0) {
             btnFinish.classList.remove("ready");
-            btnFinish.innerHTML = `<span>⚠️ Need Rears (${fronts} Fronts Taken)</span>`;
+            btnFinish.innerHTML = `<span>⚠️ Incomplete Session</span>`;
         } else if (rears > 0 && fronts === rears) {
             btnFinish.classList.add("ready");
             btnFinish.innerHTML = `<span>✓ All ${rears} Pairs Matched ➔ Submit Batch</span>`;
@@ -2867,6 +3073,53 @@ function initMobileCompanion() {
     } catch (e) {
         console.error("Error in startHeartbeat:", e);
     }
+    try {
+        initLightboxGestures();
+    } catch (e) {
+        console.error("Error in initLightboxGestures:", e);
+    }
+}
+
+function initLightboxGestures() {
+    const modal = document.getElementById("photo-lightbox-modal");
+    if (!modal) return;
+
+    let touchStartX = 0;
+    let touchStartY = 0;
+
+    modal.addEventListener("touchstart", (e) => {
+        if (e.touches && e.touches[0]) {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        }
+    }, { passive: true });
+
+    modal.addEventListener("touchend", (e) => {
+        if (e.changedTouches && e.changedTouches[0]) {
+            const diffX = e.changedTouches[0].clientX - touchStartX;
+            const diffY = e.changedTouches[0].clientY - touchStartY;
+            if (Math.abs(diffX) > 40 && Math.abs(diffX) > Math.abs(diffY)) {
+                if (diffX < 0) {
+                    navigatePhotoInspector(1); // Swipe left -> Next
+                } else {
+                    navigatePhotoInspector(-1); // Swipe right -> Prev
+                }
+            }
+        }
+    }, { passive: true });
+
+    window.addEventListener("keydown", (e) => {
+        const m = document.getElementById("photo-lightbox-modal");
+        if (m && m.style.display !== "none") {
+            if (e.key === "ArrowLeft") {
+                navigatePhotoInspector(-1);
+            } else if (e.key === "ArrowRight") {
+                navigatePhotoInspector(1);
+            } else if (e.key === "Escape") {
+                closePhotoInspector();
+            }
+        }
+    });
 }
 
 // ============================================================================

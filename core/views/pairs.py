@@ -597,7 +597,8 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
                 pair.rear_image.save(update_fields=["detected_plate"])
 
         if target_order:
-            pair.verification_status = VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
+            # Promoting directly to APPROVED on manual order link saves 50% operator review friction
+            pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
         else:
             pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
 

@@ -297,12 +297,18 @@ async function triggerBatchSubmit(requestedScope) {
     const scope = requestedScope || (typeof currentQueueDateScope !== "undefined" ? currentQueueDateScope : "TODAY");
 
     try {
-        // Fetch all pairs in the requested scope to detect discrepancies (approved vs unapproved)
-        const res = await fetch(`/api/pairs/?scope=${encodeURIComponent(scope)}&limit=500`);
+        // Scope query by both date and active batch selection
+        const batchParam = (typeof currentQueueBatchFilter !== "undefined" && currentQueueBatchFilter !== "ALL")
+            ? `&batch=${encodeURIComponent(currentQueueBatchFilter)}`
+            : "";
+        const res = await fetch(`/api/pairs/?scope=${encodeURIComponent(scope)}${batchParam}&limit=500`);
         const data = await res.json();
         const allScopePairs = data.pairs || [];
-        const approvedPairs = allScopePairs.filter(p => p.verification_status === "APPROVED");
-        const totalInScope = allScopePairs.length;
+
+        // Exclude pairs that are already SUBMITTED to ITMS to prevent false discrepancy alarms
+        const activeUnsubmittedPairs = allScopePairs.filter(p => p.submission_status !== "SUBMITTED" && p.verification_status !== "SUBMITTED");
+        const approvedPairs = activeUnsubmittedPairs.filter(p => p.verification_status === "APPROVED");
+        const totalInScope = activeUnsubmittedPairs.length;
         const approvedInScope = approvedPairs.length;
         const unapprovedCount = totalInScope - approvedInScope;
 
@@ -552,6 +558,7 @@ async function startSubmissionExecution() {
             if (progressBar) progressBar.style.width = `${currentPct}%`;
 
             showTopSubmissionIndicator(`Submitting ${currentIdx}/${total}: ${plate} (${currentPct}%)`);
+            updateSubmitPillProgress(currentIdx, total, plate, currentPct);
             appendSubmissionLog(`[${currentIdx}/${total}] Submitting ${plate} (Order #${orderNo})...`, "info");
 
             try {
@@ -624,6 +631,7 @@ async function startSubmissionExecution() {
         }
 
         isBatchSubmitting = false;
+        finishSubmitPill(succeeded, failed, total);
         window.lastBatchFailures = batchFailures;
 
         const unapprovedCount = (currentSubmissionTask && currentSubmissionTask.unapprovedCount) || 0;
@@ -731,6 +739,48 @@ function abortBatchSubmission() {
         btnAbort.disabled = true;
         btnAbort.innerText = "Aborting...";
     }
+}
+
+function minimizeSubmissionModal() {
+    closeModal("modal-submission-progress");
+    const pill = document.getElementById("global-bg-submit-pill");
+    if (pill) pill.style.display = "block";
+    showToast("Batch submission continuing in background. Click floating indicator to view.", "info");
+}
+
+function reopenSubmissionModal() {
+    const pill = document.getElementById("global-bg-submit-pill");
+    if (pill) pill.style.display = "none";
+    openModal("modal-submission-progress");
+}
+
+function updateSubmitPillProgress(currentIdx, total, plate, pct) {
+    const pill = document.getElementById("global-bg-submit-pill");
+    if (!pill) return;
+    const label = document.getElementById("global-bg-submit-label");
+    const pctEl = document.getElementById("global-bg-submit-pct");
+    const fill = document.getElementById("global-bg-submit-fill");
+    const desc = document.getElementById("global-bg-submit-desc");
+    if (label) label.textContent = `Submitting (${currentIdx}/${total})...`;
+    if (pctEl) pctEl.textContent = `${pct}%`;
+    if (fill) fill.style.width = `${pct}%`;
+    if (desc) desc.textContent = plate ? `Active: ${plate}` : "Transmitting to ITMS...";
+}
+
+function finishSubmitPill(succeeded, failed, total) {
+    const pill = document.getElementById("global-bg-submit-pill");
+    if (!pill) return;
+    const label = document.getElementById("global-bg-submit-label");
+    const pctEl = document.getElementById("global-bg-submit-pct");
+    const fill = document.getElementById("global-bg-submit-fill");
+    const desc = document.getElementById("global-bg-submit-desc");
+    if (label) label.textContent = failed > 0 ? "Batch Finished (Exceptions)" : "✓ Batch Submitted";
+    if (pctEl) pctEl.textContent = "100%";
+    if (fill) fill.style.width = "100%";
+    if (desc) desc.textContent = `${succeeded} succeeded, ${failed} failed. Click to view.`;
+    setTimeout(() => {
+        if (!isBatchSubmitting && pill) pill.style.display = "none";
+    }, 15000);
 }
 
 function appendSubmissionLog(msg, type = "info") {

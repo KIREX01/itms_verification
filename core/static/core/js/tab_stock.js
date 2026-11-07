@@ -703,12 +703,36 @@ function openStockPasteModal() {
     if (area) area.value = '';
 
     const warn = document.getElementById('paste-movement-warning');
-    if (warn) {
-        warn.style.display = currentStockMode === 'movements' ? 'block' : 'none';
-    }
-
     const modeLbl = document.getElementById('paste-mode-label');
+    const primaryBtn = document.querySelector('#stock-paste-modal .modal-footer button.btn-primary');
+    const checkStockBtn = document.getElementById('btn-paste-check-stock');
+
     if (modeLbl) modeLbl.innerText = currentStockMode.toUpperCase();
+
+    if (currentStockMode === 'dispatch') {
+        if (warn) warn.style.display = 'none';
+        if (primaryBtn) primaryBtn.innerText = '⚡ Dispatch Plates';
+        if (checkStockBtn) checkStockBtn.style.display = 'inline-block';
+    } else if (currentStockMode === 'movements') {
+        const movType = (document.getElementById('movement-type-select') || {}).value || 'DELIVERY';
+        if (warn) {
+            warn.style.display = 'block';
+            warn.innerText = `Note: In Movements mode (${movType}), these plates will be ingested into your staged buffer. Review them before clicking Commit.`;
+        }
+        if (primaryBtn) primaryBtn.innerText = `📥 Stage for ${movType}`;
+        if (checkStockBtn) checkStockBtn.style.display = 'none';
+    } else if (currentStockMode === 'audit') {
+        if (warn) {
+            warn.style.display = 'block';
+            warn.innerText = 'Note: In Safe Audit mode, these plates will be recorded as physically present in the safe room stocktaking.';
+        }
+        if (primaryBtn) primaryBtn.innerText = '🔍 Record Safe Audit';
+        if (checkStockBtn) checkStockBtn.style.display = 'none';
+    } else {
+        if (warn) warn.style.display = 'none';
+        if (primaryBtn) primaryBtn.innerText = 'Process Paste';
+        if (checkStockBtn) checkStockBtn.style.display = 'none';
+    }
 
     if (typeof openModal === 'function') {
         openModal('stock-paste-modal');
@@ -1557,6 +1581,8 @@ function renderDispatchesTable(dispatches) {
 
     dispatches.forEach((d, idx) => {
         const tr = document.createElement('tr');
+        const badgeClass = d.badge_class || (d.status_code === 'NOT_ON_STOCK' ? 'badge-red' : 'badge-green');
+        const statusLabel = d.status_label || d.status || 'ON LINE';
         tr.innerHTML = `
             <td>${idx + 1}</td>
             <td class="text-muted" style="font-family: var(--font-mono);">${(d.dispatched_at || '').substring(11, 19)}</td>
@@ -1564,7 +1590,7 @@ function renderDispatchesTable(dispatches) {
             <td><span class="badge ${d.plate_category === 'PMO' ? 'badge-yellow' : 'badge-muted'}">${d.plate_category}</span></td>
             <td style="font-family: var(--font-mono); color: #fff;">IK-${d.registration_number}</td>
             <td style="font-family: var(--font-mono); color: var(--ug-cyan);">${d.gps_tracker || '—'}</td>
-            <td><span class="badge badge-green">${d.status || 'ON LINE'}</span></td>
+            <td><span class="badge ${badgeClass}">${statusLabel}</span></td>
             <td class="text-muted">${d.operator_name || d.operator_username || 'Operator'}</td>
         `;
         tr.style.cursor = 'pointer';
@@ -1923,6 +1949,11 @@ function prefillEditLedgerFromCurrent() {
     setField('edit-ledger-trout-pmo', troutRow.pmo);
     setField('edit-ledger-trout-psv', troutRow.psv);
 
+    const closeRow = findRow('Closing Balance') || findRow('Closing Stock') || findRow('Closing');
+    setField('edit-ledger-close-pmo', closeRow.pmo);
+    setField('edit-ledger-close-psv', closeRow.psv);
+    setField('edit-ledger-close-total', closeRow.total);
+
     setField('edit-ledger-physical', physRow.total !== undefined ? physRow.total : (lastReconData.total ? lastReconData.total.physical_count : ''));
 
     const notesEl = document.getElementById('edit-ledger-notes');
@@ -1972,6 +2003,13 @@ function calcEditLedgerTotals() {
     const troutPmo = getVal('edit-ledger-trout-pmo');
     const troutPsv = getVal('edit-ledger-trout-psv');
     setTotal('edit-ledger-trout-total', troutPmo + troutPsv);
+
+    const closePmo = getVal('edit-ledger-close-pmo');
+    const closePsv = getVal('edit-ledger-close-psv');
+    const closeTotEl = document.getElementById('edit-ledger-close-total');
+    if (closeTotEl && !closeTotEl.value && (closePmo > 0 || closePsv > 0)) {
+        closeTotEl.value = closePmo + closePsv;
+    }
 }
 
 async function submitEditLedger() {
@@ -2002,6 +2040,9 @@ async function submitEditLedger() {
         bond_transfer_in_psv: optInt('edit-ledger-trin-psv'),
         bond_transfer_out_pmo: optInt('edit-ledger-trout-pmo'),
         bond_transfer_out_psv: optInt('edit-ledger-trout-psv'),
+        closing_balance_pmo: optInt('edit-ledger-close-pmo'),
+        closing_balance_psv: optInt('edit-ledger-close-psv'),
+        closing_stock: optInt('edit-ledger-close-total'),
         physical_count: optInt('edit-ledger-physical'),
         notes: (document.getElementById('edit-ledger-notes') || {}).value || '',
     };
@@ -2014,7 +2055,10 @@ async function submitEditLedger() {
 
         const res = await fetch('/api/stock/ledger/entry/', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getStockCsrfToken(),
+            },
             body: JSON.stringify(payload),
         });
         const data = await res.json();

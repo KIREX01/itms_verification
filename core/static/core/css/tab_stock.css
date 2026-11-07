@@ -217,6 +217,12 @@
     border: 1px solid rgba(14, 165, 233, 0.45);
 }
 
+.badge-orange {
+    background-color: rgba(249, 115, 22, 0.18);
+    color: #ffffff !important;
+    border: 1px solid rgba(249, 115, 22, 0.45);
+}
+
 /* Kit Inspector Styling */
 .itms-inspector-panel {
     background: #0f1420;

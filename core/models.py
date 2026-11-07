@@ -1131,6 +1131,10 @@ class DailyStockLedger(models.Model):
         default=False,
         help_text="True if bond transfers were manually entered rather than counted from scan transfers",
     )
+    override_closing = models.BooleanField(
+        default=False,
+        help_text="True if closing stock was manually entered/overridden rather than auto-calculated",
+    )
     is_closed = models.BooleanField(default=False, help_text="True if shift stock has been locked/closed")
     notes = models.TextField(blank=True, default="")
     last_reconciled_at = models.DateTimeField(null=True, blank=True)

@@ -307,30 +307,35 @@ def api_mobile_upload(request: HttpRequest) -> JsonResponse:
     is_replacement = request.POST.get("is_replacement", "false").lower() in ("true", "1")
     replace_seq = request.POST.get("replace_sequence_number", "").strip()
 
-    # If this is a U-Turn replacement upload, purge any previous unsubmitted image for this sequence & orientation
+    # Pre-locate old image if this is a replacement upload
+    old_img = None
+    target_seq = replace_seq or str(sequence_num)
+    target_seq_int = int(target_seq) if str(target_seq).isdigit() else None
+    expected_filename = f"uturn_{orientation.lower()}_{target_seq}.jpg"
+
     if mode == "uturn" and is_replacement and batch:
-        target_seq = replace_seq or str(sequence_num)
-        expected_filename = f"uturn_{orientation.lower()}_{target_seq}.jpg"
         old_img = EvidenceImage.objects.filter(
             batch=batch,
             orientation=orientation,
         ).filter(
             Q(original_source_path__endswith=expected_filename) |
+            Q(original_source_path__endswith=f"_{target_seq}.jpg") |
             Q(vault_file__endswith=expected_filename)
         ).exclude(status=EvidenceImage.Status.SUBMITTED).first()
 
-        if old_img:
-            vault_service.purge_evidence_file(old_img)
-            old_img.delete()
-            batch.total_files = max(0, batch.total_files - 1)
-            batch.ingested_count = max(0, batch.ingested_count - 1)
-            batch.save(update_fields=["total_files", "ingested_count"])
-            logger.info("Purged previous U-turn image %s before ingesting replacement", expected_filename)
+        if not old_img and target_seq_int is not None:
+            orient_imgs = list(EvidenceImage.objects.filter(
+                batch=batch,
+                orientation=orientation,
+            ).exclude(status=EvidenceImage.Status.SUBMITTED).order_by("captured_at", "id"))
+            if 1 <= target_seq_int <= len(orient_imgs):
+                old_img = orient_imgs[target_seq_int - 1]
 
     image, status = vault_service.ingest_uploaded_file(
         photo_file,
         batch=batch,
         orientation_override=orientation,
+        update_batch=(old_img is None),
     )
 
     if not image:
@@ -341,6 +346,30 @@ def api_mobile_upload(request: HttpRequest) -> JsonResponse:
             "quality_report": quality_report,
         }, status=400)
 
+    # If this is an atomic replacement of an existing image, swap on the pair & purge old record
+    if pair_id is None:
+        is_paired = False
+        pairing_note = ""
+
+    if mode == "uturn" and is_replacement and old_img and image:
+        side = "front" if orientation == EvidenceImage.Orientation.FRONT else "rear"
+        existing_pair = VehicleInstallationPair.objects.filter(
+            is_deleted=False
+        ).filter(
+            Q(front_image=old_img) | Q(rear_image=old_img)
+        ).first()
+
+        if existing_pair:
+            existing_pair.replace_image(side=side, new_image=image, purge_old=True)
+            pair_id = existing_pair.id
+            is_paired = existing_pair.is_complete
+            pairing_note = existing_pair.operator_note
+            logger.info("Atomically replaced %s image on pair %s with new image %s", side, existing_pair.id, image.id)
+        else:
+            vault_service.purge_evidence_file(old_img)
+            old_img.delete()
+            logger.info("Purged unassociated %s image %s in batch %s on replacement", orientation, old_img.id, batch.batch_id)
+
     # Update client capture timestamp if provided
     if client_timestamp:
         try:
@@ -350,9 +379,9 @@ def api_mobile_upload(request: HttpRequest) -> JsonResponse:
         except Exception:
             pass
 
-    pair_id = None
-    is_paired = False
-    pairing_note = ""
+    if pair_id is None:
+        is_paired = False
+        pairing_note = ""
 
     # Mode A: On-Conveyor (Assembly Line) - Immediate Pairwise Association
     if mode == "conveyor" and bike_client_id:

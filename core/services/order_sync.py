@@ -93,6 +93,34 @@ def parse_target_date(target: Optional[Any] = None) -> date:
     return timezone.localdate()
 
 
+def rematch_unlinked_conflict_pairs() -> int:
+    """
+    Finds complete pairs in CONFLICT without an assigned order.
+    If an unassigned active order matching their detected plate has arrived,
+    links them and automatically promotes them to APPROVED.
+    """
+    from core.models import VehicleInstallationPair, InstallationOrder
+    from core.matcher.order_matcher import match_pair_to_order
+
+    conflict_pairs = list(VehicleInstallationPair.objects.filter(
+        verification_status=VehicleInstallationPair.VerificationStatus.CONFLICT,
+        order__isnull=True,
+        is_complete=True,
+        is_deleted=False,
+    ))
+    resolved = 0
+    for pair in conflict_pairs:
+        match_pair_to_order(pair)
+        if pair.order and pair.is_complete:
+            pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
+            pair.operator_note = f"Auto-resolved: Linked to newly synced Order #{pair.order.order_number}"
+            pair.save(update_fields=["order", "match_type", "matched_via", "match_score", "verification_status", "operator_note"])
+            resolved += 1
+    if resolved > 0:
+        logger.info("Reactive rematch daemon auto-resolved %d CONFLICT pairs to APPROVED", resolved)
+    return resolved
+
+
 class OrderSyncService:
     """
     Coordinates synchronization between live ITMS installation orders, archive,
@@ -426,6 +454,14 @@ class OrderSyncService:
                     disappeared_count += 1
 
         duration_ms = int((time.time() - start_time) * 1000)
+
+        # Reactive resolution: Re-evaluate complete CONFLICT pairs against newly arrived orders
+        resolved_conflicts = 0
+        if created_count > 0 or updated_count > 0:
+            try:
+                resolved_conflicts = rematch_unlinked_conflict_pairs()
+            except Exception as rematch_err:
+                logger.warning("Error running reactive rematch for CONFLICT pairs: %s", rematch_err)
 
         # Update in-memory cache
         _LAST_SYNC_TIMESTAMP = time.time()

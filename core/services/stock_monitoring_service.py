@@ -1863,13 +1863,17 @@ def update_ledger_entry(
     bond_transfer_in_psv: Optional[int] = None,
     bond_transfer_out_pmo: Optional[int] = None,
     bond_transfer_out_psv: Optional[int] = None,
+    opening_stock: Optional[int] = None,
+    closing_balance_pmo: Optional[int] = None,
+    closing_balance_psv: Optional[int] = None,
+    closing_stock: Optional[int] = None,
     physical_count: Optional[int] = None,
     notes: Optional[str] = None,
     operator_name: str = "Operator",
 ) -> Dict[str, Any]:
     """
     Updates daily stock ledger metrics directly with full flexibility for safe-room workflows.
-    Sets manual override flags when received, installed, or transfer counts are explicitly supplied.
+    Sets manual override flags when received, installed, transfers, or closing counts are explicitly supplied.
     Recalculates closing balances and logs an immutable audit trail.
     """
     work_d, suffix = resolve_date_and_suffix(target_date_suffix)
@@ -1892,7 +1896,10 @@ def update_ledger_entry(
             ledger.opening_balance_pmo = max(0, int(opening_balance_pmo))
         if opening_balance_psv is not None:
             ledger.opening_balance_psv = max(0, int(opening_balance_psv))
-        ledger.opening_stock = ledger.opening_balance_psv + ledger.opening_balance_pmo
+        if opening_balance_pmo is not None or opening_balance_psv is not None:
+            ledger.opening_stock = ledger.opening_balance_psv + ledger.opening_balance_pmo
+        elif opening_stock is not None:
+            ledger.opening_stock = max(0, int(opening_stock))
 
         if kits_received_pmo is not None or kits_received_psv is not None:
             ledger.override_received = True
@@ -1944,22 +1951,34 @@ def update_ledger_entry(
         if notes is not None:
             ledger.notes = notes
 
-        # Recalculate closing balances
-        ledger.closing_balance_psv = (
-            ledger.opening_balance_psv
-            + ledger.kits_received_psv
-            + ledger.bond_transfer_in_psv
-            - ledger.bond_transfer_out_psv
-            - ledger.kits_installed_psv
-        )
-        ledger.closing_balance_pmo = (
-            ledger.opening_balance_pmo
-            + ledger.kits_received_pmo
-            + ledger.bond_transfer_in_pmo
-            - ledger.bond_transfer_out_pmo
-            - ledger.kits_installed_pmo
-        )
-        ledger.closing_stock = ledger.closing_balance_psv + ledger.closing_balance_pmo
+        # Recalculate or override closing balances
+        if closing_stock is not None or closing_balance_pmo is not None or closing_balance_psv is not None:
+            ledger.override_closing = True
+            if closing_balance_psv is not None:
+                ledger.closing_balance_psv = max(0, int(closing_balance_psv))
+            if closing_balance_pmo is not None:
+                ledger.closing_balance_pmo = max(0, int(closing_balance_pmo))
+            if closing_stock is not None:
+                ledger.closing_stock = max(0, int(closing_stock))
+            else:
+                ledger.closing_stock = ledger.closing_balance_psv + ledger.closing_balance_pmo
+        else:
+            ledger.closing_balance_psv = (
+                ledger.opening_balance_psv
+                + ledger.kits_received_psv
+                + ledger.bond_transfer_in_psv
+                - ledger.bond_transfer_out_psv
+                - ledger.kits_installed_psv
+            )
+            ledger.closing_balance_pmo = (
+                ledger.opening_balance_pmo
+                + ledger.kits_received_pmo
+                + ledger.bond_transfer_in_pmo
+                - ledger.bond_transfer_out_pmo
+                - ledger.kits_installed_pmo
+            )
+            ledger.closing_stock = ledger.closing_balance_psv + ledger.closing_balance_pmo
+
         if ledger.physical_count is not None:
             ledger.variance = ledger.physical_count - ledger.closing_stock
 

@@ -1055,16 +1055,62 @@ def api_stock_shift_details(request: HttpRequest) -> JsonResponse:
         resolve_res = stock_monitoring_service.resolve_transferred_blocked_plates(suffix, check_itms_live=False)
 
         # 1. Dispatches (up to 2000 rows so large 500+ kit shifts are never truncated at 150)
-        dispatches = list(StockDispatchScan.objects.filter(work_date_suffix=suffix).order_by("-dispatched_at")[:2000].values(
+        dispatches_qs = list(StockDispatchScan.objects.filter(work_date_suffix=suffix).order_by("-dispatched_at")[:2000].values(
             "id", "registration_number", "plate_category", "dispatched_at", "status", "operator_name"
         ))
-        if dispatches:
-            disp_plates = [d["registration_number"] for d in dispatches if d.get("registration_number")]
+        if dispatches_qs:
+            disp_plates = [d["registration_number"] for d in dispatches_qs if d.get("registration_number")]
             disp_kits_lookup = stock_monitoring_service.build_kit_lookup_map(disp_plates)
-            for d in dispatches:
+
+            from core.models import StockBlockedScan, StockReturnScan, InstallationOrder, VehicleInstallationPair
+            blocked_set = set(StockBlockedScan.objects.filter(work_date_suffix=suffix).values_list("registration_number", flat=True))
+            returns_set = set(StockReturnScan.objects.filter(work_date_suffix=suffix).values_list("registration_number", flat=True))
+            orders_map = {o.registration_number: o for o in InstallationOrder.objects.filter(registration_number__in=disp_plates)}
+            queue_plates = set(VehicleInstallationPair.objects.filter(
+                is_deleted=False,
+                registration_number_detected__in=disp_plates
+            ).exclude(
+                verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED
+            ).values_list("registration_number_detected", flat=True))
+
+            for d in dispatches_qs:
                 reg = d.get("registration_number", "")
+                raw_st = (d.get("status") or "").upper().strip()
                 matched_k = disp_kits_lookup.get(reg)
-                d["gps_tracker"] = (getattr(matched_k, "gps_tracker", "") or getattr(matched_k, "gps_tracker_id", "") or "-") if matched_k else "-" 
+                matched_o = orders_map.get(reg)
+                d["gps_tracker"] = (getattr(matched_k, "gps_tracker", "") or getattr(matched_k, "gps_tracker_id", "") or "-") if matched_k else "-"
+
+                # Determine verified 6-state status and badge
+                if reg in blocked_set or (not matched_k and not matched_o and "BLOCKED" in raw_st):
+                    d["status_code"] = "NOT_ON_STOCK"
+                    d["status_label"] = "🚫 NOT ON STOCK"
+                    d["badge_class"] = "badge-red"
+                elif matched_o and (getattr(matched_o, "is_archived", False) or getattr(matched_o, "order_status", "") == "Installed" or raw_st in ("RECONCILED_INSTALLED", "INSTALLED")):
+                    d["status_code"] = "INSTALLED_ARCHIVED"
+                    d["status_label"] = "✓ INSTALLED (ARCHIVED)"
+                    d["badge_class"] = "badge-blue"
+                elif reg in returns_set or raw_st in ("RETURNED_TO_SAFE", "RETURNED"):
+                    d["status_code"] = "RETURNED_TO_SAFE"
+                    d["status_label"] = "↩ RETURNED TO SAFE"
+                    d["badge_class"] = "badge-muted"
+                elif reg in queue_plates or raw_st in ("PENDING_ORDER", "IN_QUEUE", "PENDING_REVIEW"):
+                    d["status_code"] = "PENDING_QUEUE"
+                    d["status_label"] = "⏳ IN REVIEW QUEUE"
+                    d["badge_class"] = "badge-yellow"
+                elif matched_o or raw_st in ("ON_LINE_ACTIVE", "DISPATCHED"):
+                    d["status_code"] = "ON_LINE_ACTIVE"
+                    d["status_label"] = "● ON LINE (FITTING)"
+                    d["badge_class"] = "badge-green"
+                else:
+                    d["status_code"] = "UNALLOCATED"
+                    d["status_label"] = "⚠️ UNALLOCATED (NO ORDER)"
+                    d["badge_class"] = "badge-orange"
+
+                d["status"] = d["status_label"]
+
+            dispatches = dispatches_qs
+        else:
+            dispatches = [] 
 
         # 2. Movements
         movements = []
@@ -1605,12 +1651,12 @@ def api_stock_export_unregistered_csv(request: HttpRequest) -> HttpResponse:
 
 
 @require_POST
-@require_itms_envelope
+@require_itms_envelope(allow_expired=True)
 def api_stock_ledger_entry(request: HttpRequest) -> JsonResponse:
     """
     POST /api/stock/ledger/entry/
     Allows flexible manual entry/overrides of daily stock ledger metrics
-    (opening, received, scheduled, installed, bond transfers, physical count, notes).
+    (opening, received, scheduled, installed, bond transfers, closing, physical count, notes).
     """
     data = {}
     if request.content_type == "application/json" and request.body:
@@ -1635,6 +1681,7 @@ def api_stock_ledger_entry(request: HttpRequest) -> JsonResponse:
 
     opening_balance_pmo = _opt_int("opening_balance_pmo")
     opening_balance_psv = _opt_int("opening_balance_psv")
+    opening_stock = _opt_int("opening_stock")
     kits_received_pmo = _opt_int("kits_received_pmo")
     kits_received_psv = _opt_int("kits_received_psv")
     scheduled_pmo = _opt_int("scheduled_pmo")
@@ -1646,6 +1693,9 @@ def api_stock_ledger_entry(request: HttpRequest) -> JsonResponse:
     bond_transfer_in_psv = _opt_int("bond_transfer_in_psv")
     bond_transfer_out_pmo = _opt_int("bond_transfer_out_pmo")
     bond_transfer_out_psv = _opt_int("bond_transfer_out_psv")
+    closing_balance_pmo = _opt_int("closing_balance_pmo")
+    closing_balance_psv = _opt_int("closing_balance_psv")
+    closing_stock = _opt_int("closing_stock")
     physical_count = _opt_int("physical_count")
     notes = data.get("notes")
     operator_name = (
@@ -1660,6 +1710,7 @@ def api_stock_ledger_entry(request: HttpRequest) -> JsonResponse:
             storage_bond_name=storage_bond_name,
             opening_balance_pmo=opening_balance_pmo,
             opening_balance_psv=opening_balance_psv,
+            opening_stock=opening_stock,
             kits_received_pmo=kits_received_pmo,
             kits_received_psv=kits_received_psv,
             scheduled_pmo=scheduled_pmo,
@@ -1671,6 +1722,9 @@ def api_stock_ledger_entry(request: HttpRequest) -> JsonResponse:
             bond_transfer_in_psv=bond_transfer_in_psv,
             bond_transfer_out_pmo=bond_transfer_out_pmo,
             bond_transfer_out_psv=bond_transfer_out_psv,
+            closing_balance_pmo=closing_balance_pmo,
+            closing_balance_psv=closing_balance_psv,
+            closing_stock=closing_stock,
             physical_count=physical_count,
             notes=notes,
             operator_name=operator_name,

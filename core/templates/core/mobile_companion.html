@@ -228,7 +228,28 @@
                         <div style="font-size:0.7rem; color:var(--ug-text-dim,#94a3b8);">Off-conveyor row walk (isolated batch)</div>
                     </div>
                 </div>
-                <span id="uturn-pair-status-pill" style="font-size:0.72rem; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); padding:3px 10px; border-radius:12px; font-weight:700;">ACTIVE</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <button type="button" id="btn-abort-uturn" onclick="abortUturnBatch()" style="display:none; background:rgba(239,68,68,0.15); color:#ef4444; border:1px solid rgba(239,68,68,0.4); border-radius:6px; padding:4px 8px; font-size:0.72rem; font-weight:700; cursor:pointer;" title="Discard walk session">
+                        ✕ Discard
+                    </button>
+                    <span id="uturn-pair-status-pill" style="font-size:0.72rem; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); padding:3px 10px; border-radius:12px; font-weight:700;">ACTIVE</span>
+                </div>
+            </div>
+
+            <!-- Starting Leg Direction Selector with Batch Lock -->
+            <div class="uturn-start-selector-box" id="uturn-start-selector-box" style="margin-bottom:12px; background:rgba(15,23,42,0.9); border:1px solid rgba(56,189,248,0.3); border-radius:10px; padding:10px 14px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <span style="font-size:0.75rem; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.5px;">Starting Leg (Walk Direction)</span>
+                    <span id="uturn-lock-badge" class="badge" style="background:rgba(255,255,255,0.08); color:#94a3b8; font-size:0.68rem; padding:2px 8px; border-radius:4px;">🔓 Unlocked (Choose Start)</span>
+                </div>
+                <div class="uturn-direction-toggle" style="display:flex; gap:8px;">
+                    <button type="button" class="btn-direction-pill active" id="btn-start-rear" onclick="setUturnStartLeg('REAR')" style="flex:1; padding:8px 10px; font-size:0.8rem; font-weight:700; border-radius:6px; border:1px solid #38bdf8; background:#1e293b; color:#ffffff; cursor:pointer;">
+                        🏍️ Rear First (Rears ➔ Fronts)
+                    </button>
+                    <button type="button" class="btn-direction-pill" id="btn-start-front" onclick="setUturnStartLeg('FRONT')" style="flex:1; padding:8px 10px; font-size:0.8rem; font-weight:700; border-radius:6px; border:1px solid rgba(255,255,255,0.15); background:transparent; color:#94a3b8; cursor:pointer;">
+                        🛡️ Front First (Fronts ➔ Rears)
+                    </button>
+                </div>
             </div>
 
             <!-- Visual U-Turn Progress Road -->
@@ -311,12 +332,9 @@
                 </div>
             </div>
 
-            <!-- Finish U-Turn Batch Button & Abort Action -->
-            <div class="uturn-footer-actions" style="display:flex; gap:10px;">
-                <button class="btn-abort-uturn" id="btn-abort-uturn" onclick="abortUturnBatch()" style="display:none; flex:1; background:rgba(239,68,68,0.15); color:#ef4444; border:1px solid rgba(239,68,68,0.4); border-radius:10px; padding:12px; font-weight:700; font-size:0.85rem; cursor:pointer;" title="Discard current walk session and reset photos">
-                    <span>✕ Abort Walk</span>
-                </button>
-                <button class="finish-batch-btn" id="btn-finish-uturn" onclick="finishUturnBatch()" disabled style="flex:2;">
+            <!-- Finish U-Turn Batch Button -->
+            <div class="uturn-footer-actions" style="display:flex; width:100%;">
+                <button class="finish-batch-btn" id="btn-finish-uturn" onclick="finishUturnBatch()" disabled style="width:100%;">
                     <span>🏁 Complete U-Turn Batch</span>
                 </button>
             </div>
@@ -678,13 +696,18 @@
             <div class="lightbox-header">
                 <div>
                     <span class="lightbox-eyebrow" id="lightbox-eyebrow">PHOTO INSPECTOR</span>
-                    <h3 class="lightbox-title" id="lightbox-title">FRONT Angle</h3>
+                    <h3 class="lightbox-title" id="lightbox-title" style="display:flex; align-items:center; gap:8px;">
+                        <span>FRONT Angle</span>
+                        <span id="lightbox-counter" style="font-size:0.75rem; color:#94a3b8; font-weight:700;"></span>
+                    </h3>
                 </div>
                 <button class="lightbox-close-btn" onclick="closePhotoInspector()">✕</button>
             </div>
 
-            <div class="lightbox-image-box">
-                <img id="lightbox-img" class="lightbox-img" src="" alt="Inspected Photo">
+            <div class="lightbox-image-box" style="position:relative; display:flex; align-items:center; justify-content:center; min-height:240px; background:#000000; border-radius:8px; overflow:hidden;">
+                <button type="button" class="lightbox-nav-btn lightbox-nav-prev" id="lightbox-nav-prev" onclick="navigatePhotoInspector(-1)" style="position:absolute; left:8px; top:50%; transform:translateY(-50%); background:rgba(15,23,42,0.8); color:#ffffff; border:1px solid rgba(255,255,255,0.3); border-radius:50%; width:44px; height:44px; font-size:1.4rem; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:10; backdrop-filter:blur(4px); box-shadow:0 4px 12px rgba(0,0,0,0.5);">‹</button>
+                <img id="lightbox-img" class="lightbox-img" src="" alt="Inspected Photo" style="max-height:62vh; width:auto; max-width:100%; object-fit:contain; border-radius:6px;">
+                <button type="button" class="lightbox-nav-btn lightbox-nav-next" id="lightbox-nav-next" onclick="navigatePhotoInspector(1)" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:rgba(15,23,42,0.8); color:#ffffff; border:1px solid rgba(255,255,255,0.3); border-radius:50%; width:44px; height:44px; font-size:1.4rem; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:10; backdrop-filter:blur(4px); box-shadow:0 4px 12px rgba(0,0,0,0.5);">›</button>
             </div>
 
             <!-- Quality & Focus Assessment Metrics -->

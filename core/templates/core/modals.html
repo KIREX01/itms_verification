@@ -1204,9 +1204,16 @@
                             <td><input type="number" id="edit-ledger-trout-psv" oninput="calcEditLedgerTotals()" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:700; background:#0c1017; color:#ffffff; border:1px solid rgba(255,255,255,0.2);"></td>
                             <td id="edit-ledger-trout-total" style="text-align:center; font-family:var(--font-mono); font-weight:800; color:#ffffff !important;">0</td>
                         </tr>
-                        <!-- 7. Physical Count -->
+                        <!-- 7. Closing Stock (Manual Override) -->
                         <tr>
-                            <td style="font-weight:700; color:#ffffff !important;">7. Physical Safe Count</td>
+                            <td style="font-weight:700; color:#38bdf8 !important;">7. Closing Stock (Override)</td>
+                            <td><input type="number" id="edit-ledger-close-pmo" oninput="calcEditLedgerTotals()" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:700; background:#0c1017; color:#38bdf8; border:1px solid rgba(56,189,248,0.4);" placeholder="PMO Close"></td>
+                            <td><input type="number" id="edit-ledger-close-psv" oninput="calcEditLedgerTotals()" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:700; background:#0c1017; color:#38bdf8; border:1px solid rgba(56,189,248,0.4);" placeholder="PSV Close"></td>
+                            <td><input type="number" id="edit-ledger-close-total" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:800; background:#0c1017; color:#38bdf8; border:1px solid rgba(56,189,248,0.4);" placeholder="Total Closing"></td>
+                        </tr>
+                        <!-- 8. Physical Count -->
+                        <tr>
+                            <td style="font-weight:700; color:#ffffff !important;">8. Physical Safe Count</td>
                             <td colspan="2" style="text-align:center; font-size:0.78rem; color:rgba(255,255,255,0.7);">Total physical kits verified in safe room</td>
                             <td><input type="number" id="edit-ledger-physical" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:800; background:#0c1017; color:#ffffff; border:1px solid rgba(255,255,255,0.2);"></td>
                         </tr>
@@ -1302,6 +1309,24 @@
     </div>
     <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.7rem; color:#888;">
         <span id="global-bg-upload-desc">Transferring photos in background...</span>
+        <span style="color:#06b6d4; font-weight:700;">Open &rarr;</span>
+    </div>
+</button>
+
+<!-- Floating Background Batch Submission Progress Widget -->
+<button type="button" id="global-bg-submit-pill" style="display:none; position:fixed; bottom:20px; right:20px; z-index:99999; background:rgba(18,20,29,0.95); border:1px solid rgba(255,255,255,0.15); border-left:4px solid #10b981; box-shadow:0 8px 30px rgba(0,0,0,0.6); padding:10px 14px; border-radius:8px; backdrop-filter:blur(10px); min-width:280px; max-width:380px; cursor:pointer; text-align:left; font-family:inherit;" onclick="reopenSubmissionModal()" title="Click to view live submission modal" aria-label="View background submission progress">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:5px;">
+        <span id="global-bg-submit-title" style="font-size:0.75rem; font-weight:800; color:#fff; display:flex; align-items:center; gap:6px;">
+            <span class="live-pulse-dot" id="global-bg-submit-dot" style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#10b981; animation:pulse 1.5s infinite;"></span>
+            <span id="global-bg-submit-label">Submitting Batch...</span>
+        </span>
+        <span id="global-bg-submit-pct" style="font-size:0.75rem; font-weight:800; color:#10b981; font-family:monospace;">0%</span>
+    </div>
+    <div style="height:5px; background:rgba(255,255,255,0.08); border-radius:3px; overflow:hidden; margin-bottom:6px;">
+        <div id="global-bg-submit-fill" style="height:100%; width:0%; background:linear-gradient(90deg, #3b82f6, #10b981); transition:width 0.25s ease; border-radius:3px;"></div>
+    </div>
+    <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.7rem; color:#888;">
+        <span id="global-bg-submit-desc">Transmitting photos to ITMS...</span>
         <span style="color:#06b6d4; font-weight:700;">Open &rarr;</span>
     </div>
 </button>

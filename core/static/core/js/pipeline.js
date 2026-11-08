@@ -303,7 +303,18 @@ async function triggerBatchSubmit(requestedScope) {
             : "";
         const res = await fetch(`/api/pairs/?scope=${encodeURIComponent(scope)}${batchParam}&limit=500`);
         const data = await res.json();
-        const allScopePairs = data.pairs || [];
+        let allScopePairs = data.pairs || [];
+
+        // Strictly constrain pairs to the active batch filter if the user selected a specific batch
+        if (typeof currentQueueBatchFilter !== "undefined" && currentQueueBatchFilter !== "ALL") {
+            if (currentQueueBatchFilter === "LATEST") {
+                allScopePairs = allScopePairs.filter(p => p.is_latest_batch);
+            } else if (currentQueueBatchFilter === "CARRYOVER") {
+                allScopePairs = allScopePairs.filter(p => p.is_carryover);
+            } else {
+                allScopePairs = allScopePairs.filter(p => p.batch_id === currentQueueBatchFilter);
+            }
+        }
 
         // Exclude pairs that are already SUBMITTED to ITMS to prevent false discrepancy alarms
         const activeUnsubmittedPairs = allScopePairs.filter(p => p.submission_status !== "SUBMITTED" && p.verification_status !== "SUBMITTED");
@@ -312,12 +323,24 @@ async function triggerBatchSubmit(requestedScope) {
         const approvedInScope = approvedPairs.length;
         const unapprovedCount = totalInScope - approvedInScope;
 
-        if (approvedPairs.length === 0) {
-            if (scope === "TODAY" && data.carryover_approved_count > 0) {
-                showToast(`No approved pairs in Today's shift. Found ${data.carryover_approved_count} in Prior Carryover (switch Date Scope to Prior Carryover).`, "warning");
+        // User-friendly label for the current working target
+        let targetLabel = scope;
+        if (typeof currentQueueBatchFilter !== "undefined" && currentQueueBatchFilter !== "ALL") {
+            if (currentQueueBatchFilter === "LATEST") {
+                targetLabel = "Latest Batch";
+            } else if (currentQueueBatchFilter === "CARRYOVER") {
+                targetLabel = "Carryover Batches";
             } else {
-                showToast(`No approved pairs ready for submission in ${scope} scope (${unapprovedCount} pair(s) in review/issues). Please approve pairs in Review Queue [A].`, "info");
+                targetLabel = `Batch #${currentQueueBatchFilter}`;
             }
+        } else if (scope === "TODAY") {
+            targetLabel = "Today's Shift";
+        } else if (scope === "ACTIVE_BATCH") {
+            targetLabel = "Active Ingestion Batch";
+        }
+
+        if (approvedPairs.length === 0) {
+            showToast(`No approved pairs ready for submission in ${targetLabel} (${unapprovedCount} pair(s) awaiting review/issue resolution).`, "info");
             return;
         }
 
@@ -327,16 +350,17 @@ async function triggerBatchSubmit(requestedScope) {
             type: "batch",
             pairs: approvedPairs,
             scope: scope,
+            targetLabel: targetLabel,
             totalInScope: totalInScope,
             approvedInScope: approvedInScope,
             unapprovedCount: unapprovedCount,
         };
 
-        setText("sub-modal-title", `🚀 Batch ITMS Submission (${scope})`);
-        setText("sub-confirm-scope-title", `SCOPE: ${scope} TRANSMISSION`);
+        setText("sub-modal-title", `🚀 Batch ITMS Submission (${targetLabel})`);
+        setText("sub-confirm-scope-title", `TARGET: ${targetLabel.toUpperCase()}`);
         setText("sub-confirm-count-badge", `${approvedPairs.length} Orders Ready`);
-        setText("sub-confirm-target-main", `${approvedPairs.length} Approved Orders (${scope})`);
-        setText("sub-confirm-target-sub", `All verified motorcycle pairs within the '${scope}' date scope will be sequentially submitted to ITMS.`);
+        setText("sub-confirm-target-main", `${approvedPairs.length} Approved Orders (${targetLabel})`);
+        setText("sub-confirm-target-sub", `Verified motorcycle pairs in '${targetLabel}' will be sequentially submitted to ITMS.`);
 
         // Pre-Submission Physical Discrepancy Banner (Section 16.3 B)
         const discBanner = document.getElementById("sub-confirm-discrepancy-banner");
@@ -346,6 +370,14 @@ async function triggerBatchSubmit(requestedScope) {
                 setText("sub-discrepancy-approved-count", approvedInScope);
                 setText("sub-discrepancy-total-count", totalInScope);
                 setText("sub-discrepancy-unapproved-count", unapprovedCount);
+                const descContainer = discBanner.querySelector("div:last-child");
+                if (descContainer) {
+                    descContainer.innerHTML = `
+                        Only <strong style="color:#ffffff;">${approvedInScope}</strong> of <strong style="color:#ffffff;">${totalInScope}</strong> pairs in <strong>${escapeHtml(targetLabel)}</strong> are <strong>APPROVED</strong>.
+                        <br>
+                        <strong style="color:#f87171;">${unapprovedCount}</strong> pair(s) in <strong>CONFLICT / PENDING REVIEW</strong> will <strong>NOT</strong> be sent to ITMS until reviewed.
+                    `;
+                }
                 discBanner.style.display = "block";
                 if (btnReviewConflicts) btnReviewConflicts.style.display = "inline-flex";
             } else {

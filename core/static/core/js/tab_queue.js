@@ -108,21 +108,7 @@ async function fetchPairs() {
             }
 
             // Update queue filter counts (All issues: conflicts, unlinked orders, incomplete, failed, unregistered)
-            const cntAll = pairsData.length;
-            const cntReview = pairsData.filter(p => p.verification_status === "PENDING_REVIEW" && (p.order || p.order_number)).length;
             const cntApproved = pairsData.filter(p => p.verification_status === "APPROVED").length;
-            const cntIssues = pairsData.filter(p => ["INCOMPLETE", "CONFLICT", "FAILED", "UNREGISTERED", "OFFLINE_OUTBOX"].includes(p.verification_status) || (!p.order && !p.order_number)).length;
-            const cntDone = pairsData.filter(p => p.verification_status === "SUBMITTED").length;
-
-            setText("cnt-all", cntAll);
-            setText("cnt-review", cntReview);
-            setText("cnt-approved", cntApproved);
-            setText("cnt-issues", cntIssues);
-            setText("cnt-done", cntDone);
-            ["cnt-all", "cnt-review", "cnt-approved", "cnt-issues", "cnt-done"].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.style.display = "inline-flex";
-            });
 
             // Update queue approved counter & quick batch submit button
             const approvedCount = cntApproved;
@@ -291,7 +277,7 @@ function renderQueueCards() {
                     ? `<span class="badge badge-yellow" style="font-size:0.58rem; padding:1px 5px;" title="Carryover from Previous Shift / Batch">⏳ PRIOR</span>`
                     : `<span class="badge badge-muted" style="font-size:0.58rem; padding:1px 5px;">📦 BATCH</span>`));
 
-        return `<div class="queue-item-card ${isSelected ? 'selected' : ''}" onclick="selectPair(${p.id})">
+        return `<div class="queue-item-card ${isSelected ? 'selected' : ''}" data-pair-id="${p.id}" onclick="selectPair(${p.id})">
             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
                 <div style="display:flex; align-items:center; gap:6px;">
                     <span class="item-plate-text">${plate}</span>
@@ -320,6 +306,12 @@ async function selectPair(pairId) {
     selectedPairId = pairId;
     renderQueueCards();
     
+    // Auto-scroll the active card into view in the queue cards container
+    const activeCard = document.querySelector(`.queue-item-card[data-pair-id="${pairId}"]`);
+    if (activeCard && typeof activeCard.scrollIntoView === "function") {
+        activeCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
     // Auto-open mobile inspector when a pair is tapped
     if (typeof openQueueMobileInspector === "function") {
         openQueueMobileInspector();
@@ -363,7 +355,11 @@ async function selectPair(pairId) {
                     const titleEl = document.getElementById("qdetail-conflict-title");
                     const msgEl = document.getElementById("qdetail-conflict-msg");
                     if (titleEl) titleEl.innerText = p.conflict_reason || (p.order ? "Pair Conflict" : "Order Unassigned / Missing");
-                    if (msgEl) msgEl.innerText = p.operator_note || (!p.order ? "All uploaded pairs start in Conflict until linked to an active unassigned order." : "Conflict detected on this pair.");
+                    let displayNote = p.operator_note || "";
+                    if (displayNote.includes(" | Order Conflict:")) {
+                        displayNote = displayNote.split(" | ")[0];
+                    }
+                    if (msgEl) msgEl.innerText = displayNote || (!p.order ? "All uploaded pairs start in Conflict until linked to an active unassigned order." : "Conflict detected on this pair.");
                 } else {
                     conflictBanner.style.display = "none";
                 }
@@ -531,13 +527,38 @@ async function executePairAction(action) {
         const prevStatus = pairObj ? pairObj.verification_status : "PENDING_REVIEW";
         const plate = (selectedPairDetail ? selectedPairDetail.registration_number_detected : "") || "Pair";
 
-        // Determine next pair to inspect before approving
+        // Determine next pair to inspect: strictly progressive from up to down (linear flow)
         const currentFiltered = getFilteredQueuePairs();
         const currentIdx = currentFiltered.findIndex(p => p.id === pairIdToApprove);
         let nextPair = null;
-        if (currentIdx !== -1 && currentIdx + 1 < currentFiltered.length) {
+
+        // 1. First look downwards from current position for the next unapproved pair in the list
+        for (let i = currentIdx + 1; i < currentFiltered.length; i++) {
+            const candidate = currentFiltered[i];
+            if (candidate.id !== pairIdToApprove && candidate.verification_status !== "APPROVED" && candidate.verification_status !== "SUBMITTED") {
+                nextPair = candidate;
+                break;
+            }
+        }
+
+        // 2. If no unapproved pair found below, advance to the immediate next card below
+        if (!nextPair && currentIdx !== -1 && currentIdx + 1 < currentFiltered.length) {
             nextPair = currentFiltered[currentIdx + 1];
-        } else if (currentFiltered.length > 1 && currentFiltered[0].id !== pairIdToApprove) {
+        }
+
+        // 3. If reached the end of the list, wrap around from the top looking downwards
+        if (!nextPair) {
+            for (let i = 0; i < currentIdx; i++) {
+                const candidate = currentFiltered[i];
+                if (candidate.id !== pairIdToApprove && candidate.verification_status !== "APPROVED" && candidate.verification_status !== "SUBMITTED") {
+                    nextPair = candidate;
+                    break;
+                }
+            }
+        }
+
+        // 4. Final fallback to top item
+        if (!nextPair && currentFiltered.length > 0 && currentFiltered[0].id !== pairIdToApprove) {
             nextPair = currentFiltered[0];
         }
 

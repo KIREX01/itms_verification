@@ -87,44 +87,6 @@
     box-shadow: 0 0 8px rgba(252, 220, 4, 0.25);
 }
 
-/* Status count badges */
-.queue-cnt-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.68rem;
-    font-weight: 700;
-    min-width: 17px;
-    height: 17px;
-    padding: 0 4px;
-    margin-left: 5px;
-    border-radius: 9px;
-    background: rgba(255, 255, 255, 0.12);
-    color: #ffffff;
-    line-height: 1;
-}
-.queue-filter-pill.active .queue-cnt-badge {
-    background: var(--ug-yellow);
-    color: #000000;
-    font-weight: 800;
-}
-.queue-cnt-badge.queue-cnt-issues {
-    background: rgba(239, 68, 68, 0.25);
-    color: #ef4444;
-}
-.queue-filter-pill.active .queue-cnt-badge.queue-cnt-issues {
-    background: #ef4444;
-    color: #ffffff;
-}
-.queue-cnt-badge.queue-cnt-approved {
-    background: rgba(16, 185, 129, 0.22);
-    color: var(--ug-green);
-}
-.queue-filter-pill.active .queue-cnt-badge.queue-cnt-approved {
-    background: var(--ug-green);
-    color: #ffffff;
-}
-
 /* Centralized Search & Scope Toolbar */
 .queue-central-toolbar {
     display: flex;

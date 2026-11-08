@@ -216,40 +216,46 @@ def match_pair_to_order(
 
         from core.vision import normalizer
         clean_plate = normalizer.canonicalize(pair.registration_number_detected) or pair.registration_number_detected
-
-        # Check if an order exists in local DB but is closed/installed/submitted/archived
-        closed_order = (
-            InstallationOrder.objects.filter(
-                Q(registration_number__iexact=clean_plate) | Q(registration_number__iexact=pair.registration_number_detected)
-            ).order_by("-updated_at").first()
+        is_placeholder_plate = (
+            not clean_plate or
+            clean_plate.upper().startswith("PAIR") or
+            clean_plate.upper().startswith("MISSING")
         )
-        if closed_order:
-            order_stat = closed_order.order_status or closed_order.status
-            pair.operator_note = (
-                f"Order Conflict: Order #{closed_order.order_number} for plate '{clean_plate}' is already "
-                f"{order_stat} (closed/submitted). No active pending order available."
-            )
-        else:
-            # Check if kit exists in stock but unallocated
-            kit_note = ""
-            try:
-                from core.models import InstallationKit
-                kit = InstallationKit.objects.filter(
-                    Q(registration_number__iexact=pair.registration_number_detected)
-                    | Q(registration_number__iexact=clean_plate)
-                    | Q(kit_code__iexact=f"IK-{clean_plate}")
-                ).first()
-                if kit and (kit.status or "").strip().lower() == "new":
-                    kit_note = f" (Kit {kit.kit_code} is in stock with status 'New' at {kit.warehouse or 'warehouse'})"
-            except Exception:
-                pass
 
-            existing_note = pair.operator_note or ""
-            conflict_msg = (
-                f"Order Conflict: No pending installation order found for plate '{clean_plate}'{kit_note}. "
-                f"Vehicle plate not in active pending order list."
+        if is_placeholder_plate:
+            pair.operator_note = "Plate not yet detected or entered. Please review photos or link an order."
+        else:
+            # Check if an order exists in local DB but is closed/installed/submitted/archived
+            closed_order = (
+                InstallationOrder.objects.filter(
+                    Q(registration_number__iexact=clean_plate) | Q(registration_number__iexact=pair.registration_number_detected)
+                ).order_by("-updated_at").first()
             )
-            pair.operator_note = f"{existing_note} | {conflict_msg}".strip(" |") if existing_note else conflict_msg
+            if closed_order:
+                order_stat = closed_order.order_status or closed_order.status
+                pair.operator_note = (
+                    f"Order Conflict: Order #{closed_order.order_number} for plate '{clean_plate}' is already "
+                    f"{order_stat} (closed/submitted). No active pending order available."
+                )
+            else:
+                # Check if kit exists in stock but unallocated
+                kit_note = ""
+                try:
+                    from core.models import InstallationKit
+                    kit = InstallationKit.objects.filter(
+                        Q(registration_number__iexact=pair.registration_number_detected)
+                        | Q(registration_number__iexact=clean_plate)
+                        | Q(kit_code__iexact=f"IK-{clean_plate}")
+                    ).first()
+                    if kit and (kit.status or "").strip().lower() == "new":
+                        kit_note = f" (Kit {kit.kit_code} is in stock with status 'New' at {kit.warehouse or 'warehouse'})"
+                except Exception:
+                    pass
+
+                pair.operator_note = (
+                    f"Order Conflict: No pending installation order found for plate '{clean_plate}'{kit_note}. "
+                    f"Vehicle plate not in active pending order list."
+                )
 
     pair.save()
     return pair

@@ -57,7 +57,7 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
 
     qs = VehicleInstallationPair.objects.filter(is_deleted=False).select_related(
         "order", "front_image", "rear_image", "front_image__batch", "rear_image__batch"
-    )
+    ).order_by("created_at", "id")
 
     envelope = getattr(request, "envelope", None)
     if envelope and envelope.is_valid:

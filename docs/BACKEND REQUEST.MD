@@ -465,9 +465,15 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
        - Implemented relevance ranking: exact match (score 0), prefix match (score 1), and contains match (score 2).
        - Live search verification: live ITMS fallback records are verified to actually match the query before being added to results.
        - Clean empty state: when no order exists, the endpoint returns `success: true, orders: []`, and the UI displays a clear `⚠️ Order not available` state with actionable tips instead of false results.
-  3. **Centralized Queue Controls Toolbar:**
+  3. **Centralized Queue Controls Toolbar & Unambiguous Pills:**
      - Replaced the fragmented collapsible filter drawer, redundant scope pills (`Today`, `Active`, `Carryover`, `All`), and separate batch dropdown with a clean, centralized 3-tier toolbar:
-       - **Tier 1 (Status Pills)**: `All`, `Review`, `Approved`, `⚠️ Issues`, and `Done` with prominent, styled count badges (`.queue-cnt-badge`).
+       - **Tier 1 (Status Navigation)**: Clean, unambiguous text pills without confusing counts: `All`, `Review`, `Approved`, `⚠️ Issues`, and `Done`.
        - **Tier 2 (Action Toolbar)**: Search input with clear `✕` button (`#queue-search-clear`), unified Scope & Ingestion Batch selector (`#queue-batch-select`), refresh (`🔄`), and CSV export (`📥`).
        - **Tier 3 (Batch Action Bar)**: Live vision pipeline indicator, approved count summary, and quick submit button (`🚀 Submit Approved (N) [B]`).
-     - Added CSS rules in `core/static/core/css/tab_queue.css` for responsive stacking and touch targets. Bumped cache-busting version to `v=28` in `base.html`.
+     - Added CSS rules in `core/static/core/css/tab_queue.css` for responsive stacking and touch targets. Bumped cache-busting version to `v=29` in `base.html`.
+  4. **Linear Top-to-Bottom Auto-Progression Upon Pair Approval:**
+     - In `core/views/pairs.py:api_pairs_list`: Enforced deterministic chronological ordering `qs.order_by("created_at", "id")`, preventing pairs from randomly reordering whenever `updated_at` was bumped.
+     - In `core/static/core/js/tab_queue.js`: Updated auto-advance upon approval to strictly move downwards (`currentIdx + 1` to end of list) prioritizing the next pending pair, with automatic scroll-into-view.
+  5. **Submission Modal Batch Scoping & Infinite Note Fix:**
+     - In `core/static/core/js/pipeline.js:triggerBatchSubmit`: Strictly constrained pairs and conflict counts to the active batch filter (`currentQueueBatchFilter`). Eliminated false discrepancy warnings originating from other batches or historical records.
+     - In `core/matcher/order_matcher.py`: Fixed the repetitive string concatenation bug (`f"{existing_note} | {conflict_msg}"`) that was appending duplicate messages on every shift sync cycle. Appropriately formatted placeholder plate IDs (`PAIR...` / `MISSING...`). Sanitized bloated existing notes in the database.

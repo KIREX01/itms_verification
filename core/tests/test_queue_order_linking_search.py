@@ -154,3 +154,29 @@ class QueueOrderLinkingSearchTest(TestCase):
         pair.refresh_from_db()
         self.assertEqual(pair.order_id, order.id)
         self.assertEqual(pair.verification_status, VehicleInstallationPair.VerificationStatus.APPROVED)
+
+    def test_pairs_list_orders_chronologically_by_created_at_not_scrambled_by_updates(self):
+        """
+        Pairs in the queue must follow a stable chronological order (created_at, id),
+        so operators advance predictably top-to-bottom even after updating later pairs.
+        """
+        pair1 = VehicleInstallationPair.objects.create(
+            registration_number_detected="UMA 101AA",
+            front_image=self.front_img,
+            is_complete=True,
+        )
+        pair2 = VehicleInstallationPair.objects.create(
+            registration_number_detected="UMA 102BB",
+            front_image=self.front_img,
+            is_complete=True,
+        )
+        # Update pair1 to bump updated_at
+        VehicleInstallationPair.objects.filter(id=pair1.id).update(verification_status=VehicleInstallationPair.VerificationStatus.APPROVED)
+
+        res = self.client.get(reverse("core:api_pairs_list"))
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        pair_ids = [p["id"] for p in data["pairs"]]
+        # pair1 was created before pair2, so pair1 must precede pair2 despite pair1 having a newer updated_at
+        self.assertLess(pair_ids.index(pair1.id), pair_ids.index(pair2.id))
+

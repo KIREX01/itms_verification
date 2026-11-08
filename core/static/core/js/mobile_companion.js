@@ -125,6 +125,7 @@ const MobileState = {
         batchIndex: getInitialUturnBatchIndex(),
         walkSessionId: generateUturnSessionId(getInitialUturnBatchIndex()),
         startLeg: "REAR", // 'REAR' | 'FRONT'
+        startLegChosen: false,
         phase: "REAR", // 'REAR' | 'FRONT'
         rearCount: 0,
         frontCount: 0,
@@ -322,36 +323,9 @@ async function pingServer() {
 
 function updateBatchCapacityUI(batchData) {
     if (!batchData) return;
-    const labelElem = document.getElementById("mobile-batch-label");
-    const pillElem = document.getElementById("mobile-batch-limit-pill");
-    const fillElem = document.getElementById("mobile-batch-progress-fill");
     const bannerElem = document.getElementById("batch-rollover-banner");
-
-    const count = batchData.batch_photos !== undefined ? batchData.batch_photos : (batchData.total_photos || 0);
-    const limit = batchData.batch_limit || batchData.batch_max_photos || 200;
-    const label = batchData.batch_label || "Active Batch";
-    const pairs = Math.floor(count / 2);
-    const maxPairs = Math.floor(limit / 2);
-
-    if (labelElem) labelElem.textContent = `📦 ${label}`;
-    if (pillElem) pillElem.textContent = `${count}/${limit} Photos (${pairs}/${maxPairs} Bikes)`;
-
-    if (fillElem) {
-        const pct = Math.min(100, Math.round((count / limit) * 100));
-        fillElem.style.width = `${pct}%`;
-        if (pct >= 100) {
-            fillElem.classList.add("full");
-        } else {
-            fillElem.classList.remove("full");
-        }
-    }
-
     if (bannerElem) {
-        if (batchData.batch_is_full || count >= limit) {
-            bannerElem.style.display = "flex";
-        } else {
-            bannerElem.style.display = "none";
-        }
+        bannerElem.style.display = "none";
     }
 }
 
@@ -559,10 +533,7 @@ function switchMobileMode(mode) {
         c.style.display = "none";
     });
 
-    const capBar = document.getElementById("batch-capacity-bar");
-
     if (mode === "conveyor") {
-        if (capBar) capBar.style.display = "block";
         const btn = document.getElementById("btn-mode-conveyor");
         if (btn) btn.classList.add("active");
         const cont = document.getElementById("container-conveyor");
@@ -571,7 +542,6 @@ function switchMobileMode(mode) {
             cont.style.display = "block";
         }
     } else if (mode === "uturn") {
-        if (capBar) capBar.style.display = "none";
         const btn = document.getElementById("btn-mode-uturn");
         if (btn) btn.classList.add("active");
         const cont = document.getElementById("container-uturn");
@@ -580,8 +550,9 @@ function switchMobileMode(mode) {
             cont.style.display = "block";
         }
         updateUturnBatchIndicator();
+        applyUturnPhaseUI(MobileState.uturn.phase);
+        updateUturnShutterCounter();
     } else if (mode === "stock") {
-        if (capBar) capBar.style.display = "none";
         const btn = document.getElementById("btn-mode-stock");
         if (btn) btn.classList.add("active");
         const cont = document.getElementById("container-stock");
@@ -593,7 +564,6 @@ function switchMobileMode(mode) {
         renderBlockedPlatesTray();
         void syncBlockedPlatesWithServer();
     } else if (mode === "order") {
-        if (capBar) capBar.style.display = "none";
         const btn = document.getElementById("btn-mode-order");
         if (btn) btn.classList.add("active");
         const cont = document.getElementById("container-order");
@@ -2217,6 +2187,41 @@ function advanceToNextBike() {
 // MODE 2: Off-Conveyor (U-Turn Yard Walk) Actions & State Management
 // ============================================================================
 
+function handleUturnShutterClick() {
+    // If starting a fresh walk batch and direction not selected, prompt user
+    if (MobileState.uturn.totalPhotos === 0 && !MobileState.uturn.startLegChosen) {
+        openStartLegModal();
+        return;
+    }
+    // Direction already set / in progress: trigger camera immediately
+    triggerUturnCapture();
+}
+
+function openStartLegModal() {
+    const modal = document.getElementById("start-leg-modal");
+    if (modal) modal.style.display = "flex";
+}
+
+function closeStartLegModal() {
+    const modal = document.getElementById("start-leg-modal");
+    if (modal) modal.style.display = "none";
+}
+
+function chooseStartLegAndCapture(orientation) {
+    const clean = orientation.toUpperCase() === "FRONT" ? "FRONT" : "REAR";
+    MobileState.uturn.startLeg = clean;
+    MobileState.uturn.phase = clean;
+    MobileState.uturn.startLegChosen = true;
+
+    closeStartLegModal();
+    applyUturnPhaseUI(MobileState.uturn.phase);
+    updateUturnShutterCounter();
+    saveUturnSessionState();
+
+    showMobileToast(`🔒 Starting with ${clean === "REAR" ? "REARS" : "FRONTS"}`);
+    triggerUturnCapture();
+}
+
 function setUturnStartLeg(orientation) {
     if (MobileState.uturn.totalPhotos > 0) {
         showMobileToast("🔒 Start direction is locked once photos have been snapped in this batch!", true);
@@ -2225,30 +2230,7 @@ function setUturnStartLeg(orientation) {
     const clean = orientation.toUpperCase() === "FRONT" ? "FRONT" : "REAR";
     MobileState.uturn.startLeg = clean;
     MobileState.uturn.phase = clean;
-
-    const btnRear = document.getElementById("btn-start-rear");
-    const btnFront = document.getElementById("btn-start-front");
-    if (btnRear && btnFront) {
-        if (clean === "REAR") {
-            btnRear.classList.add("active");
-            btnRear.style.border = "1px solid #38bdf8";
-            btnRear.style.background = "#1e293b";
-            btnRear.style.color = "#ffffff";
-            btnFront.classList.remove("active");
-            btnFront.style.border = "1px solid rgba(255,255,255,0.15)";
-            btnFront.style.background = "transparent";
-            btnFront.style.color = "#94a3b8";
-        } else {
-            btnFront.classList.add("active");
-            btnFront.style.border = "1px solid #38bdf8";
-            btnFront.style.background = "#1e293b";
-            btnFront.style.color = "#ffffff";
-            btnRear.classList.remove("active");
-            btnRear.style.border = "1px solid rgba(255,255,255,0.15)";
-            btnRear.style.background = "transparent";
-            btnRear.style.color = "#94a3b8";
-        }
-    }
+    MobileState.uturn.startLegChosen = true;
 
     applyUturnPhaseUI(MobileState.uturn.phase);
     updateUturnShutterCounter();
@@ -2289,7 +2271,13 @@ function applyUturnPhaseUI(phase) {
         }
     }
 
-    if (!isOutbound) {
+    if (MobileState.uturn.totalPhotos === 0 && !MobileState.uturn.startLegChosen) {
+        if (guidanceBar) guidanceBar.className = "uturn-guidance-bar";
+        if (guidanceIcon) guidanceIcon.textContent = "🚶";
+        if (instruction) instruction.innerHTML = "Tap Take Photo to choose starting side and begin.";
+        if (turnaroundCallout) turnaroundCallout.style.display = "none";
+        if (returnMatchBanner) returnMatchBanner.style.display = "none";
+    } else if (!isOutbound) {
         if (guidanceBar) guidanceBar.className = "uturn-guidance-bar return-mode";
         if (guidanceIcon) guidanceIcon.textContent = "↩️";
         if (instruction) instruction.innerHTML = `Walking back: snap all <strong>${phase}S</strong>.`;
@@ -2299,17 +2287,23 @@ function applyUturnPhaseUI(phase) {
     } else {
         if (guidanceBar) guidanceBar.className = "uturn-guidance-bar";
         if (guidanceIcon) guidanceIcon.textContent = "🚶";
-        if (instruction) instruction.innerHTML = `Snap all <strong>${phase}S</strong> walking out.`;
+        if (instruction) instruction.innerHTML = `Walking out: snap all <strong>${phase}S</strong>.`;
 
         if (returnMatchBanner) returnMatchBanner.style.display = "none";
         if (turnaroundCallout) {
             turnaroundCallout.style.display = (outboundCount > 0) ? "flex" : "none";
+            const turnaroundLabel = document.getElementById("turnaround-btn-label");
+            if (turnaroundLabel) {
+                turnaroundLabel.textContent = `Turn Around ➔ Switch to ${phase === "REAR" ? "Fronts" : "Rears"}`;
+            }
         }
     }
 
     if (shutter) {
         shutter.classList.remove("shutter-step-rear", "shutter-rear", "shutter-step-front", "shutter-front");
-        if (phase === "FRONT") {
+        if (MobileState.uturn.totalPhotos === 0 && !MobileState.uturn.startLegChosen) {
+            shutter.classList.add("shutter-step-rear");
+        } else if (phase === "FRONT") {
             shutter.classList.add("shutter-step-front");
         } else {
             shutter.classList.add("shutter-step-rear");
@@ -2317,8 +2311,12 @@ function applyUturnPhaseUI(phase) {
     }
     if (shutterIcon) shutterIcon.textContent = "📸";
     if (shutterText) {
-        const count = (phase === "REAR") ? MobileState.uturn.rearCount : MobileState.uturn.frontCount;
-        shutterText.textContent = `Snap ${phase === "REAR" ? "Rear" : "Front"} #${count + 1}`;
+        if (MobileState.uturn.totalPhotos === 0 && !MobileState.uturn.startLegChosen) {
+            shutterText.textContent = "Take Photo";
+        } else {
+            const count = (phase === "REAR") ? MobileState.uturn.rearCount : MobileState.uturn.frontCount;
+            shutterText.textContent = `Snap ${phase === "REAR" ? "Rear" : "Front"} #${count + 1}`;
+        }
     }
 }
 
@@ -2329,6 +2327,7 @@ function saveUturnSessionState() {
             walkSessionId: MobileState.uturn.walkSessionId,
             batchIndex: MobileState.uturn.batchIndex,
             startLeg: MobileState.uturn.startLeg || "REAR",
+            startLegChosen: MobileState.uturn.startLegChosen || false,
             phase: MobileState.uturn.phase,
             rearCount: MobileState.uturn.rearCount,
             frontCount: MobileState.uturn.frontCount,
@@ -2358,6 +2357,7 @@ async function loadUturnSessionFromStorage() {
         MobileState.uturn.walkSessionId = saved.walkSessionId;
         MobileState.uturn.batchIndex = saved.batchIndex || getInitialUturnBatchIndex();
         MobileState.uturn.startLeg = saved.startLeg || "REAR";
+        MobileState.uturn.startLegChosen = saved.startLegChosen !== undefined ? saved.startLegChosen : (saved.totalPhotos > 0);
         MobileState.uturn.phase = saved.phase || MobileState.uturn.startLeg;
         MobileState.uturn.rearCount = saved.rearCount || 0;
         MobileState.uturn.frontCount = saved.frontCount || 0;
@@ -2516,7 +2516,9 @@ function updateUturnShutterCounter() {
     if (totalElem) totalElem.textContent = total;
 
     if (shutterText) {
-        if (MobileState.uturn.phase === "REAR") {
+        if (total === 0 && !MobileState.uturn.startLegChosen) {
+            shutterText.textContent = "Take Photo";
+        } else if (MobileState.uturn.phase === "REAR") {
             shutterText.textContent = `Snap Rear #${rears + 1}`;
         } else {
             shutterText.textContent = `Snap Front #${fronts + 1}`;
@@ -2525,7 +2527,9 @@ function updateUturnShutterCounter() {
 
     if (shutter) {
         shutter.classList.remove("shutter-step-rear", "shutter-rear", "shutter-step-front", "shutter-front");
-        if (MobileState.uturn.phase === "FRONT") {
+        if (total === 0 && !MobileState.uturn.startLegChosen) {
+            shutter.classList.add("shutter-step-rear");
+        } else if (MobileState.uturn.phase === "FRONT") {
             shutter.classList.add("shutter-step-front");
         } else {
             shutter.classList.add("shutter-step-rear");
@@ -2534,28 +2538,6 @@ function updateUturnShutterCounter() {
 
     if (btnAbort) {
         btnAbort.style.display = (total > 0) ? "inline-flex" : "none";
-    }
-
-    // Direction Lock Badge & Buttons
-    const lockBadge = document.getElementById("uturn-lock-badge");
-    const btnStartRear = document.getElementById("btn-start-rear");
-    const btnStartFront = document.getElementById("btn-start-front");
-    if (lockBadge) {
-        if (total > 0) {
-            lockBadge.textContent = `🔒 Start: ${startLeg === "REAR" ? "Rear" : "Front"}`;
-            lockBadge.style.color = "#38bdf8";
-            lockBadge.style.background = "rgba(56,189,248,0.18)";
-            lockBadge.style.border = "1px solid rgba(56,189,248,0.4)";
-            if (btnStartRear) btnStartRear.style.opacity = "0.5";
-            if (btnStartFront) btnStartFront.style.opacity = "0.5";
-        } else {
-            lockBadge.textContent = "🔓 Unlocked";
-            lockBadge.style.color = "#94a3b8";
-            lockBadge.style.background = "rgba(255,255,255,0.08)";
-            lockBadge.style.border = "none";
-            if (btnStartRear) btnStartRear.style.opacity = "1";
-            if (btnStartFront) btnStartFront.style.opacity = "1";
-        }
     }
 
     // Road step titles
@@ -2903,6 +2885,8 @@ async function abortUturnBatch() {
     MobileState.uturn.totalPhotos = 0;
     MobileState.uturn.recentTiles = [];
     MobileState.uturn.phase = "REAR";
+    MobileState.uturn.startLeg = "REAR";
+    MobileState.uturn.startLegChosen = false;
 
     const strip = document.getElementById("uturn-recent-strip");
     if (strip) strip.innerHTML = '<div class="empty-strip-msg">Snapped photos will appear here</div>';
@@ -3028,6 +3012,8 @@ async function finishUturnBatch() {
         MobileState.uturn.totalPhotos = 0;
         MobileState.uturn.recentTiles = [];
         MobileState.uturn.phase = "REAR";
+        MobileState.uturn.startLeg = "REAR";
+        MobileState.uturn.startLegChosen = false;
 
         const strip = document.getElementById("uturn-recent-strip");
         if (strip) strip.innerHTML = '<div class="empty-strip-msg">Snapped photos will appear here</div>';

@@ -208,14 +208,12 @@ body {
     font-weight: 800;
 }
 
-/* Batch Capacity Progress Bar */
-.batch-capacity-bar {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 8px 16px;
-    background: var(--ug-black-surface);
-    border-bottom: 1px solid var(--ug-border);
+/* Batch Capacity Progress Bar - Completely hidden per UX requirements */
+.batch-capacity-bar,
+#batch-capacity-bar,
+.batch-rollover-banner,
+#batch-rollover-banner {
+    display: none !important;
 }
 
 .batch-capacity-info {

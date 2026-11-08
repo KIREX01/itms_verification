@@ -27,7 +27,7 @@
     <meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'core/logos/android-chrome-512x512.png' %}">
     <meta property="og:type" content="website">
 
-    <link rel="stylesheet" href="{% static 'core/css/mobile_companion.css' %}?v=28">
+    <link rel="stylesheet" href="{% static 'core/css/mobile_companion.css' %}?v=29">
 </head>
 <body>
     <!-- Top National Flag Ribbon -->
@@ -61,18 +61,6 @@
                 <a href="#" id="btn-switch-to-https" style="display:inline-block; padding:5px 12px; background:#eab308; color:#0f172a; font-weight:bold; font-size:0.75rem; border-radius:6px; text-decoration:none;">Switch to Secure HTTPS (Port 443) ➔</a>
             </div>
         </div>
-
-        <!-- Active Batch Capacity & Rollover (Silent background rollover) -->
-        <div class="batch-capacity-bar" id="batch-capacity-bar" style="display:none;">
-            <div class="batch-capacity-info">
-                <span class="batch-label-tag" id="mobile-batch-label">📦 {{ active_batch_label|default:"Mobile Batch #1" }}</span>
-                <span class="batch-limit-pill" id="mobile-batch-limit-pill"></span>
-            </div>
-            <div class="batch-progress-track">
-                <div class="batch-progress-fill" id="mobile-batch-progress-fill" style="width: 0%;"></div>
-            </div>
-        </div>
-        <div class="batch-rollover-banner" id="batch-rollover-banner" style="display:none;"></div>
 
         <!-- Mode Selector Switch -->
         <div class="mode-selector-bar">
@@ -220,25 +208,9 @@
                 </div>
             </div>
 
-            <!-- Starting Leg Direction Selector with Batch Lock -->
-            <div class="uturn-start-selector-box" id="uturn-start-selector-box" style="margin-bottom:10px; background:rgba(15,23,42,0.9); border:1px solid rgba(56,189,248,0.3); border-radius:10px; padding:8px 12px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                    <span style="font-size:0.75rem; font-weight:800; color:#38bdf8; text-transform:uppercase;">Start With:</span>
-                    <span id="uturn-lock-badge" class="badge" style="background:rgba(255,255,255,0.08); color:#94a3b8; font-size:0.68rem; padding:2px 8px; border-radius:4px;">🔓 Unlocked</span>
-                </div>
-                <div class="uturn-direction-toggle" style="display:flex; gap:8px;">
-                    <button type="button" class="btn-direction-pill active" id="btn-start-rear" onclick="setUturnStartLeg('REAR')" style="flex:1; padding:6px 10px; font-size:0.8rem; font-weight:700; border-radius:6px; border:1px solid #10b981; background:#064e3b; color:#ffffff; cursor:pointer;">
-                        🏍️ Rear First
-                    </button>
-                    <button type="button" class="btn-direction-pill" id="btn-start-front" onclick="setUturnStartLeg('FRONT')" style="flex:1; padding:6px 10px; font-size:0.8rem; font-weight:700; border-radius:6px; border:1px solid rgba(255,255,255,0.15); background:transparent; color:#94a3b8; cursor:pointer;">
-                        🛡️ Front First
-                    </button>
-                </div>
-            </div>
-
-            <!-- Visual U-Turn Progress Road -->
+            <!-- 1. Photo Count Section -->
             <div class="uturn-flow-road" style="margin-bottom:8px;">
-                <div class="road-step road-step-rear active" id="road-step-rear" onclick="safeSwitchLeg('REAR')" style="cursor:pointer;" title="Tap to switch leg">
+                <div class="road-step road-step-rear active" id="road-step-rear" style="cursor:pointer;" onclick="safeSwitchLeg('REAR')">
                     <div class="road-step-top">
                         <span class="step-num">1</span>
                         <span class="road-badge" id="road-rear-badge">0 Rears</span>
@@ -248,7 +220,7 @@
 
                 <div class="road-arrow" id="road-arrow-indicator">➔</div>
 
-                <div class="road-step road-step-front" id="road-step-front" onclick="safeSwitchLeg('FRONT')" style="cursor:pointer;" title="Tap to switch leg">
+                <div class="road-step road-step-front" id="road-step-front" style="cursor:pointer;" onclick="safeSwitchLeg('FRONT')">
                     <div class="road-step-top">
                         <span class="step-num">2</span>
                         <span class="road-badge" id="road-front-badge">0 Fronts</span>
@@ -257,37 +229,37 @@
                 </div>
             </div>
 
-            <!-- Active Phase Guidance Bar -->
-            <div class="uturn-guidance-bar" id="uturn-guidance-bar" style="margin-bottom:10px;">
+            <!-- 2. Instructions on Direction of Taking Photos -->
+            <div class="uturn-guidance-bar" id="uturn-guidance-bar" style="margin-bottom:12px;">
                 <span class="guidance-icon" id="uturn-guidance-icon">🚶</span>
                 <span class="guidance-text" id="uturn-instruction-text">
-                    Snap all <strong>REARS</strong> walking out.
+                    Tap Take Photo to choose starting side and begin.
                 </span>
             </div>
 
-            <!-- Primary Shutter Button (Harmonized with Conveyor styling) -->
+            <!-- 3. Button for Taking Photos -->
             <div class="smart-shutter-container" style="margin-bottom:10px;">
-                <button class="smart-shutter-btn shutter-step-rear" id="btn-big-shutter" onclick="triggerUturnCapture()">
+                <button type="button" class="smart-shutter-btn shutter-step-rear" id="btn-big-shutter" onclick="handleUturnShutterClick()">
                     <span class="smart-shutter-icon" id="shutter-icon">📸</span>
-                    <span class="smart-shutter-title" id="shutter-main-text">Snap Rear #1</span>
+                    <span class="smart-shutter-title" id="shutter-main-text">Take Photo</span>
                 </button>
             </div>
 
-            <!-- Prominent Turnaround Callout Card (Visible when outbound >= 1) -->
+            <!-- 4. Switch to Take the Other Side (Turn Around) -->
             <div class="turnaround-callout-card" id="turnaround-callout" style="display:none; margin-bottom:10px;">
-                <button type="button" class="btn-turnaround-action" id="btn-turnaround" onclick="confirmTurnaround()" style="width:100%; padding:10px; border-radius:10px; font-weight:800; font-size:0.88rem; background:linear-gradient(135deg, #f59e0b, #d97706); color:#000000; border:none; cursor:pointer; display:flex; justify-content:center; align-items:center; gap:8px;">
-                    <span>Turn Around ➔ Snap Fronts</span>
+                <button type="button" class="btn-turnaround-action" id="btn-turnaround" onclick="confirmTurnaround()" style="width:100%; padding:11px; border-radius:10px; font-weight:800; font-size:0.9rem; background:linear-gradient(135deg, #f59e0b, #d97706); color:#000000; border:none; cursor:pointer; display:flex; justify-content:center; align-items:center; gap:8px;">
+                    <span id="turnaround-btn-label">Turn Around ➔ Switch to Fronts</span>
                     <span class="turnaround-arrow">↩️</span>
                 </button>
             </div>
 
-            <!-- Return Leg Match Tracking Banner (Visible during Return Leg) -->
+            <!-- Return Leg Switch Back Banner -->
             <div class="return-match-banner" id="return-match-banner" style="display:none; margin-bottom:10px; justify-content:space-between; align-items:center;">
                 <div class="match-info">
                     <span id="return-match-text">0 of 0 matched</span>
                     <span class="match-percent" id="return-match-percent">0%</span>
                 </div>
-                <button type="button" class="btn-switch-back" onclick="confirmSwitchBack()" style="background:rgba(255,255,255,0.15); color:#ffffff; border:1px solid rgba(255,255,255,0.3); border-radius:6px; padding:4px 10px; font-size:0.75rem; font-weight:700; cursor:pointer;">
+                <button type="button" class="btn-switch-back" onclick="confirmSwitchBack()" style="background:rgba(255,255,255,0.15); color:#ffffff; border:1px solid rgba(255,255,255,0.3); border-radius:6px; padding:5px 12px; font-size:0.75rem; font-weight:700; cursor:pointer;">
                     ↩️ Switch back to Rears
                 </button>
             </div>
@@ -735,7 +707,29 @@
         </div>
     </div>
 
+    <!-- Start Leg Direction Prompt Modal (Triggered by Take Photo on new walk) -->
+    <div class="start-leg-modal" id="start-leg-modal" style="display:none; position:fixed; inset:0; z-index:99999; background:rgba(0,0,0,0.85); backdrop-filter:blur(6px); align-items:center; justify-content:center; padding:16px;" onclick="if(event.target===this) closeStartLegModal();">
+        <div style="background:#1e293b; border:1px solid rgba(56,189,248,0.4); border-radius:14px; max-width:340px; width:100%; padding:22px 18px; text-align:center; box-shadow:0 12px 36px rgba(0,0,0,0.7);">
+            <div style="font-size:2rem; margin-bottom:6px;">🚶</div>
+            <h3 style="font-size:1.1rem; font-weight:800; color:#ffffff; margin:0 0 6px 0;">Choose Starting Side</h3>
+            <p style="font-size:0.78rem; color:#94a3b8; margin:0 0 16px 0;">Which side of the motorcycles will you photograph first walking out?</p>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+                <button type="button" onclick="chooseStartLegAndCapture('REAR')" style="padding:14px; border-radius:10px; border:2px solid #10b981; background:linear-gradient(135deg, #10b981, #059669); color:#ffffff; font-weight:800; font-size:0.95rem; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
+                    <span>🏍️ REAR First</span>
+                    <span style="font-size:0.72rem; opacity:0.85;">(Rears ➔ Fronts)</span>
+                </button>
+                <button type="button" onclick="chooseStartLegAndCapture('FRONT')" style="padding:14px; border-radius:10px; border:2px solid #38bdf8; background:linear-gradient(135deg, #0284c7, #0369a1); color:#ffffff; font-weight:800; font-size:0.95rem; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
+                    <span>🛡️ FRONT First</span>
+                    <span style="font-size:0.72rem; opacity:0.85;">(Fronts ➔ Rears)</span>
+                </button>
+                <button type="button" onclick="closeStartLegModal()" style="margin-top:6px; background:transparent; border:none; color:#64748b; font-size:0.8rem; cursor:pointer; padding:6px;">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Client-Side Engine -->
-    <script src="{% static 'core/js/mobile_companion.js' %}?v=28"></script>
+    <script src="{% static 'core/js/mobile_companion.js' %}?v=29"></script>
 </body>
 </html>

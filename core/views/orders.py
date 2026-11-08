@@ -941,7 +941,33 @@ def api_itms_sync_now(request: HttpRequest) -> JsonResponse:
             "daemon_status": daemon_status,
         })
 
-    if tab in ("shift", "both", "today", "all"):
+    if tab in ("all", "everything"):
+        sync_pages = max(1, min(50, pages if pages > 1 else 25))
+        res_shift = sync_svc.sync_shift_scoped(target_date=target_date, force=True, max_pages=sync_pages)
+        res_kits = sync_svc.sync_installation_kits_scoped(max_pages=sync_pages, force=True)
+        act = res_shift.get("active", {})
+        arc = res_shift.get("archive", {})
+        total_created = act.get("created", 0) + arc.get("created", 0) + res_kits.get("created", 0)
+        total_updated = act.get("updated", 0) + arc.get("updated", 0) + res_kits.get("updated", 0)
+        total_fetched = act.get("total_active_seen", 0) + arc.get("total_fetched", 0) + res_kits.get("total_fetched", 0)
+        total_installed = arc.get("installed_verified", 0)
+        return JsonResponse({
+            "success": True,
+            "created": total_created,
+            "updated": total_updated,
+            "installed_verified": total_installed,
+            "total_fetched": total_fetched,
+            "active_seen": act.get("total_active_seen", 0),
+            "archive_seen": arc.get("total_fetched", 0),
+            "kits_seen": res_kits.get("total_fetched", 0),
+            "kits_created": res_kits.get("created", 0),
+            "kits_updated": res_kits.get("updated", 0),
+            "target_date": res_shift.get("target_date", "today"),
+            "message": f"ITMS Sync complete: {total_created} created, {total_updated} updated across orders, archive & kits.",
+            "daemon_status": daemon_status,
+        })
+
+    if tab in ("shift", "both", "today"):
         shift_pages = max(1, min(50, pages if pages > 1 else 25))
         res = sync_svc.sync_shift_scoped(target_date=target_date, force=True, max_pages=shift_pages)
         act = res.get("active", {})

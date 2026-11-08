@@ -232,17 +232,12 @@ function switchItmsSubview(subview) {
     const viewConnect = document.getElementById("itms-view-connect");
     const viewOrders = document.getElementById("itms-view-orders");
     const subviewControls = document.getElementById("itms-subview-controls");
-    const autoSyncKitsBtn = document.getElementById("btn-itms-auto-sync-kits");
     const thead = document.getElementById("itms-explorer-thead");
 
     if (btnConnect) btnConnect.classList.toggle("active", subview === "CONNECT");
     if (btnOrders) btnOrders.classList.toggle("active", subview === "ORDERS");
     if (btnArchive) btnArchive.classList.toggle("active", subview === "ARCHIVE");
     if (btnKits) btnKits.classList.toggle("active", subview === "KITS");
-
-    if (autoSyncKitsBtn) {
-        autoSyncKitsBtn.style.display = (subview === "KITS") ? "inline-block" : "none";
-    }
 
     if (thead) {
         if (subview === "KITS") {
@@ -285,10 +280,8 @@ function switchItmsSubview(subview) {
 }
 
 function setItmsExplorerSource(src) {
-    itmsExplorerSource = src;
+    itmsExplorerSource = "live";
     itmsExplorerPage = 1;
-    document.getElementById("itms-src-live-btn").classList.toggle("active", src === "live");
-    document.getElementById("itms-src-local-btn").classList.toggle("active", src === "local");
     fetchItmsExplorerOrders();
 }
 
@@ -313,6 +306,7 @@ function changeItmsExplorerPage(delta) {
 }
 
 async function fetchItmsExplorerOrders() {
+    itmsExplorerSource = "live";
     let tabName = "active";
     if (itmsCurrentSubview === "KITS") {
         tabName = "kits";
@@ -323,15 +317,17 @@ async function fetchItmsExplorerOrders() {
     const tbody = document.getElementById("itms-explorer-tbody");
     const labelKind = (tabName === "kits") ? "installation kits" : `${tabName} orders`;
     tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--ug-text-muted);">
-        Fetching ${labelKind} from ${itmsExplorerSource.toUpperCase()}...
+        Fetching live ${labelKind} from ITMS...
     </td></tr>`;
 
     const sourceTag = document.getElementById("itms-explorer-source-tag");
-    sourceTag.innerText = (itmsExplorerSource === "live") ? "Live ITMS" : "Local DB";
-    sourceTag.className = (itmsExplorerSource === "live") ? "badge badge-yellow" : "badge badge-green";
+    if (sourceTag) {
+        sourceTag.innerText = "Live ITMS";
+        sourceTag.className = "badge badge-yellow";
+    }
 
     try {
-        const url = `/api/itms/orders/?tab=${encodeURIComponent(tabName)}&source=${encodeURIComponent(itmsExplorerSource)}&page=${itmsExplorerPage}&search=${encodeURIComponent(itmsExplorerSearch)}`;
+        const url = `/api/itms/orders/?tab=${encodeURIComponent(tabName)}&source=live&page=${itmsExplorerPage}&search=${encodeURIComponent(itmsExplorerSearch)}`;
         const res = await fetch(url);
         const data = await res.json();
 
@@ -1168,25 +1164,63 @@ function getCsrfToken() {
         || (document.querySelector('[name=csrfmiddlewaretoken]')?.value || '');
 }
 
-async function syncItmsShiftOrders() {
-    const btn = document.getElementById("btn-itms-sync-shift");
-    const origText = btn ? btn.innerHTML : "⚡ Sync Shift Orders";
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = "⏳ Syncing Shift...";
+/**
+ * Centralized one-tap refresh for ITMS Tab.
+ * Reloads session status, active bonded facilities, live order/archive/kit records, and selected order telematics.
+ */
+async function refreshItmsTab() {
+    const icon = document.getElementById("itms-refresh-icon");
+    const btn = document.getElementById("btn-itms-central-refresh");
+    if (icon) icon.classList.add("spin-animation");
+    if (btn) btn.disabled = true;
+
+    try {
+        const p1 = (typeof fetchItmsStatus === "function") ? fetchItmsStatus(true) : Promise.resolve();
+        const p2 = (typeof loadOperatingBonds === "function") ? loadOperatingBonds() : Promise.resolve();
+        let p3 = Promise.resolve();
+        if (itmsCurrentSubview !== "CONNECT") {
+            p3 = fetchItmsExplorerOrders();
+        }
+        await Promise.allSettled([p1, p2, p3]);
+
+        if (selectedItmsOrder && itmsCurrentSubview !== "CONNECT" && typeof selectItmsOrder === "function") {
+            selectItmsOrder(selectedItmsOrder);
+        }
+        if (typeof showToast === "function") {
+            showToast("✓ Refreshed ITMS live records.", "info");
+        }
+    } catch (err) {
+        console.warn("Error refreshing ITMS tab:", err);
+    } finally {
+        if (icon) icon.classList.remove("spin-animation");
+        if (btn) btn.disabled = false;
     }
+}
+
+/**
+ * Consolidated Single-Button Synchronization for ITMS.
+ * Syncs shift orders (active + archive) and installation kits in one unified background pass.
+ */
+async function syncItmsAll() {
+    const btn = document.getElementById("btn-itms-sync-all");
+    const icon = document.getElementById("itms-sync-icon");
+    const text = document.getElementById("itms-sync-text");
+    const origText = text ? text.innerText : "Sync ITMS";
+    if (btn) btn.disabled = true;
+    if (icon) icon.classList.add("spin-animation");
+    if (text) text.innerText = "Syncing ITMS...";
 
     if (typeof appendConsoleLog === "function") {
-        appendConsoleLog("Starting comprehensive shift synchronization (active queue + completed archive)...", "info");
+        appendConsoleLog("Starting unified ITMS synchronization (orders, archive, and kits)...", "info");
     }
     if (typeof showToast === "function") {
-        showToast("⏳ Synchronizing active orders and shift archive from ITMS...", "info");
+        showToast("⏳ Synchronizing ITMS shift orders, archive & installation kits...", "info");
     }
 
     try {
         const csrf = getCsrfToken();
         const targetDate = (window.activeShiftDateInfo && window.activeShiftDateInfo.suffix) ? window.activeShiftDateInfo.suffix : "";
-        const bodyPayload = `tab=shift&pages=25${targetDate ? '&target_date=' + encodeURIComponent(targetDate) : ''}`;
+        const bodyPayload = `tab=all&pages=25${targetDate ? '&target_date=' + encodeURIComponent(targetDate) : ''}`;
         const res = await fetch("/api/itms/orders/sync/now/", {
             method: "POST",
             headers: {
@@ -1197,127 +1231,48 @@ async function syncItmsShiftOrders() {
         });
         const data = await res.json();
         if (data.success) {
-            const msg = `✓ ${data.message || "Shift sync completed successfully."}`;
+            const msg = `✓ ${data.message || "ITMS sync completed successfully."}`;
             if (typeof showToast === "function") showToast(msg, "success");
             if (typeof appendConsoleLog === "function") appendConsoleLog(msg, "success");
-            fetchStats();
-            fetchItmsExplorerOrders();
+            if (typeof fetchStats === "function") fetchStats();
             if (typeof fetchReportTotals === "function") fetchReportTotals();
+            await refreshItmsTab();
         } else {
-            const err = data.error || data.message || "Shift sync failed";
+            const err = data.error || data.message || "ITMS sync failed.";
             if (typeof showToast === "function") showToast(err, "error");
-            if (typeof appendConsoleLog === "function") appendConsoleLog(`Shift sync error: ${err}`, "error");
+            if (typeof appendConsoleLog === "function") appendConsoleLog(`ITMS sync error: ${err}`, "error");
         }
     } catch (err) {
-        if (typeof showToast === "function") showToast("Error during shift sync: " + err, "error");
+        if (typeof showToast === "function") showToast("Error during ITMS sync: " + err, "error");
     } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = origText;
-        }
+        if (btn) btn.disabled = false;
+        if (icon) icon.classList.remove("spin-animation");
+        if (text) text.innerText = origText;
     }
+}
+
+async function syncItmsShiftOrders() {
+    return syncItmsAll();
 }
 
 async function syncCurrentItmsPage() {
-    const btn = document.getElementById("btn-itms-sync-page");
-    const origText = btn ? btn.innerHTML : "📥 Sync Page to DB";
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = "⏳ Syncing...";
-    }
-
-    let tabName = "active";
-    if (itmsCurrentSubview === "KITS") {
-        tabName = "kits";
-    } else if (itmsCurrentSubview === "ARCHIVE") {
-        tabName = "archive";
-    }
-
-    const labelKind = (tabName === "kits") ? "installation kits" : `${tabName} orders`;
-    if (typeof appendConsoleLog === "function") appendConsoleLog(`Starting live synchronization of ${labelKind} (page ${itmsExplorerPage})...`, "info");
-
-    try {
-        const csrf = getCsrfToken();
-        const res = await fetch("/api/itms/orders/sync/now/", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-                "X-CSRFToken": csrf,
-            },
-            body: `tab=${encodeURIComponent(tabName)}&pages=1`,
-        });
-        const data = await res.json();
-        if (data.success) {
-            showToast(data.message, "success");
-            if (typeof appendConsoleLog === "function") appendConsoleLog(`Sync complete: ${data.message}`, "success");
-            fetchStats();
-            fetchItmsExplorerOrders();
-            if (typeof fetchReportTotals === "function") fetchReportTotals();
-        } else {
-            showToast(data.error || data.message || "Sync failed", "error");
-        }
-    } catch (err) {
-        showToast("Sync error: " + err, "error");
-    } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = origText;
-        }
-    }
+    return syncItmsAll();
 }
 
 async function autoSyncAllItmsKits() {
-    const btn = document.getElementById("btn-itms-auto-sync-kits");
-    if (btn) {
-        btn.disabled = true;
-        btn.innerText = "⏳ Crawling All 20+ Pages...";
-    }
-    if (typeof appendConsoleLog === "function") {
-        appendConsoleLog("Starting multi-page auto-sync of all installation kits from stock.itms.ug...", "info");
-    }
-    if (typeof showToast === "function") {
-        showToast("⏳ Crawling and synchronizing all installation kits pages from ITMS...", "info");
-    }
-
-    try {
-        const csrf = getCsrfToken();
-        const res = await fetch("/api/itms/orders/sync/now/", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-                "X-CSRFToken": csrf,
-            },
-            body: "tab=kits&pages=30",
-        });
-        const data = await res.json();
-        if (data.success) {
-            const msg = `✓ Synced ${data.total_fetched || 0} kits (${data.created || 0} new, ${data.updated || 0} updated) across ${data.pages_fetched || 0} pages!`;
-            if (typeof showToast === "function") showToast(msg, "success");
-            if (typeof appendConsoleLog === "function") appendConsoleLog(msg, "success");
-            fetchItmsExplorerOrders();
-            if (typeof fetchReportTotals === "function") fetchReportTotals();
-        } else {
-            if (typeof showToast === "function") showToast(data.error || "Auto-sync kits failed.", "error");
-        }
-    } catch (err) {
-        if (typeof showToast === "function") showToast("Error during auto-sync kits: " + err, "error");
-    } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.innerText = "⚡ Auto-Sync Kits (All Pages)";
-        }
-    }
+    return syncItmsAll();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
     loadOperatingBonds();
 });
 
-
 // Explicit window attachment to guarantee availability across subviews
-window.syncItmsShiftOrders = syncItmsShiftOrders;
-window.syncCurrentItmsPage = syncCurrentItmsPage;
-window.autoSyncAllItmsKits = autoSyncAllItmsKits;
+window.refreshItmsTab = refreshItmsTab;
+window.syncItmsAll = syncItmsAll;
+window.syncItmsShiftOrders = syncItmsAll;
+window.syncCurrentItmsPage = syncItmsAll;
+window.autoSyncAllItmsKits = syncItmsAll;
 
 window.openItmsOrderDetailsModal = openItmsOrderDetailsModal;
 window.openCurrentOrderInModal = openCurrentOrderInModal;

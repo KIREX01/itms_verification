@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch, MagicMock
 from django.test import TestCase, Client
 from django.contrib.auth.models import User
 from django.urls import reverse
@@ -264,4 +265,40 @@ class ITMSTabDetailsTestCase(TestCase):
         self.assertEqual(matched.get("rear_tracker"), "8ADC47222222")
         self.assertEqual(matched.get("gps_tracker"), "8BAE47333333")
         self.assertEqual(matched.get("status"), "New")
+
+    @patch("core.views.orders.get_web_client")
+    @patch("core.services.order_sync.OrderSyncService")
+    def test_api_itms_sync_now_all_tab(self, mock_sync_svc_cls, mock_get_web_client):
+        """POST /api/itms/orders/sync/now/ with tab=all executes both shift sync and kits sync."""
+        mock_client = MagicMock()
+        mock_client.session_store.session.is_cookie_valid.return_value = True
+        mock_get_web_client.return_value = mock_client
+
+        mock_svc_inst = MagicMock()
+        mock_svc_inst.sync_shift_scoped.return_value = {
+            "success": True,
+            "target_date": "08.11.2026",
+            "active": {"created": 2, "updated": 3, "total_active_seen": 15},
+            "archive": {"created": 1, "updated": 4, "installed_verified": 5, "total_fetched": 20},
+        }
+        mock_svc_inst.sync_installation_kits_scoped.return_value = {
+            "success": True,
+            "created": 5,
+            "updated": 10,
+            "total_fetched": 45,
+            "pages_fetched": 3,
+        }
+        mock_sync_svc_cls.return_value = mock_svc_inst
+
+        res = self.client.post(reverse("core:api_itms_sync_now"), {"tab": "all", "pages": "25"})
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["created"], 8)  # 2 + 1 + 5
+        self.assertEqual(data["updated"], 17) # 3 + 4 + 10
+        self.assertEqual(data["total_fetched"], 80) # 15 + 20 + 45
+        self.assertIn("ITMS Sync complete", data["message"])
+        mock_svc_inst.sync_shift_scoped.assert_called_once()
+        mock_svc_inst.sync_installation_kits_scoped.assert_called_once()
+
 

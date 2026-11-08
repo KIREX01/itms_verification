@@ -121,34 +121,21 @@
             </div>
         </div>
 
-        <!-- Action Controls & Synchronization Bar (Shown in ORDERS, ARCHIVE, KITS) -->
+        <!-- Action Controls & Synchronization Bar (Single Tap Sync & Refresh, Always Live ITMS) -->
         <div class="itms-action-controls-bar" id="itms-subview-controls" style="display:none;">
-            <div class="itms-subnav-strip" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-                <div class="itms-source-toggle">
-                    <button type="button" class="itms-source-btn active" id="itms-src-live-btn" onclick="setItmsExplorerSource('live')">⚡ Live ITMS</button>
-                    <button type="button" class="itms-source-btn" id="itms-src-local-btn" onclick="setItmsExplorerSource('local')">💾 Local DB</button>
-                </div>
-                <button type="button" class="mobile-filter-funnel-btn" id="btn-itms-filter-funnel" onclick="toggleMobileFilterPanel('itms-filter-drawer', this)" title="Open search and synchronization actions" aria-label="Toggle Filters">
-                    <svg class="funnel-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
-                    <span>Sync Actions</span>
+            <div class="itms-central-actions-strip">
+                <button type="button" class="btn btn-warning itms-central-btn" id="btn-itms-sync-all" onclick="syncItmsAll()" title="Synchronize shift orders, archive records, and installation kits from ITMS">
+                    <span id="itms-sync-icon">⚡</span>
+                    <span id="itms-sync-text">Sync ITMS</span>
+                </button>
+                <button type="button" class="btn btn-secondary itms-central-btn" id="btn-itms-central-refresh" onclick="refreshItmsTab()" title="Reload ITMS session, warehouse, and records">
+                    <span id="itms-refresh-icon">🔄</span>
+                    <span id="itms-refresh-text">Refresh</span>
                 </button>
             </div>
-
-            <div class="collapsible-filter-drawer" id="itms-filter-drawer">
-                <div class="itms-sync-actions-group">
-                    <button type="button" class="btn btn-warning itms-action-btn" id="btn-itms-sync-shift" onclick="syncItmsShiftOrders()" title="Synchronize all active orders and completed archive orders for current work shift">
-                        <span>⚡</span> <span>Sync Shift Orders</span>
-                    </button>
-                    <button type="button" class="btn btn-warning itms-action-btn" id="btn-itms-auto-sync-kits" onclick="autoSyncAllItmsKits()" style="display:none;" title="Auto-sync all 20+ pages of installation kits from ITMS into local database">
-                        <span>⚡</span> <span>Auto-Sync Kits</span>
-                    </button>
-                    <button type="button" class="btn btn-primary itms-action-btn" id="btn-itms-sync-page" onclick="syncCurrentItmsPage()" title="Sync current page into local database">
-                        <span>⬇️</span> <span>Sync Page</span>
-                    </button>
-                    <button type="button" class="btn btn-secondary itms-action-btn" id="btn-itms-refresh" onclick="fetchItmsExplorerOrders()" title="Refresh registry records">
-                        <span>🔄</span> <span>Refresh</span>
-                    </button>
-                </div>
+            <div class="itms-live-badge-wrap">
+                <span class="live-pulse-dot"></span>
+                <span class="itms-live-label">LIVE ITMS</span>
             </div>
         </div>
 
@@ -164,15 +151,15 @@
                 <div style="font-size:0.82rem; color:rgba(255,255,255,0.85); line-height:1.5;" id="itms-account-details">
                     Connect your ITMS credentials to enable installation order lookup and evidence verification.
                 </div>
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-top:4px; padding:8px 12px; background:rgba(255,255,255,0.03); border:1px solid var(--ug-border); border-radius:var(--radius-md);">
-                    <div style="font-size:0.75rem; color:rgba(255,255,255,0.85); font-weight:600;">Active Operating Bond:</div>
-                    <span class="badge badge-secondary" id="itms-connect-bond-badge" style="font-weight:700; color:#ffffff;">AGM Bonded Warehouse (AGM)</span>
+                <div class="itms-connect-bond-row">
+                    <span class="itms-connect-bond-label">Active Operating Bond:</span>
+                    <span class="badge badge-secondary" id="itms-connect-bond-badge">AGM Bonded Warehouse (AGM)</span>
                 </div>
-                <div style="background-color:rgba(252,220,4,0.08); border:1px solid rgba(252,220,4,0.25); border-radius:var(--radius-md); padding:12px; font-size:0.8rem; color:#ffffff; line-height:1.4;">
+                <div class="itms-portal-notice">
                     🇺🇬 <strong>Official Ugandan Fitment Portal:</strong> All session tokens are encrypted locally and communication adheres to authenticated session protocols.
                 </div>
                 <div style="margin-top:auto;">
-                    <button type="button" class="btn btn-danger" id="btn-disconnect-itms-view" onclick="disconnectItms()" style="display:none; width:100%; justify-content:center;">
+                    <button type="button" class="btn btn-danger" id="btn-disconnect-itms-view" onclick="disconnectItms()" style="display:none; width:100%; justify-content:center; min-height:42px;">
                         Disconnect Account
                     </button>
                 </div>
@@ -185,11 +172,11 @@
                 </div>
                 <div class="form-field">
                     <label>Operating Facility / Bonded Warehouse</label>
-                    <div style="display:flex; gap:8px;">
-                        <select id="itms-select-bond" class="form-select" style="flex:1;" onchange="onBondSelectionChanged()">
+                    <div class="itms-connect-select-wrap">
+                        <select id="itms-select-bond" class="form-select itms-connect-select" onchange="onBondSelectionChanged()">
                             <option value="AGM">AGM Bonded Warehouse (AGM)</option>
                         </select>
-                        <button type="button" class="btn btn-secondary" onclick="typeof syncBondsFromITMS === 'function' ? syncBondsFromITMS() : loadOperatingBonds()" style="padding:0 12px; font-size:0.85rem;" title="Fetch latest bonded facilities from ITMS">🔄</button>
+                        <button type="button" class="btn btn-secondary itms-connect-btn-icon" onclick="typeof syncBondsFromITMS === 'function' ? syncBondsFromITMS() : loadOperatingBonds()" title="Fetch latest bonded facilities from ITMS">🔄</button>
                     </div>
                     <span style="font-size:0.72rem; color:rgba(255,255,255,0.7);">Orders from other facilities are strictly isolated to protect local floor counts.</span>
                 </div>
@@ -199,21 +186,21 @@
                 </div>
                 <div class="form-field">
                     <label>Operator Username / Email</label>
-                    <input type="text" id="itms-input-email" placeholder="e.g. operator@example.com">
+                    <input type="text" id="itms-input-email" placeholder="e.g. operator@example.com" autocomplete="username">
                 </div>
                 <div class="form-field">
                     <label>Password</label>
-                    <input type="password" id="itms-input-password" placeholder="Enter ITMS portal password">
+                    <input type="password" id="itms-input-password" placeholder="Enter ITMS portal password" autocomplete="current-password">
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <input type="checkbox" id="itms-remember-chk" checked style="accent-color:var(--ug-yellow);">
-                    <label for="itms-remember-chk" style="font-size:0.8rem; color:rgba(255,255,255,0.85); font-weight:600;">Remember Session (30 Days Cookie)</label>
+                    <input type="checkbox" id="itms-remember-chk" checked style="accent-color:var(--ug-yellow); width:18px; height:18px;">
+                    <label for="itms-remember-chk" style="font-size:0.82rem; color:rgba(255,255,255,0.85); font-weight:600; cursor:pointer;">Remember Session (30 Days Cookie)</label>
                 </div>
-                <div style="display:flex; gap:10px; margin-top:8px;">
-                    <button type="button" class="btn btn-primary" id="btn-submit-itms-connect" onclick="submitItmsCredentials()" style="flex:1; justify-content:center;">
+                <div class="itms-connect-btn-group">
+                    <button type="button" class="btn btn-primary itms-connect-submit-btn" id="btn-submit-itms-connect" onclick="submitItmsCredentials()">
                         Connect &amp; Sign In
                     </button>
-                    <button type="button" class="btn btn-secondary" onclick="loadOperatingBonds(true)" style="padding:8px 12px;" title="Test and reload bonded warehouses">
+                    <button type="button" class="btn btn-secondary itms-connect-test-btn" onclick="loadOperatingBonds(true)" title="Test and reload bonded warehouses">
                         Test Connection
                     </button>
                 </div>

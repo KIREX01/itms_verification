@@ -145,6 +145,8 @@ const MobileState = {
         scanHistory: [],
         recentScansCooldown: new Map(), // plate -> timestamp
         isSyncing: false,
+        isProcessingScan: false, // SAFE LINK: locks scanner until current plate is fully processed & displayed
+        idleTimer: null,
         autoSync: localStorage.getItem("itms_mobile_auto_sync") !== "false",
         cameraStream: null,
         cameraFacing: "environment",
@@ -156,6 +158,38 @@ const MobileState = {
         barcodeDetector: null,
     }
 };
+
+// ============================================================================
+// Global Mobile Toast Notification Component
+// ============================================================================
+function showMobileToast(message, isWarning = false) {
+    let toast = document.getElementById("mobile-toast");
+    if (!toast) {
+        toast = document.createElement("div");
+        toast.id = "mobile-toast";
+        toast.style.position = "fixed";
+        toast.style.bottom = "80px";
+        toast.style.left = "50%";
+        toast.style.transform = "translateX(-50%)";
+        toast.style.padding = "10px 18px";
+        toast.style.borderRadius = "20px";
+        toast.style.fontSize = "0.85rem";
+        toast.style.fontWeight = "bold";
+        toast.style.zIndex = "99999";
+        toast.style.boxShadow = "0 4px 14px rgba(0,0,0,0.5)";
+        toast.style.transition = "opacity 0.3s ease";
+        toast.style.pointerEvents = "none";
+        document.body.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.style.background = isWarning ? "#ef4444" : "#10b981";
+    toast.style.color = "#ffffff";
+    toast.style.opacity = "1";
+    if (window._mobileToastTimer) clearTimeout(window._mobileToastTimer);
+    window._mobileToastTimer = setTimeout(() => {
+        if (toast) toast.style.opacity = "0";
+    }, 2800);
+}
 
 // ============================================================================
 // IndexedDB Local Storage (Zero Data Loss Outbox)
@@ -817,6 +851,18 @@ function playScanBeep(success = true) {
     }
 }
 
+function resetStockIdleTimer() {
+    if (MobileState.stock.idleTimer) clearTimeout(MobileState.stock.idleTimer);
+    MobileState.stock.idleTimer = setTimeout(() => {
+        if (MobileState.stock.isScanning) {
+            stopStockCameraScanner();
+            if (typeof showMobileToast === "function") {
+                showMobileToast("⏸ Camera paused after 3 minutes idle. Tap Start to resume.", true);
+            }
+        }
+    }, 180000);
+}
+
 async function toggleStockCameraScanner() {
     if (MobileState.stock.isScanning) {
         stopStockCameraScanner();
@@ -878,6 +924,8 @@ async function startStockCameraScanner() {
             }).catch(() => {});
         }
         MobileState.stock.isScanning = true;
+        MobileState.stock.isProcessingScan = false;
+        resetStockIdleTimer();
 
         if (video) {
             video.srcObject = stream;
@@ -918,7 +966,15 @@ async function startStockCameraScanner() {
         showMobileToast("📷 Camera scanner active. Point at plate QR or barcode.");
     } catch (err) {
         console.error("Camera access error:", err);
-        alert(`Cannot access camera: ${err.message || err.name}. Please ensure camera permission is granted.`);
+        let errorMsg = `Cannot access camera: ${err.message || err.name}.`;
+        if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+            errorMsg = "Camera permission was denied. Please allow camera access in your browser settings (tap the lock icon 🔒 in the address bar).";
+        } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+            errorMsg = "No camera found on this device. You can use the manual plate input below.";
+        } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
+            errorMsg = "Camera is currently locked by another tab or app. Please close other camera apps and try again.";
+        }
+        alert(errorMsg);
         if (btnToggle) {
             btnToggle.disabled = false;
             btnToggle.style.background = "";
@@ -929,18 +985,26 @@ async function startStockCameraScanner() {
 }
 
 function stopStockCameraScanner() {
+    if (MobileState.stock.idleTimer) {
+        clearTimeout(MobileState.stock.idleTimer);
+        MobileState.stock.idleTimer = null;
+    }
+
     if (MobileState.stock.scanLoopId) {
         cancelAnimationFrame(MobileState.stock.scanLoopId);
         MobileState.stock.scanLoopId = null;
     }
 
     if (MobileState.stock.cameraStream) {
-        MobileState.stock.cameraStream.getTracks().forEach(track => track.stop());
+        MobileState.stock.cameraStream.getTracks().forEach(track => {
+            try { track.stop(); } catch(e){}
+        });
         MobileState.stock.cameraStream = null;
     }
 
     MobileState.stock.isScanning = false;
     MobileState.stock.torchActive = false;
+    MobileState.stock.isProcessingScan = false;
 
     const viewport = document.getElementById("stock-camera-viewport");
     const video = document.getElementById("stock-scanner-video");
@@ -965,6 +1029,18 @@ function stopStockCameraScanner() {
         btnToggle.innerHTML = "<span>📷 Start Camera Scanner</span>";
     }
 }
+
+// Ensure camera stops cleanly when navigating away or switching apps
+document.addEventListener("visibilitychange", () => {
+    if (document.hidden && MobileState.stock && MobileState.stock.isScanning) {
+        stopStockCameraScanner();
+    }
+});
+window.addEventListener("pagehide", () => {
+    if (MobileState.stock && MobileState.stock.isScanning) {
+        stopStockCameraScanner();
+    }
+});
 
 function toggleStockTorch() {
     if (!MobileState.stock.cameraStream) return;
@@ -1002,6 +1078,12 @@ function startStockScanLoop() {
     async function tick(timestamp) {
         if (!MobileState.stock.isScanning) return;
 
+        // SAFE LINK: If previous scan is still processing network round-trip, skip frame detection
+        if (MobileState.stock.isProcessingScan) {
+            MobileState.stock.scanLoopId = requestAnimationFrame(tick);
+            return;
+        }
+
         // Throttle detection loop to every 100ms (10 scans/sec)
         // Eliminates CPU thermal throttling and frame drops on mobile devices
         if (timestamp - lastDetectTick >= 100 && video.readyState === video.HAVE_ENOUGH_DATA && !isDetecting) {
@@ -1012,8 +1094,8 @@ function startStockScanLoop() {
                     const barcodes = await MobileState.stock.barcodeDetector.detect(video);
                     if (barcodes && barcodes.length > 0) {
                         const raw = barcodes[0].rawValue;
-                        if (raw) {
-                            handleStockBarcodeDetected(raw);
+                        if (raw && !MobileState.stock.isProcessingScan) {
+                            await handleStockBarcodeDetected(raw);
                         }
                     }
                 } else if (canvas) {
@@ -1024,8 +1106,8 @@ function startStockScanLoop() {
                     if (window.jsQR) {
                         const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                         const code = window.jsQR(imgData.data, imgData.width, imgData.height);
-                        if (code && code.data) {
-                            handleStockBarcodeDetected(code.data);
+                        if (code && code.data && !MobileState.stock.isProcessingScan) {
+                            await handleStockBarcodeDetected(code.data);
                         }
                     }
                 }
@@ -1079,241 +1161,260 @@ async function handleStockBarcodeDetected(rawCode) {
     const cleanPlate = extractPlateFromScannedCode(rawCode);
     if (!cleanPlate || cleanPlate.length < 3) return;
 
-    const now = Date.now();
+    // SAFE LINK: Lock scanner until this scan result is completely fetched, verified and displayed
+    if (MobileState.stock.isProcessingScan) return;
+    MobileState.stock.isProcessingScan = true;
+    resetStockIdleTimer();
 
-    // 1. Per-Plate Debounce Cooldown: 1800ms
-    const lastSeen = MobileState.stock.recentScansCooldown.get(cleanPlate) || 0;
-    if (now - lastSeen < 1800) {
-        return;
-    }
+    const hintElem = document.getElementById("stock-scan-hint");
+    if (hintElem) hintElem.textContent = "⏳ Processing scan... Please wait";
 
-    const isOutboundDispatch = (MobileState.stock.subMode === "DISPATCH");
-    const isAlreadySynced = MobileState.stock.syncedSessionPlates.has(cleanPlate);
-    const isBlocked = isOutboundDispatch && MobileState.stock.blockedPlates.includes(cleanPlate);
+    try {
+        const now = Date.now();
 
-    // 2. Duplicate Detection:
-    if (isAlreadySynced) {
+        // 1. Per-Plate Debounce Cooldown: 1800ms
+        const lastSeen = MobileState.stock.recentScansCooldown.get(cleanPlate) || 0;
+        if (now - lastSeen < 1800) {
+            return;
+        }
+
+        const isOutboundDispatch = (MobileState.stock.subMode === "DISPATCH");
+        const isAlreadySynced = MobileState.stock.syncedSessionPlates.has(cleanPlate);
+        const isBlocked = isOutboundDispatch && MobileState.stock.blockedPlates.includes(cleanPlate);
+
+        // 2. Duplicate Detection:
+        if (isAlreadySynced) {
+            MobileState.stock.recentScansCooldown.set(cleanPlate, now);
+            showScanDetectionBanner(`DUPLICATE: ${cleanPlate}`, true);
+            playScanBeep(false);
+            if (navigator.vibrate) navigator.vibrate([140, 70, 140]);
+            showMobileToast(`⚠️ Plate ${cleanPlate} already processed & synced!`, true);
+            return;
+        }
+
+        // Debounce blocked alert if scanned within 5 seconds
+        if (isOutboundDispatch && isBlocked && (now - lastSeen < 5000)) {
+            MobileState.stock.recentScansCooldown.set(cleanPlate, now);
+            showScanDetectionBanner(`NOT ON STOCK: ${cleanPlate}`, true);
+            playScanBeep(false);
+            if (navigator.vibrate) navigator.vibrate([140, 70, 140]);
+            showMobileToast(`⚠️ Plate ${cleanPlate} is NOT ON STOCK! (Set aside)`, true);
+            return;
+        }
+
         MobileState.stock.recentScansCooldown.set(cleanPlate, now);
-        showScanDetectionBanner(`DUPLICATE: ${cleanPlate}`, true);
-        playScanBeep(false);
-        if (navigator.vibrate) navigator.vibrate([140, 70, 140]);
-        showMobileToast(`⚠️ Plate ${cleanPlate} already processed & synced!`, true);
-        return;
-    }
+        const category = MobileState.stock.category || "PSV";
+        const suffix = MobileState.stock.shiftSuffix || "";
 
-    // Debounce blocked alert if scanned within 5 seconds
-    if (isOutboundDispatch && isBlocked && (now - lastSeen < 5000)) {
-        MobileState.stock.recentScansCooldown.set(cleanPlate, now);
-        showScanDetectionBanner(`NOT ON STOCK: ${cleanPlate}`, true);
-        playScanBeep(false);
-        if (navigator.vibrate) navigator.vibrate([140, 70, 140]);
-        showMobileToast(`⚠️ Plate ${cleanPlate} is NOT ON STOCK! (Set aside)`, true);
-        return;
-    }
+        // 3. Mode Handling:
+        if (isOutboundDispatch) {
+            // DISPATCH: Requires Stock Inspection Check first!
+            updateMobileStockStatusBadge(cleanPlate, { badge: "⏳ CHECKING...", desc: "Verifying warehouse stock profile...", code: "CHECKING" }, category, false);
 
-    MobileState.stock.recentScansCooldown.set(cleanPlate, now);
-    const category = MobileState.stock.category || "PSV";
-    const suffix = MobileState.stock.shiftSuffix || "";
+            try {
+                const inspectRes = await fetch(`/api/stock/inspect/?plate=${encodeURIComponent(cleanPlate)}&date_suffix=${encodeURIComponent(suffix)}&check_itms_live=true`);
+                const inspectData = await inspectRes.json();
 
-    // 3. Mode Handling:
-    if (isOutboundDispatch) {
-        // DISPATCH: Requires Stock Inspection Check first!
-        updateMobileStockStatusBadge(cleanPlate, { badge: "⏳ CHECKING...", desc: "Verifying warehouse stock profile...", code: "CHECKING" }, category, false);
-
-        try {
-            const inspectRes = await fetch(`/api/stock/inspect/?plate=${encodeURIComponent(cleanPlate)}&date_suffix=${encodeURIComponent(suffix)}&check_itms_live=true`);
-            const inspectData = await inspectRes.json();
-
-            if (inspectData.success) {
-                if (inspectData.date_suffix) {
-                    MobileState.stock.shiftSuffix = inspectData.date_suffix;
-                }
-                const isItemBlocked = Boolean(inspectData.is_blocked);
-
-                if (isItemBlocked) {
-                    // NOT ON STOCK
-                    playScanBeep(false);
-                    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-                    if (!MobileState.stock.blockedPlates.includes(cleanPlate)) {
-                        MobileState.stock.blockedPlates.push(cleanPlate);
+                if (inspectData.success) {
+                    if (inspectData.date_suffix) {
+                        MobileState.stock.shiftSuffix = inspectData.date_suffix;
                     }
-                    updateMobileStockStatusBadge(cleanPlate, { badge: "🔴 NOT ON STOCK", desc: "Not found in warehouse stock. Set physical box aside!", code: "NOT_ON_STOCK" }, category, true);
+                    const isItemBlocked = Boolean(inspectData.is_blocked);
+
+                    if (isItemBlocked) {
+                        // NOT ON STOCK
+                        playScanBeep(false);
+                        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+                        if (!MobileState.stock.blockedPlates.includes(cleanPlate)) {
+                            MobileState.stock.blockedPlates.push(cleanPlate);
+                        }
+                        updateMobileStockStatusBadge(cleanPlate, { badge: "🔴 NOT ON STOCK", desc: "Not found in warehouse stock. Set physical box aside!", code: "NOT_ON_STOCK" }, category, true);
+
+                        MobileState.stock.scanHistory.unshift({
+                            plate: cleanPlate,
+                            category: category,
+                            status: "NOT_ON_STOCK",
+                            statusBadge: "🔴 Not On Stock",
+                            badgeClass: "badge-red",
+                            timestamp: now,
+                            desc: "Not found in warehouse stock. Set physical box aside!"
+                        });
+
+                        saveStockQueueToStorage();
+                        renderBlockedPlatesTray();
+                        renderStockActivityFeed();
+                        updateScannerStats();
+                        showMobileToast(`🚫 Plate ${cleanPlate} NOT ON STOCK! Set physical box aside!`, true);
+                        return;
+                    }
+
+                    // Plate is in stock! Send direct dispatch to server
+                    if (isBlocked && !isItemBlocked) {
+                        MobileState.stock.blockedPlates = MobileState.stock.blockedPlates.filter(p => p !== cleanPlate);
+                    }
+                }
+            } catch (err) {
+                console.warn("Stock inspection network fallback:", err);
+            }
+
+            // Direct Outbound Dispatch API Call
+            try {
+                const dispatchRes = await fetch("/api/stock/dispatch/", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        plates: [cleanPlate],
+                        plate_category: category,
+                        date_suffix: suffix,
+                        operator_name: MobileState.deviceName,
+                        auto_create_kits: true,
+                        check_itms_live: true
+                    })
+                });
+                const dispatchData = await dispatchRes.json();
+
+                if (dispatchData.success) {
+                    playScanBeep(true);
+                    if (navigator.vibrate) navigator.vibrate(60);
+
+                    MobileState.stock.syncedSessionPlates.add(cleanPlate);
+                    MobileState.stock.blockedPlates = MobileState.stock.blockedPlates.filter(p => p !== cleanPlate);
+
+                    updateMobileStockStatusBadge(cleanPlate, { badge: "🟢 DISPATCHED", desc: "Dispatched to line", code: "DISPATCHED" }, category, false);
 
                     MobileState.stock.scanHistory.unshift({
                         plate: cleanPlate,
                         category: category,
-                        status: "NOT_ON_STOCK",
-                        statusBadge: "🔴 Not On Stock",
-                        badgeClass: "badge-red",
+                        status: "DISPATCHED",
+                        statusBadge: "🟢 Dispatched",
+                        badgeClass: "badge-green",
                         timestamp: now,
-                        desc: "Not found in warehouse stock. Set physical box aside!"
+                        desc: "Dispatched to line"
                     });
 
                     saveStockQueueToStorage();
                     renderBlockedPlatesTray();
                     renderStockActivityFeed();
                     updateScannerStats();
-                    showMobileToast(`🚫 Plate ${cleanPlate} NOT ON STOCK! Set physical box aside!`, true);
-                    return;
-                }
+                    showMobileToast(`✓ Dispatched ${cleanPlate}`);
+                } else {
+                    // Server rejection
+                    const blocked = dispatchData.rejected_not_on_stock || dispatchData.blocked_plates || [];
+                    if (blocked.length > 0) {
+                        blocked.forEach(p => {
+                            if (!MobileState.stock.blockedPlates.includes(p)) {
+                                MobileState.stock.blockedPlates.push(p);
+                            }
+                        });
+                        playScanBeep(false);
+                        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+                        updateMobileStockStatusBadge(cleanPlate, { badge: "🔴 NOT ON STOCK", desc: "Rejected: not on stock", code: "NOT_ON_STOCK" }, category, true);
 
-                // Plate is in stock! Send direct dispatch to server
-                if (isBlocked && !isItemBlocked) {
-                    MobileState.stock.blockedPlates = MobileState.stock.blockedPlates.filter(p => p !== cleanPlate);
+                        MobileState.stock.scanHistory.unshift({
+                            plate: cleanPlate,
+                            category: category,
+                            status: "NOT_ON_STOCK",
+                            statusBadge: "🔴 Not On Stock",
+                            badgeClass: "badge-red",
+                            timestamp: now,
+                            desc: "Server rejected: not on stock"
+                        });
+
+                        saveStockQueueToStorage();
+                        renderBlockedPlatesTray();
+                        renderStockActivityFeed();
+                        updateScannerStats();
+                        showMobileToast(`🚫 BLOCKED: Plate ${cleanPlate} NOT ON STOCK! Set box aside!`, true);
+                    } else {
+                        playScanBeep(false);
+                        showMobileToast(dispatchData.error || "Dispatch failed", true);
+                    }
                 }
+            } catch (err) {
+                playScanBeep(false);
+                showMobileToast(`Connection offline: ${err.message}`, true);
             }
-        } catch (err) {
-            console.warn("Stock inspection network fallback:", err);
-        }
 
-        // Direct Outbound Dispatch API Call
-        try {
-            const dispatchRes = await fetch("/api/stock/dispatch/", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
+        } else {
+            // NON-DISPATCH (DELIVERY, RETURN, AUDIT): No stock check required!
+            let endpoint = "/api/stock/delivery/";
+            let payload = {
+                plates: [cleanPlate],
+                delivery_number: `DEL-MOB-${Date.now().toString(36).toUpperCase()}`,
+                plate_category: category,
+                date_suffix: suffix,
+                operator_name: MobileState.deviceName,
+                auto_create_kits: true
+            };
+
+            if (MobileState.stock.subMode === "RETURN") {
+                endpoint = "/api/stock/return/";
+                payload = {
                     plates: [cleanPlate],
-                    plate_category: category,
+                    reason: "LINE_ROLLOVER",
                     date_suffix: suffix,
                     operator_name: MobileState.deviceName,
-                    auto_create_kits: true,
-                    check_itms_live: true
-                })
-            });
-            const dispatchData = await dispatchRes.json();
+                    notes: "Mobile Companion uninstalled plates return"
+                };
+            } else if (MobileState.stock.subMode === "AUDIT") {
+                endpoint = "/api/stock/audit/";
+                payload = {
+                    plates: [cleanPlate],
+                    date_suffix: suffix,
+                    operator_name: MobileState.deviceName,
+                    notes: "Mobile safe room physical audit"
+                };
+            }
 
-            if (dispatchData.success) {
-                playScanBeep(true);
-                if (navigator.vibrate) navigator.vibrate(60);
-
-                MobileState.stock.syncedSessionPlates.add(cleanPlate);
-                MobileState.stock.blockedPlates = MobileState.stock.blockedPlates.filter(p => p !== cleanPlate);
-
-                updateMobileStockStatusBadge(cleanPlate, { badge: "🟢 DISPATCHED", desc: "Dispatched to line", code: "DISPATCHED" }, category, false);
-
-                MobileState.stock.scanHistory.unshift({
-                    plate: cleanPlate,
-                    category: category,
-                    status: "DISPATCHED",
-                    statusBadge: "🟢 Dispatched",
-                    badgeClass: "badge-green",
-                    timestamp: now,
-                    desc: "Dispatched to line"
+            try {
+                const resp = await fetch(endpoint, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
                 });
+                const data = await resp.json();
 
-                saveStockQueueToStorage();
-                renderBlockedPlatesTray();
-                renderStockActivityFeed();
-                updateScannerStats();
-                showMobileToast(`✓ Dispatched ${cleanPlate}`);
-            } else {
-                // Server rejection
-                const blocked = dispatchData.rejected_not_on_stock || dispatchData.blocked_plates || [];
-                if (blocked.length > 0) {
-                    blocked.forEach(p => {
-                        if (!MobileState.stock.blockedPlates.includes(p)) {
-                            MobileState.stock.blockedPlates.push(p);
-                        }
-                    });
-                    playScanBeep(false);
-                    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-                    updateMobileStockStatusBadge(cleanPlate, { badge: "🔴 NOT ON STOCK", desc: "Rejected: not on stock", code: "NOT_ON_STOCK" }, category, true);
+                if (data.success) {
+                    playScanBeep(true);
+                    if (navigator.vibrate) navigator.vibrate(60);
+
+                    MobileState.stock.syncedSessionPlates.add(cleanPlate);
+
+                    const statusLabel = MobileState.stock.subMode === "DELIVERY" ? "🟢 Delivered" : MobileState.stock.subMode === "RETURN" ? "↩️ Returned" : "🔒 Audited";
+                    updateMobileStockStatusBadge(cleanPlate, { badge: statusLabel, desc: `${MobileState.stock.subMode} recorded` }, category, false);
 
                     MobileState.stock.scanHistory.unshift({
                         plate: cleanPlate,
                         category: category,
-                        status: "NOT_ON_STOCK",
-                        statusBadge: "🔴 Not On Stock",
-                        badgeClass: "badge-red",
+                        status: MobileState.stock.subMode,
+                        statusBadge: statusLabel,
+                        badgeClass: "badge-green",
                         timestamp: now,
-                        desc: "Server rejected: not on stock"
+                        desc: `${MobileState.stock.subMode} recorded`
                     });
 
                     saveStockQueueToStorage();
-                    renderBlockedPlatesTray();
                     renderStockActivityFeed();
                     updateScannerStats();
-                    showMobileToast(`🚫 BLOCKED: Plate ${cleanPlate} NOT ON STOCK! Set box aside!`, true);
+                    showMobileToast(`✓ ${MobileState.stock.subMode}: ${cleanPlate}`);
                 } else {
                     playScanBeep(false);
-                    showMobileToast(dispatchData.error || "Dispatch failed", true);
+                    showMobileToast(data.error || "Operation failed", true);
                 }
-            }
-        } catch (err) {
-            playScanBeep(false);
-            showMobileToast(`Connection offline: ${err.message}`, true);
-        }
-
-    } else {
-        // NON-DISPATCH (DELIVERY, RETURN, AUDIT): No stock check required!
-        let endpoint = "/api/stock/delivery/";
-        let payload = {
-            plates: [cleanPlate],
-            delivery_number: `DEL-MOB-${Date.now().toString(36).toUpperCase()}`,
-            plate_category: category,
-            date_suffix: suffix,
-            operator_name: MobileState.deviceName,
-            auto_create_kits: true
-        };
-
-        if (MobileState.stock.subMode === "RETURN") {
-            endpoint = "/api/stock/return/";
-            payload = {
-                plates: [cleanPlate],
-                reason: "LINE_ROLLOVER",
-                date_suffix: suffix,
-                operator_name: MobileState.deviceName,
-                notes: "Mobile Companion uninstalled plates return"
-            };
-        } else if (MobileState.stock.subMode === "AUDIT") {
-            endpoint = "/api/stock/audit/";
-            payload = {
-                plates: [cleanPlate],
-                date_suffix: suffix,
-                operator_name: MobileState.deviceName,
-                notes: "Mobile safe room physical audit"
-            };
-        }
-
-        try {
-            const resp = await fetch(endpoint, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload)
-            });
-            const data = await resp.json();
-
-            if (data.success) {
-                playScanBeep(true);
-                if (navigator.vibrate) navigator.vibrate(60);
-
-                MobileState.stock.syncedSessionPlates.add(cleanPlate);
-
-                const statusLabel = MobileState.stock.subMode === "DELIVERY" ? "🟢 Delivered" : MobileState.stock.subMode === "RETURN" ? "↩️ Returned" : "🔒 Audited";
-                updateMobileStockStatusBadge(cleanPlate, { badge: statusLabel, desc: `${MobileState.stock.subMode} recorded` }, category, false);
-
-                MobileState.stock.scanHistory.unshift({
-                    plate: cleanPlate,
-                    category: category,
-                    status: MobileState.stock.subMode,
-                    statusBadge: statusLabel,
-                    badgeClass: "badge-green",
-                    timestamp: now,
-                    desc: `${MobileState.stock.subMode} recorded`
-                });
-
-                saveStockQueueToStorage();
-                renderStockActivityFeed();
-                updateScannerStats();
-                showMobileToast(`✓ ${MobileState.stock.subMode}: ${cleanPlate}`);
-            } else {
+            } catch (err) {
                 playScanBeep(false);
-                showMobileToast(data.error || "Operation failed", true);
+                showMobileToast(`Connection offline: ${err.message}`, true);
             }
-        } catch (err) {
-            playScanBeep(false);
-            showMobileToast(`Connection offline: ${err.message}`, true);
         }
+    } finally {
+        // Safe link unlock: release lock after 600ms so UI results are fully visible before next scan
+        setTimeout(() => {
+            MobileState.stock.isProcessingScan = false;
+            const hintElem = document.getElementById("stock-scan-hint");
+            if (hintElem && MobileState.stock.isScanning) {
+                hintElem.textContent = "Aim at plate QR or barcode";
+            }
+        }, 600);
     }
 }
 

@@ -3303,9 +3303,15 @@ function clearSelectedMobileOrder() {
     const fInput = document.getElementById("m-order-front-serial");
     const rInput = document.getElementById("m-order-rear-serial");
     const gInput = document.getElementById("m-order-gps-id");
+    const fbInput = document.getElementById("m-order-fb-id");
+    const rbInput = document.getElementById("m-order-rb-id");
+    const oldPlateLabel = document.getElementById("m-order-old-plate-label");
     if (fInput) fInput.value = "";
     if (rInput) rInput.value = "";
     if (gInput) gInput.value = "";
+    if (fbInput) fbInput.value = "";
+    if (rbInput) rbInput.value = "";
+    if (oldPlateLabel) oldPlateLabel.style.display = "none";
 
     resetMobileOrderPhotoDropzone("front");
     resetMobileOrderPhotoDropzone("rear");
@@ -3413,14 +3419,31 @@ async function lookupMobileOrder(targetQuery) {
         const fInput = document.getElementById("m-order-front-serial");
         const rInput = document.getElementById("m-order-rear-serial");
         const gInput = document.getElementById("m-order-gps-id");
+        const fbInput = document.getElementById("m-order-fb-id");
+        const rbInput = document.getElementById("m-order-rb-id");
+        const oldPlateLabel = document.getElementById("m-order-old-plate-label");
 
         const fVal = o.front_plate_serial || (data.step1_form?.front_plate?.selected_text ? data.step1_form.front_plate.selected_text.split(" ")[0] : "") || data.step1_form?.front_plate?.selected_id || "";
         const rVal = o.rear_plate_serial || (data.step1_form?.rear_plate?.selected_text ? data.step1_form.rear_plate.selected_text.split(" ")[0] : "") || data.step1_form?.rear_plate?.selected_id || "";
         const gVal = o.gps_tracker_id || data.step1_form?.tracker?.selected_text || data.step1_form?.tracker?.selected_id || "";
+        const fbVal = o.front_beacon_id || (o.hardware && o.hardware.front_beacon_id) || "";
+        const rbVal = o.rear_beacon_id || (o.hardware && o.hardware.rear_beacon_id) || "";
 
         if (fInput) fInput.value = fVal;
         if (rInput) rInput.value = rVal;
         if (gInput) gInput.value = gVal;
+        if (fbInput) fbInput.value = fbVal;
+        if (rbInput) rbInput.value = rbVal;
+
+        if (oldPlateLabel) {
+            const oldPlateVal = o.old_registration_number || (o.details_json && o.details_json["Old plate number"]);
+            if (oldPlateVal && oldPlateVal !== "---") {
+                oldPlateLabel.innerText = `Old Plate: ${oldPlateVal}`;
+                oldPlateLabel.style.display = "block";
+            } else {
+                oldPlateLabel.style.display = "none";
+            }
+        }
 
         if (data.step1_form) {
             populateMobileHardwareDatalist("m-order-front-options", data.step1_form.front_plate?.options);

@@ -222,6 +222,9 @@ async function disconnectItms() {
 
 function switchItmsSubview(subview) {
     itmsCurrentSubview = subview;
+    const mobBar = document.getElementById("itms-mobile-selected-bar");
+    if (mobBar) mobBar.style.display = "none";
+
     const btnConnect = document.getElementById("btn-sub-connect");
     const btnOrders = document.getElementById("btn-sub-orders");
     const btnArchive = document.getElementById("btn-sub-archive");
@@ -390,14 +393,24 @@ function renderItmsOrdersTable(items) {
 
             return `<tr id="itms-row-${idx}" onclick="selectItmsOrderAtIndex(${idx})">
                 <td><strong style="color:#ffffff !important; font-family:var(--font-mono);">${kitCode}</strong></td>
-                <td><span style="color:#ffffff !important; font-family:var(--font-mono); font-weight:800;">${regPlate}</span></td>
+                <td>
+                    <span style="color:#ffffff !important; font-family:var(--font-mono); font-weight:800;">${regPlate}</span>
+                    <div class="itms-mobile-row-sub">
+                        <span>FP: <code>${frontPlate}</code> • RP: <code>${rearPlate}</code></span>
+                        <span>GPS: <code style="color:#a78bfa;">${gps}</code></span>
+                        <span>Trk: <code style="color:#38bdf8;">${frontTracker || rearTracker}</code></span>
+                    </div>
+                </td>
                 <td class="hide-mobile"><span style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${frontPlate}</span></td>
                 <td class="hide-mobile"><span style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${rearPlate}</span></td>
                 <td class="hide-mobile"><span style="font-family:var(--font-mono); font-size:0.75rem; color:#38bdf8;">${frontTracker}</span></td>
                 <td class="hide-mobile"><span style="font-family:var(--font-mono); font-size:0.75rem; color:#38bdf8;">${rearTracker}</span></td>
                 <td class="hide-mobile"><span style="font-family:var(--font-mono); font-size:0.75rem; color:#a78bfa;">${gps}</span></td>
                 <td class="hide-mobile"><span style="font-size:0.75rem; color:var(--ug-text-muted);">${wh}</span></td>
-                <td><span class="badge ${badgeClass}">${status}</span></td>
+                <td>
+                    <span class="badge ${badgeClass}">${status}</span>
+                    <span class="itms-mobile-chevron">›</span>
+                </td>
                 <td class="hide-mobile"><span style="font-size:0.75rem; color:var(--ug-text-dim);">${created}</span></td>
             </tr>`;
         }).join("");
@@ -415,11 +428,29 @@ function renderItmsOrdersTable(items) {
         const hasPhoto = Boolean(o.has_photos || (o.photos && o.photos.length > 0));
         const photoBadge = hasPhoto ? '<span title="Evidence photos available" style="margin-left:5px; font-size:0.75rem; vertical-align:middle; cursor:pointer;">📷</span>' : '';
 
+        const hw = o.hardware || {};
+        const gpsId = escapeHtml(o.gps_tracker_id || hw.gps_tracker_id || (o.gps_tracker && o.gps_tracker.serial_number) || "");
+        const fbId = escapeHtml(o.front_beacon_id || hw.front_beacon_id || (o.front_beacon && o.front_beacon.serial_number) || "");
+        const rbId = escapeHtml(o.rear_beacon_id || hw.rear_beacon_id || (o.rear_beacon && o.rear_beacon.serial_number) || "");
+        const fpId = escapeHtml(o.front_plate_serial || hw.front_plate_serial || (o.front_plate && o.front_plate.serial_number) || "");
+        const rpId = escapeHtml(o.rear_plate_serial || hw.rear_plate_serial || (o.rear_plate && o.rear_plate.serial_number) || "");
+
         return `<tr id="itms-row-${idx}" onclick="selectItmsOrderAtIndex(${idx})">
             <td><strong style="color:#fff; font-family:var(--font-mono);">${orderNum}</strong></td>
-            <td><span style="color:#ffffff !important; font-family:var(--font-mono); font-weight:800;">${regPlate}</span>${photoBadge}</td>
+            <td>
+                <span style="color:#ffffff !important; font-family:var(--font-mono); font-weight:800;">${regPlate}</span>${photoBadge}
+                <div class="itms-mobile-row-sub">
+                    ${vin && vin !== "---" ? `<span>VIN: <code>${vin}</code></span>` : ""}
+                    ${gpsId ? `<span>GPS: <code style="color:#c084fc;">${gpsId}</code></span>` : ""}
+                    ${fbId || rbId ? `<span>BLE: <code style="color:#38bdf8;">${fbId || rbId}</code></span>` : ""}
+                    ${fpId || rpId ? `<span>Plates: <code>${fpId}</code> / <code>${rpId}</code></span>` : ""}
+                </div>
+            </td>
             <td class="hide-mobile"><span style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${vin}</span></td>
-            <td><span class="badge ${status.toLowerCase().includes('installed') ? 'badge-green' : 'badge-yellow'}">${status}</span></td>
+            <td>
+                <span class="badge ${status.toLowerCase().includes('installed') ? 'badge-green' : 'badge-yellow'}">${status}</span>
+                <span class="itms-mobile-chevron">›</span>
+            </td>
             <td class="hide-mobile"><span style="font-size:0.75rem; color:var(--ug-text-muted);">${wh}</span></td>
             <td class="hide-mobile"><span style="font-size:0.75rem; color:var(--ug-text-muted);">${officer}</span></td>
             <td class="hide-mobile"><span style="font-size:0.75rem; color:var(--ug-text-dim);">${date}</span></td>
@@ -512,180 +543,180 @@ function renderItmsDetailsHtml(order, isKit, isArchive) {
 
         return `
         <!-- Information -->
-        <div class="itms-detail-card" style="margin-bottom:12px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px;">
-            <div style="font-size:0.8rem; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+        <div class="itms-detail-card">
+            <div class="itms-detail-card-title accent-sky">
                 <span>ℹ️</span> Information
             </div>
             <div class="hardware-box" style="padding:0; border:none; background:transparent;">
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Registration number:</span>
                     <span class="hw-val" style="color:#fde047 !important;">${infoReg}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Status:</span>
-                    <span class="badge ${infoStatus.toLowerCase().includes('installed') ? 'badge-blue' : 'badge-green'}">${infoStatus}</span>
+                    <span class="hw-val"><span class="badge ${infoStatus.toLowerCase().includes('installed') ? 'badge-blue' : 'badge-green'}">${infoStatus}</span></span>
                 </div>
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Created by user:</span>
                     <span class="hw-val">${infoUser}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Created date:</span>
                     <span class="hw-val">${infoDate}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0;">
+                <div class="hw-row">
                     <span class="hw-label">Current warehouse:</span>
-                    <span class="hw-val" style="font-size:0.75rem; text-align:right;">${infoWh}</span>
+                    <span class="hw-val itms-val-wrap">${infoWh}</span>
                 </div>
             </div>
         </div>
 
         <!-- Front plate -->
-        <div class="itms-detail-card" style="margin-bottom:12px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px;">
-            <div style="font-size:0.8rem; font-weight:800; color:#ffffff; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+        <div class="itms-detail-card">
+            <div class="itms-detail-card-title accent-sky">
                 <span>🚘</span> Front plate
             </div>
             <div class="hardware-box" style="padding:0; border:none; background:transparent;">
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Article name:</span>
-                    <span class="hw-val" style="font-size:0.76rem; color:#94a3b8 !important;">${fpArticle}</span>
+                    <span class="hw-val itms-val-wrap" style="color:#94a3b8 !important;">${fpArticle}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Serial number:</span>
-                    <span class="hw-val" style="color:#ffffff !important;">${fpSerial}</span>
+                    <span class="hw-val">${fpSerial}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Registration number:</span>
                     <span class="hw-val" style="color:#fde047 !important;">${fpReg}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0;">
+                <div class="hw-row">
                     <span class="hw-label">Current warehouse:</span>
-                    <span class="hw-val" style="font-size:0.75rem; text-align:right;">${fpWh}</span>
+                    <span class="hw-val itms-val-wrap">${fpWh}</span>
                 </div>
             </div>
         </div>
 
         <!-- Rear plate -->
-        <div class="itms-detail-card" style="margin-bottom:12px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px;">
-            <div style="font-size:0.8rem; font-weight:800; color:#ffffff; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+        <div class="itms-detail-card">
+            <div class="itms-detail-card-title accent-sky">
                 <span>🚘</span> Rear plate
             </div>
             <div class="hardware-box" style="padding:0; border:none; background:transparent;">
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Article name:</span>
-                    <span class="hw-val" style="font-size:0.76rem; color:#94a3b8 !important;">${rpArticle}</span>
+                    <span class="hw-val itms-val-wrap" style="color:#94a3b8 !important;">${rpArticle}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Serial number:</span>
-                    <span class="hw-val" style="color:#ffffff !important;">${rpSerial}</span>
+                    <span class="hw-val">${rpSerial}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Registration number:</span>
                     <span class="hw-val" style="color:#fde047 !important;">${rpReg}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0;">
+                <div class="hw-row">
                     <span class="hw-label">Current warehouse:</span>
-                    <span class="hw-val" style="font-size:0.75rem; text-align:right;">${rpWh}</span>
+                    <span class="hw-val itms-val-wrap">${rpWh}</span>
                 </div>
             </div>
         </div>
 
         <!-- GPS tracker -->
-        <div class="itms-detail-card" style="margin-bottom:12px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px;">
-            <div style="font-size:0.8rem; font-weight:800; color:#a78bfa; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+        <div class="itms-detail-card">
+            <div class="itms-detail-card-title accent-purple">
                 <span>🛰️</span> GPS tracker
             </div>
             <div class="hardware-box" style="padding:0; border:none; background:transparent;">
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Article name:</span>
-                    <span class="hw-val" style="color:#94a3b8 !important;">${gpsArticle}</span>
+                    <span class="hw-val itms-val-wrap" style="color:#94a3b8 !important;">${gpsArticle}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Serial number:</span>
                     <span class="hw-val" style="color:#c084fc !important;">${gpsSerial}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">MAC address:</span>
                     <span class="hw-val">${gpsMac || "---"}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0;">
+                <div class="hw-row">
                     <span class="hw-label">Current warehouse:</span>
-                    <span class="hw-val" style="font-size:0.75rem; text-align:right;">${gpsWh}</span>
+                    <span class="hw-val itms-val-wrap">${gpsWh}</span>
                 </div>
             </div>
         </div>
 
         <!-- SIM Card -->
-        <div class="itms-detail-card" style="margin-bottom:12px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px;">
-            <div style="font-size:0.8rem; font-weight:800; color:#f59e0b; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+        <div class="itms-detail-card">
+            <div class="itms-detail-card-title accent-amber">
                 <span>📶</span> SIM Card
             </div>
             <div class="hardware-box" style="padding:0; border:none; background:transparent;">
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Article name:</span>
-                    <span class="hw-val" style="color:#94a3b8 !important;">${simArticle}</span>
+                    <span class="hw-val itms-val-wrap" style="color:#94a3b8 !important;">${simArticle}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Serial number:</span>
                     <span class="hw-val" style="color:#fbbf24 !important;">${simSerial}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">MAC address:</span>
                     <span class="hw-val">${simMac || "---"}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0;">
+                <div class="hw-row">
                     <span class="hw-label">Current warehouse:</span>
-                    <span class="hw-val" style="font-size:0.75rem; text-align:right;">${simWh}</span>
+                    <span class="hw-val itms-val-wrap">${simWh}</span>
                 </div>
             </div>
         </div>
 
         <!-- Front tracker -->
-        <div class="itms-detail-card" style="margin-bottom:12px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px;">
-            <div style="font-size:0.8rem; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+        <div class="itms-detail-card">
+            <div class="itms-detail-card-title accent-sky">
                 <span>📡</span> Front tracker
             </div>
             <div class="hardware-box" style="padding:0; border:none; background:transparent;">
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Article name:</span>
-                    <span class="hw-val" style="color:#94a3b8 !important;">${ftArticle}</span>
+                    <span class="hw-val itms-val-wrap" style="color:#94a3b8 !important;">${ftArticle}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Serial number:</span>
                     <span class="hw-val" style="color:#38bdf8 !important;">${ftSerial}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">MAC address:</span>
                     <span class="hw-val">${ftMac || "---"}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0;">
+                <div class="hw-row">
                     <span class="hw-label">Current warehouse:</span>
-                    <span class="hw-val" style="font-size:0.75rem; text-align:right;">${ftWh}</span>
+                    <span class="hw-val itms-val-wrap">${ftWh}</span>
                 </div>
             </div>
         </div>
 
         <!-- Rear tracker -->
-        <div class="itms-detail-card" style="margin-bottom:12px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px;">
-            <div style="font-size:0.8rem; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+        <div class="itms-detail-card">
+            <div class="itms-detail-card-title accent-sky">
                 <span>📡</span> Rear tracker
             </div>
             <div class="hardware-box" style="padding:0; border:none; background:transparent;">
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Article name:</span>
-                    <span class="hw-val" style="color:#94a3b8 !important;">${rtArticle}</span>
+                    <span class="hw-val itms-val-wrap" style="color:#94a3b8 !important;">${rtArticle}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Serial number:</span>
                     <span class="hw-val" style="color:#38bdf8 !important;">${rtSerial}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">MAC address:</span>
                     <span class="hw-val">${rtMac || "---"}</span>
                 </div>
-                <div class="hw-row" style="padding:5px 0;">
+                <div class="hw-row">
                     <span class="hw-label">Current warehouse:</span>
-                    <span class="hw-val" style="font-size:0.75rem; text-align:right;">${rtWh}</span>
+                    <span class="hw-val itms-val-wrap">${rtWh}</span>
                 </div>
             </div>
         </div>`;
@@ -719,20 +750,20 @@ function renderItmsDetailsHtml(order, isKit, isArchive) {
 
         return `
         <!-- Archive Header Overview -->
-        <div class="itms-detail-card" style="margin-bottom:14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
-            <div style="font-size:0.8rem; font-weight:800; color:#10b981; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+        <div class="itms-detail-card">
+            <div class="itms-detail-card-title accent-green">
                 <span>✅</span> Archive Fitment Overview
             </div>
             <div class="hardware-box" style="padding:0; border:none; background:transparent;">
-                <div class="hw-row" style="padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Installed By:</span>
-                    <span class="hw-val" style="color:#ffffff !important;">${installedBy}</span>
+                    <span class="hw-val">${installedBy}</span>
                 </div>
-                <div class="hw-row" style="padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Installation Warehouse:</span>
-                    <span class="hw-val" style="font-size:0.75rem; text-align:right; color:#ffffff !important;">${warehouse}</span>
+                    <span class="hw-val itms-val-wrap">${warehouse}</span>
                 </div>
-                <div class="hw-row" style="padding:6px 0;">
+                <div class="hw-row">
                     <span class="hw-label">Vehicle VIN/Chassis No.:</span>
                     <span class="hw-val" style="color:#38bdf8 !important;">${vin}</span>
                 </div>
@@ -740,28 +771,28 @@ function renderItmsDetailsHtml(order, isKit, isArchive) {
         </div>
 
         <!-- Details -->
-        <div class="itms-detail-card" style="margin-bottom:14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
-            <div style="font-size:0.8rem; font-weight:800; color:#fde047; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+        <div class="itms-detail-card">
+            <div class="itms-detail-card-title accent-yellow">
                 <span>📋</span> Details
             </div>
             <div class="hardware-box" style="padding:0; border:none; background:transparent;">
-                <div class="hw-row" style="padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Front license plate:</span>
-                    <span class="hw-val" style="font-size:0.75rem; text-align:right; color:#ffffff !important;">${escapeHtml(fpStr)}</span>
+                    <span class="hw-val itms-val-wrap">${escapeHtml(fpStr)}</span>
                 </div>
-                <div class="hw-row" style="padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Rear license plate:</span>
-                    <span class="hw-val" style="font-size:0.75rem; text-align:right; color:#ffffff !important;">${escapeHtml(rpStr)}</span>
+                    <span class="hw-val itms-val-wrap">${escapeHtml(rpStr)}</span>
                 </div>
-                <div class="hw-row" style="padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">GPS Tracker:</span>
                     <span class="hw-val" style="color:#c084fc !important;">${escapeHtml(gpsStr)}</span>
                 </div>
-                <div class="hw-row" style="padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                <div class="hw-row">
                     <span class="hw-label">Front beacon:</span>
                     <span class="hw-val" style="color:#38bdf8 !important;">${escapeHtml(fbStr)}</span>
                 </div>
-                <div class="hw-row" style="padding:6px 0;">
+                <div class="hw-row">
                     <span class="hw-label">Rear beacon:</span>
                     <span class="hw-val" style="color:#38bdf8 !important;">${escapeHtml(rbStr)}</span>
                 </div>
@@ -784,28 +815,28 @@ function renderItmsDetailsHtml(order, isKit, isArchive) {
 
     return `
     <!-- Vehicle Details -->
-    <div class="itms-detail-card" style="margin-bottom:14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
-        <div style="font-size:0.8rem; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+    <div class="itms-detail-card">
+        <div class="itms-detail-card-title accent-sky">
             <span>🚗</span> Vehicle Details
         </div>
         <div class="hardware-box" style="padding:0; border:none; background:transparent;">
-            <div class="hw-row" style="padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+            <div class="hw-row">
                 <span class="hw-label">Vehicle VIN/Chassis No.</span>
-                <span class="hw-val" style="color:#ffffff !important;">${vin}</span>
+                <span class="hw-val">${vin}</span>
             </div>
-            <div class="hw-row" style="padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+            <div class="hw-row">
                 <span class="hw-label">Old plate number</span>
                 <span class="hw-val" style="color:var(--ug-text-dim);">${oldPlate}</span>
             </div>
-            <div class="hw-row" style="padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+            <div class="hw-row">
                 <span class="hw-label">Front License Plate *</span>
-                <span class="hw-val" style="color:#ffffff !important;">${frontPlate}</span>
+                <span class="hw-val">${frontPlate}</span>
             </div>
-            <div class="hw-row" style="padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+            <div class="hw-row">
                 <span class="hw-label">Rear License Plate *</span>
-                <span class="hw-val" style="color:#ffffff !important;">${rearPlate}</span>
+                <span class="hw-val">${rearPlate}</span>
             </div>
-            <div class="hw-row" style="padding:6px 0;">
+            <div class="hw-row">
                 <span class="hw-label">Registration Number</span>
                 <span class="hw-val" style="color:#fde047 !important; font-size:0.95rem; font-weight:900;">${regNum}</span>
             </div>
@@ -813,20 +844,20 @@ function renderItmsDetailsHtml(order, isKit, isArchive) {
     </div>
 
     <!-- Tracker Details -->
-    <div class="itms-detail-card" style="margin-bottom:14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
-        <div style="font-size:0.8rem; font-weight:800; color:#a78bfa; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+    <div class="itms-detail-card">
+        <div class="itms-detail-card-title accent-purple">
             <span>🛰️</span> Tracker Details
         </div>
         <div class="hardware-box" style="padding:0; border:none; background:transparent;">
-            <div class="hw-row" style="padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+            <div class="hw-row">
                 <span class="hw-label">GPS Tracker *</span>
                 <span class="hw-val" style="color:#c084fc !important;">${gpsTracker}</span>
             </div>
-            <div class="hw-row" style="padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+            <div class="hw-row">
                 <span class="hw-label">Front Beacon:</span>
                 <span class="hw-val" style="color:#38bdf8 !important;">${frontBeacon}</span>
             </div>
-            <div class="hw-row" style="padding:6px 0;">
+            <div class="hw-row">
                 <span class="hw-label">Rear Beacon:</span>
                 <span class="hw-val" style="color:#38bdf8 !important;">${rearBeacon}</span>
             </div>
@@ -984,6 +1015,18 @@ async function selectItmsOrder(order, idx) {
     // Update inspector header
     setText("itms-insp-plate", order.registration_number || order.kit_code || "---");
     setText("itms-insp-order", isKit ? (`Kit #${order.kit_code || ''} • ${order.warehouse || 'Warehouse Stock'}`) : (`Order #${order.order_number || ''} • ${order.warehouse || order.warehouse_name || 'Uganda Hub'}`));
+
+    // Update mobile selected record quick bar
+    const mobBar = document.getElementById("itms-mobile-selected-bar");
+    const mobPlate = document.getElementById("itms-mob-plate");
+    const mobOrder = document.getElementById("itms-mob-order");
+    if (mobBar && mobPlate && mobOrder) {
+        mobBar.style.display = "flex";
+        mobPlate.innerText = order.registration_number || order.kit_code || "---";
+        mobOrder.innerText = isKit
+            ? (`Kit #${order.kit_code || ''} • ${order.status || 'New'}`)
+            : (`Order #${order.order_number || ''} • ${order.vin || order.order_status || ''}`);
+    }
 
     // Render inspector details container
     const inspDetailsCont = document.getElementById("itms-insp-details-container");

@@ -410,24 +410,10 @@ def api_itms_orders_explorer(request: HttpRequest) -> JsonResponse:
         local_kits = []
         for k in paged_kits:
             pair = pairs_by_reg.get(k.registration_number) if k.registration_number else None
-
-            local_kits.append({
-                "id": k.id,
-                "kit_code": k.kit_code,
-                "registration_number": k.registration_number,
-                "front_plate": k.front_plate,
-                "rear_plate": k.rear_plate,
-                "front_tracker": k.front_tracker,
-                "rear_tracker": k.rear_tracker,
-                "gps_tracker": k.gps_tracker,
-                "warehouse": k.warehouse,
-                "status": k.status,
-                "created_date": k.created_date,
-                "kit_uuid": k.kit_uuid,
-                "detail_url": k.detail_url,
-                "matched_pair_id": pair.id if pair else None,
-                "verification_status": pair.verification_status if pair else None,
-            })
+            k_dict = k.to_dict()
+            k_dict["matched_pair_id"] = pair.id if pair else None
+            k_dict["verification_status"] = pair.verification_status if pair else None
+            local_kits.append(k_dict)
 
         summary_text = f"Showing {offset + 1} to {min(offset + len(local_kits), total_count)} of {total_count} local kits" if total_count > 0 else "0 kits found"
 
@@ -608,6 +594,7 @@ def api_itms_orders_explorer(request: HttpRequest) -> JsonResponse:
             "order_number": o.order_number,
             "registration_number": o.registration_number,
             "vin": o.vin,
+            "old_registration_number": o.old_registration_number or "",
             "sales_order": o.sales_order,
             "service_type": o.service_type,
             "warehouse": o.warehouse_name,
@@ -632,7 +619,9 @@ def api_itms_orders_explorer(request: HttpRequest) -> JsonResponse:
                 "front_beacon_id": o.front_beacon_id,
                 "rear_beacon_id": o.rear_beacon_id,
                 "front_plate_serial": o.front_plate_serial,
+                "front_plate_type": o.front_plate_type,
                 "rear_plate_serial": o.rear_plate_serial,
+                "rear_plate_type": o.rear_plate_type,
             },
         })
 
@@ -693,6 +682,7 @@ def api_itms_order_detail(request: HttpRequest, order_ident: str) -> JsonRespons
                 defaults = {
                     "registration_number": normalizer.canonicalize(reg_num) or reg_num,
                     "vin": live_info.get("vin") or (order.vin if order else ""),
+                    "old_registration_number": live_info.get("old_registration_number") or (order.old_registration_number if order else ""),
                     "warehouse_name": live_info.get("warehouse") or (order.warehouse_name if order else ""),
                     "installation_officer": live_info.get("installed_by") or (order.installation_officer if order else ""),
                     "front_plate_serial": front_plate.get("serial", ""),
@@ -731,20 +721,62 @@ def api_itms_order_detail(request: HttpRequest, order_ident: str) -> JsonRespons
                 except Exception as exc:
                     logger.debug("Error fetching kit details for %s: %s", kit.kit_uuid, exc)
 
+            fp_data = {
+                "article_name": kit.front_plate_article or kit.details_json.get("front_plate", {}).get("article_name", "PN-PBL-M-UMA-SQR-BWW"),
+                "serial_number": kit.front_plate or kit.details_json.get("front_plate", {}).get("serial_number", ""),
+                "registration_number": kit.registration_number or kit.details_json.get("front_plate", {}).get("registration_number", ""),
+                "current_warehouse": kit.warehouse or kit.details_json.get("front_plate", {}).get("current_warehouse", ""),
+            }
+            rp_data = {
+                "article_name": kit.rear_plate_article or kit.details_json.get("rear_plate", {}).get("article_name", "PN-PBL-M-UMA-SQR-BWW"),
+                "serial_number": kit.rear_plate or kit.details_json.get("rear_plate", {}).get("serial_number", ""),
+                "registration_number": kit.registration_number or kit.details_json.get("rear_plate", {}).get("registration_number", ""),
+                "current_warehouse": kit.warehouse or kit.details_json.get("rear_plate", {}).get("current_warehouse", ""),
+            }
+            gps_data = {
+                "article_name": kit.gps_article or kit.details_json.get("gps_tracker", {}).get("article_name", "GPS"),
+                "serial_number": kit.gps_tracker or kit.details_json.get("gps_tracker", {}).get("serial_number", ""),
+                "mac_address": kit.details_json.get("gps_tracker", {}).get("mac_address", ""),
+                "current_warehouse": kit.warehouse or kit.details_json.get("gps_tracker", {}).get("current_warehouse", ""),
+            }
+            sim_data = {
+                "article_name": kit.sim_article or kit.details_json.get("sim_card", {}).get("article_name", "SIM chip"),
+                "serial_number": kit.sim_serial or kit.details_json.get("sim_card", {}).get("serial_number", ""),
+                "mac_address": kit.sim_mac or kit.details_json.get("sim_card", {}).get("mac_address", ""),
+                "current_warehouse": kit.warehouse or kit.details_json.get("sim_card", {}).get("current_warehouse", ""),
+            }
+            ft_data = {
+                "article_name": kit.front_tracker_article or kit.details_json.get("front_tracker", {}).get("article_name", "BLE"),
+                "serial_number": kit.front_tracker or kit.details_json.get("front_tracker", {}).get("serial_number", ""),
+                "mac_address": kit.front_tracker_mac or kit.details_json.get("front_tracker", {}).get("mac_address", ""),
+                "current_warehouse": kit.warehouse or kit.details_json.get("front_tracker", {}).get("current_warehouse", ""),
+            }
+            rt_data = {
+                "article_name": kit.rear_tracker_article or kit.details_json.get("rear_tracker", {}).get("article_name", "BLE"),
+                "serial_number": kit.rear_tracker or kit.details_json.get("rear_tracker", {}).get("serial_number", ""),
+                "mac_address": kit.rear_tracker_mac or kit.details_json.get("rear_tracker", {}).get("mac_address", ""),
+                "current_warehouse": kit.warehouse or kit.details_json.get("rear_tracker", {}).get("current_warehouse", ""),
+            }
+
             return JsonResponse({
                 "success": True,
                 "is_kit": True,
                 "order": {
                     "id": kit.id,
                     "order_number": kit.kit_code,
+                    "kit_code": kit.kit_code,
                     "registration_number": kit.registration_number,
                     "vin": "---",
+                    "old_registration_number": "",
                     "sales_order": "---",
                     "service_type": "Installation Kit",
                     "warehouse_name": kit.warehouse,
                     "installation_officer": kit.created_by_user or "ITMS Central Stock",
+                    "created_by_user": kit.created_by_user or "Kwoleka Peter",
                     "installation_date": kit.created_date,
+                    "created_date": kit.created_date,
                     "order_status": kit.status,
+                    "status": kit.status,
                     "registration_status": "Stock Kit",
                     "is_archived": False,
                     "itms_stage": "KIT_STOCK",
@@ -754,10 +786,16 @@ def api_itms_order_detail(request: HttpRequest, order_ident: str) -> JsonRespons
                         "front_beacon_id": kit.front_tracker or "None",
                         "rear_beacon_id": kit.rear_tracker or "None",
                         "front_plate_serial": kit.front_plate or "---",
-                        "front_plate_type": kit.front_plate_article or "---",
+                        "front_plate_type": kit.front_plate_article or "PN-PBL-M-UMA-SQR-BWW",
                         "rear_plate_serial": kit.rear_plate or "---",
-                        "rear_plate_type": kit.rear_plate_article or "---",
+                        "rear_plate_type": kit.rear_plate_article or "PN-PBL-M-UMA-SQR-BWW",
                     },
+                    "front_plate": fp_data,
+                    "rear_plate": rp_data,
+                    "gps_tracker": gps_data,
+                    "sim_card": sim_data,
+                    "front_tracker": ft_data,
+                    "rear_tracker": rt_data,
                     "photos": [],
                     "front_photo_url": None,
                     "rear_photo_url": None,
@@ -791,6 +829,7 @@ def api_itms_order_detail(request: HttpRequest, order_ident: str) -> JsonRespons
             "order_number": order.order_number,
             "registration_number": order.registration_number,
             "vin": order.vin,
+            "old_registration_number": order.old_registration_number or "",
             "sales_order": order.sales_order,
             "service_type": order.service_type,
             "warehouse_name": order.warehouse_name,
@@ -806,9 +845,36 @@ def api_itms_order_detail(request: HttpRequest, order_ident: str) -> JsonRespons
                 "front_beacon_id": order.front_beacon_id,
                 "rear_beacon_id": order.rear_beacon_id,
                 "front_plate_serial": order.front_plate_serial,
-                "front_plate_type": order.front_plate_type,
+                "front_plate_type": order.front_plate_type or "PN-PBL-M-UMA-SQR-BWW",
                 "rear_plate_serial": order.rear_plate_serial,
-                "rear_plate_type": order.rear_plate_type,
+                "rear_plate_type": order.rear_plate_type or "PN-PBL-M-UMA-SQR-BWW",
+            },
+            "front_plate": {
+                "article_name": order.front_plate_type or "PN-PBL-M-UMA-SQR-BWW",
+                "serial_number": order.front_plate_serial,
+                "registration_number": order.registration_number,
+                "warehouse": order.warehouse_name,
+            },
+            "rear_plate": {
+                "article_name": order.rear_plate_type or "PN-PBL-M-UMA-SQR-BWW",
+                "serial_number": order.rear_plate_serial,
+                "registration_number": order.registration_number,
+                "warehouse": order.warehouse_name,
+            },
+            "gps_tracker": {
+                "article_name": "GPS",
+                "serial_number": order.gps_tracker_id,
+                "warehouse": order.warehouse_name,
+            },
+            "front_beacon": {
+                "article_name": "BLE",
+                "serial_number": order.front_beacon_id,
+                "warehouse": order.warehouse_name,
+            },
+            "rear_beacon": {
+                "article_name": "BLE",
+                "serial_number": order.rear_beacon_id,
+                "warehouse": order.warehouse_name,
             },
             "photos": order.photos_json or (
                 ([{"label": "Front Plate", "url": order.front_photo_url, "orientation": "FRONT"}] if order.front_photo_url else []) +

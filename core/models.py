@@ -709,6 +709,15 @@ class InstallationKit(models.Model):
             "facility_code": self.facility_code,
             "kit_uuid": self.kit_uuid,
             "detail_url": self.detail_url,
+            "front_plate_article": self.front_plate_article,
+            "rear_plate_article": self.rear_plate_article,
+            "gps_article": self.gps_article,
+            "sim_article": self.sim_article,
+            "front_tracker_article": self.front_tracker_article,
+            "rear_tracker_article": self.rear_tracker_article,
+            "front_tracker_mac": self.front_tracker_mac,
+            "rear_tracker_mac": self.rear_tracker_mac,
+            "details_json": self.details_json,
         }
 
 

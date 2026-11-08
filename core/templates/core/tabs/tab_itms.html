@@ -285,43 +285,23 @@
             <div class="itms-inspector-panel" id="itms-inspector-panel">
                 <div class="inspector-header">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                        <div class="inspector-plate-hero" id="itms-insp-plate">SELECT AN ORDER</div>
+                        <div class="inspector-plate-hero" id="itms-insp-plate">SELECT A RECORD</div>
                         <button type="button" class="btn btn-primary btn-sm" id="btn-itms-insp-quick-install" onclick="openCurrentOrderInInstallModal()" title="Quick Install Order" style="display:none; font-size:0.8rem; font-weight:800; padding:6px 14px; background:#2563eb; border:1px solid #3b82f6; border-radius:6px; color:#ffffff; align-items:center; gap:6px; box-shadow:0 0 10px rgba(37,99,235,0.4); cursor:pointer;">
                             ⚡ Quick Install
                         </button>
                     </div>
-                    <div class="inspector-order-num" id="itms-insp-order">Click an order on the left to inspect telematics &amp; photo links</div>
+                    <div class="inspector-order-num" id="itms-insp-order">Click an item on the left to inspect complete vehicle &amp; telematics details</div>
                 </div>
 
-                <!-- Hardware & Telematics Inventory -->
-                <div>
-                    <div class="inspector-section-title">🛰️ Hardware &amp; Telematics</div>
-                    <div class="hardware-box">
-                        <div class="hw-row">
-                            <span class="hw-label">GPS Tracker:</span>
-                            <span class="hw-val" id="itms-insp-gps">---</span>
-                        </div>
-                        <div class="hw-row">
-                            <span class="hw-label">Front Beacon:</span>
-                            <span class="hw-val" id="itms-insp-fbeacon">---</span>
-                        </div>
-                        <div class="hw-row">
-                            <span class="hw-label">Rear Beacon:</span>
-                            <span class="hw-val" id="itms-insp-rbeacon">---</span>
-                        </div>
-                        <div class="hw-row">
-                            <span class="hw-label">Front Plate Serial:</span>
-                            <span class="hw-val" id="itms-insp-fserial">---</span>
-                        </div>
-                        <div class="hw-row">
-                            <span class="hw-label">Rear Plate Serial:</span>
-                            <span class="hw-val" id="itms-insp-rserial">---</span>
-                        </div>
+                <!-- Dynamic Record Details Container -->
+                <div id="itms-insp-details-container">
+                    <div style="padding:30px 10px; text-align:center; color:rgba(255,255,255,0.7); font-size:0.82rem;">
+                        Select an order or kit on the left to view complete vehicle, telematics, and fitment details.
                     </div>
                 </div>
 
                 <!-- Evidence Photo Links (Pure Links - Direct Web Viewing) -->
-                <div>
+                <div id="itms-insp-photos-section">
                     <div class="inspector-section-title">📷 Evidence Photos (Direct ITMS Links)</div>
                     <div class="inspector-photos-grid" id="itms-insp-photos-grid">
                         <div style="grid-column:1/-1; padding:20px; text-align:center; color:rgba(255,255,255,0.7); font-size:0.8rem; background:var(--ug-black-surface); border-radius:var(--radius-md);">

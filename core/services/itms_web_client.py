@@ -2942,6 +2942,7 @@ class ITMSWebClient:
         installed_by = raw_kv.get("Installed By", "")
         warehouse = raw_kv.get("Installation Warehouse", "")
         vin = raw_kv.get("Vehicle VIN/Chassis No.", "")
+        old_plate = raw_kv.get("Old plate number") or raw_kv.get("Old registration number") or raw_kv.get("Old Plate", "")
 
         def parse_plate_entry(raw_str: str) -> Dict[str, str]:
             # Format: 'PN-PBL-M-UMA-SQR-BWW (001107363) (UMA 282PG)'
@@ -3048,6 +3049,7 @@ class ITMSWebClient:
             "installed_by": installed_by,
             "warehouse": warehouse,
             "vin": vin,
+            "old_registration_number": old_plate,
             "registration_number": registration_number,
             "front_plate": front_plate,
             "rear_plate": rear_plate,

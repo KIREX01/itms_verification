@@ -609,7 +609,7 @@ def api_stock_upload_delivery_note(request: HttpRequest) -> JsonResponse:
 @require_itms_envelope
 def api_stock_mvr_docket(request: HttpRequest) -> JsonResponse:
     """Returns the MVR Allocation Exception Docket (raw plates list and formatted text)."""
-    from core.services import stock_monitoring_service
+    from core.services.kit_unallocation_service import kit_unallocation_service
     date_suffix = (
         request.GET.get("date")
         or request.GET.get("date_suffix")
@@ -617,7 +617,7 @@ def api_stock_mvr_docket(request: HttpRequest) -> JsonResponse:
         or None
     )
     try:
-        docket = stock_monitoring_service.get_mvr_unallocated_docket(date_suffix)
+        docket = kit_unallocation_service.generate_mvr_docket(date_suffix)
         return JsonResponse({"success": True, "docket": docket})
     except Exception as exc:
         logger.error("api_stock_mvr_docket error: %s", exc)

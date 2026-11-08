@@ -1470,4 +1470,42 @@ if (hwCard) {
   - \core/views_mobile.py\: Added \is_replacement\ and eplace_sequence_number\ handling in \pi_mobile_upload\. Purges old unsubmitted image in vault before ingesting new photo to preserve exact counts and trajectory alignment.
   - \core/views_mobile.py\: Added \pi_mobile_uturn_undo_snap\ endpoint for 'Retake Last'.
   - \core/static/core/js/mobile_companion.js\: Added \MobileState.inspectedContext\ and \MobileState.uturn.replacingTile\. Retaking from photo inspector replaces tile in-place without incrementing photo counts or shifting trajectory index.
-- **Automated Tests**: Unit tests \	est_uturn_replace_photo_in_place\ and \	est_uturn_undo_snap\ in \core/tests/test_mobile_companion.py\ passed with 100% success.
+- **Automated Tests**: Unit tests \test_uturn_replace_photo_in_place\ and \test_uturn_undo_snap\ in \core/tests/test_mobile_companion.py\ passed with 100% success.
+
+---
+
+## 21. Stock Tab UI/UX Enhancements: Centralized Refresh, Unified Ledger Modal & Contextual Excel Paste (Completed)
+
+### 21.1 Unified 9-Row Daily Stock Ledger Modal
+- **Container**: `#modal-edit-ledger` in `core/templates/core/tabs/tab_stock.html`.
+- **Button**: Replaced competing `#btn-open-edit-ledger` and `openLedgerTargetModal` with single `✏️ Edit Ledger (O)`.
+- **Sections**:
+  1. *Opening Balances*: PSV White, PMO Yellow, Total with "⚡ Auto-Carry Previous Closing" helper button.
+  2. *Scheduled Targets*: Scheduled Total, PSV Target, PMO Target.
+  3. *Shift Overrides*: Deliveries, Installed, Transfers (In/Out), Closing Overrides, and Physical Count.
+  4. *Shift Remarks*: Textarea for shift handover notes.
+- **Save Action**: Calls `POST /api/stock/ledger/entry/` atomically.
+
+### 21.2 Centralized One-Tap Refresh (`#btn-refresh-stock-tab`)
+- **Location**: `#pane-stock .pane-header .header-actions` next to the shift date selector.
+- **Behavior**: Triggered by button click or hotkey `R`. Animates rotating icon, fetches reconciliation, shift details, and blocked plate status, and updates dashboard KPIs.
+
+### 21.3 High-Visibility Display of Kits Not On Stock
+- **Filter Pills**: Added `.stock-filter-pills-bar` above `#table-stock-dispatch`:
+  - `All Dispatched (N)`
+  - `✓ In Stock (N)`
+  - `⚠️ Not On Stock (N)` (highlighted in red/amber)
+  - `❌ Unallocated Floor (N)`
+- **Behavior**: Clicking `⚠️ Not On Stock` filters the table immediately in-memory to show kits requiring warehouse stock transfer.
+
+### 21.4 Context-Aware "Paste from Excel" Modal
+- **Container**: `#stock-paste-modal`.
+- **Dynamic Configuration**:
+  - *Dispatch Mode*: "Paste Dispatched Kits from Excel", with "Check Stock Only" and "Dispatch Plates" buttons.
+  - *Movements Mode*: "Paste Stock Movements from Excel", featuring explicit radio buttons:
+    - 📦 Inbound Delivery (Add Delivered Kits)
+    - ↩️ Line Return (Add Returned Kits)
+    - ⇄ Bond Transfer In
+    With partner and reference fields.
+  - *Safe Audit Mode*: "Paste Safe Room Physical Audit from Excel", recording direct physical inventory counts.
+

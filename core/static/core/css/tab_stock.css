@@ -468,3 +468,23 @@
         font-size: 0.8rem;
     }
 }
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.rotating {
+    display: inline-block;
+    animation: spin 0.8s linear infinite;
+}
+
+.stock-filter-pills-bar .stock-table-filter-pill {
+    transition: all 0.15s ease-in-out;
+    border-radius: var(--radius-sm, 4px);
+}
+
+.stock-filter-pills-bar .stock-table-filter-pill.active {
+    outline: 2px solid #38bdf8;
+    outline-offset: 1px;
+}

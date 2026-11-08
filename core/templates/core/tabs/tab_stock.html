@@ -102,6 +102,9 @@
                     <button class="btn btn-secondary" onclick="stockPrevDay()" title="Previous Shift">◀</button>
                     <button class="btn btn-primary" onclick="stockToday()" title="Today's Shift">Today</button>
                     <button class="btn btn-secondary" onclick="stockNextDay()" title="Next Shift">▶</button>
+                    <button class="btn btn-secondary" id="btn-refresh-stock-tab" onclick="refreshStockTab()" style="font-weight: 700; display: inline-flex; align-items: center; gap: 5px;" title="Centralized atomic refresh of stock ledger, subtabs, and KPIs (Hotkey: R)">
+                        <span id="btn-refresh-stock-spinner">🔄</span> Refresh <span class="hotkey">R</span>
+                    </button>
                     <div class="stock-shift-pill-container" style="display:inline-flex; align-items:center; gap:6px;">
                         <span class="badge badge-dark" style="display:inline-flex; align-items:center; gap:6px; padding:5px 10px; font-size:0.82rem; font-weight:700; background:#0f172a; border:1px solid #334155; border-radius:4px;">
                             <span style="color:#ffffff !important;">Active Shift:</span>
@@ -195,6 +198,20 @@
 
             <!-- MODE 1: Dispatch -->
             <div id="mode-dispatch" class="stock-mode-container active" style="display: flex; flex-direction: column; flex: 1; overflow: hidden; min-height: 0;">
+                <div class="stock-filter-pills-bar" style="display: flex; gap: 6px; margin-bottom: 8px; align-items: center; flex-wrap: wrap;">
+                    <button type="button" class="btn btn-primary btn-sm stock-table-filter-pill active" id="btn-filter-disp-all" onclick="filterDispatchTable('all')" style="padding: 3px 10px; font-size: 0.78rem; font-weight: 700;">
+                        All Dispatched (<span id="count-disp-all">0</span>)
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm stock-table-filter-pill" id="btn-filter-disp-valid" onclick="filterDispatchTable('valid')" style="padding: 3px 10px; font-size: 0.78rem;">
+                        ✓ In Stock (<span id="count-disp-valid">0</span>)
+                    </button>
+                    <button type="button" class="btn btn-warning btn-sm stock-table-filter-pill" id="btn-filter-disp-blocked" onclick="filterDispatchTable('blocked')" style="padding: 3px 10px; font-size: 0.78rem; font-weight: 700; color: #fca5a5; background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444;">
+                        ⚠️ Not On Stock (<span id="count-disp-blocked">0</span>)
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm stock-table-filter-pill" id="btn-filter-disp-unalloc" onclick="filterDispatchTable('unallocated')" style="padding: 3px 10px; font-size: 0.78rem;">
+                        ❌ Unallocated Floor (<span id="count-disp-unalloc">0</span>)
+                    </button>
+                </div>
                 <div class="itms-table-scroll">
                     <table class="itms-grid-table" id="table-stock-dispatch">
                         <thead>
@@ -311,8 +328,7 @@
                     </table>
                 </div>
                 <div class="table-pagination-bar" style="margin-top: auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 0 0 0;">
-                    <button class="btn btn-primary" id="btn-open-edit-ledger" onclick="openEditLedgerModal()" style="font-size: 0.85rem; font-weight: 700;" title="Full 9-row direct manual numeric entry and metric overrides">✏️ Edit Ledger (9-Row Overrides)</button>
-                    <button class="btn btn-secondary" onclick="openLedgerTargetModal()" style="font-size: 0.85rem;">✎ Opening & Target <span class="hotkey">O</span></button>
+                    <button class="btn btn-primary" id="btn-open-edit-ledger" onclick="openEditLedgerModal()" style="font-size: 0.85rem; font-weight: 700;" title="Edit Daily Stock Ledger: Opening Balances, Targets, Overrides & Notes (Hotkey: O)">✏️ Edit Ledger <span class="hotkey">O</span></button>
                     <button class="btn btn-primary" id="btn-open-email-report" onclick="openEmailStockReportModal()" style="font-size: 0.85rem; font-weight: 700; background: #2563eb; border-color: #3b82f6;" title="Email official 9-row daily reconciliation report">📧 Email Report</button>
                     <button class="btn btn-secondary" onclick="refreshStockLedger()" style="font-size: 0.85rem;">🔄 Refresh Ledger <span class="hotkey">R</span></button>
                     <button class="btn btn-success" id="btn-export-ledger" onclick="exportStockCSV()" style="font-size: 0.85rem; font-weight: 700;" title="Export full daily reconciliation ledger as CSV">📊 Export Reconciliation CSV</button>
@@ -460,27 +476,51 @@
     </div>
 </div>
 
-<!-- Paste Excel Modal -->
+<!-- Context-Aware Paste from Excel Modal -->
 <div class="modal-overlay" id="stock-paste-modal">
-    <div class="modal-box" style="width: 580px;">
+    <div class="modal-box" style="width: 620px; max-width: 95vw;">
         <div class="modal-header">
-            <h3 class="modal-title"><span>📋</span> Paste from Excel</h3>
+            <h3 class="modal-title"><span id="paste-modal-icon">📋</span> <span id="paste-modal-title">Paste from Excel</span></h3>
             <button class="modal-close" onclick="closeStockPasteModal()">×</button>
         </div>
-        <div class="modal-body">
-            <p style="font-size: 0.85rem; color: var(--ug-text-muted); margin: 0;">Paste a column of registration numbers from Excel below. The system will automatically parse them for the current mode (<span id="paste-mode-label" style="font-weight: bold; color: var(--ug-yellow);">DISPATCH</span>).</p>
-            <textarea id="stock-paste-area" class="form-control" style="height: 180px; width: 100%; font-family: monospace; font-size: 0.9rem;" placeholder="UMA 123A&#10;UMB 456B&#10;UMC 789C..." aria-label="Registration numbers pasted from Excel"></textarea>
-            
-            <div id="paste-movement-warning" class="alert alert-warning" style="display: none; font-size: 0.85rem; padding: 10px; margin: 0;">
-                Note: In Movements mode, these plates will be ingested into your staged buffer. You can review them before clicking Commit.
+        <div class="modal-body" style="display: flex; flex-direction: column; gap: 12px;">
+            <div id="paste-context-banner" class="alert alert-info" style="font-size: 0.85rem; padding: 10px 12px; margin: 0; line-height: 1.45;">
+                Paste a column of registration numbers from Excel below. System mode: <span id="paste-mode-label" style="font-weight: bold; color: var(--ug-yellow);">DISPATCH</span>.
             </div>
+
+            <!-- Contextual Movements Controls (Visible ONLY in Movements mode) -->
+            <div id="paste-movements-controls" style="display: none; background: rgba(255,255,255,0.03); border: 1px solid var(--ug-border); border-radius: var(--radius-md); padding: 10px 12px;">
+                <label style="font-size: 0.82rem; font-weight: 700; color: #38bdf8; margin-bottom: 6px; display: block;">Select Movement Operation:</label>
+                <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px;">
+                    <label style="font-size: 0.85rem; display: flex; align-items: center; gap: 4px; cursor: pointer; color: #fff;">
+                        <input type="radio" name="paste-mvt-type" id="paste-mvt-radio-deliv" value="DELIVERY" checked onchange="onPasteMovementTypeChange(this.value)"> 📦 Inbound Delivery (Add Delivered Kits)
+                    </label>
+                    <label style="font-size: 0.85rem; display: flex; align-items: center; gap: 4px; cursor: pointer; color: #fff;">
+                        <input type="radio" name="paste-mvt-type" id="paste-mvt-radio-ret" value="RETURN" onchange="onPasteMovementTypeChange(this.value)"> ↩️ Line Return (Add Returned Kits)
+                    </label>
+                    <label style="font-size: 0.85rem; display: flex; align-items: center; gap: 4px; cursor: pointer; color: #fff;">
+                        <input type="radio" name="paste-mvt-type" id="paste-mvt-radio-trin" value="TRANSFER_IN" onchange="onPasteMovementTypeChange(this.value)"> ⇄ Bond Transfer In
+                    </label>
+                </div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <input type="text" id="paste-mvt-partner" class="form-control" placeholder="Source / Supplier / Reason (e.g. SPIRO Warehouse)" style="flex: 1; min-width: 160px; font-size: 0.82rem;">
+                    <input type="text" id="paste-mvt-ref" class="form-control" placeholder="Reference # (e.g. Delivery Note #)" style="width: 140px; font-size: 0.82rem;">
+                </div>
+            </div>
+
+            <div>
+                <label for="stock-paste-area" style="font-size: 0.82rem; font-weight: 600; color: var(--ug-text-muted); display: block; margin-bottom: 4px;">Paste Column from Excel (Registration Plates or Barcodes):</label>
+                <textarea id="stock-paste-area" class="form-control" style="height: 180px; width: 100%; font-family: monospace; font-size: 0.9rem;" placeholder="UMA 123A&#10;UMB 456B&#10;UMC 789C..." aria-label="Registration numbers pasted from Excel"></textarea>
+            </div>
+            
+            <div id="paste-movement-warning" class="alert alert-warning" style="display: none; font-size: 0.82rem; padding: 8px 12px; margin: 0;"></div>
         </div>
         <div class="modal-footer" style="display: flex; gap: 8px; justify-content: space-between; align-items: center;">
             <button class="btn btn-secondary" onclick="openMobileConnectModal()">📱 Scan with Mobile</button>
             <div style="display: flex; gap: 8px;">
                 <button class="btn btn-secondary" onclick="closeStockPasteModal()">Cancel</button>
                 <button class="btn btn-warning" id="btn-paste-check-stock" onclick="checkStockPasteAvailability()" title="Check stock availability and report unlisted plates without dispatching">🔍 Check Stock Only</button>
-                <button class="btn btn-primary" onclick="processStockPaste()" title="Verify and dispatch valid plates to floor">⚡ Dispatch Plates</button>
+                <button class="btn btn-primary" id="btn-process-stock-paste" onclick="processStockPaste()" title="Process pasted plates">⚡ Dispatch Plates</button>
             </div>
         </div>
     </div>
@@ -563,45 +603,168 @@
     </div>
 </div>
 
-<!-- Edit Opening / Targets Modal -->
-<div class="modal-overlay" id="stock-target-modal">
-    <div class="modal-box" style="width: 480px;">
+<!-- Unified Daily Stock Ledger Modal (Consolidated Overrides & Balances) -->
+<div class="modal-overlay" id="modal-edit-ledger">
+    <div class="modal-box" style="width: 680px; max-width: 95vw; max-height: 90vh; display: flex; flex-direction: column;">
         <div class="modal-header">
-            <h3 class="modal-title"><span>✎</span> Edit Opening & Target</h3>
-            <button class="modal-close" onclick="closeLedgerTargetModal()">×</button>
+            <h3 class="modal-title"><span>✏️</span> Edit Daily Stock Ledger</h3>
+            <button class="modal-close" onclick="closeEditLedgerModal()">×</button>
         </div>
-        <div class="modal-body">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-size: 0.8rem; color: var(--ug-text-muted);">Auto-Balance Helper:</span>
-                <button type="button" class="btn btn-secondary" onclick="autoCarryPreviousClosing()" style="padding: 4px 10px; font-size: 0.78rem;">
-                    ⚡ Auto-Carry Previous Closing
-                </button>
+        <div class="modal-body" style="overflow-y: auto; flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 14px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); border: 1px solid var(--ug-border); border-radius: var(--radius-md); padding: 8px 12px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 0.82rem; font-weight: 700; color: #fff;">Shift Target Suffix:</span>
+                    <input type="text" id="edit-ledger-date" class="form-control" style="width: 120px; font-size: 0.85rem; font-family: var(--font-mono); font-weight: 700;" readonly>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 0.82rem; color: var(--ug-text-muted);">Bond:</span>
+                    <select id="edit-ledger-bond" class="form-control" style="width: 140px; font-size: 0.82rem;">
+                        <option value="AGM / SPIRO">AGM / SPIRO</option>
+                        <option value="SPIRO MAIN">SPIRO MAIN</option>
+                    </select>
+                </div>
             </div>
-            <div class="form-group" style="margin-top: 4px;">
-                <label for="ledger-opening-psv" style="font-size: 0.85rem; font-weight: 600;">Opening Balance (PSV White)</label>
-                <input type="number" id="ledger-opening-psv" class="form-control" style="width: 100%;" oninput="updateTotalOpening()" aria-label="Opening Balance for PSV White">
+
+            <!-- SECTION 1: OPENING BALANCES -->
+            <div style="border: 1px solid rgba(56, 189, 248, 0.25); background: rgba(56, 189, 248, 0.04); border-radius: var(--radius-md); padding: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <strong style="font-size: 0.88rem; color: #38bdf8;">1. Opening Balances (Safe Room)</strong>
+                    <button type="button" class="btn btn-secondary" onclick="autoCarryPreviousClosing()" style="padding: 4px 10px; font-size: 0.78rem; font-weight: 700;" title="Fetch previous shift closing balance and fill opening balances">
+                        ⚡ Auto-Carry Previous Closing
+                    </button>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; align-items: flex-end;">
+                    <div class="form-group" style="margin: 0;">
+                        <label for="edit-ledger-open-psv" style="font-size: 0.8rem; font-weight: 600;">PSV White Opening</label>
+                        <input type="number" id="edit-ledger-open-psv" class="form-control" style="width: 100%;" oninput="calcEditLedgerTotals()" aria-label="Opening PSV White">
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label for="edit-ledger-open-pmo" style="font-size: 0.8rem; font-weight: 600;">PMO Yellow Opening</label>
+                        <input type="number" id="edit-ledger-open-pmo" class="form-control" style="width: 100%;" oninput="calcEditLedgerTotals()" aria-label="Opening PMO Yellow">
+                    </div>
+                    <div style="padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid var(--ug-border); border-radius: var(--radius-sm); text-align: center;">
+                        <span style="font-size: 0.72rem; color: var(--ug-text-muted); display: block;">Combined Opening</span>
+                        <strong id="edit-ledger-open-total" style="font-size: 1.1rem; color: #fff; font-family: var(--font-mono);">0</strong>
+                    </div>
+                </div>
             </div>
-            <div class="form-group">
-                <label for="ledger-opening-pmo" style="font-size: 0.85rem; font-weight: 600;">Opening Balance (PMO Yellow)</label>
-                <input type="number" id="ledger-opening-pmo" class="form-control" style="width: 100%;" oninput="updateTotalOpening()" aria-label="Opening Balance for PMO Yellow">
+
+            <!-- SECTION 2: SCHEDULED TARGETS -->
+            <div style="border: 1px solid var(--ug-border); border-radius: var(--radius-md); padding: 12px;">
+                <strong style="font-size: 0.88rem; color: #fbbf24; display: block; margin-bottom: 8px;">2. Scheduled Installation Targets</strong>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                    <div class="form-group" style="margin: 0;">
+                        <label for="edit-ledger-sched-total" style="font-size: 0.8rem; font-weight: 600;">Total Scheduled Target</label>
+                        <input type="number" id="edit-ledger-sched-total" class="form-control" style="width: 100%;" oninput="calcEditLedgerTotals()" placeholder="Total Target">
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label for="edit-ledger-sched-psv" style="font-size: 0.8rem; font-weight: 600;">PSV Target (Optional)</label>
+                        <input type="number" id="edit-ledger-sched-psv" class="form-control" style="width: 100%;" oninput="calcEditLedgerTotals()" placeholder="PSV Target">
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label for="edit-ledger-sched-pmo" style="font-size: 0.8rem; font-weight: 600;">PMO Target (Optional)</label>
+                        <input type="number" id="edit-ledger-sched-pmo" class="form-control" style="width: 100%;" oninput="calcEditLedgerTotals()" placeholder="PMO Target">
+                    </div>
+                </div>
             </div>
-            <div style="padding: 8px 12px; background: rgba(255,255,255,0.03); border: 1px solid var(--ug-border); border-radius: var(--radius-md); font-size: 0.82rem; display: flex; justify-content: space-between;">
-                <span style="color: var(--ug-text-muted);">Total Combined Opening:</span>
-                <span id="ledger-opening-total" style="font-weight: 700; color: #fff;">0</span>
-            </div>
-            <hr style="border: 0; border-top: 1px solid var(--ug-border); margin: 4px 0;">
-            <div class="form-group">
-                <label for="ledger-target-total" style="font-size: 0.85rem; font-weight: 600;">Scheduled Target (Total)</label>
-                <input type="number" id="ledger-target-total" class="form-control" style="width: 100%;" aria-label="Scheduled Target Total">
-            </div>
-            <div class="form-group">
-                <label for="ledger-remarks" style="font-size: 0.85rem; font-weight: 600;">Shift Handover Remarks</label>
-                <input type="text" id="ledger-remarks" class="form-control" style="width: 100%;" placeholder="e.g. Opening verified with Safe Room officer" aria-label="Shift Handover Remarks">
+
+            <!-- SECTION 3: ADVANCED SHIFT OVERRIDES -->
+            <details style="border: 1px solid var(--ug-border); border-radius: var(--radius-md); padding: 10px 12px;">
+                <summary style="font-size: 0.85rem; font-weight: 700; color: var(--ug-text-muted); cursor: pointer;">
+                    ⚙️ Advanced Shift Overrides (Deliveries, Installed, Transfers & Closing)
+                </summary>
+                <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.78rem;">Kits Received (PSV)</label>
+                            <input type="number" id="edit-ledger-recv-psv" class="form-control" style="width: 100%;" oninput="calcEditLedgerTotals()">
+                        </div>
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.78rem;">Kits Received (PMO)</label>
+                            <input type="number" id="edit-ledger-recv-pmo" class="form-control" style="width: 100%;" oninput="calcEditLedgerTotals()">
+                        </div>
+                        <div style="padding: 6px; background: rgba(0,0,0,0.2); border: 1px solid var(--ug-border); border-radius: 4px; text-align: center;">
+                            <span style="font-size: 0.7rem; color: var(--ug-text-muted);">Total Received:</span>
+                            <span id="edit-ledger-recv-total" style="font-weight: 700; color: #fff; margin-left: 4px;">0</span>
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.78rem;">Installed Override (PSV)</label>
+                            <input type="number" id="edit-ledger-inst-psv" class="form-control" style="width: 100%;" oninput="calcEditLedgerTotals()">
+                        </div>
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.78rem;">Installed Override (PMO)</label>
+                            <input type="number" id="edit-ledger-inst-pmo" class="form-control" style="width: 100%;" oninput="calcEditLedgerTotals()">
+                        </div>
+                        <div style="padding: 6px; background: rgba(0,0,0,0.2); border: 1px solid var(--ug-border); border-radius: 4px; text-align: center;">
+                            <span style="font-size: 0.7rem; color: var(--ug-text-muted);">Total Installed:</span>
+                            <span id="edit-ledger-inst-total" style="font-weight: 700; color: #fff; margin-left: 4px;">0</span>
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.78rem;">Transfer In (PSV)</label>
+                            <input type="number" id="edit-ledger-trin-psv" class="form-control" style="width: 100%;" oninput="calcEditLedgerTotals()">
+                        </div>
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.78rem;">Transfer In (PMO)</label>
+                            <input type="number" id="edit-ledger-trin-pmo" class="form-control" style="width: 100%;" oninput="calcEditLedgerTotals()">
+                        </div>
+                        <div style="padding: 6px; background: rgba(0,0,0,0.2); border: 1px solid var(--ug-border); border-radius: 4px; text-align: center;">
+                            <span style="font-size: 0.7rem; color: var(--ug-text-muted);">Total Transfer In:</span>
+                            <span id="edit-ledger-trin-total" style="font-weight: 700; color: #fff; margin-left: 4px;">0</span>
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.78rem;">Transfer Out (PSV)</label>
+                            <input type="number" id="edit-ledger-trout-psv" class="form-control" style="width: 100%;" oninput="calcEditLedgerTotals()">
+                        </div>
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.78rem;">Transfer Out (PMO)</label>
+                            <input type="number" id="edit-ledger-trout-pmo" class="form-control" style="width: 100%;" oninput="calcEditLedgerTotals()">
+                        </div>
+                        <div style="padding: 6px; background: rgba(0,0,0,0.2); border: 1px solid var(--ug-border); border-radius: 4px; text-align: center;">
+                            <span style="font-size: 0.7rem; color: var(--ug-text-muted);">Total Transfer Out:</span>
+                            <span id="edit-ledger-trout-total" style="font-weight: 700; color: #fff; margin-left: 4px;">0</span>
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.78rem;">Closing Override (PSV)</label>
+                            <input type="number" id="edit-ledger-close-psv" class="form-control" style="width: 100%;" oninput="calcEditLedgerTotals()">
+                        </div>
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.78rem;">Closing Override (PMO)</label>
+                            <input type="number" id="edit-ledger-close-pmo" class="form-control" style="width: 100%;" oninput="calcEditLedgerTotals()">
+                        </div>
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.78rem;">Closing Override (Total)</label>
+                            <input type="number" id="edit-ledger-close-total" class="form-control" style="width: 100%;" oninput="calcEditLedgerTotals()">
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin: 0;">
+                        <label for="edit-ledger-physical" style="font-size: 0.78rem;">Physical Safe Room Audit Count</label>
+                        <input type="number" id="edit-ledger-physical" class="form-control" style="width: 100%;">
+                    </div>
+                </div>
+            </details>
+
+            <!-- SECTION 4: SHIFT REMARKS -->
+            <div class="form-group" style="margin: 0;">
+                <label for="edit-ledger-notes" style="font-size: 0.85rem; font-weight: 600;">Shift Handover Remarks & Notes</label>
+                <textarea id="edit-ledger-notes" class="form-control" style="width: 100%; height: 70px; font-size: 0.85rem;" placeholder="e.g. Opening stock confirmed with safe room officer."></textarea>
             </div>
         </div>
         <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 8px;">
-            <button class="btn btn-secondary" onclick="closeLedgerTargetModal()">Cancel</button>
-            <button class="btn btn-primary" onclick="saveLedgerTargets()">Save Balances</button>
+            <button class="btn btn-secondary" onclick="closeEditLedgerModal()">Cancel</button>
+            <button class="btn btn-primary" id="btn-submit-edit-ledger" onclick="submitEditLedger()" style="font-weight: 700;">💾 Save 9-Row Ledger Overrides</button>
         </div>
     </div>
 </div>

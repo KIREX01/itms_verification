@@ -60,6 +60,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 closeStockPasteModal();
                 return;
             }
+            if (document.getElementById('modal-edit-ledger')?.classList.contains('active')) {
+                closeEditLedgerModal();
+                return;
+            }
             if (document.getElementById('stock-target-modal')?.classList.contains('active')) {
                 closeLedgerTargetModal();
                 return;
@@ -106,10 +110,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } else if (e.key === 'o' || e.key === 'O') {
                 e.preventDefault();
-                openLedgerTargetModal();
+                openEditLedgerModal();
             } else if (e.key === 'r' || e.key === 'R') {
                 e.preventDefault();
-                void refreshStockLedger();
+                void refreshStockTab();
             }
         }
     });
@@ -702,33 +706,57 @@ function openStockPasteModal() {
     const area = document.getElementById('stock-paste-area');
     if (area) area.value = '';
 
+    const titleEl = document.getElementById('paste-modal-title');
+    const iconEl = document.getElementById('paste-modal-icon');
+    const bannerEl = document.getElementById('paste-context-banner');
+    const mvtControls = document.getElementById('paste-movements-controls');
+    const primaryBtn = document.getElementById('btn-process-stock-paste') || document.querySelector('#stock-paste-modal .modal-footer button.btn-primary');
+    const checkStockBtn = document.getElementById('btn-paste-check-stock');
     const warn = document.getElementById('paste-movement-warning');
     const modeLbl = document.getElementById('paste-mode-label');
-    const primaryBtn = document.querySelector('#stock-paste-modal .modal-footer button.btn-primary');
-    const checkStockBtn = document.getElementById('btn-paste-check-stock');
 
     if (modeLbl) modeLbl.innerText = currentStockMode.toUpperCase();
 
     if (currentStockMode === 'dispatch') {
+        if (titleEl) titleEl.innerText = 'Paste Dispatched Kits from Excel';
+        if (iconEl) iconEl.innerText = '📦';
+        if (bannerEl) {
+            bannerEl.className = 'alert alert-info';
+            bannerEl.innerHTML = 'Paste registration numbers issued to the assembly floor today. Scanned kits are validated against inventory; kits not on stock will be flagged.';
+        }
+        if (mvtControls) mvtControls.style.display = 'none';
         if (warn) warn.style.display = 'none';
         if (primaryBtn) primaryBtn.innerText = '⚡ Dispatch Plates';
         if (checkStockBtn) checkStockBtn.style.display = 'inline-block';
     } else if (currentStockMode === 'movements') {
-        const movType = (document.getElementById('movement-type-select') || {}).value || 'DELIVERY';
-        if (warn) {
-            warn.style.display = 'block';
-            warn.innerText = `Note: In Movements mode (${movType}), these plates will be ingested into your staged buffer. Review them before clicking Commit.`;
+        if (titleEl) titleEl.innerText = 'Paste Stock Movements from Excel';
+        if (iconEl) iconEl.innerText = '🚚';
+        if (bannerEl) {
+            bannerEl.className = 'alert alert-info';
+            bannerEl.innerHTML = 'Select movement operation (Delivered, Line Return, or Bond Transfer) and paste registration numbers:';
         }
-        if (primaryBtn) primaryBtn.innerText = `📥 Stage for ${movType}`;
+        if (mvtControls) mvtControls.style.display = 'block';
+        if (warn) warn.style.display = 'none';
+        const checkedRadio = document.querySelector('input[name="paste-mvt-type"]:checked');
+        const mvtType = checkedRadio ? checkedRadio.value : 'DELIVERY';
+        onPasteMovementTypeChange(mvtType);
         if (checkStockBtn) checkStockBtn.style.display = 'none';
     } else if (currentStockMode === 'audit') {
-        if (warn) {
-            warn.style.display = 'block';
-            warn.innerText = 'Note: In Safe Audit mode, these plates will be recorded as physically present in the safe room stocktaking.';
+        if (titleEl) titleEl.innerText = 'Paste Safe Room Physical Audit from Excel';
+        if (iconEl) iconEl.innerText = '🔍';
+        if (bannerEl) {
+            bannerEl.className = 'alert alert-info';
+            bannerEl.innerHTML = 'Paste registration numbers physically audited in the safe room / storage box today. These will be recorded directly into safe room stocktaking.';
         }
+        if (mvtControls) mvtControls.style.display = 'none';
+        if (warn) warn.style.display = 'none';
         if (primaryBtn) primaryBtn.innerText = '🔍 Record Safe Audit';
         if (checkStockBtn) checkStockBtn.style.display = 'none';
     } else {
+        if (titleEl) titleEl.innerText = 'Paste from Excel';
+        if (iconEl) iconEl.innerText = '📋';
+        if (bannerEl) bannerEl.innerHTML = 'Paste column from Excel below.';
+        if (mvtControls) mvtControls.style.display = 'none';
         if (warn) warn.style.display = 'none';
         if (primaryBtn) primaryBtn.innerText = 'Process Paste';
         if (checkStockBtn) checkStockBtn.style.display = 'none';
@@ -743,6 +771,30 @@ function openStockPasteModal() {
 
     if (area) {
         setTimeout(() => area.focus(), 100);
+    }
+}
+
+function onPasteMovementTypeChange(val) {
+    const primaryBtn = document.getElementById('btn-process-stock-paste') || document.querySelector('#stock-paste-modal .modal-footer button.btn-primary');
+    const partnerInput = document.getElementById('paste-mvt-partner');
+    const refInput = document.getElementById('paste-mvt-ref');
+
+    // Also mirror to movements tab inputs if present
+    const mvtSelect = document.getElementById('movement-type');
+    if (mvtSelect) mvtSelect.value = val;
+
+    if (val === 'DELIVERY') {
+        if (primaryBtn) primaryBtn.innerText = '📦 Add Delivered Kits';
+        if (partnerInput) partnerInput.placeholder = 'Supplier / Factory (e.g. SPIRO Warehouse)';
+        if (refInput) refInput.placeholder = 'Delivery Note #';
+    } else if (val === 'RETURN') {
+        if (primaryBtn) primaryBtn.innerText = '↩️ Add Returned Kits';
+        if (partnerInput) partnerInput.placeholder = 'Return Reason (e.g. Bike No-Show, Swapped Kit)';
+        if (refInput) refInput.placeholder = 'Return Ref #';
+    } else if (val === 'TRANSFER_IN') {
+        if (primaryBtn) primaryBtn.innerText = '⇄ Add Bond Transfer In';
+        if (partnerInput) partnerInput.placeholder = 'Origin Bond Facility (e.g. Jinja Bond)';
+        if (refInput) refInput.placeholder = 'Transfer Waybill #';
     }
 }
 
@@ -772,7 +824,18 @@ async function processStockPaste() {
     if (currentStockMode === 'dispatch') {
         await submitDispatch(plates);
     } else if (currentStockMode === 'movements') {
+        const checkedRadio = document.querySelector('input[name="paste-mvt-type"]:checked');
+        const mvtType = checkedRadio ? checkedRadio.value : (document.getElementById('movement-type')?.value || 'DELIVERY');
+        const partner = (document.getElementById('paste-mvt-partner')?.value || document.getElementById('movement-partner')?.value || '').trim();
+        const ref = (document.getElementById('paste-mvt-ref')?.value || document.getElementById('movement-ref')?.value || '').trim();
+
+        // Stage plates with context
         stageMovementsPlates(plates);
+        if (partner && document.getElementById('movement-partner')) document.getElementById('movement-partner').value = partner;
+        if (ref && document.getElementById('movement-ref')) document.getElementById('movement-ref').value = ref;
+        if (mvtType && document.getElementById('movement-type')) document.getElementById('movement-type').value = mvtType;
+
+        notify(`📥 Staged ${plates.length} kit(s) for ${mvtType}. Review and click Commit Movement to finalize.`, 'info');
     } else if (currentStockMode === 'audit') {
         await submitAudit(plates);
     } else {
@@ -1189,39 +1252,13 @@ function downloadNotOnStockDocket() {
 // -----------------------------------------------------------------------------
 
 function openLedgerTargetModal() {
-    if (lastReconData) {
-        const rep = lastReconData.report_table || {};
-        const rows = rep.rows || [];
-        const openRow = rows.find(r => r.metric === 'Opening Balance') || {};
-
-        const psvInput = document.getElementById('ledger-opening-psv');
-        const pmoInput = document.getElementById('ledger-opening-pmo');
-        const tgtInput = document.getElementById('ledger-target-total');
-
-        if (psvInput && openRow.psv !== undefined) psvInput.value = openRow.psv;
-        if (pmoInput && openRow.pmo !== undefined) pmoInput.value = openRow.pmo;
-
-        const schedRow = rows.find(r => r.metric === 'Target (Scheduled)') || {};
-        if (tgtInput && schedRow.total !== undefined) tgtInput.value = schedRow.total;
-
-        updateTotalOpening();
-    }
-
-    if (typeof openModal === 'function') {
-        openModal('stock-target-modal');
-    } else {
-        const m = document.getElementById('stock-target-modal');
-        if (m) m.classList.add('active');
-    }
+    // Consolidated into unified Edit Ledger modal
+    openEditLedgerModal();
 }
 
 function closeLedgerTargetModal() {
-    if (typeof closeModal === 'function') {
-        closeModal('stock-target-modal');
-    } else {
-        const m = document.getElementById('stock-target-modal');
-        if (m) m.classList.remove('active');
-    }
+    // Consolidated into unified Edit Ledger modal
+    closeEditLedgerModal();
 }
 
 function updateTotalOpening() {
@@ -1241,11 +1278,23 @@ async function autoCarryPreviousClosing() {
 
         if (data.success && data.data) {
             const d = data.data;
-            document.getElementById('ledger-opening-psv').value = d.opening_psv || 0;
-            document.getElementById('ledger-opening-pmo').value = d.opening_pmo || 0;
-            updateTotalOpening();
+            const psvVal = d.opening_psv || 0;
+            const pmoVal = d.opening_pmo || 0;
 
-            notify(`⚡ Auto-carried closing balances from shift ${d.from_shift_suffix || 'previous'}: PSV ${d.opening_psv}, PMO ${d.opening_pmo}.`, 'success');
+            const editPsv = document.getElementById('edit-ledger-open-psv');
+            const editPmo = document.getElementById('edit-ledger-open-pmo');
+            if (editPsv) editPsv.value = psvVal;
+            if (editPmo) editPmo.value = pmoVal;
+
+            const legPsv = document.getElementById('ledger-opening-psv');
+            const legPmo = document.getElementById('ledger-opening-pmo');
+            if (legPsv) legPsv.value = psvVal;
+            if (legPmo) legPmo.value = pmoVal;
+
+            if (typeof calcEditLedgerTotals === 'function') calcEditLedgerTotals();
+            if (typeof updateTotalOpening === 'function') updateTotalOpening();
+
+            notify(`⚡ Auto-carried closing balances from shift ${d.from_shift_suffix || 'previous'}: PSV ${psvVal}, PMO ${pmoVal}.`, 'success');
         } else {
             notify('No previous shift closing balance available.', 'warning');
         }
@@ -1445,6 +1494,30 @@ function exportCategoryFromStock(category) {
 // Data Fetching & Rendering
 // -----------------------------------------------------------------------------
 
+async function refreshStockTab() {
+    const btn = document.getElementById('btn-refresh-stock-tab');
+    const spinner = document.getElementById('btn-refresh-stock-spinner');
+    if (spinner) spinner.classList.add('rotating');
+    if (btn) btn.disabled = true;
+
+    notify('🔄 Refreshing entire stock tab (ledger, subtabs, and KPIs)...', 'info');
+    try {
+        await refreshStockLedger();
+        if (typeof fetchStockDetails === 'function') {
+            await fetchStockDetails();
+        }
+        if (typeof checkShiftBlockedPlates === 'function') {
+            await checkShiftBlockedPlates(true, false);
+        }
+        notify('✓ Stock tab refreshed successfully!', 'success');
+    } catch (e) {
+        notify(`Refresh error: ${e.message}`, 'error');
+    } finally {
+        if (spinner) spinner.classList.remove('rotating');
+        if (btn) btn.disabled = false;
+    }
+}
+
 async function refreshStockLedger() {
     try {
         const url = `/api/stock/reconciliation/?date_suffix=${currentStockDateSuffix}`;
@@ -1569,20 +1642,54 @@ function updateDashboard(recon) {
     }
 }
 
-function renderDispatchesTable(dispatches) {
+let cachedDispatchesList = [];
+let currentDispatchFilter = 'all';
+
+function filterDispatchTable(filterType) {
+    currentDispatchFilter = filterType || 'all';
+    document.querySelectorAll('.stock-table-filter-pill').forEach(btn => {
+        btn.classList.remove('active');
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-secondary');
+    });
+    const activeBtn = document.getElementById(`btn-filter-disp-${filterType}`);
+    if (activeBtn) {
+        activeBtn.classList.remove('btn-secondary');
+        activeBtn.classList.add('btn-primary');
+        activeBtn.classList.add('active');
+    }
+    applyDispatchFilter();
+}
+
+function applyDispatchFilter() {
     const tbody = document.querySelector('#table-stock-dispatch tbody');
     if (!tbody) return;
     tbody.innerHTML = '';
 
-    if (!dispatches || dispatches.length === 0) {
+    if (!cachedDispatchesList || cachedDispatchesList.length === 0) {
         tbody.innerHTML = '<tr><td colspan="8" class="text-center" style="padding: 30px; color: var(--ug-text-muted);">No plates dispatched today yet.</td></tr>';
         return;
     }
 
-    dispatches.forEach((d, idx) => {
+    const filtered = cachedDispatchesList.filter(d => {
+        const isBlocked = d.status_code === 'NOT_ON_STOCK' || (d.status_label || '').includes('NOT ON STOCK') || (d.badge_class || '').includes('badge-red');
+        const isUnalloc = (d.status_label || '').includes('Unresolved') || (d.status || '').includes('Unresolved') || (d.status_label || '').includes('Discrepancy');
+        if (currentDispatchFilter === 'blocked') return isBlocked;
+        if (currentDispatchFilter === 'unallocated') return isUnalloc;
+        if (currentDispatchFilter === 'valid') return !isBlocked && !isUnalloc;
+        return true;
+    });
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center" style="padding: 30px; color: var(--ug-text-muted);">No records matching '${currentDispatchFilter}' filter.</td></tr>`;
+        return;
+    }
+
+    filtered.forEach((d, idx) => {
         const tr = document.createElement('tr');
-        const badgeClass = d.badge_class || (d.status_code === 'NOT_ON_STOCK' ? 'badge-red' : 'badge-green');
-        const statusLabel = d.status_label || d.status || 'ON LINE';
+        const isBlocked = d.status_code === 'NOT_ON_STOCK' || (d.status_label || '').includes('NOT ON STOCK') || (d.badge_class || '').includes('badge-red');
+        const badgeClass = isBlocked ? 'badge-red' : (d.badge_class || (d.status_code === 'NOT_ON_STOCK' ? 'badge-red' : 'badge-green'));
+        const statusLabel = d.status_label || d.status || (isBlocked ? '⚠️ NOT ON STOCK' : 'ON LINE');
         tr.innerHTML = `
             <td>${idx + 1}</td>
             <td class="text-muted" style="font-family: var(--font-mono);">${(d.dispatched_at || '').substring(11, 19)}</td>
@@ -1597,6 +1704,30 @@ function renderDispatchesTable(dispatches) {
         tr.onclick = () => inspectPlate(d.registration_number);
         tbody.appendChild(tr);
     });
+}
+
+function renderDispatchesTable(dispatches) {
+    cachedDispatchesList = dispatches || [];
+
+    // Calculate pill metrics
+    const totalCount = cachedDispatchesList.length;
+    let blockedCount = 0;
+    let unallocCount = 0;
+
+    cachedDispatchesList.forEach(d => {
+        const isBlocked = d.status_code === 'NOT_ON_STOCK' || (d.status_label || '').includes('NOT ON STOCK') || (d.badge_class || '').includes('badge-red');
+        const isUnalloc = (d.status_label || '').includes('Unresolved') || (d.status || '').includes('Unresolved') || (d.status_label || '').includes('Discrepancy');
+        if (isBlocked) blockedCount++;
+        else if (isUnalloc) unallocCount++;
+    });
+    const validCount = Math.max(0, totalCount - blockedCount - unallocCount);
+
+    setTextSafe('count-disp-all', totalCount);
+    setTextSafe('count-disp-valid', validCount);
+    setTextSafe('count-disp-blocked', blockedCount);
+    setTextSafe('count-disp-unalloc', unallocCount);
+
+    applyDispatchFilter();
 }
 
 function renderMovementsTable(movements) {

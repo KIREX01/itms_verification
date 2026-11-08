@@ -477,3 +477,45 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
   5. **Submission Modal Batch Scoping & Infinite Note Fix:**
      - In `core/static/core/js/pipeline.js:triggerBatchSubmit`: Strictly constrained pairs and conflict counts to the active batch filter (`currentQueueBatchFilter`). Eliminated false discrepancy warnings originating from other batches or historical records.
      - In `core/matcher/order_matcher.py`: Fixed the repetitive string concatenation bug (`f"{existing_note} | {conflict_msg}"`) that was appending duplicate messages on every shift sync cycle. Appropriately formatted placeholder plate IDs (`PAIR...` / `MISSING...`). Sanitized bloated existing notes in the database.
+
+### Backend & UI/UX Update: Stock Tab Architectural Separation, Distinct Services, Centralized Refresh, Ledger Deduplication & Context-Aware Excel Paste (09 November 2026)
+- **Status:** COMPLETED & TESTED (13/13 Tests Passing in `test_stock_services.py`, `test_stock_counting_and_queue.py`, and `test_stock_shift_details_and_tui.py`)
+- **Key Enhancements Implemented:**
+  1. **Architectural Separation into Two Distinct Domain Services:**
+     - **Service 1: Stock Checking & Daily Ledger Service (`core/services/stock_checking_service.py`)**:
+       - Encapsulates warehouse inventory validation (`validate_plates_stock_availability`).
+       - Calculates 9-row daily shift ledger balances (`calculate_shift_balances`): Opening Balance + Receipts + Transfer In - Transfer Out - Installed = Closing Balance, Physical Audit Count, and Variance.
+       - Manages ledger manual entry and override persistence (`update_ledger_entry`).
+       - Implements automated shift balance carryover (`auto_carry_previous_closing`).
+     - **Service 2: Kit Unallocation & Misallocation Monitoring Service (`core/services/kit_unallocation_service.py`)**:
+       - Enforces **Physical Dispatches as Ground Truth**: Treats safe-room physically scanned/pasted kits as the source of truth for shift floor issuance.
+       - Detects **Unallocated Floor Kits (`get_unallocated_kits`)**: Isolates kits physically dispatched that were never returned to safe room and never appeared in ITMS orders or archives for that shift, differentiating between kits with local photo evidence (Pending System Sync) and unresolved floor discrepancies.
+       - Detects **Misallocated Kits by MVR (`get_misallocated_kits`)**: Detects clerical errors made during ITMS order creation/entry:
+         - *Hardware Serial Mismatches*: Front/rear plate serial, GPS tracker, or BLE beacons in `InstallationOrder` differing from registered `InstallationKit` stock.
+         - *Category Mismatches*: Dispatched as PSV White but allocated as PMO Yellow (or vice-versa).
+         - *Warehouse Mismatches*: Dispatched under AGM Bond but allocated under a foreign facility in ITMS.
+         - *Duplicate Allocations*: Same registration plate assigned across multiple active orders.
+       - Detects **Spiked / Undispatched Kits (`get_spiked_undispatched_kits`)**: ITMS orders that were fitted on line without safe-room dispatch scans.
+       - Safe Auto-Ingestion (`auto_ingest_shift_orders_to_dispatch`): Ingests unscanned orders/archives into `StockDispatchScan` with `AUTO_ORDER_DISPATCH_NOTE` to track fitted daily totals while ensuring zero collision or corruption of unallocated kit monitoring.
+       - Generates comprehensive MVR Action Exception Dockets (`generate_mvr_docket`).
+  2. **Deduplicate Ledger Editing & Unified 9-Row Modal:**
+     - Removed redundant and competing `#stock-target-modal` from `tab_stock.html`.
+     - Replaced duplicate buttons (`✏️ Edit Ledger (9-Row Overrides)` and `✎ Opening & Target`) with a single, clear button: `✏️ Edit Ledger (O)`.
+     - Built comprehensive `#modal-edit-ledger` supporting Opening Balances, Target Quotas, Auto-Carry Previous Closing, Advance Overrides (Receipts, Installed, Transfers, Closing), Physical Audit Count, and Shift Handover Remarks in a single unified view.
+  3. **Centralized Atomic One-Tap Refresh (`refreshStockTab`):**
+     - Added `#btn-refresh-stock-tab` in `#pane-stock` header actions next to the shift date.
+     - Single tap atomically triggers:
+       - Live daily reconciliation recalculation (`/api/stock/reconciliation/?date_suffix=...`)
+       - Shift dispatches, movements, and audit log reload (`/api/stock/shift/details/?date_suffix=...`)
+       - Blocked / not-on-stock live recheck (`/api/stock/blocked-plates/?date_suffix=...`)
+       - Instant UI KPI cards, status badges, and table refresh with rotating icon and toast feedback.
+  4. **High-Visibility Display of Kits Not On Stock:**
+     - Added in-memory filter pills above the morning dispatches table: `All Dispatched`, `✓ In Stock`, `⚠️ Not On Stock`, and `❌ Unallocated Floor`.
+     - Enables instant one-click filtering of not-on-stock kits directly in the table with red badge indicators.
+     - Enhanced `#btn-view-blocked-stock` in the universal command bar with high-contrast warning styling.
+  5. **Context-Aware "Paste from Excel" Per Active Subtab:**
+     - Dynamically configures `#stock-paste-modal` according to `currentStockMode`:
+       - **Dispatch Subtab**: Titled "Paste Dispatched Kits from Excel", includes "Check Stock Only" and "Dispatch Plates" actions.
+       - **Movements Subtab**: Titled "Paste Stock Movements from Excel", dynamically presents explicit movement operations (Inbound Delivery / Delivered Kits, Line Returns, Bond Transfer In) with partner/reference fields.
+       - **Safe Audit Subtab**: Titled "Paste Safe Room Physical Audit from Excel", records direct physical inventory counts.
+

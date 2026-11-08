@@ -8,6 +8,7 @@ let reportCurrentScope = "ALL";
 let reportCurrentDate = "";
 let isFetchingReportTotals = false;
 let cachedUnallocatedItems = [];
+let cachedSkippedItems = [];
 
 function escapeHtml(str) {
     if (!str) return "";
@@ -280,12 +281,25 @@ function renderDateDrivenSection(dd) {
     if (elCat2Pct) elCat2Pct.textContent = pend.percentage || "0%";
 
     const elCat2Stages = document.getElementById("report-cat2-stages");
+    const elStagesPills = document.getElementById("report-cat2-stages-pills");
+    const stageEntries = Object.entries(pend.stages || {});
     if (elCat2Stages) {
-        const stageEntries = Object.entries(pend.stages || {});
         if (stageEntries.length === 0) {
             elCat2Stages.textContent = "Stages: None pending";
         } else {
             elCat2Stages.textContent = "Stages: " + stageEntries.map(([k, v]) => `${k} (${v})`).join(", ");
+        }
+    }
+    if (elStagesPills) {
+        if (stageEntries.length === 0) {
+            elStagesPills.innerHTML = `<span class="badge badge-dark" style="font-size:0.75rem; padding:2px 8px; color:#94a3b8;">No pending stages</span>`;
+        } else {
+            elStagesPills.innerHTML = stageEntries.map(([st, cnt]) => `
+                <span class="badge badge-yellow" style="font-size:0.72rem; padding:2px 6px; font-weight:700; color:#000000 !important; background:#fde047 !important; display:inline-flex; align-items:center; gap:4px;">
+                    <span>${escapeHtml(st)}:</span>
+                    <strong>${cnt}</strong>
+                </span>
+            `).join("");
         }
     }
 
@@ -315,8 +329,8 @@ function renderDateDrivenSection(dd) {
             cat3Badge.textContent = `⚠️ ${spikedCount} Spiked Undispatched`;
             cat3Badge.className = "badge badge-warning";
             cat3Badge.style.cursor = "pointer";
-            cat3Badge.onclick = () => downloadCategoryCsv('spiked');
-            cat3Badge.title = "Click to download Spiked Undispatched Kits CSV";
+            cat3Badge.onclick = () => downloadReportCsv('scanned_vs_skipped');
+            cat3Badge.title = "Click to download Scanned vs Skipped Discrepancy CSV";
         } else {
             cat3Badge.textContent = "Missing from Orders";
             cat3Badge.className = "badge badge-red";
@@ -324,8 +338,32 @@ function renderDateDrivenSection(dd) {
         }
     }
 
+    // 6. Category 4: Scanned vs Skipped Problem Identifier
+    const sc = dd.scanned_vs_skipped || {};
+    const elSkippedCount = document.getElementById("report-skipped-count");
+    if (elSkippedCount) elSkippedCount.textContent = sc.total_skipped ?? 0;
+
+    const elScannedRatio = document.getElementById("report-scanned-vs-skipped-ratio");
+    if (elScannedRatio) elScannedRatio.textContent = `${sc.total_scanned ?? 0} Scanned`;
+
+    const elScannedDesc = document.getElementById("report-scanned-vs-skipped-desc");
+    if (elScannedDesc) elScannedDesc.textContent = `Scanned: ${sc.total_scanned ?? 0} (${sc.camera_scanned ?? 0} Camera, ${sc.dispatch_scanned ?? 0} Dispatch)`;
+
+    const elSkippedBd = document.getElementById("report-skipped-breakdown");
+    if (elSkippedBd) {
+        elSkippedBd.textContent = `Missing Safe-Room: ${sc.skipped_dispatch_count ?? 0} • Missing Photos: ${sc.skipped_camera_count ?? 0}`;
+    }
+
+    const elSkippedTableCount = document.getElementById("report-skipped-table-count");
+    if (elSkippedTableCount) {
+        elSkippedTableCount.textContent = `${sc.total_skipped ?? 0} discrepancies`;
+    }
+
     cachedUnallocatedItems = unalloc.items || [];
     renderUnallocatedTable(cachedUnallocatedItems);
+
+    cachedSkippedItems = sc.items || [];
+    renderSkippedTable(cachedSkippedItems);
 }
 
 function renderUnallocatedTable(items) {
@@ -383,6 +421,92 @@ function filterUnallocatedTable(query) {
     });
 
     renderUnallocatedTable(filtered);
+}
+
+function renderSkippedTable(items) {
+    const tbody = document.getElementById("report-skipped-tbody");
+    if (!tbody) return;
+
+    if (!items || items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:14px; color:#64748b;">No operational discrepancies detected. All orders properly scanned with photos and safe-room dispatches.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = items.slice(0, 100).map(item => {
+        const badgeClass = item.problem_class || "badge-warning";
+        const badgeLabel = item.problem_badge || "⚠️ Discrepancy";
+
+        return `
+            <tr style="border-bottom:1px solid #1e293b;">
+                <td style="padding:6px 10px; font-weight:700; color:#f8fafc;">
+                    <span class="badge ${badgeClass}" style="margin-right:6px; font-size:0.7rem;">${badgeLabel}</span>
+                    <span>${escapeHtml(item.display_plate || item.plate)}</span>
+                </td>
+                <td style="padding:6px 10px; color:#cbd5e1; font-family:monospace; font-size:0.8rem;">
+                    <div>${escapeHtml(item.order_number || "—")}</div>
+                    <div style="font-size:0.75rem; color:#94a3b8;">${escapeHtml(item.stage || "—")}</div>
+                </td>
+                <td style="padding:6px 10px; color:#f59e0b; font-size:0.78rem;">
+                    ${escapeHtml(item.reason || "—")}
+                </td>
+                <td style="padding:6px 10px; color:#e2e8f0; font-size:0.8rem;">
+                    <div>${escapeHtml(item.vin || "—")}</div>
+                    <div style="font-size:0.75rem; color:#64748b;">${escapeHtml(item.warehouse || "AGM")}</div>
+                </td>
+                <td style="padding:6px 10px; color:#38bdf8; font-size:0.78rem; font-weight:600;">
+                    ${escapeHtml(item.action_required || "—")}
+                </td>
+            </tr>
+        `;
+    }).join("");
+}
+
+function filterSkippedTable(query) {
+    const q = (query || "").trim().toLowerCase();
+    if (!q) {
+        renderSkippedTable(cachedSkippedItems);
+        return;
+    }
+
+    const filtered = cachedSkippedItems.filter(item => {
+        const p = (item.plate || "").toLowerCase();
+        const dp = (item.display_plate || "").toLowerCase();
+        const ord = (item.order_number || "").toLowerCase();
+        const rsn = (item.reason || "").toLowerCase();
+        const st = (item.stage || "").toLowerCase();
+        return p.includes(q) || dp.includes(q) || ord.includes(q) || rsn.includes(q) || st.includes(q);
+    });
+
+    renderSkippedTable(filtered);
+}
+
+async function copySkippedRawPlates() {
+    if (!cachedSkippedItems || cachedSkippedItems.length === 0) {
+        if (typeof showToast === "function") {
+            showToast("No skipped plates found to copy.", "warning");
+        }
+        return;
+    }
+
+    const plates = cachedSkippedItems.map(item => item.plate || item.display_plate).filter(Boolean);
+    if (plates.length === 0) {
+        if (typeof showToast === "function") {
+            showToast("No valid plate numbers found in skipped list.", "warning");
+        }
+        return;
+    }
+
+    const textToCopy = plates.join("\n");
+    const ok = await copyTextToClipboard(textToCopy);
+    if (ok) {
+        if (typeof showToast === "function") {
+            showToast(`📋 Copied ${plates.length} skipped plate(s) to clipboard.`, "success");
+        }
+    } else {
+        if (typeof showToast === "function") {
+            showToast("Failed to copy skipped plates to clipboard.", "error");
+        }
+    }
 }
 
 function copyTextToClipboard(text) {
@@ -549,29 +673,26 @@ if (typeof window.downloadCsvFile !== "function") {
     };
 }
 
-function downloadCategoryCsv(category) {
-    const suf = (window.activeShiftDateInfo && window.activeShiftDateInfo.suffix) ? window.activeShiftDateInfo.suffix : (reportCurrentDate || "today");
-    const cat = encodeURIComponent(category);
-    const url = `/api/stock/export/category/${cat}/?date=${encodeURIComponent(suf)}`;
+function downloadReportCsv(type) {
+    const suf = (window.activeShiftDateInfo && window.activeShiftDateInfo.suffix) ? window.activeShiftDateInfo.suffix : (reportCurrentDate || "ALL");
+    const exportType = encodeURIComponent(type);
+    const url = `/api/export/report/?type=${exportType}&date=${encodeURIComponent(suf)}`;
     const menu = document.getElementById("shift-csv-dropdown");
     if (menu) menu.style.display = "none";
     if (typeof downloadCsvFile === "function") {
-        downloadCsvFile(url, `shift_${suf}_${category}.csv`);
+        downloadCsvFile(url, `itms_${type}_${suf}.csv`);
     } else {
         window.location.href = url;
     }
 }
 
+function downloadCategoryCsv(category) {
+    downloadReportCsv(category);
+}
+
 function downloadShiftPairsReport(event) {
     if (event) event.preventDefault();
-    const menu = document.getElementById("shift-csv-dropdown");
-    if (menu) menu.style.display = "none";
-    const url = "/api/export/report/";
-    if (typeof downloadCsvFile === "function") {
-        downloadCsvFile(url, "itms_shift_report.csv");
-    } else {
-        window.location.href = url;
-    }
+    downloadReportCsv("master");
 }
 
 function openShiftReconcileModal() {

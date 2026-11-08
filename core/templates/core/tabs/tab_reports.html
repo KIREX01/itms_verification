@@ -114,27 +114,24 @@
                         <button class="btn btn-primary dropdown-toggle reports-btn-export" onclick="toggleShiftCsvMenu(event)" title="Export categorized Shift CSV spreadsheets" style="background-color:#d97706 !important; border:1px solid #f59e0b !important; color:#ffffff !important; font-weight:700;">
                             📑 Export CSVs ▾
                         </button>
-                        <div id="shift-csv-dropdown" style="display:none; position:absolute; right:0; top:100%; margin-top:4px; background:#0c1017; border:1px solid #334155; border-radius:6px; box-shadow:0 8px 24px rgba(0,0,0,0.7); z-index:100; min-width:230px; overflow:hidden;">
-                            <a href="javascript:void(0)" onclick="downloadCategoryCsv('unallocated')">
-                                🔴 Unallocated Kits CSV
+                        <div id="shift-csv-dropdown" style="display:none; position:absolute; right:0; top:100%; margin-top:4px; background:#0c1017; border:1px solid #334155; border-radius:6px; box-shadow:0 8px 24px rgba(0,0,0,0.7); z-index:100; min-width:260px; overflow:hidden;">
+                            <a href="javascript:void(0)" onclick="downloadReportCsv('master')">
+                                📑 Master Verification Pairs CSV
                             </a>
-                            <a href="javascript:void(0)" onclick="downloadCategoryCsv('spiked')" style="color:#f59e0b !important; font-weight:700; border-bottom:1px solid rgba(255,255,255,0.08);">
-                                ⚠️ Spiked Undispatched Kits CSV
+                            <a href="javascript:void(0)" onclick="downloadReportCsv('stages')" style="color:#38bdf8 !important; font-weight:700;">
+                                📊 Order Stages Breakdown CSV
                             </a>
-                            <a href="javascript:void(0)" onclick="downloadCategoryCsv('archived')">
-                                🔵 Completed Archive CSV
+                            <a href="javascript:void(0)" onclick="downloadReportCsv('scanned_vs_skipped')" style="color:#f59e0b !important; font-weight:700; border-bottom:1px solid rgba(255,255,255,0.08);">
+                                ⚠️ Scanned vs Skipped Discrepancy CSV
                             </a>
-                            <a href="javascript:void(0)" onclick="downloadCategoryCsv('pending')">
+                            <a href="javascript:void(0)" onclick="downloadReportCsv('unallocated')">
+                                🔴 Floor Unallocated Kits CSV
+                            </a>
+                            <a href="javascript:void(0)" onclick="downloadReportCsv('archived')">
+                                🔵 Completed Archive Orders CSV
+                            </a>
+                            <a href="javascript:void(0)" onclick="downloadReportCsv('pending')">
                                 🟡 Active Pending Orders CSV
-                            </a>
-                            <a href="javascript:void(0)" onclick="downloadCategoryCsv('dispatched')">
-                                ⚪ Morning Dispatched CSV
-                            </a>
-                            <a href="javascript:void(0)" onclick="downloadCategoryCsv('master')" style="color:var(--ug-yellow, #fcdc04) !important; font-weight:700;">
-                                📊 Master Shift Reconciliation
-                            </a>
-                            <a href="javascript:void(0)" onclick="downloadShiftPairsReport(event)">
-                                📑 Shift Pairs Verification Report
                             </a>
                         </div>
                     </div>
@@ -185,8 +182,11 @@
                         <div class="reports-cat-desc">
                             Active installation orders scheduled or currently under fitment.
                         </div>
-                        <div class="reports-cat-footer" id="report-cat2-stages">
+                        <div class="reports-cat-footer" id="report-cat2-stages" style="display:none;">
                             Stages: None
+                        </div>
+                        <div id="report-cat2-stages-pills" style="display:flex; flex-wrap:wrap; gap:4px; margin-top:2px;">
+                            <span class="badge badge-dark" style="font-size:0.72rem; padding:2px 6px;">Loading stages...</span>
                         </div>
                     </div>
 
@@ -207,6 +207,23 @@
                         </div>
                     </div>
 
+                    <!-- Category 4: Scanned vs Skipped Problem Identifier -->
+                    <div class="reports-category-card cat-skipped" style="border-top:3px solid #f59e0b; background:linear-gradient(180deg, rgba(245, 158, 11, 0.08) 0%, #111622 100%);">
+                        <div class="reports-cat-header">
+                            <div class="reports-cat-title" style="color:#f59e0b !important;">
+                                ⚠️ Category 4: Scanned vs Skipped
+                            </div>
+                            <span class="badge badge-warning" id="report-scanned-vs-skipped-ratio" style="color:#ffffff !important; font-weight:700;">0 Scanned</span>
+                        </div>
+                        <div class="reports-cat-val" id="report-skipped-count" style="color:#f59e0b !important;">0</div>
+                        <div class="reports-cat-desc" id="report-scanned-vs-skipped-desc">
+                            Plates scanned: 0 (Camera &amp; Safe-Room)
+                        </div>
+                        <div class="reports-cat-footer" id="report-skipped-breakdown" style="color:#fbbf24; font-size:0.75rem;">
+                            Missing Safe-Room: 0 • Missing Photos: 0
+                        </div>
+                    </div>
+
                 </div>
 
                 <!-- Unallocated Plates Audit Table -->
@@ -222,7 +239,7 @@
                             <button type="button" class="btn btn-secondary" onclick="copyMvrDocket()" title="Copy formatted MVR Shift Docket to clipboard" style="background-color:#1e293b !important; border:1px solid rgba(255,255,255,0.2) !important; color:#ffffff !important; font-weight:700;">
                                 📑 Copy MVR Docket
                             </button>
-                            <button type="button" class="btn btn-danger" onclick="downloadCategoryCsv('unallocated')" title="Download Unallocated Plates CSV" style="background-color:#991b1b !important; border:1px solid #dc2626 !important; color:#ffffff !important; font-weight:700;">
+                            <button type="button" class="btn btn-danger" onclick="downloadReportCsv('unallocated')" title="Download Unallocated Plates CSV" style="background-color:#991b1b !important; border:1px solid #dc2626 !important; color:#ffffff !important; font-weight:700;">
                                 📥 Download CSV
                             </button>
                             <input type="text" id="report-unallocated-search" class="unallocated-search-input" placeholder="Filter plate or source..." oninput="filterUnallocatedTable(this.value)" aria-label="Filter unallocated plates">
@@ -242,6 +259,43 @@
                             <tbody id="report-unallocated-tbody">
                                 <tr>
                                     <td colspan="5" style="text-align:center; padding:16px; color:rgba(255,255,255,0.6);">Loading unallocated plates...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Scanned vs Skipped Problem Identifier Audit Table -->
+                <div style="margin-top:20px; border-top:1px solid rgba(245, 158, 11, 0.2); padding-top:15px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+                        <div style="font-weight:700; font-size:0.85rem; color:#f59e0b !important; display:flex; align-items:center; gap:6px;">
+                            <span>⚠️ Scanned vs Skipped Problem Identifier:</span>
+                            <span class="badge badge-warning" id="report-skipped-table-count">0 discrepancies</span>
+                        </div>
+                        <div class="unallocated-toolbar-actions">
+                            <button type="button" class="btn btn-secondary" onclick="copySkippedRawPlates()" title="Copy raw skipped plate numbers to clipboard" style="background-color:#1e293b !important; border:1px solid rgba(255,255,255,0.2) !important; color:#ffffff !important; font-weight:700;">
+                                📋 Copy Skipped Plates
+                            </button>
+                            <button type="button" class="btn btn-warning" onclick="downloadReportCsv('scanned_vs_skipped')" title="Download Scanned vs Skipped CSV" style="background-color:#9a3412 !important; border:1px solid #ea580c !important; color:#ffffff !important; font-weight:700;">
+                                📥 Download Skipped CSV
+                            </button>
+                            <input type="text" id="report-skipped-search" class="unallocated-search-input" placeholder="Filter plate, order, or reason..." oninput="filterSkippedTable(this.value)" aria-label="Filter skipped plates">
+                        </div>
+                    </div>
+                    <div class="reports-table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="padding:8px 12px; text-align:left;">Registration Plate</th>
+                                    <th style="padding:8px 12px; text-align:left;">ITMS Order / Stage</th>
+                                    <th style="padding:8px 12px; text-align:left;">Discrepancy Issue</th>
+                                    <th style="padding:8px 12px; text-align:left;">VIN / Operating Facility</th>
+                                    <th style="padding:8px 12px; text-align:left;">Recommended Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="report-skipped-tbody">
+                                <tr>
+                                    <td colspan="5" style="text-align:center; padding:16px; color:rgba(255,255,255,0.6);">Loading operational discrepancies...</td>
                                 </tr>
                             </tbody>
                         </table>

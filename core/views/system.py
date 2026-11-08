@@ -22,7 +22,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from core.models import EvidenceImage, VehicleInstallationPair
+from core.models import EvidenceImage, InstallationOrder, VehicleInstallationPair
 from core.services import config_service, date_service, vault_service
 from core.services.pipeline_runner import runner as pipeline_runner
 from core.services.update_service import update_service
@@ -141,7 +141,15 @@ def api_stream_events(request: HttpRequest) -> HttpResponse:
 @require_GET
 def api_export_report(request: HttpRequest) -> HttpResponse:
     """
-    Exports shift verification report as a high-performance streaming CSV.
+    Exports shift verification and operational reports as high-performance streaming CSVs.
+    Supports:
+    - 'master' / 'pairs': VehicleInstallationPairs with OCR, match, VIN, photos, timestamps.
+    - 'stages' / 'all_orders': All installation orders across all given stages.
+    - 'scanned_vs_skipped' / 'skipped': Operational discrepancy problem identifier.
+    - 'unallocated': Kits physically dispatched to line without active order or archive.
+    - 'archived': Officially completed orders archived on ITMS.
+    - 'pending': Active installation orders awaiting or under fitment.
+
     Uses chunked streaming to handle 10,000+ records seamlessly with minimal memory footprint,
     and simultaneously saves an Excel-compatible (UTF-8 BOM, zero empty rows) backup to disk.
     """
@@ -149,8 +157,189 @@ def api_export_report(request: HttpRequest) -> HttpResponse:
         return HttpResponse("Unauthorized", status=401)
 
     from django.db.models import Q
-    target_date = request.GET.get("date") or request.GET.get("date_suffix") or request.GET.get("suffix")
+    from core.services import report_service, stock_monitoring_service
 
+    target_date = request.GET.get("date") or request.GET.get("date_suffix") or request.GET.get("suffix")
+    export_type = (request.GET.get("type") or request.GET.get("category") or "master").lower().strip()
+
+    is_all = (target_date or "").strip().upper() == "ALL"
+    if is_all:
+        selected_suffix = "ALL"
+    else:
+        work_d, selected_suffix = date_service.resolve_date_and_suffix(target_date)
+
+    exports_dir = Path(settings.BASE_DIR) / "exports"
+    exports_dir.mkdir(parents=True, exist_ok=True)
+    date_str = date_service.now_kampala().strftime("%Y%m%d_%H%M")
+
+    # 1. Order Stages Breakdown Export
+    if export_type in ("stages", "all_orders", "orders_stages", "orders"):
+        filename = (
+            f"itms_order_stages_{selected_suffix}_{date_str}.csv"
+            if selected_suffix != "ALL"
+            else f"itms_order_stages_all_{date_str}.csv"
+        )
+        backup_file_path = exports_dir / filename
+
+        if is_all:
+            orders_qs = InstallationOrder.objects.all().order_by("order_status", "registration_number")
+        else:
+            orders_qs = InstallationOrder.objects.filter(
+                Q(order_number__endswith=selected_suffix) |
+                Q(order_number__icontains=selected_suffix)
+            ).order_by("order_status", "registration_number")
+
+        def stream_stages_generator():
+            with open(backup_file_path, "wb") as disk_file:
+                bom = b"\xef\xbb\xbf"
+                disk_file.write(bom)
+                yield bom
+
+                buffer = io.StringIO()
+                writer = csv.writer(buffer, lineterminator="\r\n")
+                writer.writerow([
+                    "Row",
+                    "Order Number",
+                    "Plate Number",
+                    "VIN",
+                    "Order Status",
+                    "ITMS Stage",
+                    "Warehouse Facility",
+                    "Installation Officer",
+                    "Installation Date",
+                    "Front Photo On ITMS",
+                    "Rear Photo On ITMS",
+                    "Archived On ITMS",
+                    "Last Synced At (EAT)",
+                ])
+                chunk = buffer.getvalue().encode("utf-8")
+                disk_file.write(chunk)
+                yield chunk
+                buffer.seek(0)
+                buffer.truncate(0)
+
+                row_idx = 1
+                for o in orders_qs.iterator(chunk_size=1000):
+                    writer.writerow([
+                        row_idx,
+                        o.order_number,
+                        o.registration_number,
+                        o.vin or "—",
+                        o.order_status or "Ready for installation",
+                        o.itms_stage or o.order_status or "STAGE_1_INSTALLATION",
+                        o.warehouse_name or "AGM",
+                        o.installation_officer or "—",
+                        o.installation_date or "—",
+                        "YES" if o.has_front_photo else "NO",
+                        "YES" if o.has_rear_photo else "NO",
+                        "YES" if o.is_archived else "NO",
+                        date_service.format_itms_timestamp(o.last_synced_at),
+                    ])
+                    row_idx += 1
+                    if row_idx % 200 == 0:
+                        chunk = buffer.getvalue().encode("utf-8")
+                        disk_file.write(chunk)
+                        yield chunk
+                        buffer.seek(0)
+                        buffer.truncate(0)
+
+                rem = buffer.getvalue()
+                if rem:
+                    chunk = rem.encode("utf-8")
+                    disk_file.write(chunk)
+                    yield chunk
+
+        response = StreamingHttpResponse(stream_stages_generator(), content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
+    # 2. Scanned vs Skipped Discrepancies Export (Problem Identifier)
+    if export_type in ("scanned_vs_skipped", "skipped", "discrepancies", "spiked"):
+        filename = (
+            f"itms_scanned_vs_skipped_{selected_suffix}_{date_str}.csv"
+            if selected_suffix != "ALL"
+            else f"itms_scanned_vs_skipped_all_{date_str}.csv"
+        )
+        backup_file_path = exports_dir / filename
+
+        date_totals = report_service.get_date_driven_plate_totals(selected_suffix)
+        scanned_vs_skipped_data = date_totals.get("scanned_vs_skipped", {})
+        skipped_items = scanned_vs_skipped_data.get("items", [])
+
+        def stream_skipped_generator():
+            with open(backup_file_path, "wb") as disk_file:
+                bom = b"\xef\xbb\xbf"
+                disk_file.write(bom)
+                yield bom
+
+                buffer = io.StringIO()
+                writer = csv.writer(buffer, lineterminator="\r\n")
+                writer.writerow([
+                    "Row",
+                    "Plate Number",
+                    "Order Number",
+                    "VIN",
+                    "Discrepancy Classification",
+                    "Current System Stage",
+                    "Safe Room Dispatch Status",
+                    "Camera Evidence Status",
+                    "Operating Facility",
+                    "Discrepancy Reason",
+                    "Recommended Action Required",
+                ])
+                chunk = buffer.getvalue().encode("utf-8")
+                disk_file.write(chunk)
+                yield chunk
+                buffer.seek(0)
+                buffer.truncate(0)
+
+                for row_idx, item in enumerate(skipped_items, start=1):
+                    is_dispatch_miss = (item.get("problem_type") == "SKIPPED_SAFE_ROOM_SCAN")
+                    writer.writerow([
+                        row_idx,
+                        item.get("plate", ""),
+                        item.get("order_number", "—"),
+                        item.get("vin", "—"),
+                        item.get("problem_badge", "⚠️ Discrepancy"),
+                        item.get("stage", "Unknown"),
+                        "MISSING DISPATCH SCAN (Spiked on Line)" if is_dispatch_miss else "DISPATCHED / ON SITE",
+                        "MISSING PHOTO EVIDENCE" if not is_dispatch_miss else "PRESENT OR QUEUED",
+                        item.get("warehouse", "AGM"),
+                        item.get("reason", "—"),
+                        item.get("action_required", "—"),
+                    ])
+                    if row_idx % 200 == 0:
+                        chunk = buffer.getvalue().encode("utf-8")
+                        disk_file.write(chunk)
+                        yield chunk
+                        buffer.seek(0)
+                        buffer.truncate(0)
+
+                rem = buffer.getvalue()
+                if rem:
+                    chunk = rem.encode("utf-8")
+                    disk_file.write(chunk)
+                    yield chunk
+
+        response = StreamingHttpResponse(stream_skipped_generator(), content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
+    # 3. Floor Unallocated / Archived / Pending Category Exports
+    if export_type in ("unallocated", "archived", "pending", "dispatched"):
+        csv_content = stock_monitoring_service.generate_category_csv_content(export_type, selected_suffix)
+        filename = f"itms_{export_type}_{selected_suffix}_{date_str}.csv"
+        backup_file_path = exports_dir / filename
+        backup_file_path.write_bytes(csv_content.encode("utf-8-sig"))
+
+        response = HttpResponse(csv_content.encode("utf-8-sig"), content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
+    # 4. Default: Verification Pairs Master Report
     pairs = (
         VehicleInstallationPair.objects.all()
         .select_related("order", "front_image", "rear_image")
@@ -174,21 +363,16 @@ def api_export_report(request: HttpRequest) -> HttpResponse:
         .order_by("-updated_at")
     )
 
-    is_all = (target_date or "").strip().upper() == "ALL"
-    if is_all:
-        selected_suffix = "ALL"
-    else:
-        work_d, selected_suffix = date_service.resolve_date_and_suffix(target_date)
+    if not is_all:
+        work_d, _ = date_service.resolve_date_and_suffix(target_date)
         pairs = pairs.filter(
             Q(order__order_number__endswith=selected_suffix) |
+            Q(order__order_number__icontains=selected_suffix) |
             Q(created_at__date=work_d) |
             Q(front_image__ingested_at__date=work_d) |
             Q(rear_image__ingested_at__date=work_d)
         )
 
-    exports_dir = Path(settings.BASE_DIR) / "exports"
-    exports_dir.mkdir(parents=True, exist_ok=True)
-    date_str = date_service.now_kampala().strftime("%Y%m%d_%H%M")
     filename = (
         f"itms_shift_report_{selected_suffix}_{date_str}.csv"
         if selected_suffix != "ALL"

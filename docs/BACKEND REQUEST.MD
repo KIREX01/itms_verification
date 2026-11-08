@@ -519,3 +519,37 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
        - **Movements Subtab**: Titled "Paste Stock Movements from Excel", dynamically presents explicit movement operations (Inbound Delivery / Delivered Kits, Line Returns, Bond Transfer In) with partner/reference fields.
        - **Safe Audit Subtab**: Titled "Paste Safe Room Physical Audit from Excel", records direct physical inventory counts.
 
+
+
+### Backend & UI/UX Update: Reports Tab Operational Stage Metrics, Scanned vs Skipped Discrepancy Tracking, and Centralized Clean CSV Exports (09 November 2026)
+- **Status:** COMPLETED & TESTED (7/7 Tests Passing in `test_report_exports.py`, 22/22 in `test_stock_services.py` & `test_reports_and_lifecycle.py`)
+- **Key Enhancements Implemented:**
+  1. **Dynamic Order Stages Breakdown Across All Given Stages:**
+     - In `core/services/report_service.py`: Implemented exact SQL aggregations across all orders (`all_stages: Dict[str, int]`) and pending orders (`pending_stages: Dict[str, int]`) grouping by `order_status` and `itms_stage`.
+     - Eliminated arbitrary 100-item query limits, providing 100% accurate counts of orders across all lifecycle stages (`Ready for installation`, `Under installation`, `Ready for approve`, `Installed`, `Archived`).
+     - Added dynamic stage pill badges in `tab_reports.html` (`#report-cat2-stages-pills`) rendered in real time.
+  2. **Scanned vs Skipped Problem Identifier & Discrepancy Tracking:**
+     - In `core/services/report_service.py`: Implemented two-way operational discrepancy monitoring:
+       - **Total Scanned**: Quantifies unique canonical plates captured via camera evidence (`VehicleInstallationPair` / `EvidenceImage`) and physical safe-room dispatch scans (`StockDispatchScan`).
+       - **Total Skipped / Problems**: Isolates critical floor discrepancies:
+         - *Skipped Safe-Room Scan (Spiked on Line)*: Orders installed or in active queue that bypassed safe-room barcode scanning.
+         - *Skipped Camera Evidence*: ITMS orders marked installed or archived that lack front/rear camera verification photos.
+     - Created Category 4 KPI Card in `tab_reports.html` and a dedicated **Scanned vs Skipped Problem Identifier Audit Table** (`#report-skipped-tbody`) with real-time text filter and clipboard copy (`copySkippedRawPlates`).
+  3. **Centralized & Clean CSV Export Hub (`/api/export/report/`):**
+     - Enhanced `core/views/system.py:api_export_report` with `type` routing:
+       - `type=master`: Streaming CSV of all verification pairs with OCR scores, match confidence, VIN, and photo paths.
+       - `type=stages`: Streaming CSV of all installation orders across all stages with officer, date, photo flags, and sync timestamps.
+       - `type=scanned_vs_skipped`: Dedicated discrepancy CSV clearly stating problem classification, stage, safe-room scan status, photo evidence status, and recommended actions.
+       - `type=unallocated`: Detailed floor unallocated kit list.
+       - `type=archived`: Completed archive orders.
+       - `type=pending`: Active pending orders.
+     - Guaranteed Excel compatibility: UTF-8 BOM (`\xef\xbb\xbf`), standard CRLF line terminators, zero duplicate blank rows, chunked streaming for 10,000+ records.
+  4. **Strict Isolation of Stock Tab Exports:**
+     - Cleaned `#stock-export-dropdown` in `tab_stock.html` to strictly export warehouse inventory data:
+       - Daily Reconciliation Ledger CSV (`/api/stock/export/`)
+       - Safe Room Dispatches CSV (`/api/stock/export/category/dispatched/`)
+       - Inbound Deliveries & Movements CSV (`/api/stock/export/category/movements/`)
+       - Safe Room Physical Count Audit CSV (`/api/stock/export/category/audit/`)
+       - Safe Room Unregistered Plates CSV (`/api/stock/export/unregistered/`)
+       - Blocked / Not On Stock CSV (`/api/stock/export/category/blocked/`)
+     - Removed all order stage and verification exports from the Stock Tab, redirecting operational reporting strictly to the Reports Tab.

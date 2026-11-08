@@ -109,11 +109,21 @@ def get_date_driven_plate_totals(target_date: Optional[str] = None) -> Dict[str,
     pending_qs = orders_qs.filter(is_archived=False).exclude(order_status__iexact="Installed")
     pending_count = pending_qs.count()
 
+    # Exact database aggregation across ALL pending order stages (eliminates 100 item cutoff)
     stage_counts: Dict[str, int] = {}
+    for st_group in pending_qs.values("order_status", "itms_stage").annotate(c=Count("id")).order_by("-c"):
+        st_name = st_group.get("itms_stage") or st_group.get("order_status") or "Ready for installation"
+        stage_counts[st_name] = stage_counts.get(st_name, 0) + st_group["c"]
+
+    # Exact aggregation across ALL order stages for this scope
+    all_stages_counts: Dict[str, int] = {}
+    for st_group in orders_qs.values("order_status", "itms_stage").annotate(c=Count("id")).order_by("-c"):
+        st_name = st_group.get("itms_stage") or st_group.get("order_status") or "Unknown Stage"
+        all_stages_counts[st_name] = all_stages_counts.get(st_name, 0) + st_group["c"]
+
     pending_items: List[Dict[str, Any]] = []
     for o in pending_qs[:100]:
         st = o.itms_stage or o.order_status or "Ready for installation"
-        stage_counts[st] = stage_counts.get(st, 0) + 1
         pending_items.append({
             "plate": o.registration_number,
             "display_plate": format_display_plate(o.registration_number),
@@ -254,12 +264,115 @@ def get_date_driven_plate_totals(target_date: Optional[str] = None) -> Dict[str,
             "date": formatted_date,
         })
 
+    # 5. Scanned vs Skipped Discrepancy Analysis (Problem Identifier)
+    if is_all:
+        pairs_scope_qs = VehicleInstallationPair.objects.filter(is_deleted=False)
+        dispatch_scope_qs = StockDispatchScan.objects.all()
+    else:
+        work_d, _ = date_service.resolve_date_and_suffix(selected_suffix)
+        pairs_scope_qs = VehicleInstallationPair.objects.filter(is_deleted=False).filter(
+            Q(order__order_number__endswith=selected_suffix) |
+            Q(order__order_number__icontains=selected_suffix) |
+            Q(created_at__date=work_d) |
+            Q(front_image__ingested_at__date=work_d) |
+            Q(rear_image__ingested_at__date=work_d)
+        )
+        dispatch_scope_qs = StockDispatchScan.objects.filter(
+            Q(work_date_suffix=selected_suffix) | Q(work_date=work_d)
+        )
+
+    scanned_pair_plates_raw = set(
+        pairs_scope_qs.exclude(registration_number_detected="").values_list("registration_number_detected", flat=True)
+    )
+    scanned_pair_canonical = {normalizer.canonicalize(p) for p in scanned_pair_plates_raw if p}
+
+    dispatched_plates_raw = set(
+        dispatch_scope_qs.exclude(registration_number="").values_list("registration_number", flat=True)
+    )
+    dispatched_canonical = {normalizer.canonicalize(p) for p in dispatched_plates_raw if p}
+
+    total_scanned_unique = len(scanned_pair_canonical | dispatched_canonical)
+    total_camera_scanned = len(scanned_pair_canonical)
+    total_dispatch_scanned = len(dispatched_canonical)
+
+    order_by_plate = {}
+    for o in orders_qs.only("order_number", "registration_number", "order_status", "itms_stage", "vin", "warehouse_name", "is_archived", "has_front_photo", "has_rear_photo"):
+        if o.registration_number:
+            order_by_plate[normalizer.canonicalize(o.registration_number)] = o
+
+    skipped_items: List[Dict[str, Any]] = []
+    seen_skipped_plates = set()
+
+    # 5a. Skipped Safe-Room Scan (Spiked on Line)
+    for p in spiked_installed_list:
+        c_p = normalizer.canonicalize(p)
+        if c_p and c_p not in seen_skipped_plates:
+            seen_skipped_plates.add(c_p)
+            o = order_by_plate.get(c_p)
+            skipped_items.append({
+                "plate": p,
+                "display_plate": format_display_plate(p),
+                "order_number": o.order_number if o else "—",
+                "vin": (o.vin if o else "") or "—",
+                "stage": "Installed (ITMS Archive)",
+                "problem_type": "SKIPPED_SAFE_ROOM_SCAN",
+                "problem_badge": "⚠️ Skipped Safe Room",
+                "problem_class": "badge-warning",
+                "reason": "Plate fitted on line without safe-room dispatch scan",
+                "action_required": "Perform retrospective safe audit registration",
+                "warehouse": (o.warehouse_name if o else "") or "Line Floor (AGM)",
+                "date": formatted_date,
+            })
+
+    for p in spiked_pending_list:
+        c_p = normalizer.canonicalize(p)
+        if c_p and c_p not in seen_skipped_plates:
+            seen_skipped_plates.add(c_p)
+            o = order_by_plate.get(c_p)
+            skipped_items.append({
+                "plate": p,
+                "display_plate": format_display_plate(p),
+                "order_number": o.order_number if o else "—",
+                "vin": (o.vin if o else "") or "—",
+                "stage": (o.itms_stage or o.order_status) if o else "Ready for installation",
+                "problem_type": "SKIPPED_SAFE_ROOM_SCAN",
+                "problem_badge": "⚠️ Skipped Safe Room",
+                "problem_class": "badge-warning",
+                "reason": "Active order in queue without safe-room dispatch scan",
+                "action_required": "Verify physical kit location in safe room before fitment",
+                "warehouse": (o.warehouse_name if o else "") or "Line Floor (AGM)",
+                "date": formatted_date,
+            })
+
+    # 5b. Skipped Camera / Photo Evidence (Installed orders missing photos)
+    installed_missing_camera_count = 0
+    for o in installed_qs:
+        c_p = normalizer.canonicalize(o.registration_number)
+        if c_p and c_p not in scanned_pair_canonical and c_p not in seen_skipped_plates:
+            seen_skipped_plates.add(c_p)
+            installed_missing_camera_count += 1
+            skipped_items.append({
+                "plate": o.registration_number,
+                "display_plate": format_display_plate(o.registration_number),
+                "order_number": o.order_number,
+                "vin": o.vin or "—",
+                "stage": "Installed (Archive)",
+                "problem_type": "SKIPPED_CAMERA_PHOTOS",
+                "problem_badge": "📷 Missing Photos",
+                "problem_class": "badge-red",
+                "reason": "Order installed on ITMS without front/rear camera evidence",
+                "action_required": "Capture front & rear vehicle verification photos",
+                "warehouse": o.warehouse_name or "Line Floor (AGM)",
+                "date": formatted_date,
+            })
+
     return {
         "selected_date_suffix": selected_suffix,
         "selected_date_formatted": formatted_date,
         "is_all_dates": is_all,
         "available_dates": available_dates,
         "total_orders_for_date": total_orders_for_date,
+        "all_stages": all_stages_counts,
         "installed_archive": {
             "count": installed_count,
             "percentage": installed_pct,
@@ -278,6 +391,15 @@ def get_date_driven_plate_totals(target_date: Optional[str] = None) -> Dict[str,
             "stock_kits_count": stock_kits_count,
             "dispatched_unallocated_count": dispatched_unallocated_count,
             "items": unallocated_items,
+        },
+        "scanned_vs_skipped": {
+            "total_scanned": total_scanned_unique,
+            "camera_scanned": total_camera_scanned,
+            "dispatch_scanned": total_dispatch_scanned,
+            "total_skipped": len(skipped_items),
+            "skipped_dispatch_count": len(spiked_installed_list) + len(spiked_pending_list),
+            "skipped_camera_count": installed_missing_camera_count,
+            "items": skipped_items,
         },
         "spiked_undispatched": {
             "total_count": spiked_total_count,

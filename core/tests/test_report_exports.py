@@ -233,3 +233,186 @@ class ReportExportsAndSpikedKitTests(TestCase):
         totals = report_service.get_system_totals(scope="ALL", target_date=self.test_suffix)
         self.assertEqual(totals["pairs"]["approved"], 1000)
         self.assertIn("spiked_undispatched", totals["date_driven"])
+        self.assertIn("scanned_vs_skipped", totals["date_driven"])
+        self.assertIn("all_stages", totals["date_driven"])
+
+    def test_order_stages_breakdown_metrics(self):
+        """
+        Verify that order stages are dynamically calculated across all given stages
+        without any cutoff or omissions.
+        """
+        suffix = "191026"
+        # Create orders in various stages
+        InstallationOrder.objects.create(
+            order_number=f"ORD-STG-1-{suffix}",
+            registration_number="UMA111ST",
+            order_status="Ready for installation",
+            itms_stage="STAGE_1_INSTALLATION",
+            is_archived=False,
+            warehouse_name="AGM",
+        )
+        InstallationOrder.objects.create(
+            order_number=f"ORD-STG-2-{suffix}",
+            registration_number="UMA112ST",
+            order_status="Under installation",
+            itms_stage="STAGE_2_APPROVE",
+            is_archived=False,
+            warehouse_name="AGM",
+        )
+        InstallationOrder.objects.create(
+            order_number=f"ORD-STG-3-{suffix}",
+            registration_number="UMA113ST",
+            order_status="Installed",
+            itms_stage="ARCHIVED",
+            is_archived=True,
+            warehouse_name="AGM",
+        )
+
+        date_totals = report_service.get_date_driven_plate_totals(suffix)
+        self.assertEqual(date_totals["total_orders_for_date"], 3)
+        self.assertEqual(date_totals["installed_archive"]["count"], 1)
+        self.assertEqual(date_totals["pending_orders"]["count"], 2)
+
+        # Check pending stages
+        pending_stages = date_totals["pending_orders"]["stages"]
+        self.assertIn("STAGE_1_INSTALLATION", pending_stages)
+        self.assertIn("STAGE_2_APPROVE", pending_stages)
+        self.assertEqual(pending_stages["STAGE_1_INSTALLATION"], 1)
+        self.assertEqual(pending_stages["STAGE_2_APPROVE"], 1)
+
+        # Check all stages
+        all_stages = date_totals["all_stages"]
+        self.assertIn("ARCHIVED", all_stages)
+        self.assertEqual(all_stages["ARCHIVED"], 1)
+
+    def test_scanned_vs_skipped_discrepancy_detection(self):
+        """
+        Verify that plates/kits that skipped safe-room scanning (spiked)
+        or skipped camera photo evidence are properly categorized and flagged.
+        """
+        suffix = "201026"
+        work_date = date(2026, 10, 20)
+
+        # 1. Properly scanned plate: has dispatch scan AND camera evidence
+        order_scanned = InstallationOrder.objects.create(
+            order_number=f"ORD-SCAN-1-{suffix}",
+            registration_number="UMA201SC",
+            order_status="Installed",
+            is_archived=True,
+            has_front_photo=True,
+            has_rear_photo=True,
+            warehouse_name="AGM",
+        )
+        StockDispatchScan.objects.create(
+            work_date=work_date,
+            work_date_suffix=suffix,
+            registration_number="UMA201SC",
+            status=StockDispatchScan.Status.DISPATCHED,
+        )
+        VehicleInstallationPair.objects.create(
+            order=order_scanned,
+            registration_number_detected="UMA201SC",
+            verification_status=VehicleInstallationPair.VerificationStatus.APPROVED,
+            match_type="EXACT",
+            match_score=100.0,
+            matched_via="VISION",
+        )
+
+        # 2. Skipped Safe-Room Scan (Spiked): in active orders, never scanned at safe-room
+        InstallationOrder.objects.create(
+            order_number=f"ORD-SKIP-DISP-{suffix}",
+            registration_number="UMA202SD",
+            order_status="Ready for installation",
+            is_archived=False,
+            warehouse_name="AGM",
+        )
+
+        # 3. Skipped Camera Photos: dispatched from safe-room & installed in ITMS without camera photo evidence
+        InstallationOrder.objects.create(
+            order_number=f"ORD-SKIP-CAM-{suffix}",
+            registration_number="UMA203SC",
+            order_status="Installed",
+            is_archived=True,
+            has_front_photo=False,
+            has_rear_photo=False,
+            warehouse_name="AGM",
+        )
+        StockDispatchScan.objects.create(
+            work_date=work_date,
+            work_date_suffix=suffix,
+            registration_number="UMA203SC",
+            status=StockDispatchScan.Status.DISPATCHED,
+        )
+
+        date_totals = report_service.get_date_driven_plate_totals(suffix)
+        scanned_vs_skipped = date_totals["scanned_vs_skipped"]
+
+        self.assertGreaterEqual(scanned_vs_skipped["total_scanned"], 1)
+        self.assertGreaterEqual(scanned_vs_skipped["total_skipped"], 2)
+
+        items = scanned_vs_skipped["items"]
+        skipped_plates = [it["plate"] for it in items]
+        self.assertIn("UMA202SD", skipped_plates)
+        self.assertIn("UMA203SC", skipped_plates)
+
+        # Check classifications
+        disp_skip_item = next(it for it in items if it["plate"] == "UMA202SD")
+        self.assertEqual(disp_skip_item["problem_type"], "SKIPPED_SAFE_ROOM_SCAN")
+
+        cam_skip_item = next(it for it in items if it["plate"] == "UMA203SC")
+        self.assertEqual(cam_skip_item["problem_type"], "SKIPPED_CAMERA_PHOTOS")
+
+    def test_scoped_report_csv_exports(self):
+        """
+        Verify that /api/export/report/ cleanly routes each scoped report type:
+        stages, scanned_vs_skipped, unallocated, archived, pending.
+        """
+        suffix = "211026"
+        work_date = date(2026, 10, 21)
+
+        InstallationOrder.objects.create(
+            order_number=f"ORD-EXP-1-{suffix}",
+            registration_number="UMA301EX",
+            order_status="Ready for installation",
+            itms_stage="STAGE_1_INSTALLATION",
+            is_archived=False,
+            warehouse_name="AGM",
+        )
+        InstallationOrder.objects.create(
+            order_number=f"ORD-EXP-2-{suffix}",
+            registration_number="UMA302EX",
+            order_status="Installed",
+            itms_stage="ARCHIVED",
+            is_archived=True,
+            installation_officer="Officer John",
+            installation_date="21.10.2026",
+            warehouse_name="AGM",
+        )
+
+        # 1. Stages Export
+        resp = self.client.get(f"/api/export/report/?type=stages&date={suffix}")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "text/csv; charset=utf-8")
+        stages_content = b"".join(resp.streaming_content).decode("utf-8-sig")
+        self.assertIn("Order Number,Plate Number,VIN,Order Status,ITMS Stage", stages_content)
+        self.assertIn("UMA301EX", stages_content)
+        self.assertIn("STAGE_1_INSTALLATION", stages_content)
+
+        # 2. Scanned vs Skipped Export
+        resp = self.client.get(f"/api/export/report/?type=scanned_vs_skipped&date={suffix}")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "text/csv; charset=utf-8")
+        skipped_content = b"".join(resp.streaming_content).decode("utf-8-sig")
+        self.assertIn("Discrepancy Classification", skipped_content)
+
+        # 3. Archived Orders Export
+        resp = self.client.get(f"/api/export/report/?type=archived&date={suffix}")
+        self.assertEqual(resp.status_code, 200)
+        archived_content = resp.content.decode("utf-8-sig")
+        self.assertIn("UMA302EX", archived_content)
+
+        # 4. Pending Orders Export
+        resp = self.client.get(f"/api/export/report/?type=pending&date={suffix}")
+        self.assertEqual(resp.status_code, 200)
+        pending_content = resp.content.decode("utf-8-sig")
+        self.assertIn("UMA301EX", pending_content)

@@ -1509,3 +1509,48 @@ if (hwCard) {
     With partner and reference fields.
   - *Safe Audit Mode*: "Paste Safe Room Physical Audit from Excel", recording direct physical inventory counts.
 
+
+
+---
+
+## 22. Feature: Reports Tab Operational Stages, Scanned vs Skipped Discrepancy UI, and Centralized CSV Export Hub - [COMPLETED]
+
+### 22.1 Dynamic Order Stages Pill Breakdown
+- **Location**: `#pane-reports` inside Category 2 card.
+- **Container**: `#report-cat2-stages-pills`.
+- **Behavior**: Renders dynamic, real-time stage badges (`Ready for installation`, `Under installation`, `Ready for approve`, etc.) with exact order counts populated from `/api/reports/totals/` without any 100-record query limitations.
+
+### 22.2 Scanned vs Skipped Problem Identifier KPI & Table
+- **Location**: `#pane-reports` Category 4 card and dedicated discrepancy section below the unallocated floor table.
+- **KPI Card**: `#report-scanned-vs-skipped-ratio`, `#report-skipped-count`, `#report-scanned-vs-skipped-desc`, `#report-skipped-breakdown`.
+- **Discrepancy Table**: `#report-skipped-tbody` displaying:
+  - Plate with high-visibility problem badges (`⚠️ Skipped Safe Room`, `📷 Missing Photos`).
+  - ITMS Order Number & current stage.
+  - Audit Reason & Root Cause explanation.
+  - VIN & Facility code.
+  - Actionable resolution guidance.
+- **Actions**:
+  - `copySkippedRawPlates()`: Quick one-click copy of all problem plates for floor supervisors and MVR officers.
+  - `downloadReportCsv('scanned_vs_skipped')`: Instant CSV download.
+  - `#report-skipped-search`: Real-time instant text search filter.
+
+### 22.3 Centralized Reports Export Center
+- **Menu**: `#shift-csv-dropdown` in Reports Tab header.
+- **Endpoints & Types**: All operational exports unified under `downloadReportCsv(type)` calling `/api/export/report/?type=<type>&date=<suffix>`:
+  - 📑 Master Verification Pairs CSV (`master`)
+  - 📊 Order Stages Breakdown CSV (`stages`)
+  - ⚠️ Scanned vs Skipped Discrepancy CSV (`scanned_vs_skipped`)
+  - 🔴 Floor Unallocated Kits CSV (`unallocated`)
+  - 🔵 Completed Archive Orders CSV (`archived`)
+  - 🟡 Active Pending Orders CSV (`pending`)
+
+### 22.4 Scoped Safe-Room Stock Tab Exports
+- **Menu**: `#stock-export-dropdown` in Stock Tab header.
+- **Scope**: Exclusively exports safe-room warehouse inventory:
+  - Daily Reconciliation Ledger CSV
+  - Safe Room Dispatches CSV
+  - Inbound Deliveries & Movements CSV
+  - Safe Room Physical Audit Scans CSV
+  - Safe Room Unregistered Plates CSV
+  - Blocked / Not On Stock CSV
+- Eliminated cross-cutting order and verification exports from the Stock Tab.

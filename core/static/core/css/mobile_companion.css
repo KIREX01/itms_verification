@@ -1861,13 +1861,36 @@ body {
     border-radius: 6px;
 }
 
-/* Scanned Stock Queue Tray */
-.stock-queue-tray {
+/* Scanner Metric Cards & Activity Feed */
+.scanner-stats-bar {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.scanner-stat-card {
+    border-radius: 8px;
+    padding: 8px 4px;
+    text-align: center;
+    transition: transform 0.15s ease;
+}
+
+.scanner-stat-card:active {
+    transform: scale(0.97);
+}
+
+.scanner-activity-card {
     margin-top: 12px;
     background: var(--ug-black-surface, #161a22);
     border: 1px solid var(--ug-border, #2d3748);
     border-radius: 10px;
     padding: 12px;
+}
+
+/* Scanned Stock Queue Tray (Legacy fallback) */
+.stock-queue-tray {
+    display: none !important;
 }
 
 .stock-queue-header {

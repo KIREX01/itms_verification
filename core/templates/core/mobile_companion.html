@@ -27,7 +27,7 @@
     <meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'core/logos/android-chrome-512x512.png' %}">
     <meta property="og:type" content="website">
 
-    <link rel="stylesheet" href="{% static 'core/css/mobile_companion.css' %}?v=29">
+    <link rel="stylesheet" href="{% static 'core/css/mobile_companion.css' %}?v=30">
 </head>
 <body>
     <!-- Top National Flag Ribbon -->
@@ -74,7 +74,7 @@
             </button>
             <button class="mode-btn" id="btn-mode-stock" onclick="switchMobileMode('stock')">
                 <span class="mode-icon">📦</span>
-                <span class="mode-label">Stock Scan</span>
+                <span class="mode-label">Scanner</span>
             </button>
             <button class="mode-btn" id="btn-mode-order" onclick="switchMobileMode('order')">
                 <span class="mode-icon">⚡</span>
@@ -291,48 +291,57 @@
         </main>
 
         <!-- ================================================================= -->
-        <!-- MODE 3: STOCK QR SCAN WORKFLOW (Dispatches, Deliveries, Transfers) -->
+        <!-- MODE 3: STOCK QR & BARCODE SCANNER WORKFLOW -->
         <!-- ================================================================= -->
         <main class="mode-container" id="container-stock" style="display:none;">
-            <!-- Active Bike Number Badge & Stepper Card -->
+            <!-- Target Title & Quick Submode Switcher -->
             <div class="bike-status-card">
                 <div class="bike-status-header">
                     <div>
-                        <h2 class="bike-target-title" id="stock-target-title">Dispatch to Line (Line Out)</h2>
-                    </div>
-                    <div class="bike-pair-state" id="stock-pair-badge">
-                        <span class="badge badge-yellow" id="stock-staged-badge">0 Plates Staged</span>
+                        <h2 class="bike-target-title" id="stock-target-title">Scanner</h2>
                     </div>
                 </div>
 
                 <!-- Submode Selector Grid -->
                 <div class="stock-submode-grid">
-                    <button class="stock-submode-btn submode-dispatch active" id="pill-stock-dispatch" onclick="setStockSubMode('DISPATCH')">
-                        <span class="step-num">1</span>
+                    <button type="button" class="stock-submode-btn submode-dispatch active" id="pill-stock-dispatch" onclick="setStockSubMode('DISPATCH')">
                         <span class="step-text">⚡ Dispatch</span>
                     </button>
-                    <button class="stock-submode-btn submode-delivery" id="pill-stock-delivery" onclick="setStockSubMode('DELIVERY')">
-                        <span class="step-num">2</span>
+                    <button type="button" class="stock-submode-btn submode-delivery" id="pill-stock-delivery" onclick="setStockSubMode('DELIVERY')">
                         <span class="step-text">📥 Delivery</span>
                     </button>
-                    <button class="stock-submode-btn submode-return" id="pill-stock-return" onclick="setStockSubMode('RETURN')">
-                        <span class="step-num">3</span>
+                    <button type="button" class="stock-submode-btn submode-return" id="pill-stock-return" onclick="setStockSubMode('RETURN')">
                         <span class="step-text">↩️ Returns</span>
                     </button>
-                    <button class="stock-submode-btn submode-audit" id="pill-stock-audit" onclick="setStockSubMode('AUDIT')">
-                        <span class="step-num">4</span>
-                        <span class="step-text">🔒 Safe Audit</span>
+                    <button type="button" class="stock-submode-btn submode-audit" id="pill-stock-audit" onclick="setStockSubMode('AUDIT')">
+                        <span class="step-text">🔒 Audit</span>
                     </button>
                 </div>
 
                 <!-- Category Switcher: PSV vs PMO -->
                 <div class="stock-category-selector">
-                    <button class="stock-cat-btn cat-psv active" id="btn-cat-psv" onclick="setStockCategory('PSV')">
-                        🏁 Public White (PSV)
+                    <button type="button" class="stock-cat-btn cat-psv active" id="btn-cat-psv" onclick="setStockCategory('PSV')">
+                        White (PSV)
                     </button>
-                    <button class="stock-cat-btn cat-pmo" id="btn-cat-pmo" onclick="setStockCategory('PMO')">
-                        🛵 Private Yellow (PMO)
+                    <button type="button" class="stock-cat-btn cat-pmo" id="btn-cat-pmo" onclick="setStockCategory('PMO')">
+                        Yellow (PMO)
                     </button>
+                </div>
+
+                <!-- Data Representation: Scanned, Dispatched, Not On Stock -->
+                <div class="scanner-stats-bar" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-top:10px;">
+                    <div class="scanner-stat-card" style="background:#1e293b; border:1px solid #38bdf8; border-radius:8px; padding:8px 4px; text-align:center;">
+                        <span style="font-size:0.68rem; font-weight:700; color:#94a3b8; text-transform:uppercase; display:block;">Scanned</span>
+                        <span id="stat-scanned-count" style="font-size:1.35rem; font-weight:900; color:#38bdf8;">0</span>
+                    </div>
+                    <div class="scanner-stat-card" style="background:rgba(6, 78, 59, 0.6); border:1px solid #10b981; border-radius:8px; padding:8px 4px; text-align:center;">
+                        <span style="font-size:0.68rem; font-weight:700; color:#a7f3d0; text-transform:uppercase; display:block;" id="stat-processed-label">Dispatched</span>
+                        <span id="stat-dispatched-count" style="font-size:1.35rem; font-weight:900; color:#34d399;">0</span>
+                    </div>
+                    <div class="scanner-stat-card" id="stat-blocked-card" onclick="toggleBlockedDrawer()" style="background:rgba(69, 10, 10, 0.6); border:1px solid #ef4444; border-radius:8px; padding:8px 4px; text-align:center; cursor:pointer;">
+                        <span style="font-size:0.68rem; font-weight:700; color:#fca5a5; text-transform:uppercase; display:block;">Not On Stock</span>
+                        <span id="stat-blocked-count" style="font-size:1.35rem; font-weight:900; color:#f87171;">0</span>
+                    </div>
                 </div>
             </div>
 
@@ -342,7 +351,7 @@
                 <div style="padding:10px 14px; background:#21262d; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #30363d;">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span style="font-size:1.1rem;">📷</span>
-                        <strong style="color:#f0f6fc; font-size:0.9rem;">Live Camera QR / Barcode Scanner</strong>
+                        <strong style="color:#f0f6fc; font-size:0.88rem;">Camera Scanner</strong>
                     </div>
                     <div style="display:flex; gap:6px;">
                         <button class="btn btn-sm" id="btn-stock-torch" onclick="toggleStockTorch()" style="display:none; padding:4px 8px; font-size:0.8rem; background:#30363d; color:#e6edf3; border-radius:4px;">🔦 Flash</button>
@@ -384,81 +393,49 @@
                 </div>
 
                 <!-- Camera Controls & Start/Stop Button -->
-                <div style="padding:12px 14px; display:flex; flex-direction:column; gap:8px;">
-                    <button class="btn btn-primary" id="btn-toggle-stock-camera" onclick="toggleStockCameraScanner()" style="width:100%; padding:12px; font-size:1rem; font-weight:bold; display:flex; justify-content:center; align-items:center; gap:8px;">
-                        <span>📷 Start Camera QR Scanner</span>
+                <div style="padding:10px 14px;">
+                    <button class="btn btn-primary" id="btn-toggle-stock-camera" onclick="toggleStockCameraScanner()" style="width:100%; padding:11px; font-size:0.95rem; font-weight:bold; display:flex; justify-content:center; align-items:center; gap:8px;">
+                        <span>📷 Start Camera Scanner</span>
                     </button>
-                    <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.75rem; color:#8b949e;">
-                        <span>⚡ Auto-detects & adds plate codes</span>
-                        <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-                            <input type="checkbox" id="chk-auto-sync" checked style="accent-color:#22c55e;">
-                            <span>Auto-Sync to Server</span>
-                        </label>
-                    </div>
                 </div>
             </div>
 
-            <!-- Persistent Live Stock Status Inspector Card -->
-            <div class="camera-card" id="stock-live-inspector-card" style="display:none; margin-top:10px; background:#161b22; border:1px solid #30363d; border-radius:8px; padding:12px;">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <span style="font-size:0.72rem; color:#8b949e; text-transform:uppercase; font-weight:700;">Live Stock Status</span>
-                        <div id="mobile-ins-plate" style="font-size:1.35rem; font-weight:900; color:#ffffff; letter-spacing:1px; margin-top:2px;">---</div>
-                    </div>
-                    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
-                        <div style="display:flex; gap:4px;">
-                            <span id="mobile-ins-cat" class="badge badge-muted" style="font-size:0.75rem; font-weight:800; padding:2px 6px;">PSV</span>
-                            <span id="mobile-ins-status" class="badge badge-green" style="font-size:0.78rem; font-weight:800; padding:3px 8px;">🟢 ON STOCK</span>
-                        </div>
-                        <span id="mobile-ins-wh" style="font-size:0.68rem; color:#64748b;">AGM Bonded Safe Room</span>
-                    </div>
-                </div>
-                <div id="mobile-ins-desc" style="font-size:0.8rem; color:#cbd5e1; margin-top:6px; line-height:1.3;">---</div>
-            </div>
-
-            <!-- Manual Plate Entry (Quick Fallback for Damaged Physical Barcodes) -->
+            <!-- Manual Plate Entry -->
             <div class="camera-card" style="margin-top:10px;">
-                <div style="padding:12px 14px; background:var(--ug-black-surface); display:flex; flex-direction:column; gap:8px;">
-                    <label style="color:#ffffff; font-size:0.78rem; text-transform:uppercase; font-weight:700;">Manual Plate Entry (Barcode Fallback)</label>
+                <div style="padding:10px 12px; background:var(--ug-black-surface); display:flex; flex-direction:column; gap:6px;">
+                    <label style="color:#94a3b8; font-size:0.72rem; text-transform:uppercase; font-weight:700;">Manual Entry</label>
                     <div class="stock-manual-input-box">
                         <input type="text" id="input-stock-barcode" class="stock-barcode-input" placeholder="Type plate (e.g. UMA711PW)..." onkeydown="if(event.key==='Enter') submitSingleStockPlate();">
-                        <button class="stock-add-btn" onclick="submitSingleStockPlate()">+ Add</button>
+                        <button class="stock-add-btn" onclick="submitSingleStockPlate()">+ Scan</button>
                     </div>
                 </div>
             </div>
 
-            <!-- Blocked / Not-On-Stock Alert Drawer (Set Box Aside) -->
-            <div id="stock-blocked-tray" class="stock-blocked-card" style="display:none;">
-                <div class="stock-blocked-header">
-                    <strong class="stock-blocked-title">⚠️ BLOCKED (Set Box Aside): <span id="lbl-mobile-blocked-count">0</span></strong>
+            <!-- Not-On-Stock Alert Drawer (Set Box Aside) -->
+            <div id="stock-blocked-tray" class="stock-blocked-card" style="display:none; margin-top:10px; border:1px solid #ef4444; background:rgba(220, 53, 69, 0.12); border-radius:10px; padding:12px;">
+                <div class="stock-blocked-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <strong class="stock-blocked-title" style="color:#f87171; font-size:0.85rem; font-weight:900;">⚠️ NOT ON STOCK: <span id="lbl-mobile-blocked-count">0</span></strong>
                     <div style="display:flex; gap:6px; align-items:center;">
                         <button type="button" class="btn btn-xs btn-secondary" id="btn-mobile-recheck-blocked" onclick="recheckMobileBlockedPlates()" style="font-size:0.72rem; padding:4px 8px; background:#1e293b; border:1px solid #38bdf8; color:#38bdf8; border-radius:6px; font-weight:700;">
-                            🔄 Re-Check Stock
+                            🔄 Re-Check
                         </button>
-                        <button class="btn-whatsapp-transfer" onclick="shareBlockedPlatesWhatsApp()">
-                            💬 WhatsApp Transfer
+                        <button type="button" class="btn-whatsapp-transfer" onclick="shareBlockedPlatesWhatsApp()" style="font-size:0.72rem; padding:4px 8px; background:#25d366; color:#000000; border:none; border-radius:6px; font-weight:800; cursor:pointer;">
+                            💬 WhatsApp
                         </button>
                     </div>
                 </div>
-                <div id="mobile-resolved-banner" style="display:none; background:rgba(22, 163, 74, 0.25); border:1px solid #22c55e; color:#4ade80; padding:8px 10px; border-radius:6px; font-size:0.76rem; font-weight:700; margin-bottom:6px;"></div>
-                <div id="mobile-blocked-list" class="stock-blocked-list-box"></div>
+                <div id="mobile-resolved-banner" style="display:none; background:rgba(22, 163, 74, 0.25); border:1px solid #22c55e; color:#4ade80; padding:6px 8px; border-radius:6px; font-size:0.75rem; font-weight:700; margin-bottom:6px;"></div>
+                <div id="mobile-blocked-list" class="stock-blocked-list-box" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
             </div>
 
-            <!-- Scanned Batch List & Sync Button -->
-            <div class="stock-queue-tray">
-                <div class="stock-queue-header">
-                    <strong class="stock-queue-title">Staged Queue (<span id="stock-queue-count">0</span> plates)</strong>
-                    <div style="display:flex; gap:6px; align-items:center;">
-                        <button class="btn btn-sm btn-secondary" id="btn-clear-stock-queue" onclick="clearStockQueue()" style="font-size:0.75rem; padding:4px 8px; color:#cbd5e1; background:var(--ug-black-surface-elevated); border:1px solid var(--ug-border); border-radius:4px;">
-                            Clear
-                        </button>
-                        <button class="btn btn-sm btn-success" id="btn-sync-stock" onclick="syncStockScansToServer()" style="font-weight:bold;">
-                            📤 Sync to Server
-                        </button>
-                    </div>
+            <!-- Recent Scans Activity Feed (Direct Instant Sync) -->
+            <div class="scanner-activity-card" style="margin-top:12px; background:var(--ug-black-surface, #161a22); border:1px solid var(--ug-border, #2d3748); border-radius:10px; padding:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <strong style="font-size:0.82rem; font-weight:800; color:#f8fafc;">Recent Scans (<span id="stock-activity-count">0</span>)</strong>
+                    <button type="button" onclick="clearStockActivityHistory()" style="background:none; border:none; color:#64748b; font-size:0.72rem; cursor:pointer; padding:2px 6px;">Clear</button>
                 </div>
-                <div id="stock-scanned-list" class="stock-scanned-items-scroll">
-                    <div style="color:var(--ug-text-dim); text-align:center; padding:12px;">No plates staged yet. Scan or paste above.</div>
+                <div id="stock-activity-list" style="display:flex; flex-direction:column; max-height:220px; overflow-y:auto;">
+                    <div style="color:#64748b; text-align:center; padding:14px; font-size:0.8rem;">No plates scanned yet. Scan or enter above.</div>
                 </div>
             </div>
         </main>
@@ -730,6 +707,6 @@
     </div>
 
     <!-- Client-Side Engine -->
-    <script src="{% static 'core/js/mobile_companion.js' %}?v=29"></script>
+    <script src="{% static 'core/js/mobile_companion.js' %}?v=30"></script>
 </body>
 </html>

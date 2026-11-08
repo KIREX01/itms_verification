@@ -27,7 +27,7 @@
     <meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'core/logos/android-chrome-512x512.png' %}">
     <meta property="og:type" content="website">
 
-    <link rel="stylesheet" href="{% static 'core/css/mobile_companion.css' %}?v=27">
+    <link rel="stylesheet" href="{% static 'core/css/mobile_companion.css' %}?v=28">
 </head>
 <body>
     <!-- Top National Flag Ribbon -->
@@ -41,10 +41,10 @@
                 <h1 class="brand-title">CLOSE MOBILE SCANNER</h1>
             </div>
 
-            <!-- Header Controls: Console Switch & Disconnect Button -->
+            <!-- Header Controls: Back to App & Disconnect -->
             <div class="header-actions">
-                <a href="/?view=desktop" class="btn-switch-supervisor" id="btn-switch-supervisor" title="Open Desktop Supervisor Console">
-                    💻 Console
+                <a href="/" class="btn-switch-supervisor" id="btn-switch-supervisor" title="Back to Main App">
+                    ← Back to App
                 </a>
                 <button class="btn-disconnect-session" id="btn-disconnect-session" title="Release connection slot for another phone" onclick="disconnectDeviceSession()">
                     ✕ Disconnect
@@ -62,25 +62,17 @@
             </div>
         </div>
 
-        <!-- Active Batch Capacity & Phone Lease Bar -->
-        <div class="batch-capacity-bar" id="batch-capacity-bar">
+        <!-- Active Batch Capacity & Rollover (Silent background rollover) -->
+        <div class="batch-capacity-bar" id="batch-capacity-bar" style="display:none;">
             <div class="batch-capacity-info">
                 <span class="batch-label-tag" id="mobile-batch-label">📦 {{ active_batch_label|default:"Mobile Batch #1" }}</span>
-                <span class="batch-limit-pill" id="mobile-batch-limit-pill">0/200 Photos (100 Bikes)</span>
+                <span class="batch-limit-pill" id="mobile-batch-limit-pill"></span>
             </div>
             <div class="batch-progress-track">
                 <div class="batch-progress-fill" id="mobile-batch-progress-fill" style="width: 0%;"></div>
             </div>
         </div>
-
-        <!-- Batch Complete / Rollover Banner -->
-        <div class="batch-rollover-banner" id="batch-rollover-banner" style="display:none;">
-            <span style="font-size:1.3rem;">🎉</span>
-            <div>
-                <strong style="display:block; color:var(--ug-green); font-size:0.85rem;">Batch Limit Reached (200 Photos / 100 Pairs)!</strong>
-                <span id="batch-rollover-desc" style="font-size:0.75rem; color:var(--ug-text-muted);">Next photo will automatically start a new batch.</span>
-            </div>
-        </div>
+        <div class="batch-rollover-banner" id="batch-rollover-banner" style="display:none;"></div>
 
         <!-- Mode Selector Switch -->
         <div class="mode-selector-bar">
@@ -112,22 +104,19 @@
                     <div>
                         <h2 class="bike-target-title" id="conveyor-bike-label">Motorcycle #1</h2>
                     </div>
-                    <div class="bike-pair-state" id="conveyor-pair-badge">
-                        <span class="badge badge-yellow" id="badge-pair-progress">0 of 2 Captured</span>
-                    </div>
                 </div>
 
                 <!-- 2-Step Progress Indicator -->
                 <div class="step-progress-row">
                     <div class="step-pill active" id="pill-step-front">
                         <span class="step-num">1</span>
-                        <span class="step-name">Front Angle</span>
+                        <span class="step-name">Front</span>
                         <span class="step-check" id="check-step-front">⭕</span>
                     </div>
                     <div class="step-arrow">➔</div>
                     <div class="step-pill" id="pill-step-rear">
                         <span class="step-num">2</span>
-                        <span class="step-name">Rear Angle</span>
+                        <span class="step-name">Rear</span>
                         <span class="step-check" id="check-step-rear">⭕</span>
                     </div>
                 </div>
@@ -137,8 +126,7 @@
             <div class="smart-shutter-container">
                 <button class="smart-shutter-btn shutter-step-front" id="btn-conveyor-smart" onclick="handleConveyorSmartShutter()">
                     <span class="smart-shutter-icon" id="conveyor-smart-icon">📸</span>
-                    <span class="smart-shutter-title" id="conveyor-smart-title">Take FRONT Photo</span>
-                    <span class="smart-shutter-subtitle" id="conveyor-smart-sub">Step 1: Headlamp &amp; Front Plate</span>
+                    <span class="smart-shutter-title" id="conveyor-smart-title">Snap Front</span>
                 </button>
             </div>
 
@@ -209,8 +197,7 @@
             <!-- Advance to Next Bike Button -->
             <div class="conveyor-footer-actions">
                 <button class="next-bike-btn" id="btn-next-bike" onclick="advanceToNextBike()" disabled>
-                    <span>✓ Pair Complete ➔ Advance to Next Bike</span>
-                    <span class="next-icon">➔</span>
+                    <span>Next Bike ➔</span>
                 </button>
             </div>
         </main>
@@ -220,101 +207,87 @@
         <!-- ================================================================= -->
         <main class="mode-container" id="container-uturn">
             <!-- Active Walk Session Batch Indicator -->
-            <div class="uturn-batch-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding:8px 12px; background:rgba(15,23,42,0.85); border:1px solid rgba(56,189,248,0.3); border-radius:10px;">
+            <div class="uturn-batch-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding:8px 12px; background:rgba(15,23,42,0.85); border:1px solid rgba(56,189,248,0.3); border-radius:10px;">
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span style="font-size:1.1rem;">🚶</span>
                     <div>
-                        <div id="uturn-batch-indicator" style="font-weight:700; font-size:0.88rem; color:#38bdf8; letter-spacing:0.5px;">ACTIVE WALK: BATCH #1</div>
-                        <div style="font-size:0.7rem; color:var(--ug-text-dim,#94a3b8);">Off-conveyor row walk (isolated batch)</div>
+                        <div id="uturn-batch-indicator" style="font-weight:800; font-size:0.92rem; color:#38bdf8; letter-spacing:0.5px;">Line / Batch #{{ today_uturn_batch_index|default:"1" }}</div>
+                        <div style="font-size:0.68rem; color:var(--ug-text-dim,#94a3b8);">{{ active_shift_suffix }}</div>
                     </div>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <button type="button" id="btn-abort-uturn" onclick="abortUturnBatch()" style="display:none; background:rgba(239,68,68,0.15); color:#ef4444; border:1px solid rgba(239,68,68,0.4); border-radius:6px; padding:4px 8px; font-size:0.72rem; font-weight:700; cursor:pointer;" title="Discard walk session">
-                        ✕ Discard
-                    </button>
                     <span id="uturn-pair-status-pill" style="font-size:0.72rem; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); padding:3px 10px; border-radius:12px; font-weight:700;">ACTIVE</span>
                 </div>
             </div>
 
             <!-- Starting Leg Direction Selector with Batch Lock -->
-            <div class="uturn-start-selector-box" id="uturn-start-selector-box" style="margin-bottom:12px; background:rgba(15,23,42,0.9); border:1px solid rgba(56,189,248,0.3); border-radius:10px; padding:10px 14px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                    <span style="font-size:0.75rem; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.5px;">Starting Leg (Walk Direction)</span>
-                    <span id="uturn-lock-badge" class="badge" style="background:rgba(255,255,255,0.08); color:#94a3b8; font-size:0.68rem; padding:2px 8px; border-radius:4px;">🔓 Unlocked (Choose Start)</span>
+            <div class="uturn-start-selector-box" id="uturn-start-selector-box" style="margin-bottom:10px; background:rgba(15,23,42,0.9); border:1px solid rgba(56,189,248,0.3); border-radius:10px; padding:8px 12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <span style="font-size:0.75rem; font-weight:800; color:#38bdf8; text-transform:uppercase;">Start With:</span>
+                    <span id="uturn-lock-badge" class="badge" style="background:rgba(255,255,255,0.08); color:#94a3b8; font-size:0.68rem; padding:2px 8px; border-radius:4px;">🔓 Unlocked</span>
                 </div>
                 <div class="uturn-direction-toggle" style="display:flex; gap:8px;">
-                    <button type="button" class="btn-direction-pill active" id="btn-start-rear" onclick="setUturnStartLeg('REAR')" style="flex:1; padding:8px 10px; font-size:0.8rem; font-weight:700; border-radius:6px; border:1px solid #38bdf8; background:#1e293b; color:#ffffff; cursor:pointer;">
-                        🏍️ Rear First (Rears ➔ Fronts)
+                    <button type="button" class="btn-direction-pill active" id="btn-start-rear" onclick="setUturnStartLeg('REAR')" style="flex:1; padding:6px 10px; font-size:0.8rem; font-weight:700; border-radius:6px; border:1px solid #10b981; background:#064e3b; color:#ffffff; cursor:pointer;">
+                        🏍️ Rear First
                     </button>
-                    <button type="button" class="btn-direction-pill" id="btn-start-front" onclick="setUturnStartLeg('FRONT')" style="flex:1; padding:8px 10px; font-size:0.8rem; font-weight:700; border-radius:6px; border:1px solid rgba(255,255,255,0.15); background:transparent; color:#94a3b8; cursor:pointer;">
-                        🛡️ Front First (Fronts ➔ Rears)
+                    <button type="button" class="btn-direction-pill" id="btn-start-front" onclick="setUturnStartLeg('FRONT')" style="flex:1; padding:6px 10px; font-size:0.8rem; font-weight:700; border-radius:6px; border:1px solid rgba(255,255,255,0.15); background:transparent; color:#94a3b8; cursor:pointer;">
+                        🛡️ Front First
                     </button>
                 </div>
             </div>
 
             <!-- Visual U-Turn Progress Road -->
-            <div class="uturn-flow-road">
-                <div class="road-step road-step-rear active" id="road-step-rear" onclick="if(MobileState.uturn.phase==='FRONT') toggleUturnTurnaround();">
+            <div class="uturn-flow-road" style="margin-bottom:8px;">
+                <div class="road-step road-step-rear active" id="road-step-rear" onclick="safeSwitchLeg('REAR')" style="cursor:pointer;" title="Tap to switch leg">
                     <div class="road-step-top">
                         <span class="step-num">1</span>
                         <span class="road-badge" id="road-rear-badge">0 Rears</span>
                     </div>
-                    <span class="road-title">Going Out: REARS</span>
+                    <span class="road-title">REARS</span>
                 </div>
 
                 <div class="road-arrow" id="road-arrow-indicator">➔</div>
 
-                <div class="road-step road-step-front" id="road-step-front" onclick="if(MobileState.uturn.phase==='REAR' && MobileState.uturn.rearCount > 0) toggleUturnTurnaround();">
+                <div class="road-step road-step-front" id="road-step-front" onclick="safeSwitchLeg('FRONT')" style="cursor:pointer;" title="Tap to switch leg">
                     <div class="road-step-top">
                         <span class="step-num">2</span>
                         <span class="road-badge" id="road-front-badge">0 Fronts</span>
                     </div>
-                    <span class="road-title">Walking Back: FRONTS</span>
+                    <span class="road-title">FRONTS</span>
                 </div>
             </div>
 
             <!-- Active Phase Guidance Bar -->
-            <div class="uturn-guidance-bar" id="uturn-guidance-bar">
+            <div class="uturn-guidance-bar" id="uturn-guidance-bar" style="margin-bottom:10px;">
                 <span class="guidance-icon" id="uturn-guidance-icon">🚶</span>
                 <span class="guidance-text" id="uturn-instruction-text">
-                    Walk down row snapping <strong>REAR</strong> plates. Tap turnaround when reaching the end.
+                    Snap all <strong>REARS</strong> walking out.
                 </span>
             </div>
 
-            <!-- Giant Primary Shutter Button -->
-            <div class="big-shutter-container">
-                <button class="big-shutter-btn shutter-rear" id="btn-big-shutter" onclick="triggerUturnCapture()">
-                    <span class="shutter-icon" id="shutter-icon">📸</span>
-                    <span class="shutter-main-text" id="shutter-main-text">Capture REAR</span>
-                    <span class="shutter-counter" id="shutter-counter">Bike #1</span>
+            <!-- Primary Shutter Button (Harmonized with Conveyor styling) -->
+            <div class="smart-shutter-container" style="margin-bottom:10px;">
+                <button class="smart-shutter-btn shutter-step-rear" id="btn-big-shutter" onclick="triggerUturnCapture()">
+                    <span class="smart-shutter-icon" id="shutter-icon">📸</span>
+                    <span class="smart-shutter-title" id="shutter-main-text">Snap Rear #1</span>
                 </button>
             </div>
 
-            <!-- Prominent Turnaround Callout Card (Visible when rears >= 1) -->
-            <div class="turnaround-callout-card" id="turnaround-callout" style="display:none;">
-                <div class="turnaround-callout-content">
-                    <span class="turnaround-callout-icon">🔄</span>
-                    <div class="turnaround-callout-text">
-                        <strong id="turnaround-callout-title">Reached the end of the row?</strong>
-                        <span id="turnaround-callout-sub">Turn around to photograph FRONT plates walking back.</span>
-                    </div>
-                </div>
-                <button class="btn-turnaround-action" id="btn-turnaround" onclick="toggleUturnTurnaround()">
-                    <span id="turnaround-btn-label">TURN AROUND ➔ SWITCH TO FRONTS</span>
+            <!-- Prominent Turnaround Callout Card (Visible when outbound >= 1) -->
+            <div class="turnaround-callout-card" id="turnaround-callout" style="display:none; margin-bottom:10px;">
+                <button type="button" class="btn-turnaround-action" id="btn-turnaround" onclick="confirmTurnaround()" style="width:100%; padding:10px; border-radius:10px; font-weight:800; font-size:0.88rem; background:linear-gradient(135deg, #f59e0b, #d97706); color:#000000; border:none; cursor:pointer; display:flex; justify-content:center; align-items:center; gap:8px;">
+                    <span>Turn Around ➔ Snap Fronts</span>
                     <span class="turnaround-arrow">↩️</span>
                 </button>
             </div>
 
-            <!-- Return Leg Match Tracking Banner (Visible during Fronts) -->
-            <div class="return-match-banner" id="return-match-banner" style="display:none;">
+            <!-- Return Leg Match Tracking Banner (Visible during Return Leg) -->
+            <div class="return-match-banner" id="return-match-banner" style="display:none; margin-bottom:10px; justify-content:space-between; align-items:center;">
                 <div class="match-info">
-                    <span id="return-match-text">Matching 0 of 0 bikes</span>
+                    <span id="return-match-text">0 of 0 matched</span>
                     <span class="match-percent" id="return-match-percent">0%</span>
                 </div>
-                <div class="match-progress-bar">
-                    <div class="match-progress-fill" id="match-progress-fill" style="width: 0%;"></div>
-                </div>
-                <button class="btn-switch-back" onclick="toggleUturnTurnaround()">
+                <button type="button" class="btn-switch-back" onclick="confirmSwitchBack()" style="background:rgba(255,255,255,0.15); color:#ffffff; border:1px solid rgba(255,255,255,0.3); border-radius:6px; padding:4px 10px; font-size:0.75rem; font-weight:700; cursor:pointer;">
                     ↩️ Switch back to Rears
                 </button>
             </div>
@@ -332,11 +305,16 @@
                 </div>
             </div>
 
-            <!-- Finish U-Turn Batch Button -->
-            <div class="uturn-footer-actions" style="display:flex; width:100%;">
+            <!-- Finish U-Turn Batch Button & Safe Discard Link -->
+            <div class="uturn-footer-actions" style="display:flex; flex-direction:column; gap:8px; width:100%;">
                 <button class="finish-batch-btn" id="btn-finish-uturn" onclick="finishUturnBatch()" disabled style="width:100%;">
-                    <span>🏁 Complete U-Turn Batch</span>
+                    <span>🏁 Complete Batch</span>
                 </button>
+                <div style="display:flex; justify-content:center; padding:4px 0;">
+                    <button type="button" id="btn-abort-uturn" onclick="abortUturnBatch()" style="display:none; background:none; border:none; color:#ef4444; font-size:0.75rem; text-decoration:underline; cursor:pointer;">
+                        Discard Walk Session
+                    </button>
+                </div>
             </div>
         </main>
 
@@ -758,6 +736,6 @@
     </div>
 
     <!-- Client-Side Engine -->
-    <script src="{% static 'core/js/mobile_companion.js' %}?v=27"></script>
+    <script src="{% static 'core/js/mobile_companion.js' %}?v=28"></script>
 </body>
 </html>

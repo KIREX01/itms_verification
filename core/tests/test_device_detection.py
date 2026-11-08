@@ -71,18 +71,18 @@ class DeviceDetectionTestCase(TestCase):
     def test_dashboard_routes_mobile_device_to_mobile_companion(self):
         self.client.force_login(self.user)
 
-        # Mobile client visits / -> redirects to /mobile/
+        # Mobile client visits / -> default is main dashboard (200 OK)
         res_mobile = self.client.get("/", HTTP_USER_AGENT=self.mobile_ua)
-        self.assertEqual(res_mobile.status_code, 302)
-        self.assertEqual(res_mobile.url, reverse("core:mobile_companion"))
+        self.assertEqual(res_mobile.status_code, 200)
+
+        # Explicit mobile view request -> redirects to /mobile/
+        res_explicit = self.client.get("/?view=mobile", HTTP_USER_AGENT=self.mobile_ua)
+        self.assertEqual(res_explicit.status_code, 302)
+        self.assertEqual(res_explicit.url, reverse("core:mobile_companion"))
 
         # Desktop client visits / -> 200 OK dashboard
         res_desktop = self.client.get("/", HTTP_USER_AGENT=self.desktop_ua)
         self.assertEqual(res_desktop.status_code, 200)
-
-        # Mobile client explicitly requesting desktop view
-        res_override = self.client.get("/?view=desktop", HTTP_USER_AGENT=self.mobile_ua)
-        self.assertEqual(res_override.status_code, 200)
 
     def test_mobile_companion_view_allows_switching_to_desktop(self):
         # Authenticated user visiting /mobile/?view=desktop switches preference and redirects to /
@@ -92,23 +92,23 @@ class DeviceDetectionTestCase(TestCase):
         self.assertEqual(res.url, reverse("core:dashboard"))
 
     def test_login_routes_based_on_device(self):
-        # Mobile login redirects to /mobile/
+        # Default login routes to main dashboard
         res_mobile = self.client.post(reverse("core:login"), {
             "username": "operator_test",
             "password": "StrongPassword123!",
         }, HTTP_USER_AGENT=self.mobile_ua)
         self.assertEqual(res_mobile.status_code, 302)
-        self.assertEqual(res_mobile.url, reverse("core:mobile_companion"))
+        self.assertEqual(res_mobile.url, reverse("core:dashboard"))
 
         self.client.logout()
 
-        # Desktop login redirects to /
-        res_desktop = self.client.post(reverse("core:login"), {
+        # Login with next=/mobile/ routes to mobile companion
+        res_with_next = self.client.post(reverse("core:login") + "?next=/mobile/", {
             "username": "operator_test",
             "password": "StrongPassword123!",
-        }, HTTP_USER_AGENT=self.desktop_ua)
-        self.assertEqual(res_desktop.status_code, 302)
-        self.assertEqual(res_desktop.url, reverse("core:dashboard"))
+        }, HTTP_USER_AGENT=self.mobile_ua)
+        self.assertEqual(res_with_next.status_code, 302)
+        self.assertEqual(res_with_next.url, "/mobile/")
 
     def test_network_service_cloud_domain_detection(self):
         # Test with close.kirex.online

@@ -244,10 +244,12 @@ def match_pair_to_order(
             except Exception:
                 pass
 
-            pair.operator_note = (
+            existing_note = pair.operator_note or ""
+            conflict_msg = (
                 f"Order Conflict: No pending installation order found for plate '{clean_plate}'{kit_note}. "
                 f"Vehicle plate not in active pending order list."
             )
+            pair.operator_note = f"{existing_note} | {conflict_msg}".strip(" |") if existing_note else conflict_msg
 
     pair.save()
     return pair

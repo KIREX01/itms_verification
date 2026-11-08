@@ -29,15 +29,13 @@ SIGNUP_VERIFY_TEMPLATE = "core/signup_verify.html"
 
 def _redirect_after_auth(request: HttpRequest, next_url: str = "") -> HttpResponse:
     """
-    Directs authenticated operators to their appropriate workspace:
-    - If explicit target next_url is set, follows that destination.
-    - If opening from a mobile phone, opens the touch-optimized Mobile Capture Station.
-    - If opening from a laptop/desktop, opens the Supervisor Console.
+    Directs authenticated operators to their workspace.
+    Loads the main application dashboard by default unless explicit mobile destination is requested.
     """
     if next_url and next_url != "/":
         return redirect(next_url)
 
-    if device_service.is_mobile_device(request):
+    if request.GET.get("view", "").lower().strip() == "mobile":
         return redirect("core:mobile_companion")
     return redirect("core:dashboard")
 

@@ -64,10 +64,17 @@ def mobile_companion_view(request: HttpRequest) -> HttpResponse:
     shift_suffix = date_service.format_date_suffix(active_shift_d)
     shift_date_str = date_service.format_iso_date(active_shift_d)
 
+    uturn_qs = IngestionBatch.objects.filter(
+        created_at__date=active_shift_d,
+        source_type=IngestionBatch.SourceType.MOBILE,
+    ).filter(Q(source_label__icontains="Walk Batch") | Q(source_label__icontains="U-Turn"))
+    today_uturn_batch_index = uturn_qs.count() + 1
+
     return render(request, "core/mobile_companion.html", {
         "version": __version__,
         "active_batch_id": batch.batch_id,
         "active_batch_label": batch.source_label,
+        "today_uturn_batch_index": today_uturn_batch_index,
         "server_time": timezone.now().isoformat(),
         "active_shift_date": shift_date_str,
         "active_shift_suffix": shift_suffix,
@@ -115,6 +122,15 @@ def api_mobile_ping(request: HttpRequest) -> JsonResponse:
     batch = vault_service.get_or_create_mobile_batch()
     max_photos = getattr(settings, "MAX_MOBILE_BATCH_PHOTOS", 200)
 
+    from core.services import date_service
+    active_shift_d = date_service.get_active_shift_date()
+    shift_suffix = date_service.format_date_suffix(active_shift_d)
+    uturn_qs = IngestionBatch.objects.filter(
+        created_at__date=active_shift_d,
+        source_type=IngestionBatch.SourceType.MOBILE,
+    ).filter(Q(source_label__icontains="Walk Batch") | Q(source_label__icontains="U-Turn"))
+    today_uturn_batch_index = uturn_qs.count() + 1
+
     return JsonResponse({
         "pong": True,
         "allowed": True,
@@ -127,6 +143,8 @@ def api_mobile_ping(request: HttpRequest) -> JsonResponse:
         "batch_limit": max_photos,
         "batch_remaining": max(0, max_photos - batch.ingested_count),
         "batch_is_full": batch.ingested_count >= max_photos,
+        "today_uturn_batch_index": today_uturn_batch_index,
+        "active_shift_suffix": shift_suffix,
         "server_time": timezone.now().isoformat(),
         "status": "online",
     })
@@ -295,7 +313,7 @@ def api_mobile_upload(request: HttpRequest) -> JsonResponse:
         batch = vault_service.get_or_create_uturn_batch(
             uturn_session_id=uturn_session_id,
             batch_index=int(uturn_batch_index) if uturn_batch_index.isdigit() else None,
-            source_label=batch_label or f"U-Turn Walk Batch #{uturn_batch_index or '1'}",
+            source_label=batch_label or f"Walk Batch #{uturn_batch_index or '1'}",
         )
     else:
         batch = vault_service.get_or_create_mobile_batch(
@@ -346,11 +364,11 @@ def api_mobile_upload(request: HttpRequest) -> JsonResponse:
             "quality_report": quality_report,
         }, status=400)
 
-    # If this is an atomic replacement of an existing image, swap on the pair & purge old record
-    if pair_id is None:
-        is_paired = False
-        pairing_note = ""
+    pair_id = None
+    is_paired = False
+    pairing_note = ""
 
+    # If this is an atomic replacement of an existing image, swap on the pair & purge old record
     if mode == "uturn" and is_replacement and old_img and image:
         side = "front" if orientation == EvidenceImage.Orientation.FRONT else "rear"
         existing_pair = VehicleInstallationPair.objects.filter(
@@ -420,6 +438,8 @@ def api_mobile_upload(request: HttpRequest) -> JsonResponse:
             logger.debug("Auto-association notice on U-turn upload: %s", assoc_err)
 
     max_photos = getattr(settings, "MAX_MOBILE_BATCH_PHOTOS", 200)
+    batch_limit_val = 99999 if mode == "uturn" else max_photos
+    is_batch_full = False if mode == "uturn" else (batch.ingested_count >= max_photos)
 
     return JsonResponse({
         "success": True,
@@ -435,9 +455,9 @@ def api_mobile_upload(request: HttpRequest) -> JsonResponse:
         "batch_id": batch.batch_id,
         "batch_label": batch.source_label,
         "batch_photos": batch.ingested_count,
-        "batch_limit": max_photos,
-        "batch_remaining": max(0, max_photos - batch.ingested_count),
-        "batch_is_full": batch.ingested_count >= max_photos,
+        "batch_limit": batch_limit_val,
+        "batch_remaining": max(0, batch_limit_val - batch.ingested_count),
+        "batch_is_full": is_batch_full,
         "vault_file": image.vault_file,
         "quality_report": quality_report,
     })

@@ -785,10 +785,12 @@ def get_or_create_uturn_batch(
 ) -> IngestionBatch:
     """
     Finds or creates a distinct IngestionBatch for an Off-Conveyor (U-Turn walk) session.
-    Unlike the continuous On-Conveyor 200-image rolling limit, each U-Turn walk represents
-    a distinct row/bay walk session with its own batch number (e.g. 'U-Turn Walk Batch #1', '#2').
+    Unlike the continuous On-Conveyor rolling limit, each U-Turn walk represents
+    a distinct physical yard line with its own daily-scoped batch number (e.g. 'Walk Batch #1 (08.11.2026)').
     """
-    today = timezone.localdate()
+    from core.services import date_service
+    active_shift_d = date_service.get_active_shift_date()
+    shift_suffix = date_service.format_date_suffix(active_shift_d)
     clean_session_id = str(uturn_session_id).strip()
 
     if clean_session_id and not force_new:
@@ -802,14 +804,20 @@ def get_or_create_uturn_batch(
     if not clean_session_id and not force_new:
         return get_or_create_mobile_batch(source_label=source_label)
 
-    # Count existing U-Turn mobile batches today to determine sequential walk batch index
+    # Count existing walk batches today to determine daily sequential walk batch index (1, 2, 3...)
+    from django.db.models import Q
     qs = IngestionBatch.objects.filter(
-        created_at__date=today,
+        created_at__date=active_shift_d,
         source_type=IngestionBatch.SourceType.MOBILE,
-        source_label__icontains="U-Turn",
-    )
+    ).filter(Q(source_label__icontains="Walk Batch") | Q(source_label__icontains="U-Turn"))
+
     b_idx = batch_index or (qs.count() + 1)
-    base_label = source_label.strip() if source_label else f"U-Turn Walk Batch #{b_idx}"
+    base_label = f"Walk Batch #{b_idx} ({shift_suffix})"
+    if source_label and shift_suffix not in source_label:
+        base_label = f"{source_label} ({shift_suffix})"
+    elif source_label:
+        base_label = source_label
+
     if clean_session_id and clean_session_id not in base_label:
         label = f"{base_label} [{clean_session_id}]"
     else:
@@ -819,7 +827,7 @@ def get_or_create_uturn_batch(
         source_type=IngestionBatch.SourceType.MOBILE,
         source_label=label,
     )
-    logger.info("Created distinct Off-Conveyor U-Turn batch: %s (%s)", new_batch.batch_id, _sanitize_log_str(label))
+    logger.info("Created distinct Off-Conveyor walk batch: %s (%s)", new_batch.batch_id, _sanitize_log_str(label))
     return new_batch
 
 

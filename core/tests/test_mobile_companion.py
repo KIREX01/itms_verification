@@ -589,7 +589,7 @@ class TestMobileCompanion:
         # Verify batch 1 has 4 images
         b1 = IngestionBatch.objects.get(batch_id=batch1_id)
         assert b1.images.count() == 4
-        assert "U-Turn Walk Batch #1" in b1.source_label
+        assert "Walk Batch #1" in b1.source_label
 
         # Verify walk 1 pairs are formed only within batch 1
         w1_pairs = VehicleInstallationPair.objects.filter(
@@ -629,7 +629,7 @@ class TestMobileCompanion:
         # Verify batch 2 has 4 images
         b2 = IngestionBatch.objects.get(batch_id=batch2_id)
         assert b2.images.count() == 4
-        assert "U-Turn Walk Batch #2" in b2.source_label
+        assert "Walk Batch #2" in b2.source_label
 
         # Verify walk 2 pairs are strictly within batch 2
         w2_pairs = VehicleInstallationPair.objects.filter(

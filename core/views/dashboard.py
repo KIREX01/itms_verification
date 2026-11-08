@@ -28,10 +28,9 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
     """
     Renders the primary Operator Console (Single-Page Web Application).
     Provides all tools needed to review evidence, match plates, and submit to ITMS.
-    Automatically routes mobile devices to the Mobile Capture Station unless desktop view requested.
+    Loads desktop console by default; routes to mobile only if explicitly requested.
     """
-    mode = device_service.get_effective_view_mode(request)
-    if mode == "mobile":
+    if request.GET.get("view", "").lower().strip() == "mobile":
         return redirect("core:mobile_companion")
 
     is_mobile = device_service.is_mobile_device(request)

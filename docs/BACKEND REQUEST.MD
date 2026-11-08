@@ -430,3 +430,22 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
        - Auto-fills hardware serials from matching `InstallationKit` in `POST` if omitted in the request.
        - Set `blocking_lock=True, lock_timeout=15.0` to eliminate lock contention failures.
        - If Step 3 confirmation succeeded on ITMS, the workflow returns success (`pending_archive_confirmation=True`), transitioning the order and pair to `SUBMITTED` while background daemons verify final archive indexing.
+
+
+### Backend & UI/UX Update: Centralized Live ITMS Sync, One-Tap Refresh & Mobile Connect Responsiveness (08 November 2026)
+- **Status:** COMPLETED, TESTED & DEPLOYED (Commit `fe5bd7c`, Deployed Live on EC2 Production `16.170.39.187`)
+- **Key Enhancements Implemented:**
+  1. **Purged Local DB Toggle (Web UI Exclusively Focused on Live ITMS):**
+     - Removed the confusing `⚡ Live ITMS` vs `💾 Local DB` toggle switch from `#itms-subview-controls`.
+     - Locked `itmsExplorerSource = "live"` permanently in frontend JavaScript, ensuring all registry lookups hit the live ITMS feed with zero user confusion.
+  2. **Single-Tap Consolidated ITMS Synchronization (`syncItmsAll` & `POST /api/itms/orders/sync/now/?tab=all`):**
+     - Removed the multi-button sync drawer (`#itms-filter-drawer`, `Sync Shift Orders`, `Auto-Sync Kits`, `Sync Page`).
+     - Enhanced `core/views/orders.py:api_itms_sync_now` with `tab in ("all", "everything")` to trigger unified shift-scoped sync (active + completed archive) AND installation kits crawl in a single execution.
+     - Provided a single, prominent `⚡ Sync ITMS` button in `#itms-subview-controls` with live spinner and feedback.
+  3. **Centralized One-Tap Refresh (`refreshItmsTab`):**
+     - Added unified `🔄 Refresh` button that simultaneously checks and reloads ITMS credentials session status, active bonded warehouse, current subview records (Orders / Archive / Kits), and selected order telematics detail card.
+  4. **Full Mobile Responsiveness for ITMS Connect View (`#itms-view-connect`):**
+     - Fixed clipping and scroll lock in `.itms-connect-view` by adding `min-height: 0`, `-webkit-overflow-scrolling: touch`, and `100dvh` viewport adaptation.
+     - Added `.itms-connect-bond-row` with vertical stacking on screens $\le 768\text{px}$ to prevent badge and label collisions.
+     - Added `.itms-connect-btn-group` that stacks action buttons vertically with 44px minimum touch targets on mobile.
+     - Enforced `font-size: 16px` on mobile inputs to eliminate iOS Safari auto-zoom issues.

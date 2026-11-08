@@ -65,14 +65,14 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
             qs = qs.filter(facility_code=envelope.facility_code)
         else:
             qs = qs.filter(
-                Q(operator=request.user) | Q(front_image__batch__operator=request.user),
+                Q(operator=request.user) | Q(front_image__batch__operator=request.user) | Q(operator__isnull=True),
                 facility_code=envelope.facility_code,
             )
     elif request.user and getattr(request.user, "is_authenticated", False):
         if request.user.is_superuser:
             pass
         else:
-            qs = qs.filter(Q(operator=request.user) | Q(front_image__batch__operator=request.user))
+            qs = qs.filter(Q(operator=request.user) | Q(front_image__batch__operator=request.user) | Q(operator__isnull=True))
 
     today_q = (
         Q(created_at__date=today) |
@@ -391,18 +391,49 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
     if action == "approve":
         # Attempt auto-linking if order is missing (matches TUI parity)
         if pair.is_complete and not pair.order:
-            from core.matcher.order_matcher import match_pair_to_order, get_pending_orders_queryset
-            match_pair_to_order(pair)
-            if not pair.order:
-                clean_reg = "".join(c for c in pair.registration_number_detected.upper() if c.isalnum())
-                found_order = (
-                    get_pending_orders_queryset()
-                    .filter(registration_number__iexact=clean_reg)
-                    .first()
-                )
-                if found_order:
+            clean_reg = normalizer.canonicalize(pair.registration_number_detected) or "".join(c for c in pair.registration_number_detected.upper() if c.isalnum())
+            found_order = (
+                InstallationOrder.objects.filter(
+                    is_archived=False,
+                ).exclude(
+                    order_status__in=["Installed", "Closed", "Archived"]
+                ).filter(
+                    Q(registration_number__iexact=clean_reg) |
+                    Q(registration_number__iexact=pair.registration_number_detected)
+                ).first()
+            )
+            # If not in local DB, attempt quick live lookup from ITMS
+            if not found_order and clean_reg:
+                try:
+                    client = get_web_client(user=request.user)
+                    if client.session_store.session.is_cookie_valid():
+                        fetch_res = client.fetch_order_info(clean_reg, download_photos=False)
+                        if fetch_res.get("success"):
+                            client.sync_order_info_to_local_db(fetch_res, order_uuid=fetch_res.get("order_uuid", ""))
+                            found_order = InstallationOrder.objects.filter(
+                                order_number=fetch_res.get("order_number")
+                            ).first()
+                except Exception as live_err:
+                    logger.debug("Live ITMS lookup in approve action skipped: %s", live_err)
+
+            if found_order:
+                # Ensure not already submitted on another pair
+                already_submitted = VehicleInstallationPair.objects.filter(
+                    is_deleted=False,
+                    order=found_order,
+                    verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED,
+                ).exists()
+                if not already_submitted:
                     pair.order = found_order
-                    pair.save(update_fields=["order"])
+                    found_order.status = InstallationOrder.Status.MATCHED
+                    found_order.is_active_on_itms = True
+                    found_order.is_archived = False
+                    found_order.save(update_fields=["status", "is_active_on_itms", "is_archived"])
+                    pair.match_type = VehicleInstallationPair.MatchType.EXACT
+                    pair.match_score = 100.0
+                    pair.matched_via = VehicleInstallationPair.MatchedVia.MANUAL
+                    pair.operator_note = f"Linked to Order #{found_order.order_number} ({found_order.registration_number})"
+                    pair.save(update_fields=["order", "match_type", "match_score", "matched_via", "operator_note"])
 
         if not pair.order:
             pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
@@ -422,17 +453,25 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
             ).exclude(id=pair.id).first()
         )
         if other_pair:
-            claimed_order = pair.order
-            pair.order = None
-            pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
-            pair.operator_note = f"Order Conflict: Order #{claimed_order.order_number} is already claimed by Pair #{other_pair.id}."
-            pair.save(update_fields=["order", "verification_status", "operator_note"])
-            return JsonResponse({
-                "success": False,
-                "error": f"Cannot approve: Order #{claimed_order.order_number} is already claimed by Pair #{other_pair.id}. Pair unlinked and set to CONFLICT.",
-                "code": "ORDER_ALREADY_ASSIGNED",
-                "status": pair.verification_status,
-            }, status=400)
+            # If the other pair was already submitted, this order cannot be reused
+            if other_pair.verification_status == VehicleInstallationPair.VerificationStatus.SUBMITTED:
+                claimed_order = pair.order
+                pair.order = None
+                pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
+                pair.operator_note = f"Order Conflict: Order #{claimed_order.order_number} was already submitted to ITMS on Pair #{other_pair.id}."
+                pair.save(update_fields=["order", "verification_status", "operator_note"])
+                return JsonResponse({
+                    "success": False,
+                    "error": f"Cannot approve: Order #{claimed_order.order_number} was already submitted to ITMS on Pair #{other_pair.id}. Pair unlinked and set to CONFLICT.",
+                    "code": "ORDER_ALREADY_ASSIGNED",
+                    "status": pair.verification_status,
+                }, status=400)
+            else:
+                # Reassign from stale unsubmitted pair
+                other_pair.order = None
+                if other_pair.verification_status == VehicleInstallationPair.VerificationStatus.APPROVED:
+                    other_pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
+                other_pair.save(update_fields=["order", "verification_status"])
 
         was_failed = (pair.verification_status == VehicleInstallationPair.VerificationStatus.FAILED)
         pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
@@ -528,9 +567,33 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
                 except Exception as match_err:
                     logger.warning("Order matcher lookup error: %s", match_err)
 
-        # Strictly validate that target order is PENDING and UNASSIGNED
+        # Live lookup against ITMS server if order not in local DB (TUI Parity)
+        if not target_order and raw_val:
+            try:
+                client = get_web_client(user=request.user)
+                if client.session_store.session.is_cookie_valid():
+                    fetch_res = client.fetch_order_info(clean_val, download_photos=False)
+                    if not fetch_res.get("success") and clean_val != raw_val:
+                        fetch_res = client.fetch_order_info(raw_val, download_photos=False)
+                    if fetch_res.get("success"):
+                        client.sync_order_info_to_local_db(fetch_res, order_uuid=fetch_res.get("order_uuid", ""))
+                        target_order = InstallationOrder.objects.filter(
+                            order_number=fetch_res.get("order_number")
+                        ).first()
+            except Exception as itms_err:
+                logger.warning("Live ITMS lookup failed for '%s': %s", raw_val, itms_err)
+
+        # Validate target order status and handle 1:1 pair assignments
         if target_order:
-            # Prevent duplicate order linking across pairs
+            # 1. Prevent linking if order is truly finalized in ITMS Archive
+            if target_order.is_archived or target_order.status == InstallationOrder.Status.INSTALLED or (target_order.order_status or "").lower() in ["installed", "archived", "closed"]:
+                return JsonResponse({
+                    "success": False,
+                    "error": f"Order #{target_order.order_number} ({target_order.registration_number}) is already closed/installed in the ITMS archive.",
+                    "code": "ORDER_ALREADY_CLOSED",
+                }, status=400)
+
+            # 2. Check if already claimed by another active pair (1:1 invariant)
             other_pair = (
                 VehicleInstallationPair.objects.filter(
                     is_deleted=False,
@@ -544,30 +607,11 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
                     "code": "ORDER_ALREADY_ASSIGNED",
                 }, status=400)
 
-            from core.matcher.order_matcher import get_pending_orders_queryset
-            if not get_pending_orders_queryset(exclude_pair_id=pair.id).filter(id=target_order.id).exists():
-                c_stat = target_order.order_status or target_order.status
-                return JsonResponse({
-                    "success": False,
-                    "error": f"Order #{target_order.order_number} for {target_order.registration_number} is already {c_stat} (closed/claimed). Only unassigned PENDING orders can be linked.",
-                    "code": "ORDER_NOT_AVAILABLE",
-                }, status=400)
-
-        # Live lookup against ITMS server if order not in local DB (TUI Parity)
-        if not target_order:
-                try:
-                    client = get_web_client(user=request.user)
-                    if client.session_store.session.is_cookie_valid():
-                        fetch_res = client.fetch_order_info(clean_val, download_photos=False)
-                        if not fetch_res.get("success") and clean_val != raw_val:
-                            fetch_res = client.fetch_order_info(raw_val, download_photos=False)
-                        if fetch_res.get("success"):
-                            client.sync_order_info_to_local_db(fetch_res, order_uuid=fetch_res.get("order_uuid", ""))
-                            target_order = InstallationOrder.objects.filter(
-                                order_number=fetch_res.get("order_number")
-                            ).first()
-                except Exception as itms_err:
-                    logger.warning("Live ITMS lookup failed for '%s': %s", raw_val, itms_err)
+            # 3. Activate target order status
+            target_order.status = InstallationOrder.Status.MATCHED
+            target_order.is_active_on_itms = True
+            target_order.is_archived = False
+            target_order.save(update_fields=["status", "is_active_on_itms", "is_archived"])
 
         canonical_plate = ""
         if target_order:
@@ -597,7 +641,7 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
                 pair.rear_image.save(update_fields=["detected_plate"])
 
         if target_order:
-            # Promoting directly to APPROVED on manual order link saves 50% operator review friction
+            # Promoting directly to APPROVED on manual order link saves operator review friction
             pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
         else:
             pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT

@@ -18,7 +18,45 @@ function setQueueDateScope(scope) {
         const el = document.getElementById(scopeButtons[k]);
         if (el) el.classList.toggle("active", k === scope);
     });
+    const select = document.getElementById("queue-batch-select");
+    if (select) {
+        select.value = "SCOPE:" + scope;
+    }
     fetchPairs();
+}
+
+function onQueueScopeSelectChanged(val) {
+    if (!val) return;
+    if (val.startsWith("SCOPE:")) {
+        const scope = val.replace("SCOPE:", "");
+        currentQueueBatchFilter = "ALL";
+        currentQueueDateScope = scope;
+        fetchPairs();
+    } else {
+        currentQueueBatchFilter = val;
+        renderQueueCards();
+    }
+}
+
+function onQueueSearchInput(val) {
+    const clearBtn = document.getElementById("queue-search-clear");
+    if (clearBtn) {
+        clearBtn.style.display = (val && val.trim().length > 0) ? "inline-flex" : "none";
+    }
+    filterWorkQueue();
+}
+
+function clearQueueSearch() {
+    const input = document.getElementById("queue-search-input");
+    const clearBtn = document.getElementById("queue-search-clear");
+    if (input) {
+        input.value = "";
+        input.focus();
+    }
+    if (clearBtn) {
+        clearBtn.style.display = "none";
+    }
+    filterWorkQueue();
 }
 
 function cycleQueueDateScope() {
@@ -45,17 +83,26 @@ async function fetchPairs() {
             pairsData = data.pairs || [];
             
             // Populate batch filter options if available
-            if (data.batches && data.batches.length > 0) {
-                const select = document.getElementById("queue-batch-select");
-                if (select) {
-                    const currentVal = select.value || currentQueueBatchFilter || "ALL";
-                    const latestId = data.latest_batch_id || (data.batches[0] ? data.batches[0].batch_id : "Latest");
-                    select.innerHTML = `
-                        <option value="ALL">📦 All Batches (${activeScope})</option>
-                        <option value="LATEST">🔥 Latest Ingested Batch (${escapeHtml(latestId)})</option>
-                        <option value="CARRYOVER">⏳ Carryover / Previous Batches</option>
-                        ${data.batches.map(b => `<option value="${escapeHtml(b.batch_id)}">${b.is_today ? '●' : '⏳'} ${escapeHtml(b.source_label || b.batch_id)} (${escapeHtml(b.created_at)})</option>`).join("")}
+            const select = document.getElementById("queue-batch-select");
+            if (select) {
+                const currentVal = select.value || ("SCOPE:" + activeScope);
+                let optionsHtml = `
+                    <optgroup label="Date Scope">
+                        <option value="SCOPE:TODAY" ${activeScope === "TODAY" ? "selected" : ""}>🔥 Today's Shift</option>
+                        <option value="SCOPE:ACTIVE_BATCH" ${activeScope === "ACTIVE_BATCH" ? "selected" : ""}>⚡ Active Batch</option>
+                        <option value="SCOPE:CARRYOVER" ${activeScope === "CARRYOVER" ? "selected" : ""}>⏳ Carryover</option>
+                        <option value="SCOPE:ALL" ${activeScope === "ALL" ? "selected" : ""}>🌐 All Records</option>
+                    </optgroup>
+                `;
+                if (data.batches && data.batches.length > 0) {
+                    optionsHtml += `
+                        <optgroup label="Ingestion Batches">
+                            ${data.batches.map(b => `<option value="${escapeHtml(b.batch_id)}">${b.is_today ? '●' : '⏳'} ${escapeHtml(b.source_label || b.batch_id)} (${escapeHtml(b.created_at)})</option>`).join("")}
+                        </optgroup>
                     `;
+                }
+                select.innerHTML = optionsHtml;
+                if (select.querySelector(`option[value="${currentVal}"]`)) {
                     select.value = currentVal;
                 }
             }
@@ -72,6 +119,10 @@ async function fetchPairs() {
             setText("cnt-approved", cntApproved);
             setText("cnt-issues", cntIssues);
             setText("cnt-done", cntDone);
+            ["cnt-all", "cnt-review", "cnt-approved", "cnt-issues", "cnt-done"].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = "inline-flex";
+            });
 
             // Update queue approved counter & quick batch submit button
             const approvedCount = cntApproved;
@@ -787,13 +838,17 @@ async function searchOrdersForLinking(q) {
         const data = await res.json();
         if (data.success && data.orders) {
             currentFilteredOrders = data.orders;
-            if (countEl) countEl.innerText = `${data.orders.length} order(s) found`;
+            if (countEl) countEl.innerText = data.orders.length === 0 ? "0 orders found" : `${data.orders.length} order(s) found`;
             if (data.orders.length === 0) {
                 container.innerHTML = `
-                    <div style="padding:22px 16px; text-align:center; color:var(--ug-text-dim); font-size:0.78rem;">
-                        <div>No orders in local database matching '<strong>${escapeHtml(q || 'all')}</strong>'.</div>
-                        <div style="margin-top:6px; color:var(--ug-text-muted); font-size:0.73rem;">
-                            Press <strong style="color:var(--ug-green);">Enter</strong> to update plate directly (will also query live ITMS).
+                    <div style="padding:28px 16px; text-align:center;">
+                        <div style="font-size:1.8rem; margin-bottom:8px;">⚠️</div>
+                        <div style="font-size:0.92rem; font-weight:800; color:#ef4444;">Order not available</div>
+                        <div style="color:var(--ug-text-muted); font-size:0.78rem; margin-top:4px;">
+                            No active ITMS installation order found matching "<strong>${escapeHtml(q || '')}</strong>".
+                        </div>
+                        <div style="margin-top:10px; color:var(--ug-text-dim); font-size:0.73rem;">
+                            Press <strong style="color:var(--ug-green);">Enter</strong> to save plate directly, or trigger an ITMS sync if this order was recently created.
                         </div>
                     </div>`;
                 return;

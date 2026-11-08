@@ -449,3 +449,25 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
      - Added `.itms-connect-bond-row` with vertical stacking on screens $\le 768\text{px}$ to prevent badge and label collisions.
      - Added `.itms-connect-btn-group` that stacks action buttons vertically with 44px minimum touch targets on mobile.
      - Enforced `font-size: 16px` on mobile inputs to eliminate iOS Safari auto-zoom issues.
+
+### Backend & UI/UX Update: Queue Order Linking, High-Precision Search & Centralized Filters (09 November 2026)
+- **Status:** COMPLETED & TESTED (36/36 Unit Tests Passing)
+- **Key Enhancements Implemented:**
+  1. **Fix Order Linking & Conflict Approval Failures:**
+     - Fixed `core/views/pairs.py:api_pair_action`:
+       - Removed hard exclusion of `"Ready for approve"` and excessive status gates in manual order linking (`action == "link_order"`). Allowed linking of valid open orders regardless of transient status strings.
+       - Enhanced `action == "approve"`: when an operator approves a complete pair in `CONFLICT` or without an order, automatically attempts auto-linking against local open orders or via live ITMS fetch, promoting complete pairs directly to `APPROVED`.
+       - Added automatic background rematching in `core/services/order_sync.py:sync_shift_scoped`: newly synced orders automatically rematch and promote unlinked `CONFLICT` pairs to `APPROVED` without requiring manual operator intervention.
+       - Preserved 1:1 order assignment integrity: prevent hijacking of orders already claimed by other active or submitted pairs.
+  2. **Refined Order Search Precision & Prevent False Information:**
+     - In `core/services/scoped_order_service.py` and `core/views/orders.py`:
+       - Numeric search queries (`s.isdigit() and len(s) < 6`, e.g. `600`) now filter strictly against `registration_number` and `order_number`. Substring searches inside 17-character VINs or 9-digit plate serials are prevented from returning false positive matches.
+       - Implemented relevance ranking: exact match (score 0), prefix match (score 1), and contains match (score 2).
+       - Live search verification: live ITMS fallback records are verified to actually match the query before being added to results.
+       - Clean empty state: when no order exists, the endpoint returns `success: true, orders: []`, and the UI displays a clear `⚠️ Order not available` state with actionable tips instead of false results.
+  3. **Centralized Queue Controls Toolbar:**
+     - Replaced the fragmented collapsible filter drawer, redundant scope pills (`Today`, `Active`, `Carryover`, `All`), and separate batch dropdown with a clean, centralized 3-tier toolbar:
+       - **Tier 1 (Status Pills)**: `All`, `Review`, `Approved`, `⚠️ Issues`, and `Done` with prominent, styled count badges (`.queue-cnt-badge`).
+       - **Tier 2 (Action Toolbar)**: Search input with clear `✕` button (`#queue-search-clear`), unified Scope & Ingestion Batch selector (`#queue-batch-select`), refresh (`🔄`), and CSV export (`📥`).
+       - **Tier 3 (Batch Action Bar)**: Live vision pipeline indicator, approved count summary, and quick submit button (`🚀 Submit Approved (N) [B]`).
+     - Added CSS rules in `core/static/core/css/tab_queue.css` for responsive stacking and touch targets. Bumped cache-busting version to `v=28` in `base.html`.

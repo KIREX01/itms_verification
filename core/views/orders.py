@@ -48,11 +48,30 @@ def api_orders_list(request: HttpRequest) -> JsonResponse:
 
     envelope = getattr(request, "envelope", None)
     if envelope and envelope.is_valid:
-        qs = scoped_order_service.get_scoped_orders(envelope=envelope, search=search).only(
+        qs = scoped_order_service.get_scoped_orders(envelope=envelope, search=search, is_archived=False).only(
             "id", "order_number", "registration_number", "vin", "warehouse_name", "status", "facility_code"
         )
     else:
-        qs = InstallationOrder.objects.none()
+        qs = InstallationOrder.objects.filter(is_archived=False)
+        if search:
+            s = search.strip()
+            s_clean = s.replace(" ", "").upper()
+            if s.isdigit() and len(s) < 6:
+                qs = qs.filter(
+                    models.Q(registration_number__icontains=s)
+                    | models.Q(order_number__icontains=s)
+                )
+            else:
+                cond = (
+                    models.Q(registration_number__icontains=s)
+                    | models.Q(registration_number__icontains=s_clean)
+                    | models.Q(order_number__icontains=s)
+                )
+                if len(s) >= 6 or (any(c.isalpha() for c in s) and any(c.isdigit() for c in s)):
+                    cond |= models.Q(vin__icontains=s)
+                if len(s) >= 6:
+                    cond |= models.Q(plate_serial__icontains=s)
+                qs = qs.filter(cond)
 
     orders = [
         {
@@ -67,6 +86,16 @@ def api_orders_list(request: HttpRequest) -> JsonResponse:
         for o in qs[:limit]
     ]
 
+    # Prioritize exact matches on plate or order number first, then prefix matches
+    if search and orders:
+        s_upper = search.strip().upper()
+        s_clean = s_upper.replace(" ", "")
+        orders.sort(key=lambda o: (
+            0 if (o["registration_number"].replace(" ", "").upper() == s_clean or o["order_number"].upper() == s_upper)
+            else 1 if (o["registration_number"].replace(" ", "").upper().startswith(s_clean) or o["order_number"].upper().startswith(s_upper))
+            else 2
+        ))
+
     # If no local orders found and search query is provided, query ITMS live (TUI Parity)
     if not orders and search and len(search) >= 3:
         try:
@@ -74,21 +103,28 @@ def api_orders_list(request: HttpRequest) -> JsonResponse:
             if client.session_store.session.is_cookie_valid():
                 live_info = client.fetch_order_info(search, download_photos=False)
                 if live_info.get("success"):
-                    client.sync_order_info_to_local_db(live_info, order_uuid=live_info.get("order_uuid", ""))
-                    o = (
-                        InstallationOrder.objects.filter(order_number=live_info.get("order_number"))
-                        .only("id", "order_number", "registration_number", "vin", "warehouse_name", "status")
-                        .first()
-                    )
-                    if o:
-                        orders.append({
-                            "id": o.id,
-                            "order_number": o.order_number,
-                            "registration_number": o.registration_number,
-                            "vin": o.vin,
-                            "warehouse_name": o.warehouse_name,
-                            "status": o.status,
-                        })
+                    live_reg = (live_info.get("registration_number") or "").replace(" ", "").upper()
+                    live_ord = (live_info.get("order_number") or "").upper()
+                    search_clean = search.replace(" ", "").upper()
+                    # Only accept live order if search query is actually part of the returned plate or order number
+                    # Prevents returning false / unrelated orders on short or partial queries
+                    if search_clean in live_reg or search_clean in live_ord:
+                        client.sync_order_info_to_local_db(live_info, order_uuid=live_info.get("order_uuid", ""))
+                        o = (
+                            InstallationOrder.objects.filter(order_number=live_info.get("order_number"))
+                            .only("id", "order_number", "registration_number", "vin", "warehouse_name", "status")
+                            .first()
+                        )
+                        if o:
+                            orders.append({
+                                "id": o.id,
+                                "order_number": o.order_number,
+                                "registration_number": o.registration_number,
+                                "vin": o.vin,
+                                "warehouse_name": o.warehouse_name,
+                                "status": o.status,
+                                "facility_code": getattr(o, "facility_code", "AGM"),
+                            })
         except Exception as exc:
             logger.debug("Live ITMS orders lookup error for '%s': %s", search, exc)
 

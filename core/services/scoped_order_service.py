@@ -81,12 +81,28 @@ def get_scoped_orders(
         qs = qs.filter(status=status)
     if search:
         s = search.strip()
-        qs = qs.filter(
-            models.Q(order_number__icontains=s)
-            | models.Q(registration_number__icontains=s)
-            | models.Q(vin__icontains=s)
-            | models.Q(plate_serial__icontains=s)
-        )
+        s_clean = s.replace(" ", "").upper()
+        # If search is purely numeric and short (e.g. "600", "692"):
+        # Match only registration_number or order_number containing the digits.
+        # Strictly prevent false matches against arbitrary internal substrings of 17-char VINs or plate serials.
+        if s.isdigit() and len(s) < 6:
+            qs = qs.filter(
+                models.Q(registration_number__icontains=s)
+                | models.Q(order_number__icontains=s)
+            )
+        else:
+            cond = (
+                models.Q(registration_number__icontains=s)
+                | models.Q(registration_number__icontains=s_clean)
+                | models.Q(order_number__icontains=s)
+            )
+            # Only match VIN if search query looks like a VIN / VIN prefix (contains both alpha & digits or length >= 6)
+            if len(s) >= 6 or (any(c.isalpha() for c in s) and any(c.isdigit() for c in s)):
+                cond |= models.Q(vin__icontains=s)
+            # Only match plate_serial if query is long enough to be an actual serial number (>= 6 digits)
+            if len(s) >= 6:
+                cond |= models.Q(plate_serial__icontains=s)
+            qs = qs.filter(cond)
     return qs
 
 

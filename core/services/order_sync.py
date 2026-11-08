@@ -846,6 +846,13 @@ class OrderSyncService:
             logger.debug("Automatic shift reconciliation notice during shift sync: %s", rec_err)
 
         date_label = archive_res.get("target_date") or "today"
+
+        # Auto-resolve complete CONFLICT pairs against newly arrived orders
+        try:
+            rematch_unlinked_conflict_pairs()
+        except Exception as match_err:
+            logger.warning("Auto rematch conflict pairs after shift sync error: %s", match_err)
+
         return {
             "success": True,
             "active": active_res,

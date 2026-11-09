@@ -245,12 +245,12 @@
                 <div class="history-subnav-strip" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
                     <!-- Filter Chips (Visible Subnavigation) -->
                     <div class="history-filter-chips" style="flex:1; display:flex; gap:6px; overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:2px;">
-                        <button class="history-chip active" data-hfilter="ALL" onclick="window.setHistoryFilter('ALL')">All</button>
-                        <button class="history-chip" data-hfilter="SUBMITTED" onclick="window.setHistoryFilter('SUBMITTED')">Submitted</button>
-                        <button class="history-chip" data-hfilter="FAILED" onclick="window.setHistoryFilter('FAILED')">Failed</button>
-                        <button class="history-chip" data-hfilter="ISSUES" onclick="window.setHistoryFilter('ISSUES')">Issues / Conflicts</button>
-                        <button class="history-chip" data-hfilter="STOCK" onclick="window.setHistoryFilter('STOCK')">Stock &amp; Ledger</button>
-                        <button class="history-chip" data-hfilter="EMAIL" onclick="window.setHistoryFilter('EMAIL')">Emails</button>
+                        <button class="history-chip active" data-hfilter="ALL" onclick="window.setHistoryFilter('ALL')" title="All historical verification and audit events">All Events</button>
+                        <button class="history-chip" data-hfilter="SUBMISSIONS" onclick="window.setHistoryFilter('SUBMISSIONS')" title="ITMS transmissions and final submissions">Submissions</button>
+                        <button class="history-chip" data-hfilter="APPROVALS" onclick="window.setHistoryFilter('APPROVALS')" title="Operator verified and approved pairs">Approvals</button>
+                        <button class="history-chip" data-hfilter="OVERRIDES" onclick="window.setHistoryFilter('OVERRIDES')" title="Manual plate corrections, swaps, and overrides">Overrides</button>
+                        <button class="history-chip" data-hfilter="ISSUES" onclick="window.setHistoryFilter('ISSUES')" title="OCR conflicts, validation rejections, and submission errors">Issues &amp; Fails</button>
+                        <button class="history-chip" data-hfilter="STOCK" onclick="window.setHistoryFilter('STOCK')" title="Stock ledger adjustments, inventory movements, and emails">Stock &amp; Audits</button>
                     </div>
 
                     <!-- Funnel Icon Trigger -->
@@ -302,18 +302,19 @@
                 <table class="itms-grid-table">
                     <thead>
                         <tr>
-                            <th style="width:160px;">Timestamp</th>
-                            <th style="width:140px;">Vehicle Plate</th>
-                            <th style="width:160px;">Matched Order #</th>
-                            <th style="width:150px;">Action</th>
-                            <th style="width:120px;">Status</th>
-                            <th style="width:140px;">Operator</th>
+                            <th style="width:145px;">Timestamp</th>
+                            <th style="width:130px;">Vehicle Plate</th>
+                            <th style="width:115px; text-align:center;">Evidence Photos</th>
+                            <th style="width:140px;">Matched Order #</th>
+                            <th style="width:135px;">Action</th>
+                            <th style="width:105px;">Status</th>
+                            <th style="width:130px;">Operator</th>
                             <th>Audit Message / Execution Trace</th>
                         </tr>
                     </thead>
                     <tbody id="history-table-tbody">
                         <tr>
-                            <td colspan="7" style="text-align:center; padding:40px; color:var(--ug-text-muted);">
+                            <td colspan="8" style="text-align:center; padding:40px; color:var(--ug-text-muted);">
                                 Loading historical verification audit events...
                             </td>
                         </tr>

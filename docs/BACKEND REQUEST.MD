@@ -553,3 +553,28 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
        - Safe Room Unregistered Plates CSV (`/api/stock/export/unregistered/`)
        - Blocked / Not On Stock CSV (`/api/stock/export/category/blocked/`)
      - Removed all order stage and verification exports from the Stock Tab, redirecting operational reporting strictly to the Reports Tab.
+
+
+### Backend & UI/UX Update: History Tab Distinct Audit Filters, Evidence Photo Thumbnails & Lightbox Integration (09 November 2026)
+- **Status:** COMPLETED & TESTED (5/5 Dedicated Tests Passing in `test_history_tab.py`)
+- **Key Enhancements Implemented:**
+  1. **Distinct, Comprehensive Audit Trail Filters:**
+     - Replaced confusing, duplicate filters (`Failed` vs `Issues / Conflicts`, `Stock & Ledger` vs `Emails`, and missing `Approvals` / `Overrides`) with 6 distinct audit event categories:
+       - **All Events (`ALL`)**: Complete append-only audit trail and installation lifecycle events.
+       - **Submissions (`SUBMISSIONS`)**: Transmissions to ITMS (`action in ["SUBMIT", "ITMS_SUBMISSION"]` or `verification_status == "SUBMITTED"`).
+       - **Approvals (`APPROVALS`)**: Verified and approved pairs (`action in ["PAIR_APPROVAL", "OPERATOR_APPROVE", "APPROVE"]` or `verification_status == "APPROVED"`).
+       - **Overrides (`OVERRIDES`)**: Manual plate overrides, swaps, replacements, and hypothesis corrections (`action in ["OPERATOR_OVERRIDE", "MANUAL_PLATE_ASSIGN", "OPERATOR_SWAP", "ORDER_PRIOR_CORRECT", "IMAGE_REPLACED"]` or `is_manual_override == True`).
+       - **Issues & Fails (`ISSUES`)**: Submission errors, OCR conflicts, validation rejections, and incomplete pairs (`result == "FAILURE"` or `verification_status in ["CONFLICT", "FAILED", "INCOMPLETE", "UNREGISTERED"]`).
+       - **Stock & Audits (`STOCK`)**: Safe-room physical counts, shift ledger updates, and email reports (`action in ["STOCK_LEDGER_UPDATED", "STOCK_REPORT_EMAILED"]` or plate starting with `SHIFT_`).
+     - Aligned backend query routing in `core/views/dashboard.py:api_history_list` and in-memory filtering in `core/static/core/js/tab_history.js`.
+  2. **Evidence Photos in History Table & Mobile Cards:**
+     - Added dedicated **Evidence Photos** column to desktop/tablet history grid table (`itms-grid-table`).
+     - Compact dual thumbnails (Front & Rear, 44x32px) with hover zoom and single-click full-screen lightbox preview (`openLightbox`).
+     - Added responsive evidence photo strips to mobile cards (`history-card-item`) with `FRONT` and `REAR` badge tags and tap-to-zoom.
+     - Graceful fallbacks (`--` or auto-hidden container) for stock ledger, email, or unphotographed audit events.
+  3. **Evidence Photo Previews in Audit Detail Modal (`modal-history-detail`):**
+     - Fixed `openHistoryModal` in `tab_history.js` to dynamically show/hide front and rear photo cards independently.
+     - Full-resolution image URL binding on click (`this.dataset.fullUrl || this.src`) preventing blurry thumbnail zoom in lightbox.
+  4. **Clean Media URL Normalization:**
+     - Implemented `_clean_media_url` in `core/views/dashboard.py`: safely resolves vault files, thumbnails, and previews to clean `/media/` paths, eliminating duplicate prefixes, double slashes, and Windows backslashes.
+     - Increased returned items limit to 300 to ensure rich representations of both direct audit logs and pair records.

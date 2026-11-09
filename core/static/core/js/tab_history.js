@@ -28,9 +28,21 @@ if (typeof window !== "undefined") {
 }
 
 function setHistoryFilter(filter) {
-    currentHistoryFilter = filter;
+    let normalized = (filter || "ALL").toUpperCase();
+    if (normalized === "SUBMITTED") normalized = "SUBMISSIONS";
+    if (normalized === "APPROVED") normalized = "APPROVALS";
+    if (normalized === "OVERRIDE") normalized = "OVERRIDES";
+    if (normalized === "FAILED") normalized = "ISSUES";
+    currentHistoryFilter = normalized;
+
     document.querySelectorAll(".history-chip").forEach(c => {
-        c.classList.toggle("active", c.getAttribute("data-hfilter") === filter);
+        const chipFilter = (c.getAttribute("data-hfilter") || "").toUpperCase();
+        const matches = (chipFilter === normalized) ||
+            (normalized === "SUBMISSIONS" && chipFilter === "SUBMITTED") ||
+            (normalized === "APPROVALS" && chipFilter === "APPROVED") ||
+            (normalized === "OVERRIDES" && chipFilter === "OVERRIDE") ||
+            (normalized === "ISSUES" && chipFilter === "FAILED");
+        c.classList.toggle("active", matches);
     });
     // In-memory filter or backend fetch if backend filtering is preferred
     historyCurrentPage = 1;
@@ -42,8 +54,14 @@ function setHistoryDateScope(dateScope) {
     currentHistoryDateScope = dateScope;
     const btnToday = document.getElementById("btn-hscope-today");
     const btnAll = document.getElementById("btn-hscope-all");
+    const btnTodayM = document.getElementById("btn-hscope-today-m");
+    const btnAllM = document.getElementById("btn-hscope-all-m");
+
     if (btnToday) btnToday.classList.toggle("active", dateScope === "TODAY");
     if (btnAll) btnAll.classList.toggle("active", dateScope === "ALL");
+    if (btnTodayM) btnTodayM.classList.toggle("active", dateScope === "TODAY");
+    if (btnAllM) btnAllM.classList.toggle("active", dateScope === "ALL");
+
     historyCurrentPage = 1;
     void fetchHistoryEvents();
 }
@@ -95,32 +113,36 @@ function changeHistoryPage(delta) {
 
 function applyHistoryFiltering() {
     filteredHistoryEvents = allHistoryEvents.filter(item => {
+        const act = (item.action || "").toUpperCase();
+        const res = (item.result || "").toUpperCase();
+        const stat = (item.pair_status || "").toUpperCase();
+        const plt = (item.plate || "").toUpperCase();
+        const ord = (item.order_number || "").toUpperCase();
+
         // 1. Filter Chip Matching
-        if (currentHistoryFilter === "SUBMITTED") {
-            if (item.action !== "SUBMIT" && item.action !== "SUBMIT_PAIR") return false;
-        } else if (currentHistoryFilter === "FAILED") {
-            const res = (item.result || "").toUpperCase();
-            if (res !== "FAILURE" && res !== "FAILED") return false;
-        } else if (currentHistoryFilter === "ISSUES") {
-            const res = (item.result || "").toUpperCase();
-            if (res === "SUCCESS" || res === "APPROVED") return false;
-        } else if (currentHistoryFilter === "STOCK") {
-            const act = (item.action || "").toUpperCase();
-            const plt = (item.plate || "").toUpperCase();
-            if (!act.includes("STOCK") && !act.includes("DELIVERY") && !act.includes("LEDGER") && !plt.startsWith("SHIFT_")) {
-                return false;
-            }
-        } else if (currentHistoryFilter === "EMAIL") {
-            const act = (item.action || "").toUpperCase();
-            const ord = (item.order_number || "").toUpperCase();
-            if (!act.includes("EMAIL") && ord !== "EMAIL_DISPATCH") {
-                return false;
-            }
+        if (currentHistoryFilter === "SUBMISSIONS" || currentHistoryFilter === "SUBMITTED") {
+            const isSub = act === "SUBMIT" || act === "SUBMIT_PAIR" || act === "ITMS_SUBMISSION" || stat === "SUBMITTED";
+            if (!isSub) return false;
+        } else if (currentHistoryFilter === "APPROVALS" || currentHistoryFilter === "APPROVED") {
+            const isApp = act === "PAIR_APPROVAL" || act === "OPERATOR_APPROVE" || act === "APPROVE" || stat === "APPROVED";
+            if (!isApp) return false;
+        } else if (currentHistoryFilter === "OVERRIDES" || currentHistoryFilter === "OVERRIDE") {
+            const isOvr = act === "MANUAL_OVERRIDE" || act === "OPERATOR_OVERRIDE" || act === "OPERATOR_SWAP" || 
+                          act === "MANUAL_PLATE_ASSIGN" || act === "ORDER_PRIOR_CORRECT" || act === "IMAGE_REPLACED";
+            if (!isOvr) return false;
+        } else if (currentHistoryFilter === "ISSUES" || currentHistoryFilter === "FAILED") {
+            const isIssue = res === "FAILURE" || res === "FAILED" || res === "ISSUES" ||
+                            stat === "CONFLICT" || stat === "FAILED" || stat === "INCOMPLETE" || stat === "UNREGISTERED";
+            if (!isIssue) return false;
+        } else if (currentHistoryFilter === "STOCK" || currentHistoryFilter === "EMAIL") {
+            const isStock = act.includes("STOCK") || act.includes("DELIVERY") || act.includes("LEDGER") || 
+                            act.includes("EMAIL") || ord === "EMAIL_DISPATCH" || ord === "LEDGER_OVERRIDE" || plt.startsWith("SHIFT_");
+            if (!isStock) return false;
         }
 
         // 2. Search Query Matching
         if (historySearchQuery) {
-            const searchStr = `${item.plate || ""} ${item.order_number || ""} ${item.action || ""} ${item.operator || ""} ${item.message || ""} ${item.timestamp || ""}`.toLowerCase();
+            const searchStr = `${item.plate || ""} ${item.order_number || ""} ${item.order_plate || ""} ${item.action || ""} ${item.operator || ""} ${item.operator_name || ""} ${item.message || ""} ${item.timestamp || ""}`.toLowerCase();
             if (!searchStr.includes(historySearchQuery)) return false;
         }
 
@@ -169,13 +191,31 @@ function renderHistoryData() {
             const emptyHint = historySearchQuery
                 ? `No audit logs matching search '${escapeHtml(historySearchQuery)}'.`
                 : `No verification events in ${currentHistoryDateScope === "TODAY" ? "Today's shift" : "All Time"} matching '${escapeHtml(currentHistoryFilter)}'.`;
-            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:45px 20px; color:var(--ug-text-dim); font-size:0.88rem;">${emptyHint}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:45px 20px; color:var(--ug-text-dim); font-size:0.88rem;">${emptyHint}</td></tr>`;
         } else {
             tbody.innerHTML = pageItems.map(l => {
                 const todayBadge = l.is_today 
                     ? `<span class="badge badge-green" style="font-size:0.55rem; padding:1px 5px; margin-left:4px; font-weight:800;">TODAY</span>`
                     : "";
                 const resClass = l.result === "SUCCESS" ? "badge-green" : ((l.result === "REVIEW" || l.result === "ISSUES") ? "badge-yellow" : "badge-red");
+
+                // Dual evidence photos thumbnail cell
+                const fUrl = l.front_url || "";
+                const fThumb = l.front_thumb_url || fUrl;
+                const rUrl = l.rear_url || "";
+                const rThumb = l.rear_thumb_url || rUrl;
+                let photosCell = `<span style="color:var(--ug-text-dim); font-size:0.75rem;">--</span>`;
+
+                if (fThumb || rThumb) {
+                    const fImgHtml = fThumb 
+                        ? `<img src="${escapeHtml(fThumb)}" alt="Front" class="history-grid-thumb" title="Front Angle (Click to zoom)" onclick="if(typeof openLightbox==='function'){openLightbox('${escapeHtml(fUrl || fThumb)}');}else{window.open('${escapeHtml(fUrl || fThumb)}','_blank');} event.stopPropagation();" onerror="this.style.display='none';">`
+                        : "";
+                    const rImgHtml = rThumb 
+                        ? `<img src="${escapeHtml(rThumb)}" alt="Rear" class="history-grid-thumb" title="Rear Angle (Click to zoom)" onclick="if(typeof openLightbox==='function'){openLightbox('${escapeHtml(rUrl || rThumb)}');}else{window.open('${escapeHtml(rUrl || rThumb)}','_blank');} event.stopPropagation();" onerror="this.style.display='none';">`
+                        : "";
+                    photosCell = `<div class="history-grid-thumbs-wrap">${fImgHtml}${rImgHtml}</div>`;
+                }
+
                 return `
                 <tr onclick="openHistoryModal('${escapeHtml(String(l.id))}')" style="cursor:pointer;" title="Click to view complete audit trail">
                     <td style="font-size:0.75rem; color:var(--ug-text-dim); font-family:var(--font-mono); white-space:nowrap;">${escapeHtml(l.timestamp)}</td>
@@ -183,6 +223,7 @@ function renderHistoryData() {
                         <strong style="color:var(--ug-yellow); font-family:var(--font-mono); font-size:0.85rem;">${escapeHtml(l.plate)}</strong>
                         ${todayBadge}
                     </td>
+                    <td style="text-align:center;">${photosCell}</td>
                     <td><span style="font-family:var(--font-mono); font-size:0.78rem; color:#94a3b8;">${escapeHtml(l.order_number)}</span></td>
                     <td><span class="badge badge-muted" style="font-size:0.7rem; font-weight:700;">${escapeHtml(l.action)}</span></td>
                     <td><span class="badge ${resClass}" style="font-size:0.7rem; font-weight:800;">${escapeHtml(l.result)}</span></td>
@@ -208,6 +249,30 @@ function renderHistoryData() {
                     ? `<span class="badge badge-green" style="font-size:0.55rem; padding:1px 4px; margin-left:4px;">TODAY</span>`
                     : "";
                 const resClass = l.result === "SUCCESS" ? "badge-green" : ((l.result === "REVIEW" || l.result === "ISSUES") ? "badge-yellow" : "badge-red");
+
+                // Mobile evidence photos strip
+                const fUrl = l.front_url || "";
+                const fThumb = l.front_thumb_url || fUrl;
+                const rUrl = l.rear_url || "";
+                const rThumb = l.rear_thumb_url || rUrl;
+                let mobilePhotosHtml = "";
+
+                if (fThumb || rThumb) {
+                    const fCard = fThumb
+                        ? `<div class="history-card-photo-box" onclick="if(typeof openLightbox==='function'){openLightbox('${escapeHtml(fUrl || fThumb)}');}else{window.open('${escapeHtml(fUrl || fThumb)}','_blank');} event.stopPropagation();" title="Front Angle (Tap to zoom)">
+                               <span class="history-photo-tag">FRONT</span>
+                               <img src="${escapeHtml(fThumb)}" alt="Front" class="history-card-photo-img" onerror="this.parentElement.style.display='none';">
+                           </div>`
+                        : "";
+                    const rCard = rThumb
+                        ? `<div class="history-card-photo-box" onclick="if(typeof openLightbox==='function'){openLightbox('${escapeHtml(rUrl || rThumb)}');}else{window.open('${escapeHtml(rUrl || rThumb)}','_blank');} event.stopPropagation();" title="Rear Angle (Tap to zoom)">
+                               <span class="history-photo-tag">REAR</span>
+                               <img src="${escapeHtml(rThumb)}" alt="Rear" class="history-card-photo-img" onerror="this.parentElement.style.display='none';">
+                           </div>`
+                        : "";
+                    mobilePhotosHtml = `<div class="history-card-photos-strip">${fCard}${rCard}</div>`;
+                }
+
                 return `
                 <div class="history-card-item" onclick="openHistoryModal('${escapeHtml(String(l.id))}')" role="button" tabindex="0">
                     <div class="history-card-header">
@@ -219,6 +284,7 @@ function renderHistoryData() {
                             <span class="badge ${resClass}" style="font-size:0.7rem; font-weight:800;">${escapeHtml(l.result)}</span>
                         </div>
                     </div>
+                    ${mobilePhotosHtml}
                     <div class="history-card-meta">
                         <div>
                             <span class="badge badge-muted" style="font-size:0.68rem; font-weight:700;">${escapeHtml(l.action)}</span>
@@ -245,7 +311,7 @@ async function fetchHistoryEvents() {
     const tbody = document.getElementById("history-table-tbody");
     const cardsContainer = document.getElementById("history-mobile-cards-list");
     if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:35px; color:var(--ug-text-muted);"><i class="fas fa-spinner fa-spin" style="margin-right:8px;"></i>Loading verification audit events...</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:35px; color:var(--ug-text-muted);"><i class="fas fa-spinner fa-spin" style="margin-right:8px;"></i>Loading verification audit events...</td></tr>`;
     }
     if (cardsContainer) {
         cardsContainer.innerHTML = `<div style="text-align:center; padding:25px; color:var(--ug-text-muted);"><i class="fas fa-spinner fa-spin" style="margin-right:8px;"></i>Loading events...</div>`;
@@ -270,7 +336,7 @@ async function fetchHistoryEvents() {
     } catch (err) {
         console.warn("History fetch error:", err);
         if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:35px; color:#ef4444;"><i class="fas fa-exclamation-triangle" style="margin-right:8px;"></i>Failed to load audit events. Please check connection and click Refresh.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:35px; color:#ef4444;"><i class="fas fa-exclamation-triangle" style="margin-right:8px;"></i>Failed to load audit events. Please check connection and click Refresh.</td></tr>`;
         }
     }
 }
@@ -302,15 +368,36 @@ function openHistoryModal(logId) {
     const photosContainer = document.getElementById("hist-modal-photos-container");
     const imgF = document.getElementById("hist-img-front");
     const imgR = document.getElementById("hist-img-rear");
-    if (photosContainer && (log.front_url || log.rear_url || log.front_thumb_url || log.rear_thumb_url)) {
+    const boxF = document.getElementById("hist-box-front") || (imgF ? imgF.parentElement : null);
+    const boxR = document.getElementById("hist-box-rear") || (imgR ? imgR.parentElement : null);
+
+    const fUrl = log.front_url || "";
+    const fThumb = log.front_thumb_url || fUrl;
+    const rUrl = log.rear_url || "";
+    const rThumb = log.rear_thumb_url || rUrl;
+
+    const hasFront = Boolean(fThumb || fUrl);
+    const hasRear = Boolean(rThumb || rUrl);
+
+    if (photosContainer && (hasFront || hasRear)) {
         photosContainer.style.display = "flex";
-        if (imgF) {
-            imgF.src = log.front_thumb_url || log.front_url || "";
-            imgF.dataset.fullUrl = log.front_url || "";
+        if (imgF && boxF) {
+            if (hasFront) {
+                boxF.style.display = "block";
+                imgF.src = fThumb;
+                imgF.dataset.fullUrl = fUrl || fThumb;
+            } else {
+                boxF.style.display = "none";
+            }
         }
-        if (imgR) {
-            imgR.src = log.rear_thumb_url || log.rear_url || "";
-            imgR.dataset.fullUrl = log.rear_url || "";
+        if (imgR && boxR) {
+            if (hasRear) {
+                boxR.style.display = "block";
+                imgR.src = rThumb;
+                imgR.dataset.fullUrl = rUrl || rThumb;
+            } else {
+                boxR.style.display = "none";
+            }
         }
     } else if (photosContainer) {
         photosContainer.style.display = "none";

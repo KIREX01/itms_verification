@@ -174,6 +174,16 @@ def api_reports_totals(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
+def _clean_media_url(file_path):
+    """Safely normalizes file paths to clean /media/ URLs, preventing duplicate prefixes or backslashes."""
+    if not file_path:
+        return None
+    p = str(file_path).replace("\\", "/").strip().lstrip("/")
+    if p.startswith("media/"):
+        return f"/{p}"
+    return f"/media/{p}"
+
+
 @require_GET
 def api_history_list(request: HttpRequest) -> JsonResponse:
     """Returns historical verification events and audit logs for the History tab with date scoping."""
@@ -195,12 +205,28 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
     if date_scope == "TODAY":
         logs_qs = logs_qs.filter(timestamp__date=today)
 
-    if flt == "SUBMITTED":
+    if flt in ("SUBMITTED", "SUBMISSIONS"):
         logs_qs = logs_qs.filter(action=SubmissionAuditLog.Action.SUBMIT)
+    elif flt in ("APPROVALS", "APPROVED"):
+        logs_qs = logs_qs.filter(action__in=[
+            SubmissionAuditLog.Action.OPERATOR_APPROVE,
+            SubmissionAuditLog.Action.ARCHIVE_VERIFY,
+        ])
+    elif flt in ("OVERRIDES", "OVERRIDE"):
+        logs_qs = logs_qs.filter(action__in=[
+            SubmissionAuditLog.Action.OPERATOR_OVERRIDE,
+            SubmissionAuditLog.Action.MANUAL_PLATE_ASSIGN,
+            SubmissionAuditLog.Action.OPERATOR_SWAP,
+            SubmissionAuditLog.Action.ORDER_PRIOR_CORRECT,
+            SubmissionAuditLog.Action.IMAGE_REPLACED,
+        ])
     elif flt in ("FAILED", "ISSUES"):
         logs_qs = logs_qs.filter(Q(result=SubmissionAuditLog.ResultStatus.FAILURE) | Q(result="FAILED"))
-    elif flt in ("EMAIL", "EMAILS"):
-        logs_qs = logs_qs.filter(action=SubmissionAuditLog.Action.STOCK_REPORT_EMAILED)
+    elif flt in ("STOCK", "EMAIL", "EMAILS"):
+        logs_qs = logs_qs.filter(action__in=[
+            SubmissionAuditLog.Action.STOCK_LEDGER_UPDATED,
+            SubmissionAuditLog.Action.STOCK_REPORT_EMAILED,
+        ])
 
     for l in logs_qs[:150]:
         pair = l.pair
@@ -217,14 +243,13 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
             order_no = pair.order.order_number if (pair and pair.order) else "N/A"
             order_plate = pair.order.registration_number if (pair and pair.order) else ""
 
-        front_file = str(pair.front_image.vault_file).replace("\\", "/") if (pair and pair.front_image) else None
-        front_url = (f"/{front_file}" if front_file.startswith("media/") else f"/media/{front_file}") if front_file else None
-        front_thumb = str(pair.front_image.thumbnail_file or pair.front_image.preview_file or pair.front_image.vault_file).replace("\\", "/") if (pair and pair.front_image) else None
-        front_thumb_url = (f"/{front_thumb}" if front_thumb.startswith("media/") else f"/media/{front_thumb}") if front_thumb else None
-        rear_file = str(pair.rear_image.vault_file).replace("\\", "/") if (pair and pair.rear_image) else None
-        rear_url = (f"/{rear_file}" if rear_file.startswith("media/") else f"/media/{rear_file}") if rear_file else None
-        rear_thumb = str(pair.rear_image.thumbnail_file or pair.rear_image.preview_file or pair.rear_image.vault_file).replace("\\", "/") if (pair and pair.rear_image) else None
-        rear_thumb_url = (f"/{rear_thumb}" if rear_thumb.startswith("media/") else f"/media/{rear_thumb}") if rear_thumb else None
+        f_img = pair.front_image if pair else None
+        r_img = pair.rear_image if pair else None
+
+        front_url = _clean_media_url(f_img.vault_file) if (f_img and f_img.vault_file) else None
+        front_thumb_url = _clean_media_url(f_img.thumbnail_file or f_img.preview_file or f_img.vault_file) if (f_img and f_img.vault_file) else None
+        rear_url = _clean_media_url(r_img.vault_file) if (r_img and r_img.vault_file) else None
+        rear_thumb_url = _clean_media_url(r_img.thumbnail_file or r_img.preview_file or r_img.vault_file) if (r_img and r_img.vault_file) else None
 
         is_item_today = bool(l.timestamp and l.timestamp.date() == today)
 
@@ -267,34 +292,41 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
             (Q(submitted_at__isnull=True) & Q(updated_at__date=today))
         )
 
-    if flt == "SUBMITTED":
+    if flt in ("SUBMITTED", "SUBMISSIONS"):
         pairs_qs = pairs_qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED)
-    elif flt == "FAILED":
-        pairs_qs = pairs_qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.FAILED)
-    elif flt == "ISSUES":
+    elif flt in ("APPROVALS", "APPROVED"):
+        pairs_qs = pairs_qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.APPROVED)
+    elif flt in ("OVERRIDES", "OVERRIDE"):
+        pairs_qs = pairs_qs.filter(
+            Q(is_manual_override=True) |
+            Q(matched_via__in=[VehicleInstallationPair.MatchedVia.MANUAL, VehicleInstallationPair.MatchedVia.REPAIR])
+        )
+    elif flt in ("FAILED", "ISSUES"):
         pairs_qs = pairs_qs.filter(verification_status__in=[
             VehicleInstallationPair.VerificationStatus.INCOMPLETE,
             VehicleInstallationPair.VerificationStatus.CONFLICT,
             VehicleInstallationPair.VerificationStatus.UNREGISTERED,
             VehicleInstallationPair.VerificationStatus.FAILED,
         ])
+    elif flt in ("STOCK", "EMAIL", "EMAILS"):
+        pairs_qs = pairs_qs.none()
 
     for p in pairs_qs[:150]:
         sub_time = p.submitted_at or p.updated_at
         is_item_today = bool(sub_time and sub_time.date() == today)
-        front_file = str(p.front_image.vault_file).replace("\\", "/") if (p.front_image and p.front_image.vault_file) else None
-        front_url = (f"/{front_file}" if front_file.startswith("media/") else f"/media/{front_file}") if front_file else None
-        front_thumb = str(p.front_image.thumbnail_file or p.front_image.preview_file or p.front_image.vault_file).replace("\\", "/") if (p.front_image and p.front_image.vault_file) else None
-        front_thumb_url = (f"/{front_thumb}" if front_thumb.startswith("media/") else f"/media/{front_thumb}") if front_thumb else None
-        rear_file = str(p.rear_image.vault_file).replace("\\", "/") if (p.rear_image and p.rear_image.vault_file) else None
-        rear_url = (f"/{rear_file}" if rear_file.startswith("media/") else f"/media/{rear_file}") if rear_file else None
-        rear_thumb = str(p.rear_image.thumbnail_file or p.rear_image.preview_file or p.rear_image.vault_file).replace("\\", "/") if (p.rear_image and p.rear_image.vault_file) else None
-        rear_thumb_url = (f"/{rear_thumb}" if rear_thumb.startswith("media/") else f"/media/{rear_thumb}") if rear_thumb else None
+
+        f_img = p.front_image
+        r_img = p.rear_image
+
+        front_url = _clean_media_url(f_img.vault_file) if (f_img and f_img.vault_file) else None
+        front_thumb_url = _clean_media_url(f_img.thumbnail_file or f_img.preview_file or f_img.vault_file) if (f_img and f_img.vault_file) else None
+        rear_url = _clean_media_url(r_img.vault_file) if (r_img and r_img.vault_file) else None
+        rear_thumb_url = _clean_media_url(r_img.thumbnail_file or r_img.preview_file or r_img.vault_file) if (r_img and r_img.vault_file) else None
 
         action_name = "VERIFY_PAIR"
         if p.verification_status == VehicleInstallationPair.VerificationStatus.SUBMITTED:
             action_name = "ITMS_SUBMISSION"
-        elif p.is_manual_override:
+        elif p.is_manual_override or p.matched_via in (VehicleInstallationPair.MatchedVia.MANUAL, VehicleInstallationPair.MatchedVia.REPAIR):
             action_name = "MANUAL_OVERRIDE"
         elif p.verification_status == VehicleInstallationPair.VerificationStatus.APPROVED:
             action_name = "PAIR_APPROVAL"
@@ -342,7 +374,7 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
         "filter": flt,
         "date_scope": date_scope,
         "total": len(history_items),
-        "items": history_items[:150],
+        "items": history_items[:300],
     })
 
 

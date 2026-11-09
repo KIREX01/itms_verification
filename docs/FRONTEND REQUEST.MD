@@ -1554,3 +1554,26 @@ if (hwCard) {
   - Safe Room Unregistered Plates CSV
   - Blocked / Not On Stock CSV
 - Eliminated cross-cutting order and verification exports from the Stock Tab.
+
+
+### Frontend & UI/UX Update: History Tab Distinct Filter Chips, Dual Photo Thumbnails & Lightbox View (09 November 2026)
+- **Status:** COMPLETED & TESTED
+- **Key Enhancements Implemented:**
+  1. **6 Distinct Subnavigation Filter Chips in `#pane-history`:**
+     - `All Events` (`data-hfilter="ALL"`)
+     - `Submissions` (`data-hfilter="SUBMISSIONS"`)
+     - `Approvals` (`data-hfilter="APPROVALS"`)
+     - `Overrides` (`data-hfilter="OVERRIDES"`)
+     - `Issues & Fails` (`data-hfilter="ISSUES"`)
+     - `Stock & Audits` (`data-hfilter="STOCK"`)
+     - Full tooltips, active amber accent styling (`#f59e0b`), backward compatibility with legacy filter strings (`SUBMITTED`, `FAILED`).
+  2. **Dedicated Evidence Photos Column in Desktop Grid Table (`.itms-grid-table`):**
+     - Dual thumbnail previews (Front and Rear, 44x32px) positioned between Plate and Matched Order #.
+     - Single-tap/click triggers full-resolution image zoom in modal lightbox (`openLightbox`).
+     - Error fallback gracefully hides failed thumbnails without broken image boxes.
+  3. **Touch-Optimized Photo Strips on Mobile Touch Cards (`.history-card-item`):**
+     - Side-by-side front and rear cards (height: 74px) with high-contrast `FRONT` and `REAR` tags.
+     - Tapping a photo opens full image in lightbox with `event.stopPropagation()`, preserving tap-to-inspect detail on the rest of the card.
+  4. **Multi-Angle Audit Detail Modal Enhancements (`#modal-history-detail`):**
+     - Front and rear photo preview boxes dynamically show or hide based on available angles.
+     - Click handler loads full uncompressed vault photo into lightbox.

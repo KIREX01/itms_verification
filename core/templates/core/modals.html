@@ -276,13 +276,13 @@
             <div id="hist-modal-photos-container" style="display:none; flex-direction:column; gap:6px;">
                 <label style="font-size:0.75rem; font-weight:700; color:var(--ug-text-muted);">ASSOCIATED EVIDENCE PHOTOS</label>
                 <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px;">
-                    <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:8px; text-align:center;">
+                    <div id="hist-box-front" style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:8px; text-align:center;">
                         <span style="font-size:0.72rem; color:var(--ug-text-dim); font-weight:700;">FRONT ANGLE</span>
-                        <img id="hist-img-front" src="" alt="Front" style="width:100%; height:130px; object-fit:cover; border-radius:4px; margin-top:6px; cursor:pointer;" onclick="openLightbox(this.src)" title="Click to view full image in Lightbox">
+                        <img id="hist-img-front" src="" alt="Front" style="width:100%; height:130px; object-fit:cover; border-radius:4px; margin-top:6px; cursor:pointer;" onclick="if(typeof openLightbox==='function'){openLightbox(this.dataset.fullUrl || this.src);}else{window.open(this.dataset.fullUrl || this.src,'_blank');}" title="Click to view full image in Lightbox">
                     </div>
-                    <div style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:8px; text-align:center;">
+                    <div id="hist-box-rear" style="background:var(--ug-black-surface); border:1px solid var(--ug-border); border-radius:var(--radius-md); padding:8px; text-align:center;">
                         <span style="font-size:0.72rem; color:var(--ug-text-dim); font-weight:700;">REAR ANGLE</span>
-                        <img id="hist-img-rear" src="" alt="Rear" style="width:100%; height:130px; object-fit:cover; border-radius:4px; margin-top:6px; cursor:pointer;" onclick="openLightbox(this.src)" title="Click to view full image in Lightbox">
+                        <img id="hist-img-rear" src="" alt="Rear" style="width:100%; height:130px; object-fit:cover; border-radius:4px; margin-top:6px; cursor:pointer;" onclick="if(typeof openLightbox==='function'){openLightbox(this.dataset.fullUrl || this.src);}else{window.open(this.dataset.fullUrl || this.src,'_blank');}" title="Click to view full image in Lightbox">
                     </div>
                 </div>
             </div>

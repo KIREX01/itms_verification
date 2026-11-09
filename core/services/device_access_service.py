@@ -845,6 +845,119 @@ def evaluate_request_access(request: HttpRequest) -> Dict[str, Any]:
     }
 
 
+def check_operator_session_access(
+    user: Optional[User],
+    device_id: Optional[str] = None,
+    client_ip: Optional[str] = None,
+    mac_address: Optional[str] = None,
+) -> Tuple[bool, str, Optional[Any]]:
+    """
+    Verifies that the current operator session and/or running device has not expired,
+    been blocked, or had access revoked.
+    Used for active TUI and API session heartbeats to lock unauthorized terminals immediately.
+    Returns: (is_valid: bool, rejection_reason: str, expires_at: Optional[datetime])
+    """
+    if not user:
+        return False, "No active operator session found.", None
+
+    if not getattr(user, "is_active", True):
+        return False, f"Operator account '{user.username}' is deactivated.", None
+
+    # Superusers are exempt from time-based session expiration, but remain subject to IP/MAC firewall
+    is_super = getattr(user, "is_superuser", False)
+
+    eff_ip = client_ip or resolve_local_host_ip()
+    eff_mac = mac_address or resolve_local_host_mac_address()
+    is_blocked, blocked_dev, block_reason = is_ip_or_mac_blocked(eff_ip, eff_mac, device_id)
+    if is_blocked:
+        return False, f"Access blocked by network firewall: {block_reason}", None
+
+    if is_super:
+        return True, "", None
+
+    now = timezone.now()
+    email = (getattr(user, "email", "") or "").strip().lower()
+    if not email:
+        try:
+            sess = OperatorITMSSession.objects.filter(user=user).first()
+            if sess and sess.itms_email:
+                email = sess.itms_email.strip().lower()
+        except Exception:
+            pass
+
+    # 1. Check matching EmailAccessRequest records for expiry or explicit blocks
+    if email:
+        req = EmailAccessRequest.objects.filter(email__iexact=email).order_by("-updated_at").first()
+        if req:
+            if req.status in (EmailAccessRequest.Status.BLOCKED, EmailAccessRequest.Status.REJECTED):
+                return False, f"Access authorization for {email} was rejected or blocked.", None
+            if req.status == EmailAccessRequest.Status.EXPIRED:
+                return False, f"Time-bound authorization for {email} has expired. Access renewal required.", req.expires_at
+            if req.expires_at and now >= req.expires_at:
+                req.status = EmailAccessRequest.Status.EXPIRED
+                req.save(update_fields=["status", "updated_at"])
+                AuthorizedDevice.objects.filter(authorized_email__iexact=email).exclude(
+                    status__in=[AuthorizedDevice.Status.BLOCKED, AuthorizedDevice.Status.REVOKED]
+                ).update(status=AuthorizedDevice.Status.EXPIRED)
+                return False, f"Time-bound authorization for {email} has expired. Access renewal required.", req.expires_at
+
+    # 2. Check matching AuthorizedDevice records for expiry or explicit blocks
+    dev_filter = Q(user=user)
+    if device_id:
+        dev_filter |= Q(device_id=device_id)
+    if email:
+        dev_filter |= Q(authorized_email__iexact=email)
+
+    matching_devs = list(AuthorizedDevice.objects.filter(dev_filter))
+    for d in matching_devs:
+        if d.status in (AuthorizedDevice.Status.BLOCKED, AuthorizedDevice.Status.REVOKED):
+            return False, f"Terminal device '{d.device_name or d.device_id}' is blocked or revoked.", None
+        if d.status == AuthorizedDevice.Status.EXPIRED:
+            return False, f"Time-bound window for device '{d.device_name or d.device_id}' has expired.", d.expires_at
+        if d.expires_at and now >= d.expires_at:
+            d.status = AuthorizedDevice.Status.EXPIRED
+            d.save(update_fields=["status"])
+            target_e = (d.authorized_email or email or "").strip()
+            if target_e:
+                EmailAccessRequest.objects.filter(
+                    email__iexact=target_e,
+                    expires_at__isnull=False,
+                    expires_at__lte=now,
+                ).update(status=EmailAccessRequest.Status.EXPIRED)
+            exp_str = timezone.localtime(d.expires_at).strftime("%H:%M:%S")
+            return False, f"Time-bound access window expired at {exp_str}. Terminal locked.", d.expires_at
+
+    # 3. Check Strict Email Pre-Approval mode
+    sec_cfg = get_security_access_config()
+    if sec_cfg.get("require_email_approval", False):
+        has_approved_grant = (
+            (email and EmailAccessRequest.objects.filter(
+                email__iexact=email,
+                status__in=[EmailAccessRequest.Status.APPROVED, EmailAccessRequest.Status.PRE_APPROVED],
+            ).exists())
+            or AuthorizedDevice.objects.filter(
+                dev_filter,
+                status=AuthorizedDevice.Status.APPROVED,
+            ).exists()
+        )
+        if not has_approved_grant:
+            return False, f"Strict access policy active: {email or user.username} requires administrator pre-approval.", None
+
+    # Resolve earliest active expiry if present
+    active_expiries = [d.expires_at for d in matching_devs if d.expires_at and d.expires_at > now]
+    if email:
+        req_active = EmailAccessRequest.objects.filter(
+            email__iexact=email,
+            status__in=[EmailAccessRequest.Status.APPROVED, EmailAccessRequest.Status.PRE_APPROVED],
+            expires_at__gt=now,
+        ).first()
+        if req_active and req_active.expires_at:
+            active_expiries.append(req_active.expires_at)
+
+    earliest_exp = min(active_expiries) if active_expiries else None
+    return True, "", earliest_exp
+
+
 def attach_device_trust_cookie(response: HttpResponse, device_id: str, identity: str = "") -> HttpResponse:
     """Attaches the signed HTTP-only `itms_device_trust` cookie to the outgoing response."""
     token = sign_device_trust_token(device_id, identity)

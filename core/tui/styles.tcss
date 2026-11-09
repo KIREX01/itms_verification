@@ -270,6 +270,27 @@ LandingAuthScreen {
     margin-top: 1;
 }
 
+#reg-itms-title {
+    margin-top: 1;
+    text-style: bold;
+}
+
+#reg-itms-btn-row {
+    height: auto;
+    margin-top: 1;
+    margin-bottom: 1;
+}
+
+#reg-itms-btn-row Button {
+    width: 100%;
+}
+
+#sel-reg-warehouse {
+    width: 100%;
+    margin-top: 0;
+    margin-bottom: 1;
+}
+
 #auth-hero-db {
     text-align: center;
     margin-top: 1;

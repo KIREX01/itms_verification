@@ -772,6 +772,20 @@ class ITMSConnectionPane(Vertical):
             self.client = client
             user_uuid = session_data.get("user_uuid") or client.session_store.session.user_uuid or "Active"
 
+            # Auto-discover which warehouse facility this ITMS account is linked to
+            discovery = client.discover_user_assigned_warehouse()
+            disc_code = discovery.get("code")
+            disc_name = discovery.get("name") or disc_code
+            if disc_code:
+                bond_service.set_active_bond(disc_code, disc_name)
+                if user and getattr(user, "is_authenticated", False):
+                    from core.models import OperatorProfile, OperatorITMSSession
+                    OperatorProfile.objects.filter(user=user).update(active_facility=disc_code)
+                    OperatorITMSSession.objects.filter(user=user).update(
+                        active_bond_code=disc_code,
+                        active_bond_name=disc_name,
+                    )
+
             # Clear any leftover cached orders from the previous account before loading new account data
             self._last_fetched_orders = []
             self._last_active_orders = []
@@ -781,10 +795,21 @@ class ITMSConnectionPane(Vertical):
             self._highlighted_order = None
 
             def on_login_success():
-                self._set_feedback(f"✓ Authenticated as {email}", "bold green")
+                status_txt = f"✓ Authenticated as {email}"
+                if disc_code:
+                    status_txt += f" │ Warehouse: {disc_name} ({disc_code})"
+                self._set_feedback(status_txt, "bold green")
                 try:
                     pw_input = self.query_one("#input-itms-password", Input)
                     pw_input.value = ""
+                except Exception:
+                    pass
+                try:
+                    if disc_code:
+                        sel_b = self.query_one("#sel-itms-bond", Select)
+                        warehouses = bond_service.get_all_discovered_warehouses()
+                        sel_b.set_options([(f"{w['name']} ({w['code']})", w["code"]) for w in warehouses])
+                        sel_b.value = disc_code
                 except Exception:
                     pass
                 try:
@@ -796,11 +821,13 @@ class ITMSConnectionPane(Vertical):
                     pass
 
             self.app.call_from_thread(on_login_success)
-            self.app.call_from_thread(
-                self._log_preview,
+            preview_msg = (
                 f"[bold green]✓ Login Successful:[/bold green] Authenticated as [white]{email}[/white] (UUID: {user_uuid})\n"
-                f"Session cookies saved to media/vault/.itms_web_session.json (Expires in ~30 days).",
             )
+            if disc_code:
+                preview_msg += f"[bold cyan]🏢 Operating Facility Linked:[/bold cyan] {disc_name} ({disc_code})\n"
+            preview_msg += "Session cookies saved to media/vault/.itms_web_session.json (Expires in ~30 days)."
+            self.app.call_from_thread(self._log_preview, preview_msg)
             self.app.call_from_thread(self._refresh_status_card)
             self.app.call_from_thread(self.app.reload_data)
             self.app.call_from_thread(

@@ -199,3 +199,197 @@ class TUIMasterLockScreen(ModalScreen[bool]):
                 err_label.update(
                     f"[bold red]❌ Invalid Master PIN.[/bold red] [yellow]({remaining_tries} attempt{'s' if remaining_tries > 1 else ''} left)[/yellow]"
                 )
+
+
+class TUIExpiredLockScreen(ModalScreen[bool]):
+    """
+    Dedicated Security Lock Screen presented when an operator's time-bound grant
+    or authorized device access window expires.
+    Completely locks console interaction until access is renewed, supervisor unlocks
+    with Master PIN, or operator signs out.
+    """
+
+    BINDINGS = [
+        Binding("escape", "quit_app", "Quit Copilot", show=True),
+    ]
+
+    CSS = """
+    TUIExpiredLockScreen {
+        align: center middle;
+        background: rgba(18, 10, 10, 0.96);
+    }
+
+    #expired-modal-container {
+        width: 78;
+        height: auto;
+        border: heavy $error;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #expired-banner {
+        text-align: center;
+        margin-bottom: 1;
+    }
+
+    #expired-subtitle {
+        text-align: center;
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+
+    #expired-reason-box {
+        background: #201010;
+        border: solid #ef4444;
+        color: #fca5a5;
+        padding: 1 2;
+        text-align: center;
+        margin-bottom: 1;
+    }
+
+    #expired-code-row {
+        align: center middle;
+        height: 3;
+        margin-top: 1;
+        margin-bottom: 1;
+    }
+
+    #inp-expired-code {
+        width: 30;
+        text-align: center;
+        margin-right: 1;
+        border: tall $success;
+    }
+
+    #expired-actions-row {
+        align: center middle;
+        margin-top: 1;
+        height: auto;
+    }
+
+    #expired-actions-row Button {
+        margin: 0 1;
+    }
+
+    #expired-error-label {
+        text-align: center;
+        min-height: 1;
+        margin-top: 0;
+        margin-bottom: 1;
+    }
+
+    #expired-footer-info {
+        text-align: center;
+        color: $text-disabled;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(self, reason: str = "", expires_at=None, **kwargs):
+        super().__init__(**kwargs)
+        self.reason = reason or "Your authorized time-bound window has elapsed."
+        self.expires_at = expires_at
+
+    def compose(self) -> ComposeResult:
+        with Center(), Vertical(id="expired-modal-container"):
+            yield Static(
+                "[bold red]⛔ TIME-BOUND ACCESS EXPIRED[/bold red]\n"
+                "[bold white]ITMS VERIFICATION COPILOT CONSOLE LOCKED[/bold white]",
+                id="expired-banner",
+            )
+            yield Static(
+                "Terminal operations are locked because your authorized session has expired.\n"
+                "Enter a 6-digit renewal code, request supervisor Master PIN unlock, or sign out.",
+                id="expired-subtitle",
+            )
+            yield Static(f"[bold yellow]Reason:[/bold yellow] {self.reason}", id="expired-reason-box")
+            yield Static("", id="expired-error-label")
+
+            with Horizontal(id="expired-code-row"):
+                yield Input(
+                    placeholder="Enter 6-Digit Renewal Code",
+                    id="inp-expired-code",
+                    max_length=12,
+                )
+                yield Button("Renew Access [Enter]", variant="success", id="btn-expired-renew")
+
+            with Horizontal(id="expired-actions-row"):
+                yield Button("🔑 Master PIN Unlock", variant="primary", id="btn-expired-master-pin")
+                yield Button("👤 Sign Out / Switch", variant="warning", id="btn-expired-logout")
+                yield Button("✕ Exit Copilot [Esc]", variant="error", id="btn-expired-quit")
+
+            yield Static(
+                "[dim]Time-bound grants ensure strict zero-trust operational safety across bonded facilities.[/dim]",
+                id="expired-footer-info",
+            )
+
+    def on_mount(self) -> None:
+        self.query_one("#inp-expired-code", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "inp-expired-code":
+            self._attempt_renew_code()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        bid = event.button.id
+        if bid == "btn-expired-renew":
+            self._attempt_renew_code()
+        elif bid == "btn-expired-master-pin":
+            self._prompt_master_pin()
+        elif bid == "btn-expired-logout":
+            self._handle_logout()
+        elif bid == "btn-expired-quit":
+            self.action_quit_app()
+
+    def action_quit_app(self) -> None:
+        """Terminates terminal cleanly when operator chooses to quit."""
+        self.app.exit()
+
+    def _attempt_renew_code(self) -> None:
+        code_input = self.query_one("#inp-expired-code", Input)
+        code = code_input.value.strip()
+        err_label = self.query_one("#expired-error-label", Static)
+
+        if not code:
+            err_label.update("[bold red]Please enter your 6-digit activation / renewal code.[/bold red]")
+            return
+
+        from core.services import device_access_service
+        user = getattr(self.app, "current_user", None)
+        email = (user.email if user else "") or (user.username if user else "")
+
+        ok, msg, dev = device_access_service.activate_with_code(
+            request=None,
+            email=email,
+            activation_code=code,
+        )
+
+        if ok and dev:
+            err_label.update(f"[bold green]✓ {msg} Access restored![/bold green]")
+            self.app.notify(f"Access renewed: {msg}", severity="information")
+            self.dismiss(True)
+        else:
+            err_label.update(f"[bold red]❌ {msg or 'Invalid or expired renewal code.'}[/bold red]")
+            code_input.value = ""
+            code_input.focus()
+
+    def _prompt_master_pin(self) -> None:
+        """Pushes TUIMasterLockScreen to allow supervisor override with Master PIN."""
+        self.app.push_screen(TUIMasterLockScreen(), self._on_master_pin_override)
+
+    def _on_master_pin_override(self, unlocked: bool) -> None:
+        if unlocked:
+            from core.services import device_access_service
+            user = getattr(self.app, "current_user", None)
+            target = user.email or user.username if user else ""
+            if target:
+                device_access_service.extend_or_set_expiry(target, duration_hours=4, admin_user=user)
+            self.app.notify("Console unlocked with Master PIN (+4h temporary window granted).", severity="success")
+            self.dismiss(True)
+
+    def _handle_logout(self) -> None:
+        from core.services import auth_service
+        auth_service.clear_remembered_session()
+        self.app.current_user = None
+        self.dismiss(False)
+

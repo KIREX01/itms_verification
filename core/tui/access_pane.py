@@ -39,6 +39,15 @@ class AccessControlPane(Vertical):
         padding: 0 1;
         margin-bottom: 0;
     }
+    #access-session-status-strip {
+        height: auto;
+        min-height: 1;
+        background: #1e1e38;
+        border-bottom: solid #334155;
+        color: #f1f5f9;
+        padding: 0 1;
+        margin-bottom: 0;
+    }
     #access-feedback-bar {
         height: auto;
         min-height: 1;
@@ -117,6 +126,10 @@ class AccessControlPane(Vertical):
             id="access-top-strip",
         )
         yield Static(
+            "[dim]Loading terminal session security status...[/dim]",
+            id="access-session-status-strip",
+        )
+        yield Static(
             "[dim]Active accounts & MAC addresses are auto-synced. Press [Esc] to exit inputs, [R] to refresh.[/dim]",
             id="access-feedback-bar",
         )
@@ -181,6 +194,51 @@ class AccessControlPane(Vertical):
         dev_tbl.add_columns("Status", "Account / Email", "Device", "IP Address", "MAC Address", "Linked Via", "Time Left", "Device ID")
 
         self.refresh_access_data()
+        self.set_interval(5.0, self._auto_tick_access_countdown)
+
+    def _auto_tick_access_countdown(self) -> None:
+        """Periodic heartbeat for active session countdown and immediate lockout on expiration."""
+        user = self._get_admin_user()
+        host_ip = device_access_service.resolve_local_host_ip()
+        host_mac = device_access_service.resolve_local_host_mac_address() or "Auto"
+
+        if user:
+            is_valid, reason, exp_dt = device_access_service.check_operator_session_access(user)
+            if not is_valid:
+                try:
+                    self.query_one("#access-session-status-strip", Static).update(
+                        f"[bold red]⛔ ACCESS EXPIRED[/bold red] │ Operator: [bold cyan]{user.username}[/bold cyan] │ "
+                        f"[red]{reason}[/red] │ Terminal: [dim]{host_ip}[/dim]"
+                    )
+                except Exception:
+                    pass
+                if hasattr(self.app, "action_enforce_session_expiry"):
+                    self.app.action_enforce_session_expiry(reason=reason)
+                return
+
+            cd_str = device_access_service.format_expiry_countdown(exp_dt) if exp_dt else "Unlimited / Permanent"
+            badge = "[bold green]● ACTIVE[/bold green]"
+            cd_disp = f"[bold yellow]{cd_str}[/bold yellow]"
+            if cd_str == "EXPIRED":
+                badge = "[bold red]⛔ EXPIRED[/bold red]"
+                cd_disp = "[bold red]EXPIRED[/bold red]"
+            elif "m" in cd_str and "d" not in cd_str and "h" not in cd_str:
+                badge = "[bold yellow]⏳ EXPIRING SOON[/bold yellow]"
+
+            try:
+                self.query_one("#access-session-status-strip", Static).update(
+                    f"{badge} │ Operator: [bold cyan]{user.get_full_name() or user.username}[/bold cyan] │ "
+                    f"Remaining Window: {cd_disp} │ Terminal IP: [cyan]{host_ip}[/cyan] │ MAC: [yellow]{host_mac}[/yellow]"
+                )
+            except Exception:
+                pass
+        else:
+            try:
+                self.query_one("#access-session-status-strip", Static).update(
+                    f"[dim]No active operator session. Host IP: {host_ip} ({host_mac})[/dim]"
+                )
+            except Exception:
+                pass
 
     def on_key(self, event: events.Key) -> None:
         if event.key == "escape" and isinstance(self.app.focused, Input):
@@ -392,6 +450,8 @@ class AccessControlPane(Vertical):
             self._set_feedback(f"[{'green' if ok else 'red'}]{msg}[/{'green' if ok else 'red'}]")
             self.app.notify(msg, severity="information" if ok else "error")
             self.refresh_access_data()
+            self._auto_tick_access_countdown()
+            self._auto_tick_access_countdown()
             return
 
         if bid == "btn-access-unblock-target":
@@ -403,6 +463,8 @@ class AccessControlPane(Vertical):
             self._set_feedback(f"[{'green' if ok else 'red'}]{msg}[/{'green' if ok else 'red'}]")
             self.app.notify(msg, severity="information" if ok else "error")
             self.refresh_access_data()
+            self._auto_tick_access_countdown()
+            self._auto_tick_access_countdown()
             return
 
         # Request Table Actions
@@ -432,6 +494,8 @@ class AccessControlPane(Vertical):
             self._set_feedback(f"[{'green' if ok else 'red'}]{msg}[/{'green' if ok else 'red'}]")
             self.app.notify(msg, severity="information" if ok else "error")
             self.refresh_access_data()
+            self._auto_tick_access_countdown()
+            self._auto_tick_access_countdown()
             return
 
         # Device Table Actions
@@ -472,3 +536,4 @@ class AccessControlPane(Vertical):
             self._set_feedback(f"[{'green' if ok else 'red'}]{msg}[/{'green' if ok else 'red'}]")
             self.app.notify(msg, severity="information" if ok else "error")
             self.refresh_access_data()
+            self._auto_tick_access_countdown()

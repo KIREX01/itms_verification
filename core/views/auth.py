@@ -231,6 +231,14 @@ def signup_view(request: HttpRequest) -> HttpResponse:
         )
         auth_login(request, user)
         auth_service.save_remembered_session(user, remember=True)
+
+        facility = (pending.get("facility_code") or req_approved.facility_code or "").strip().upper()
+        if facility:
+            from core.models import OperatorProfile
+            OperatorProfile.objects.update_or_create(
+                user=user,
+                defaults={"active_facility": facility, "allowed_facilities": [facility]},
+            )
         resp = _redirect_after_auth(request)
         device_access_service.attach_device_trust_cookie(resp, dev.device_id, email or user.username)
         return resp
@@ -394,6 +402,14 @@ def signup_verify_view(request: HttpRequest) -> HttpResponse:
         )
         auth_login(request, user)
         auth_service.save_remembered_session(user, remember=True)
+
+        facility = (pending.get("facility_code") or req_approved.facility_code or "").strip().upper()
+        if facility:
+            from core.models import OperatorProfile
+            OperatorProfile.objects.update_or_create(
+                user=user,
+                defaults={"active_facility": facility, "allowed_facilities": [facility]},
+            )
 
         messages.success(request, "Email verified successfully! Welcome to ITMS Verification Copilot.")
         resp = _redirect_after_auth(request)

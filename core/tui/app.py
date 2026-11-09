@@ -63,7 +63,7 @@ from core.tui.tables import TableLoaderMixin, HISTORY_FILTERS
 from core.tui.handlers import NavigationHandlersMixin
 from core.tui.actions import OperatorActionsMixin
 from core.tui.auth_screens import LandingAuthScreen
-from core.tui.lock_screen import TUIMasterLockScreen
+from core.tui.lock_screen import TUIMasterLockScreen, TUIExpiredLockScreen
 from core.tui.commands import ITMSCommandProvider, ITMSCommandPalette
 from core.services import auth_service
 
@@ -134,6 +134,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.current_user = None
+        self._session_expired = False
         self._last_user_activity = time.time()
         self.history_filter_index = 0
         self.current_history_filter = HISTORY_FILTERS[0]
@@ -289,6 +290,8 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
 
         # Periodically refresh dashboard and outbox monitor every 15s
         self.set_interval(15.0, self._auto_refresh_dashboard_and_outbox)
+        # Active session expiry and firewall heartbeat every 5s
+        self.set_interval(5.0, self._check_session_security_and_expiry)
 
     def _on_master_unlocked_startup(self, unlocked: bool) -> None:
         if unlocked:
@@ -300,17 +303,78 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
     def _proceed_after_master_unlock(self) -> None:
         saved_user = auth_service.get_remembered_session()
         if saved_user:
+            from core.services import device_access_service
+            is_valid, reason, _ = device_access_service.check_operator_session_access(saved_user)
+            if not is_valid:
+                self.action_enforce_session_expiry(reason=reason)
+                return
+
             self.current_user = saved_user
+            self._session_expired = False
             self.log_message(
                 f"[bold green]ITMS Closing System initialized.[/bold green] Operator: [bold cyan]{saved_user.get_full_name() or saved_user.username}[/bold cyan] (Session Restored)",
                 level="SUCCESS",
             )
+
+            # Check if this operator has an active ITMS session and verified warehouse
+            from core.models import OperatorITMSSession, OperatorProfile
+            itms_sess = OperatorITMSSession.objects.filter(user=saved_user).first()
+            profile = OperatorProfile.objects.filter(user=saved_user).first()
+            if not itms_sess or not itms_sess.is_authenticated:
+                self.log_message(
+                    "[bold yellow]⚠️ Notice:[/bold yellow] No active ITMS session linked to this account. Visit [2] ITMS tab to verify your operating warehouse.",
+                    level="WARNING",
+                )
+            elif profile and profile.active_facility:
+                from core.services import bond_service
+                bond_service.set_active_bond(profile.active_facility, itms_sess.active_bond_name)
+
             try:
                 self.query_one("#dashboard-pane", DashboardPane).refresh_dashboard()
             except Exception:
                 pass
             self._check_vault_startup()
         else:
+            self.push_screen(LandingAuthScreen(), self._on_auth_completed)
+
+    def _check_session_security_and_expiry(self) -> None:
+        """Periodic heartbeat daemon: checks if active operator session or device window has expired."""
+        if not self.current_user:
+            return
+
+        from core.services import device_access_service
+        is_valid, reason, _ = device_access_service.check_operator_session_access(self.current_user)
+        if not is_valid:
+            self.action_enforce_session_expiry(reason=reason)
+
+    def action_enforce_session_expiry(self, reason: str = "") -> None:
+        """Immediately locks the TUI console due to expired access grant or revoked device."""
+        if isinstance(self.screen, (TUIMasterLockScreen, TUIExpiredLockScreen, LandingAuthScreen)):
+            return
+
+        self._session_expired = True
+        self.log_message(
+            f"[bold red]⛔ ACCESS EXPIRED:[/bold red] {reason or 'Your time-bound session has ended.'}",
+            level="ERROR",
+        )
+        self.notify(
+            reason or "Your time-bound access grant has expired.",
+            title="Session Expired",
+            severity="error",
+        )
+        self.push_screen(TUIExpiredLockScreen(reason=reason), self._on_expired_lock_result)
+
+    def _on_expired_lock_result(self, unlocked: bool) -> None:
+        if unlocked:
+            self._session_expired = False
+            self.log_message("[bold green]✓ Access renewed and terminal unlocked.[/bold green]", level="SUCCESS")
+            try:
+                self.query_one("#access-pane", AccessControlPane).refresh_access_data()
+            except Exception:
+                pass
+        else:
+            self._session_expired = False
+            self.current_user = None
             self.push_screen(LandingAuthScreen(), self._on_auth_completed)
 
     def action_lock_console(self) -> None:
@@ -393,7 +457,14 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         if not user:
             self.exit()
             return
+        from core.services import device_access_service
+        is_valid, reason, _ = device_access_service.check_operator_session_access(user)
+        if not is_valid:
+            self.action_enforce_session_expiry(reason=reason)
+            return
+
         self.current_user = user
+        self._session_expired = False
         self.log_message(
             f"Welcome, [bold green]{user.get_full_name() or user.username}[/bold green]! Terminal session active.",
             level="SUCCESS",
@@ -429,6 +500,12 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
     def on_key(self, event: events.Key) -> None:
         """Global key event interceptor for hardware barcode scanners and tab shortcuts."""
         self._last_user_activity = time.time()
+        if getattr(self, "_session_expired", False):
+            if not isinstance(self.screen, (TUIMasterLockScreen, TUIExpiredLockScreen, LandingAuthScreen)):
+                self.action_enforce_session_expiry(reason="Your time-bound access grant has expired.")
+            event.prevent_default()
+            event.stop()
+            return
         # Unfocus input on Escape so digits 1-6 navigate tabs immediately without edit mode
         if event.key == "escape" and isinstance(self.focused, Input):
             self.set_focus(None)

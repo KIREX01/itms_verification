@@ -275,3 +275,225 @@ class SettingsConfigurationReviewTests(TestCase):
         # Verify default kit crawl bound is 100
         cfg = config_service.load_config()
         self.assertEqual(cfg.get("crawl", {}).get("max_kit_pages", 100), 100)
+
+
+class SessionExpiryAndLockoutTests(TestCase):
+    """Verifies that expired access grants or blocked devices trigger immediate lockout."""
+
+    def setUp(self):
+        self.operator = User.objects.create_user(
+            username="fitter_mike",
+            email="mike@close.kirex.online",
+            password="Password123!",
+        )
+        self.superuser = User.objects.create_superuser(
+            username="admin_lead",
+            email="lead@close.kirex.online",
+            password="AdminPassword123!",
+        )
+
+    def test_session_access_valid_when_active(self):
+        """Active operator with valid future expiry must be granted access."""
+        from datetime import timedelta
+        from django.utils import timezone
+        from core.models import EmailAccessRequest, AuthorizedDevice
+        from core.services import device_access_service
+
+        future_exp = timezone.now() + timedelta(hours=12)
+        EmailAccessRequest.objects.create(
+            email="mike@close.kirex.online",
+            username="fitter_mike",
+            status=EmailAccessRequest.Status.APPROVED,
+            expires_at=future_exp,
+        )
+        AuthorizedDevice.objects.create(
+            device_id="DEV_MIKE_001",
+            user=self.operator,
+            authorized_email="mike@close.kirex.online",
+            status=AuthorizedDevice.Status.APPROVED,
+            expires_at=future_exp,
+        )
+
+        is_valid, reason, exp_dt = device_access_service.check_operator_session_access(
+            self.operator, device_id="DEV_MIKE_001"
+        )
+        self.assertTrue(is_valid)
+        self.assertEqual(reason, "")
+        self.assertIsNotNone(exp_dt)
+
+    def test_session_access_locked_when_expired(self):
+        """When an access grant's expires_at is in the past, access must be denied and marked EXPIRED."""
+        from datetime import timedelta
+        from django.utils import timezone
+        from core.models import EmailAccessRequest, AuthorizedDevice
+        from core.services import device_access_service
+
+        past_exp = timezone.now() - timedelta(minutes=10)
+        req = EmailAccessRequest.objects.create(
+            email="mike@close.kirex.online",
+            username="fitter_mike",
+            status=EmailAccessRequest.Status.APPROVED,
+            expires_at=past_exp,
+        )
+        dev = AuthorizedDevice.objects.create(
+            device_id="DEV_MIKE_002",
+            user=self.operator,
+            authorized_email="mike@close.kirex.online",
+            status=AuthorizedDevice.Status.APPROVED,
+            expires_at=past_exp,
+        )
+
+        is_valid, reason, exp_dt = device_access_service.check_operator_session_access(
+            self.operator, device_id="DEV_MIKE_002"
+        )
+        self.assertFalse(is_valid)
+        self.assertIn("expired", reason.lower())
+
+        req.refresh_from_db()
+        dev.refresh_from_db()
+        self.assertEqual(req.status, EmailAccessRequest.Status.EXPIRED)
+        self.assertEqual(dev.status, AuthorizedDevice.Status.EXPIRED)
+
+    def test_session_access_blocked_by_firewall(self):
+        """When device or IP is blocked in firewall, access must be immediately rejected."""
+        from core.models import AuthorizedDevice
+        from core.services import device_access_service
+
+        AuthorizedDevice.objects.create(
+            device_id="DEV_BLOCKED_99",
+            user=self.operator,
+            status=AuthorizedDevice.Status.BLOCKED,
+            block_reason="Stolen terminal reported",
+        )
+
+        is_valid, reason, _ = device_access_service.check_operator_session_access(
+            self.operator, device_id="DEV_BLOCKED_99"
+        )
+        self.assertFalse(is_valid)
+        self.assertIn("blocked", reason.lower())
+
+    def test_superuser_exempt_from_time_expiry(self):
+        """Superuser account must not be locked out by time window expiry."""
+        from core.services import device_access_service
+
+        is_valid, reason, _ = device_access_service.check_operator_session_access(self.superuser)
+        self.assertTrue(is_valid)
+        self.assertEqual(reason, "")
+
+
+class WarehouseDiscoveryNoAGMDefaultTests(TestCase):
+    """Verifies that new user onboarding and ITMS login dynamically discovers warehouse without forcing AGM."""
+
+    def setUp(self):
+        from core.models import Warehouse
+        Warehouse.objects.all().delete()
+        self.operator = User.objects.create_user(
+            username="cfao_op", password="Password123!", email="cfao_op@close.kirex.online"
+        )
+
+    def test_discover_warehouse_from_selected_option(self):
+        """discover_user_assigned_warehouse parses selected option from orders index HTML."""
+        from core.services.itms_web_client import ITMSWebClient, ITMSWebSessionData
+        from core.models import Warehouse
+
+        Warehouse.objects.create(
+            warehouse_uuid="wh-cfao-1111",
+            code="CFAO",
+            name="CFAO MOTORS (UGANDA) LIMITED",
+            is_active_bond=True,
+        )
+
+        client = ITMSWebClient(user=self.operator)
+        client.session_store.save(ITMSWebSessionData(
+            base_url="https://stock.itms.ug",
+            user_email="cfao_op@cfao.ug",
+            user_uuid="cfao-uuid-1",
+            cookies={"_identity-frontend": "dummy_cookie"},
+            is_authenticated=True,
+            expires_at=time.time() + 86400,
+        ))
+
+        mock_orders_html = """
+        <html>
+        <body>
+        <select name="InstallationOrderSearch[warehouse_id]">
+            <option value="">All Warehouses</option>
+            <option value="wh-cfao-1111" selected="selected">CFAO MOTORS (UGANDA) LIMITED</option>
+            <option value="wh-agm-2222">AGM (INSTALLATION) SOLUTIONS</option>
+        </select>
+        </body>
+        </html>
+        """
+
+        with patch.object(client, "_request_with_retry") as mock_req, \
+             patch.object(client, "fetch_warehouses_from_itms") as mock_wh:
+            mock_req.return_value = MagicMock(status_code=200, text=mock_orders_html)
+            mock_wh.return_value = {
+                "success": True,
+                "warehouses": [
+                    {"code": "CFAO", "name": "CFAO MOTORS (UGANDA) LIMITED", "warehouse_uuid": "wh-cfao-1111"},
+                    {"code": "AGM", "name": "AGM (INSTALLATION) SOLUTIONS", "warehouse_uuid": "wh-agm-2222"},
+                ],
+            }
+
+            result = client.discover_user_assigned_warehouse()
+            self.assertEqual(result["code"], "CFAO")
+            self.assertEqual(result["name"], "CFAO MOTORS (UGANDA) LIMITED")
+            self.assertEqual(result["source"], "SELECTED_OPTION")
+
+    def test_discover_warehouse_from_single_facility(self):
+        """When an ITMS account only has access to one facility, that facility is automatically discovered."""
+        from core.services.itms_web_client import ITMSWebClient, ITMSWebSessionData
+
+        client = ITMSWebClient(user=self.operator)
+        client.session_store.save(ITMSWebSessionData(
+            base_url="https://stock.itms.ug",
+            user_email="spiro_op@itms.ug",
+            user_uuid="spiro-uuid-1",
+            cookies={"_identity-frontend": "dummy_cookie"},
+            is_authenticated=True,
+            expires_at=time.time() + 86400,
+        ))
+
+        with patch.object(client, "_request_with_retry") as mock_req, \
+             patch.object(client, "fetch_warehouses_from_itms") as mock_wh:
+            mock_req.return_value = MagicMock(status_code=200, text="<html><body></body></html>")
+            mock_wh.return_value = {
+                "success": True,
+                "warehouses": [
+                    {"code": "SPIRO", "name": "SPIRO ELECTRIC BONDED WAREHOUSE", "warehouse_uuid": "wh-spiro-99"},
+                ],
+            }
+
+            result = client.discover_user_assigned_warehouse()
+            self.assertEqual(result["code"], "SPIRO")
+            self.assertEqual(result["source"], "SINGLE_FACILITY")
+
+    def test_fetch_warehouses_does_not_force_agm_when_user_has_assigned_warehouse(self):
+        """fetch_warehouses_from_itms must not arbitrarily set active_wh_instance to AGM."""
+        from core.models import Warehouse, OperatorProfile
+        from core.services.itms_web_client import ITMSWebClient
+
+        wh_c = Warehouse.objects.create(
+            warehouse_uuid="wh-c-1",
+            code="CFAO",
+            name="CFAO MOTORS",
+        )
+        Warehouse.objects.create(
+            warehouse_uuid="wh-a-2",
+            code="AGM",
+            name="AGM (INSTALLATION)",
+        )
+
+        OperatorProfile.objects.create(
+            user=self.operator,
+            active_facility="CFAO",
+            allowed_facilities=["CFAO"],
+        )
+
+        client = ITMSWebClient(user=self.operator)
+        with patch.object(client, "_request_with_retry") as mock_req:
+            mock_req.return_value = MagicMock(status_code=200, text="<html><body></body></html>")
+            res = client.fetch_warehouses_from_itms()
+            self.assertEqual(res["active_warehouse_uuid"], "wh-c-1")
+            self.assertNotEqual(res["active_warehouse_uuid"], "wh-a-2")

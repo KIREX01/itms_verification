@@ -104,10 +104,26 @@ class OperatorActionsMixin:
         except Exception:
             pass
 
+    def _assert_active_session_not_expired(self, action_name: str = "This action") -> bool:
+        """Guards operator action: blocks execution immediately if time-bound access has expired."""
+        from core.services import device_access_service
+        user = getattr(self, "current_user", None)
+        if not user:
+            return True
+        is_valid, reason, _ = device_access_service.check_operator_session_access(user)
+        if not is_valid:
+            if hasattr(self, "action_enforce_session_expiry"):
+                self.action_enforce_session_expiry(reason=f"{action_name} blocked: {reason}")
+            else:
+                self.notify(f"{action_name} blocked: {reason}", severity="error")
+            return False
+        return True
 
     @work(thread=True)
     def action_drain_outbox(self) -> None:
         """Drains any orders waiting in OFFLINE_OUTBOX status."""
+        if not self._assert_active_session_not_expired("Drain outbox"):
+            return
         try:
             tabs = self.query_one("#tabs-content", TabbedContent)
             if getattr(tabs, "active", "") == "tab-stock":
@@ -230,6 +246,8 @@ class OperatorActionsMixin:
     @work(thread=True)
     def action_native_ingest(self) -> None:
         """Opens native desktop dialog to pick files or folders, and ingests them into a new batch."""
+        if not self._assert_active_session_not_expired("Photo ingestion"):
+            return
         if getattr(self, "_native_ingest_running", False):
             self.call_from_thread(self.notify, "Photo ingestion dialog is already active.", severity="warning")
             return
@@ -452,6 +470,8 @@ class OperatorActionsMixin:
         self.log_message("Dashboard refreshed from database.", level="INFO")
 
     def action_approve(self):
+        if not self._assert_active_session_not_expired("Approve pair"):
+            return
         pair = self._get_active_pair()
         if not pair:
             self.notify("No pair selected to approve.", severity="warning")
@@ -526,6 +546,8 @@ class OperatorActionsMixin:
         self.reload_data()
 
     def action_swap(self):
+        if not self._assert_active_session_not_expired("Swap photo assignment"):
+            return
         try:
             tabs = self.query_one("#tabs-content", TabbedContent)
             if getattr(tabs, "active", "") == "tab-stock":
@@ -581,6 +603,8 @@ class OperatorActionsMixin:
 
     def action_link_pair(self):
         """Opens interactive Closest Photo Picker modal to link front/rear photos."""
+        if not self._assert_active_session_not_expired("Link photo"):
+            return
         pair = self._get_active_pair()
         if not pair:
             self.notify("Select a pair to link photos.", severity="warning")
@@ -725,6 +749,8 @@ class OperatorActionsMixin:
     @work(thread=True)
     def action_joint_rescan(self) -> None:
         """Runs Dual-Stream Joint Vision on the currently selected pair."""
+        if not self._assert_active_session_not_expired("Joint rescan"):
+            return
         pair = self._get_active_pair("table-queue") or self._get_active_pair("table-history")
         if not pair:
             self.call_from_thread(self.notify, "Select a pair in the table to re-scan with Joint Vision.", severity="warning")
@@ -755,6 +781,8 @@ class OperatorActionsMixin:
     @work(thread=True)
     def action_process_vision(self) -> None:
         """Runs the vision pipeline in a background thread and streams progress to the bottom log."""
+        if not self._assert_active_session_not_expired("Vision pipeline"):
+            return
         if getattr(self, "_vision_running", False):
             self.call_from_thread(self.notify, "Vision pipeline is already running in background.", severity="warning")
             return
@@ -800,6 +828,8 @@ class OperatorActionsMixin:
     @work(thread=True)
     def action_match_pairs(self) -> None:
         """Runs associate_pairs in background and logs results."""
+        if not self._assert_active_session_not_expired("Pair matching"):
+            return
         if getattr(self, "_matcher_running", False):
             self.call_from_thread(self.notify, "Pair grouping and matching is already running in background.", severity="warning")
             return
@@ -824,6 +854,8 @@ class OperatorActionsMixin:
 
     def action_submit_pair(self) -> None:
         """Opens confirmation modal to review plate and photos, then submits pair to ITMS."""
+        if not self._assert_active_session_not_expired("Submit pair"):
+            return
         pair = self._get_active_pair()
         if not pair:
             self.notify("No pair selected for submission.", severity="warning")
@@ -938,6 +970,8 @@ class OperatorActionsMixin:
 
     def action_batch_submit(self) -> None:
         """Opens batch submission modal to review all approved orders (e.g. 200 orders) and submit at once."""
+        if not self._assert_active_session_not_expired("Batch submit"):
+            return
         from core.services.itms_web_client import get_current_itms_account
         active_acc = get_current_itms_account()
 
@@ -1340,6 +1374,8 @@ class OperatorActionsMixin:
 
     def action_unlink_order(self) -> None:
         """Unlinks the matched ITMS order from the selected pair in Review Queue or History."""
+        if not self._assert_active_session_not_expired("Unlink order"):
+            return
         pair = self._get_active_pair("table-queue") or self._get_active_pair("table-history")
         if not pair:
             self.notify("Select a pair in the queue to unlink order.", severity="warning")
@@ -1444,6 +1480,8 @@ class OperatorActionsMixin:
     @work(thread=True)
     def action_sync_itms_orders(self, target_date: Optional[str] = None) -> None:
         """Synchronizes active ITMS orders, shift archive, and installation kits with rate-limit protection."""
+        if not self._assert_active_session_not_expired("Sync ITMS orders"):
+            return
         if getattr(self, "_order_sync_running", False):
             self.call_from_thread(self.notify, "Order sync is already in progress.", severity="warning")
             return

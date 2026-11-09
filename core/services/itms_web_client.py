@@ -506,6 +506,8 @@ class _WarehouseHTMLParser(HTMLParser):
         self.current_val = ""
         self.current_text: list[str] = []
         self.extracted_facilities: list[tuple[str, str]] = []
+        self.is_selected = False
+        self.selected_facility: Optional[tuple[str, str]] = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]):
         attr_dict = {k.lower(): (v or "") for k, v in attrs}
@@ -517,12 +519,14 @@ class _WarehouseHTMLParser(HTMLParser):
         elif tag == "option" and self.in_select:
             self.in_option = True
             self.current_val = attr_dict.get("value", "").strip()
+            self.is_selected = "selected" in attr_dict or attr_dict.get("selected") in ("selected", "true")
             self.current_text = []
         elif tag == "li" and "select2-results__option" in attr_dict.get("class", ""):
             # ITMS uses Select2 for dynamic warehouse/facility selection
             val = attr_dict.get("data-select2-id", "").strip() or attr_dict.get("id", "").strip()
             self.in_option = True
             self.current_val = val
+            self.is_selected = "selected" in attr_dict.get("class", "") or attr_dict.get("aria-selected") == "true"
             self.current_text = []
         elif tag == "td":
             self.in_td = True
@@ -535,9 +539,12 @@ class _WarehouseHTMLParser(HTMLParser):
             text = "".join(self.current_text).strip()
             if self.current_val and text and text.lower() not in ("all", "select warehouse", "any", "prompt", "--"):
                 self.extracted_facilities.append((text, self.current_val))
+                if getattr(self, "is_selected", False):
+                    self.selected_facility = (text, self.current_val)
             self.in_option = False
             self.current_val = ""
             self.current_text = []
+            self.is_selected = False
         elif tag == "td" and self.in_td:
             cell_text = "".join(self.current_text).strip()
             if "BOND" in cell_text.upper():
@@ -1796,7 +1803,9 @@ class ITMSWebClient:
     def _collect_db_warehouses() -> list[tuple[str, str]]:
         collected = []
         try:
-            from core.models import InstallationOrder, InstallationKit
+            from core.models import Warehouse, InstallationOrder, InstallationKit
+            for wh in Warehouse.objects.all():
+                collected.append((wh.name, wh.warehouse_uuid))
             for w in InstallationOrder.objects.exclude(warehouse_name="").values_list("warehouse_name", "warehouse_id"):
                 collected.append((w[0], w[1] or ""))
             for wk in InstallationKit.objects.exclude(warehouse="").values_list("warehouse", flat=True).distinct():
@@ -1927,9 +1936,19 @@ class ITMSWebClient:
         created_wh_count = 0
         updated_wh_count = 0
 
-        # Current active bond code from config or session
+        # Current active bond code from user profile, config or session
         current_active = config_service.get_active_bond()
-        current_active_code = current_active.get("code", "AGM").upper()
+        current_active_code = ""
+        if self.user and getattr(self.user, "is_authenticated", False):
+            try:
+                prof = OperatorProfile.objects.filter(user=self.user).first()
+                if prof and prof.active_facility:
+                    current_active_code = prof.active_facility.strip().upper()
+            except Exception:
+                pass
+
+        if not current_active_code:
+            current_active_code = current_active.get("code", "").upper()
 
         active_wh_instance: Optional[Warehouse] = None
 
@@ -1981,7 +2000,7 @@ class ITMSWebClient:
                 else:
                     updated_wh_count += 1
 
-                if is_active or (not active_wh_instance and code == "AGM"):
+                if is_active:
                     active_wh_instance = wh_obj
 
                 # Update FacilitySyncMetadata for this facility
@@ -2011,8 +2030,21 @@ class ITMSWebClient:
                 "source": "ITMS_LIVE",
             })
 
-        # Sort so AGM is always first
-        facility_list.sort(key=lambda x: (0 if x.get("code") == "AGM" else 1, x.get("name", "")))
+        # If no active warehouse was explicitly matched by code, check user profile or single warehouse
+        if not active_wh_instance and self.user and getattr(self.user, "is_authenticated", False):
+            try:
+                prof = OperatorProfile.objects.filter(user=self.user).first()
+                if prof and prof.active_facility:
+                    active_wh_instance = Warehouse.objects.filter(code__iexact=prof.active_facility).first()
+            except Exception:
+                pass
+
+        if not active_wh_instance and len(facility_list) == 1:
+            active_wh_instance = Warehouse.objects.filter(code=facility_list[0]["code"]).first()
+
+        # Sort with active bond first
+        act_sort_code = (active_wh_instance.code if active_wh_instance else current_active.get("code", "")).upper()
+        facility_list.sort(key=lambda x: (0 if x.get("code", "").upper() == act_sort_code else 1, x.get("name", "")))
 
         # 6. Update config.json
         config_service.set_setting("bond.available_bonds", facility_list)
@@ -2053,6 +2085,103 @@ class ITMSWebClient:
             "active_bond": config_service.get_active_bond(),
             "active_warehouse_uuid": active_wh_instance.warehouse_uuid if active_wh_instance else "",
             "message": f"Successfully synchronized {len(facility_list)} warehouse facility(ies) from ITMS into database.",
+        }
+
+    def discover_user_assigned_warehouse(self) -> Dict[str, Any]:
+        """
+        Queries ITMS WebApp to determine which bonded warehouse / installation facility
+        is linked to the authenticated operator's account.
+        Checks:
+          1. Selected warehouse filter on /installation-orders/index (<option ... selected>)
+          2. User profile details on /user/{user_uuid}/main/information or /site/index
+          3. Available facilities on /warehouses
+        Returns:
+          {
+            "code": "CFAO",
+            "name": "CFAO MOTORS (UGANDA) LIMITED",
+            "warehouse_uuid": "...",
+            "source": "SELECTED_OPTION" | "USER_PROFILE" | "SINGLE_FACILITY" | "USER_CHOICE",
+            "available_warehouses": [...],
+            "needs_user_selection": bool,
+          }
+        """
+        session_data = self.session_store.session
+        warehouses_res = self.fetch_warehouses_from_itms()
+        all_warehouses = warehouses_res.get("warehouses", []) if isinstance(warehouses_res, dict) else []
+
+        discovered_code = ""
+        discovered_name = ""
+        discovered_uuid = ""
+        source = ""
+
+        # Step 1: Query /installation-orders/index for <option ... selected>
+        if session_data.is_cookie_valid():
+            try:
+                orders_url = f"{self.base_url}/installation-orders/index"
+                resp = self._request_with_retry("GET", orders_url, timeout=self.timeout)
+                if resp.status_code == 200:
+                    parser = _WarehouseHTMLParser()
+                    parser.feed(resp.text)
+                    if getattr(parser, "selected_facility", None):
+                        sel_text, sel_val = parser.selected_facility
+                        for wh in all_warehouses:
+                            if (
+                                wh.get("warehouse_uuid") == sel_val
+                                or wh.get("name", "").upper() == sel_text.upper()
+                                or wh.get("code", "").upper() in sel_text.upper()
+                            ):
+                                discovered_code = wh["code"]
+                                discovered_name = wh["name"]
+                                discovered_uuid = wh.get("warehouse_uuid", "")
+                                source = "SELECTED_OPTION"
+                                break
+            except Exception as exc:
+                logger.debug("Error checking selected warehouse on orders page: %s", exc)
+
+        # Step 2: Check User Profile if user_uuid is available
+        if not discovered_code and session_data.user_uuid and session_data.is_cookie_valid():
+            try:
+                prof_url = f"{self.base_url}/user/{session_data.user_uuid}/main/information"
+                p_resp = self._request_with_retry("GET", prof_url, timeout=self.timeout)
+                if p_resp.status_code == 200:
+                    for wh in all_warehouses:
+                        wh_name_upper = wh.get("name", "").upper()
+                        wh_code_upper = wh.get("code", "").upper()
+                        if wh_name_upper in p_resp.text.upper() or f">{wh_code_upper}<" in p_resp.text.upper():
+                            discovered_code = wh["code"]
+                            discovered_name = wh["name"]
+                            discovered_uuid = wh.get("warehouse_uuid", "")
+                            source = "USER_PROFILE"
+                            break
+            except Exception as p_exc:
+                logger.debug("Error checking user profile warehouse: %s", p_exc)
+
+        # Step 3: If only one facility exists in all_warehouses
+        if not discovered_code and len(all_warehouses) == 1:
+            discovered_code = all_warehouses[0]["code"]
+            discovered_name = all_warehouses[0]["name"]
+            discovered_uuid = all_warehouses[0].get("warehouse_uuid", "")
+            source = "SINGLE_FACILITY"
+
+        # Step 4: Check if user email has a warehouse indicator (e.g. spiro@..., cfao@...)
+        if not discovered_code and session_data.user_email:
+            email_part = session_data.user_email.split("@")[0].upper()
+            for wh in all_warehouses:
+                wh_code = wh.get("code", "").upper()
+                if wh_code and (wh_code in email_part or email_part in wh_code):
+                    discovered_code = wh["code"]
+                    discovered_name = wh["name"]
+                    discovered_uuid = wh.get("warehouse_uuid", "")
+                    source = "EMAIL_MATCH"
+                    break
+
+        return {
+            "code": discovered_code,
+            "name": discovered_name,
+            "warehouse_uuid": discovered_uuid,
+            "source": source,
+            "available_warehouses": all_warehouses,
+            "needs_user_selection": not bool(discovered_code),
         }
 
     # ──────────────────────────────────────────────────────────────────────────

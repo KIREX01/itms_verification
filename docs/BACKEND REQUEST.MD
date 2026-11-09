@@ -578,3 +578,43 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
   4. **Clean Media URL Normalization:**
      - Implemented `_clean_media_url` in `core/views/dashboard.py`: safely resolves vault files, thumbnails, and previews to clean `/media/` paths, eliminating duplicate prefixes, double slashes, and Windows backslashes.
      - Increased returned items limit to 300 to ensure rich representations of both direct audit logs and pair records.
+
+---
+
+## 7. Feature: TUI Access Tab Expiry Lockout & Dynamic ITMS Warehouse Onboarding - [COMPLETED]
+
+### 7.1 Immediate Lockout on Access Window Expiration (TUI & Background Services) - `COMPLETED`
+- **Core Problem Addressed**: When time-bound grants, authorized device windows, or invitation codes expired, the TUI application previously remained fully operational without any restrictions or alerts.
+- **Architectural & Security Enhancements**:
+  1. **Active Heartbeat & Lockout Daemon (`core/tui/app.py` & `core/tui/access_pane.py`)**:
+     - Background heartbeat checks session status every 5 seconds via `check_operator_session_access()`.
+     - Displays live status indicator on `#access-session-status-strip` in the Access Control pane (`● ACTIVE`, `⏳ EXPIRING SOON`, or `⛔ EXPIRED`) with real-time remaining countdown badge, operator identity, IP, and MAC address.
+     - When expiration occurs, immediately triggers `action_enforce_session_expiry()`, locking the console with `TUIExpiredLockScreen`.
+  2. **Dedicated Expiration Modal Screen (`core/tui/lock_screen.py:TUIExpiredLockScreen`)**:
+     - Modal screen traps input and presents `⛔ TIME-BOUND ACCESS EXPIRED`.
+     - Displays exact reason and expiration timestamp.
+     - Interactive 6-digit renewal code verification (`btn-expired-renew` via `device_access_service.activate_with_code`).
+     - Supervisor Master PIN emergency override mechanism (`btn-expired-master-pin` granting +4h extension).
+     - Sign Out / Switch Operator (`btn-expired-logout`) and clean terminal exit (`btn-expired-quit`).
+  3. **Strict Action Guardrails (`core/tui/actions.py:OperatorActionsMixin`)**:
+     - Implemented `_assert_active_session_not_expired(action_name)` guarding all operational actions:
+       - `action_drain_outbox`, `action_native_ingest`, `action_approve`, `action_swap`, `action_link_pair`, `action_unlink_order`, `action_joint_rescan`, `action_process_vision`, `action_match_pairs`, `action_submit_pair`, `action_batch_submit`, and `action_sync_itms_orders`.
+     - If expired, execution halts immediately and the lock screen is re-presented.
+
+### 7.2 Dynamic ITMS Account & Warehouse Discovery on Registration - `COMPLETED`
+- **Core Problem Addressed**: When new users registered, the system was previously hardcoding or defaulting their facility to `"AGM"`, regardless of their actual installation facility assignment.
+- **Implementation & Discovery Flow**:
+  1. **TUI Account Registration Overhaul (`core/tui/auth_screens.py:LandingAuthScreen`)**:
+     - Required ITMS account credentials (`input-reg-itms-email`, `input-reg-itms-password`), "🔍 Check ITMS & Discover Warehouse" button, and facility `Select` dropdown.
+     - Performs live verification with ITMS WebApp before account creation.
+     - Dynamically determines the operator's linked facility via:
+       - Selected warehouse option on `/installation-orders/index` (`<option ... selected>`).
+       - User profile information on `/user/{uuid}/main/information`.
+       - Single-facility permission assignment.
+       - Operating email domain mapping.
+     - Binds the user's `OperatorProfile.active_facility` and `OperatorITMSSession` to the discovered facility and sets active bond in `bond_service`.
+  2. **Web Signup & 2FA Synchronization (`core/views/auth.py`)**:
+     - Updated `signup_view` and `signup_verify_view` to set `OperatorProfile.active_facility` to the verified facility rather than defaulting to AGM.
+  3. **Dynamic Sorting & Database Catalog (`core/services/bond_service.py` & `core/services/itms_web_client.py`)**:
+     - Removed hardcoded AGM overrides in `fetch_warehouses_from_itms()` and `get_all_discovered_warehouses()`.
+     - Sorts the user's active operating bond to the top dynamically.

@@ -122,9 +122,10 @@ def get_all_discovered_warehouses() -> List[Dict[str, Any]]:
     except Exception as exc:
         logger.warning("Error discovering warehouses from database: %s", exc)
 
-    # Ensure AGM is always at the top of the list
+    # Ensure currently active bond facility is sorted to the top
+    active_code = get_active_bond_code().strip().upper()
     all_bonds = list(result_map.values())
-    all_bonds.sort(key=lambda b: (0 if b.get("code") == "AGM" else 1, b.get("name", "")))
+    all_bonds.sort(key=lambda b: (0 if b.get("code", "").upper() == active_code else 1, b.get("name", "")))
     return all_bonds
 
 

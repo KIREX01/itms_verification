@@ -624,6 +624,92 @@ def api_stock_mvr_docket(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
+@require_GET
+@require_itms_envelope(allow_expired=True)
+def api_stock_unallocated(request: HttpRequest):
+    """
+    Returns dual-categorized unallocated kits physically dispatched to the assembly line:
+    - Category A: NOT_ON_STOCK (Awaiting ITMS Inbound) - physically on floor, absent from ITMS.
+    - Category B: SKIPPED_BY_MVR (Pending Allocation) - in ITMS stock, but skipped in orders.
+    Supports ?format=csv to export CSV directly.
+    """
+    from core.services.kit_unallocation_service import kit_unallocation_service
+    date_suffix = (
+        request.GET.get("date")
+        or request.GET.get("date_suffix")
+        or request.GET.get("suffix")
+        or None
+    )
+    try:
+        data = kit_unallocation_service.get_unallocated_kits(date_suffix)
+        export_format = request.GET.get("format", "").strip().lower()
+        if export_format == "csv":
+            import csv
+            from django.http import HttpResponse
+            response = HttpResponse(content_type="text/csv")
+            sfx = data["work_date_suffix"]
+            response["Content-Disposition"] = f'attachment; filename="unallocated_kits_{sfx}.csv"'
+            writer = csv.writer(response)
+            writer.writerow(["#", "Plate", "Category", "Classification Reason", "Recommended Action", "Camera Evidence", "Dispatched By", "Dispatched At", "Notes"])
+            idx = 1
+            for item in data.get("not_on_stock_items", []):
+                writer.writerow([
+                    idx,
+                    item.get("plate", ""),
+                    "NOT ON STOCK (Awaiting Inbound)",
+                    item.get("reason", ""),
+                    item.get("action", ""),
+                    "Yes" if item.get("has_camera_evidence") else "No",
+                    item.get("dispatched_by", ""),
+                    item.get("dispatched_at", ""),
+                    item.get("notes", ""),
+                ])
+                idx += 1
+            for item in data.get("skipped_by_mvr_items", []):
+                writer.writerow([
+                    idx,
+                    item.get("plate", ""),
+                    "SKIPPED BY MVR (Pending Allocation)",
+                    item.get("reason", ""),
+                    item.get("action", ""),
+                    "Yes" if item.get("has_camera_evidence") else "No",
+                    item.get("dispatched_by", ""),
+                    item.get("dispatched_at", ""),
+                    item.get("notes", ""),
+                ])
+                idx += 1
+            return response
+
+        return JsonResponse({
+            "success": True,
+            "work_date_suffix": data["work_date_suffix"],
+            "warehouse_code": data["warehouse_code"],
+            "total_unallocated": data["unallocated_count"],
+            "not_on_stock": {
+                "count": data["not_on_stock_count"],
+                "plates": data["not_on_stock_plates"],
+                "items": data["not_on_stock_items"],
+            },
+            "skipped_by_mvr": {
+                "count": data["skipped_by_mvr_count"],
+                "plates": data["skipped_by_mvr_plates"],
+                "items": data["skipped_by_mvr_items"],
+            },
+            "summary": {
+                "total_physical_dispatched": data["total_physical_dispatched"],
+                "reconciled_installed": data["reconciled_installed_count"],
+                "on_line_active": data["on_line_active_count"],
+                "returned_to_safe": data["returned_to_safe_count"],
+                "pending_system_sync": data["pending_sync_count"],
+                "unresolved_discrepancy": data["unresolved_discrepancy_count"],
+            },
+            "unallocated_plates": data["unallocated_plates"],
+        })
+    except Exception as exc:
+        logger.error("api_stock_unallocated error: %s", exc)
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
+
+
 @require_itms_envelope(allow_expired=True)
 def api_stock_blocked_plates(request: HttpRequest) -> JsonResponse:
     """
@@ -702,6 +788,19 @@ def api_stock_blocked_plates(request: HttpRequest) -> JsonResponse:
                     scanned_by=user,
                 )
 
+        live_sync_in_progress = False
+        if request.method == "GET" and check_itms_live:
+            # Resolve local DB instantly (<5ms) and offload live ITMS scrape to background thread
+            # preventing modal freeze/delay on client open
+            import threading
+            threading.Thread(
+                target=stock_monitoring_service.resolve_transferred_blocked_plates,
+                kwargs={"target_date_suffix": date_suffix, "check_itms_live": True},
+                daemon=True,
+            ).start()
+            check_itms_live = False
+            live_sync_in_progress = True
+
         resolve_res = stock_monitoring_service.resolve_transferred_blocked_plates(
             target_date_suffix=date_suffix,
             check_itms_live=check_itms_live,
@@ -714,6 +813,7 @@ def api_stock_blocked_plates(request: HttpRequest) -> JsonResponse:
             "count": docket.get("count", 0),
             "resolved_plates": resolve_res.get("resolved_plates", []),
             "resolved_count": resolve_res.get("resolved_count", 0),
+            "live_sync_in_progress": live_sync_in_progress,
             "docket": docket,
         })
     except Exception as exc:

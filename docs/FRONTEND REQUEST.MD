@@ -1577,3 +1577,125 @@ if (hwCard) {
   4. **Multi-Angle Audit Detail Modal Enhancements (`#modal-history-detail`):**
      - Front and rear photo preview boxes dynamically show or hide based on available angles.
      - Click handler loads full uncompressed vault photo into lightbox.
+
+---
+
+## 23. Feature: Sibling Series Collision Confirmation Modal & Dual-Category Unallocated Kits UI - [BACKEND READY]
+
+The Backend & DevOps team has completed and verified the core backend services, endpoints, and validation protocols for:
+1. **Sibling Plate Collision Detection (`UMA496QV` vs `UMA496QW`)**
+2. **Dual-Category Unallocated Kit Tracking (`NOT_ON_STOCK` vs `SKIPPED_BY_MVR`)**
+3. **Instant Stock Modal Ingress & Auto-Pruning of Installed Kits**
+
+### 23.1 Sibling Series Collision Confirmation Modal (`tab_queue.js` & `QuickPlateTypeModal`)
+- **Trigger**: An operator attempts to link an order or manually override a plate (e.g. `UMA496QV`) when active sibling plates sharing the exact same numeric sequence (e.g. `UMA496QW`) exist in active orders, dispatches, or review queue.
+- **Backend Response**:
+  `POST /api/pairs/<pair_id>/action/` returns HTTP 200 with JSON:
+  ```json
+  {
+    "success": false,
+    "requires_confirmation": true,
+    "confirmation_type": "SIBLING_PLATE_COLLISION",
+    "error": "Sibling series collision detected! The numeric sequence '496' is shared by sibling plate(s): UMA496QW. Please verify that the vehicle photo and physical plate strictly match 'UMA496QV' before confirming.",
+    "target_plate": "UMA496QV",
+    "numeric_digits": "496",
+    "sibling_plates": ["UMA496QW"],
+    "sibling_orders": [
+      {
+        "order_id": 1045,
+        "order_number": "PO-UMA496QW-01",
+        "registration_number": "UMA496QW",
+        "status": "Pending",
+        "chassis": "MD2A..."
+      }
+    ],
+    "code": "SIBLING_PLATE_COLLISION"
+  }
+  ```
+- **Frontend Action Required**:
+  1. Catch `res.requires_confirmation === true && res.confirmation_type === 'SIBLING_PLATE_COLLISION'`.
+  2. Display a high-visibility warning modal / confirmation dialog `#modal-sibling-collision`:
+     - Header: `⚠️ Sibling Plate Series Alert` (amber background).
+     - Body: Explains that plate `UMA496QV` shares digits `496` with sibling series `UMA496QW`. Prompts the operator to inspect the front/rear photos to ensure they are not confusing sibling bikes.
+     - Buttons: `[Cancel]` and `[Confirm & Link Anyway]` (primary).
+  3. When the operator clicks `[Confirm & Link Anyway]`, re-send the POST payload with `confirm_sibling: true`:
+     ```javascript
+     fetch(`/api/pairs/${pairId}/action/`, {
+       method: 'POST',
+       headers: { 'Content-Type': 'application/json' },
+       body: JSON.stringify({
+         action: 'link_order',
+         order_id: targetOrderId,
+         confirm_sibling: true
+       })
+     });
+     ```
+  4. The backend will proceed with the link and tag the audit log / operator note with `[SIBLING_OVERRIDE_CONFIRMED: UMA496QW]`.
+
+---
+
+### 23.2 Dual-Category Unallocated Kits Tables (`tab_stock.html` / `tab_reports.html`)
+- **Endpoints**:
+  - `GET /api/stock/unallocated/?date_suffix=<suffix>` (JSON)
+  - `GET /api/stock/unallocated/?date_suffix=<suffix>&format=csv` (Direct CSV download)
+- **JSON Structure**:
+  ```json
+  {
+    "success": true,
+    "work_date_suffix": "10.11.2026",
+    "warehouse_code": "AGM",
+    "total_unallocated": 12,
+    "not_on_stock": {
+      "count": 4,
+      "plates": ["UMA496QV", "UMA502B"],
+      "items": [
+        {
+          "plate": "UMA496QV",
+          "category": "NOT_ON_STOCK",
+          "reason": "Not on ITMS Stock (Awaiting Central Depot Inbound - MVR cannot access)",
+          "action": "Request Inbound from ITMS Central Depot / Transfer Manager",
+          "has_camera_evidence": true,
+          "dispatched_by": "Operator Jane",
+          "dispatched_at": "2026-11-10 14:22:10"
+        }
+      ]
+    },
+    "skipped_by_mvr": {
+      "count": 8,
+      "plates": ["UMA501A"],
+      "items": [
+        {
+          "plate": "UMA501A",
+          "category": "SKIPPED_BY_MVR",
+          "reason": "On Stock in warehouse, but skipped by MVR during order allocation",
+          "action": "Notify MVR Officer to allocate order in ITMS",
+          "has_camera_evidence": false,
+          "dispatched_by": "Operator Jane",
+          "dispatched_at": "2026-11-10 08:15:00"
+        }
+      ]
+    }
+  }
+  ```
+- **Frontend Action Required**:
+  1. In the Stock & Reports discrepancy views, render two distinct sub-tabs or side-by-side tables:
+     - **Table 1: Category A — NOT ON STOCK (Awaiting Inbound)**:
+       - Plate badge: Red pill `🔴 Not on ITMS Stock`.
+       - Explains: Kit was physically scanned/pasted by operator, but is absent from ITMS database. MVR cannot allocate it until central depot processes inbound!
+       - Action: "Request Inbound from Central Depot".
+     - **Table 2: Category B — SKIPPED BY MVR (Pending Allocation)**:
+       - Plate badge: Amber pill `🟡 Skipped by MVR`.
+       - Explains: Kit exists in safe-room stock, but MVR officer skipped creating an order.
+       - Action: "Notify MVR Officer to allocate order".
+  2. Add `[📥 Export Unallocated CSV]` button linking to `/api/stock/unallocated/?date_suffix=${currentSuffix}&format=csv`.
+
+---
+
+### 23.3 Stock Modal Performance (<50ms Open Time) & Dynamic Pruning
+- **Enhancement**:
+  - `GET /api/stock/blocked-plates/` no longer executes synchronous external HTTP scraping against ITMS on modal open.
+  - Returns local database records in < 50ms.
+  - Background thread asynchronously refreshes live ITMS stock without freezing the UI.
+  - If a plate was previously in `StockBlockedScan` ("Set Aside / Not on stock") but now appears in an installed/archived order or submitted vehicle pair:
+    - Backend automatically prunes the record from the database.
+    - Status dynamically displays as `Pruned (Installed / Closed)` rather than `Set Box Aside`.

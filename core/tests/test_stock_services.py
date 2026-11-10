@@ -224,3 +224,86 @@ class StockServicesTest(TestCase):
         self.assertEqual(ledger["psv"], 150)
         self.assertEqual(ledger["pmo"], 40)
         self.assertEqual(ledger["total"], 190)
+
+    def test_unallocated_kits_dual_categorization(self):
+        """Tests that get_unallocated_kits divides unallocated into Category A (not on stock) vs B (skipped by MVR)."""
+        # Kit on stock in InstallationKit
+        InstallationKit.objects.create(
+            registration_number="UMA501A",
+            kit_code="IK-UMA501A",
+            status="New",
+            warehouse="AGM Bonded Warehouse",
+        )
+        # Dispatches: UMA501A (in stock) and UMA502B (NOT in stock, pasted from floor)
+        StockDispatchScan.objects.create(
+            registration_number="UMA501A",
+            work_date_suffix=self.suffix,
+            status=StockDispatchScan.Status.ON_LINE_ACTIVE,
+            operator_name="Operator Jane",
+        )
+        StockDispatchScan.objects.create(
+            registration_number="UMA502B",
+            work_date_suffix=self.suffix,
+            status=StockDispatchScan.Status.ON_LINE_ACTIVE,
+            operator_name="Operator Jane",
+            notes="[DISPATCHED_NOT_ON_STOCK]",
+        )
+
+        unalloc = kit_unallocation_service.get_unallocated_kits(self.suffix)
+        self.assertEqual(unalloc["unallocated_count"], 2)
+        # Category A: NOT_ON_STOCK
+        self.assertEqual(unalloc["not_on_stock_count"], 1)
+        self.assertIn("UMA502B", unalloc["not_on_stock_plates"])
+        self.assertEqual(unalloc["not_on_stock_items"][0]["category"], "NOT_ON_STOCK")
+        # Category B: SKIPPED_BY_MVR
+        self.assertEqual(unalloc["skipped_by_mvr_count"], 1)
+        self.assertIn("UMA501A", unalloc["skipped_by_mvr_plates"])
+        self.assertEqual(unalloc["skipped_by_mvr_items"][0]["category"], "SKIPPED_BY_MVR")
+
+    def test_record_dispatch_scans_excel_paste_and_auto_order_overwrite(self):
+        """Tests that operator paste overwrites auto-generated dispatch and registers unstocked kits."""
+        from core.services import stock_monitoring_service
+        # Pre-existing auto-generated dispatch from order
+        StockDispatchScan.objects.create(
+            registration_number="UMA601A",
+            work_date_suffix=self.suffix,
+            status=StockDispatchScan.Status.ON_LINE_ACTIVE,
+            operator_name="System",
+            notes=AUTO_ORDER_DISPATCH_NOTE,
+        )
+
+        # Operator pastes UMA601A and an unstocked plate UMA602B
+        res = stock_monitoring_service.record_dispatch_scans(
+            plates=["UMA601A", "UMA602B"],
+            target_date_suffix=self.suffix,
+            operator_name="Physical Operator Mike",
+            notes="Morning assembly dispatch",
+            require_stock_verification=False,
+        )
+        self.assertTrue(res["success"])
+        # Check overwrite
+        scan_601 = StockDispatchScan.objects.filter(registration_number="UMA601A").first()
+        self.assertIsNotNone(scan_601)
+        self.assertEqual(scan_601.operator_name, "Physical Operator Mike")
+        self.assertEqual(scan_601.notes, "Morning assembly dispatch")
+
+        # Check unstocked plate was dispatched
+        scan_602 = StockDispatchScan.objects.filter(registration_number="UMA602B").first()
+        self.assertIsNotNone(scan_602)
+        self.assertEqual(scan_602.operator_name, "Physical Operator Mike")
+
+    def test_api_stock_unallocated_endpoint(self):
+        """Tests GET /api/stock/unallocated/ JSON and CSV output."""
+        resp = self.client.get(f"/api/stock/unallocated/?date_suffix={self.suffix}")
+        self.assertEqual(resp.status_code, 200)
+        import json
+        data = json.loads(resp.content)
+        self.assertTrue(data["success"])
+        self.assertIn("not_on_stock", data)
+        self.assertIn("skipped_by_mvr", data)
+        self.assertIn("summary", data)
+
+        # CSV format test
+        resp_csv = self.client.get(f"/api/stock/unallocated/?date_suffix={self.suffix}&format=csv")
+        self.assertEqual(resp_csv.status_code, 200)
+        self.assertIn("text/csv", resp_csv["Content-Type"])

@@ -191,3 +191,84 @@ class OrderMatcherTests(TestCase):
         self.assertEqual(pair.verification_status, VehicleInstallationPair.VerificationStatus.CONFLICT)
         self.assertIsNone(pair.order)
         self.assertIn("already Installed", pair.operator_note)
+
+
+class SiblingPlateCollisionTests(TestCase):
+    def test_plate_similarity_rejects_sibling_series_plates(self):
+        """Tests that _plate_similarity strictly evaluates sibling series plates to 0.0."""
+        from core.matcher.association import _plate_similarity
+        # UMA496QV vs UMA496QW have 7/8 matching chars (87.5% ratio) but are completely distinct vehicles
+        self.assertEqual(_plate_similarity("UMA496QV", "UMA496QW"), 0.0)
+        self.assertEqual(_plate_similarity("UMA496QV", "UMA496QU"), 0.0)
+        # Identical plate evaluates to 1.0
+        self.assertEqual(_plate_similarity("UMA496QV", "UMA496QV"), 1.0)
+        # Completely different numbers evaluate to 0.0
+        self.assertEqual(_plate_similarity("UMA496QV", "UMA497QV"), 0.0)
+        self.assertEqual(_plate_similarity("UMA101A", "UMA102A"), 0.0)
+
+    def test_detect_sibling_collision_service(self):
+        """Tests that detect_sibling_collision identifies collisions across active orders and dispatches."""
+        from core.services.sibling_detector import detect_sibling_collision
+        InstallationOrder.objects.create(
+            order_number="PO-496QW-01",
+            registration_number="UMA496QW",
+            status=InstallationOrder.Status.PENDING,
+            is_active_on_itms=True,
+        )
+
+        res = detect_sibling_collision("UMA496QV")
+        self.assertTrue(res["has_sibling_collision"])
+        self.assertTrue(res["requires_confirmation"])
+        self.assertEqual(res["numeric_digits"], "496")
+        self.assertIn("UMA496QW", res["sibling_plates"])
+        self.assertEqual(res["confirmation_type"], "SIBLING_PLATE_COLLISION")
+
+    def test_api_pair_action_requires_confirmation_on_sibling_collision(self):
+        """Tests that api_pair_action rejects unconfirmed link and accepts with confirm_sibling=True."""
+        from django.contrib.auth import get_user_model
+        from django.test import Client
+        import json
+        User = get_user_model()
+        user = User.objects.create_user(username="test_op", password="pass123")
+        client = Client()
+        client.force_login(user)
+        InstallationOrder.objects.create(
+            order_number="PO-496QW-01",
+            registration_number="UMA496QW",
+            status=InstallationOrder.Status.PENDING,
+            is_active_on_itms=True,
+        )
+        ord_target = InstallationOrder.objects.create(
+            order_number="PO-496QV-01",
+            registration_number="UMA496QV",
+            status=InstallationOrder.Status.PENDING,
+            is_active_on_itms=True,
+        )
+        pair = VehicleInstallationPair.objects.create(
+            registration_number_detected="UMA496QV",
+            verification_status=VehicleInstallationPair.VerificationStatus.CONFLICT,
+        )
+
+        # 1. Unconfirmed link should return requires_confirmation: True
+        resp = client.post(
+            f"/api/pairs/{pair.id}/action/",
+            data=json.dumps({"action": "link_order", "order_id": ord_target.id}),
+            content_type="application/json",
+        )
+        data = json.loads(resp.content)
+        self.assertFalse(data["success"])
+        self.assertTrue(data.get("requires_confirmation"))
+        self.assertEqual(data.get("confirmation_type"), "SIBLING_PLATE_COLLISION")
+        self.assertIn("UMA496QW", data.get("sibling_plates", []))
+
+        # 2. Confirmed link with confirm_sibling=True should succeed
+        resp_conf = client.post(
+            f"/api/pairs/{pair.id}/action/",
+            data=json.dumps({"action": "link_order", "order_id": ord_target.id, "confirm_sibling": True}),
+            content_type="application/json",
+        )
+        data_conf = json.loads(resp_conf.content)
+        self.assertTrue(data_conf["success"])
+        pair.refresh_from_db()
+        self.assertEqual(pair.order, ord_target)
+        self.assertIn("SIBLING_OVERRIDE_CONFIRMED", pair.operator_note)

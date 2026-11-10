@@ -81,15 +81,21 @@ class KitUnallocationService:
         active_bond_code = (active_bond.get("code") or self.default_facility).strip().upper()
 
         # 1. Physical Dispatches (Ground Truth)
+        disp_filter = Q(work_date_suffix=suffix) | Q(work_date=work_d)
+        if target_date_suffix:
+            disp_filter |= Q(work_date_suffix=str(target_date_suffix).strip())
         dispatches_qs = StockDispatchScan.objects.filter(
-            Q(work_date_suffix=suffix) | Q(work_date=work_d)
+            disp_filter
         ).filter(
             Q(bond_code__iexact=active_bond_code) | Q(bond_code="") | Q(bond_code__isnull=True)
         )
 
         # 2. Returns to safe room
+        ret_filter = Q(work_date_suffix=suffix) | Q(work_date=work_d)
+        if target_date_suffix:
+            ret_filter |= Q(work_date_suffix=str(target_date_suffix).strip())
         returns_qs = StockReturnScan.objects.filter(
-            Q(work_date_suffix=suffix) | Q(work_date=work_d)
+            ret_filter
         )
         returned_plates_set = {
             normalizer.canonicalize(p)
@@ -185,6 +191,59 @@ class KitUnallocationService:
         # Total unallocated = pending_system_sync + unresolved_discrepancy
         all_unallocated_plates = sorted(pending_system_sync + unresolved_discrepancy)
 
+        # Dual-Categorization of Unallocated Kits:
+        # Category A: NOT ON STOCK (Awaiting ITMS Inbound) - physically dispatched by operator, but absent from ITMS stock. MVR cannot allocate!
+        # Category B: SKIPPED BY MVR (Pending Allocation) - verified on stock in ITMS, but skipped by MVR during order creation.
+        from core.services.stock_monitoring_service import get_kits_matching_plates_q
+        known_stock_kits = {
+            normalizer.canonicalize(k.registration_number): k
+            for k in InstallationKit.objects.filter(get_kits_matching_plates_q(all_unallocated_plates))
+        }
+
+        not_on_stock_plates: List[str] = []
+        not_on_stock_items: List[Dict[str, Any]] = []
+        skipped_by_mvr_plates: List[str] = []
+        skipped_by_mvr_items: List[Dict[str, Any]] = []
+
+        for p in all_unallocated_plates:
+            c_p = normalizer.canonicalize(p)
+            scan = dispatched_plates_map.get(c_p)
+            scan_notes = (scan.notes or "").strip() if scan else ""
+            kit = known_stock_kits.get(c_p)
+            has_ev = c_p in plates_with_evidence
+
+            # If kit not in InstallationKit or was explicitly dispatched as unstocked
+            is_not_on_stock = (c_p not in known_stock_kits) or ("[DISPATCHED_NOT_ON_STOCK]" in scan_notes)
+
+            if is_not_on_stock:
+                not_on_stock_plates.append(p)
+                not_on_stock_items.append({
+                    "plate": p,
+                    "canonical_plate": c_p,
+                    "category": "NOT_ON_STOCK",
+                    "reason": "Not on ITMS Stock (Awaiting Central Depot Inbound - MVR cannot access)",
+                    "action": "Request Inbound from ITMS Central Depot / Transfer Manager",
+                    "has_camera_evidence": has_ev,
+                    "dispatched_by": scan.operator_name if scan else "Operator",
+                    "dispatched_at": scan.created_at.strftime("%Y-%m-%d %H:%M:%S") if scan and scan.created_at else "",
+                    "notes": scan_notes,
+                })
+            else:
+                skipped_by_mvr_plates.append(p)
+                skipped_by_mvr_items.append({
+                    "plate": p,
+                    "canonical_plate": c_p,
+                    "category": "SKIPPED_BY_MVR",
+                    "reason": "On Stock in warehouse, but skipped by MVR during order allocation",
+                    "action": "Notify MVR Officer to allocate order in ITMS",
+                    "has_camera_evidence": has_ev,
+                    "dispatched_by": scan.operator_name if scan else "Operator",
+                    "dispatched_at": scan.created_at.strftime("%Y-%m-%d %H:%M:%S") if scan and scan.created_at else "",
+                    "kit_status": kit.status if kit else "New",
+                    "warehouse": kit.warehouse if kit else active_bond_code,
+                    "notes": scan_notes,
+                })
+
         return {
             "work_date_suffix": suffix,
             "warehouse_code": active_bond_code,
@@ -201,6 +260,13 @@ class KitUnallocationService:
             "unresolved_discrepancy_plates": unresolved_discrepancy,
             "unallocated_count": len(all_unallocated_plates),
             "unallocated_plates": all_unallocated_plates,
+            # Dual-Categorization
+            "not_on_stock_count": len(not_on_stock_plates),
+            "not_on_stock_plates": not_on_stock_plates,
+            "not_on_stock_items": not_on_stock_items,
+            "skipped_by_mvr_count": len(skipped_by_mvr_plates),
+            "skipped_by_mvr_plates": skipped_by_mvr_plates,
+            "skipped_by_mvr_items": skipped_by_mvr_items,
         }
 
     # -------------------------------------------------------------------------
@@ -566,6 +632,22 @@ class KitUnallocationService:
             for item in misalloc["misallocated_items"]:
                 misalloc_lines.append(f"  ⚠️ Plate {item.get('plate')}: {item.get('reason')}")
 
+        # Structured breakdown by Category A (Not on Stock) vs Category B (Skipped by MVR)
+        breakdown_lines: List[str] = []
+        if unalloc.get("not_on_stock_plates"):
+            breakdown_lines.append("")
+            breakdown_lines.append(f"CATEGORY A: NOT ON ITMS STOCK ({unalloc['not_on_stock_count']} Kit(s)) — Awaiting Depot Inbound:")
+            breakdown_lines.append("  (Physically on floor; MVR cannot allocate until Inbound is recorded in ITMS)")
+            for idx, p in enumerate(unalloc["not_on_stock_plates"], start=1):
+                breakdown_lines.append(f"    {idx:2d}. {p}")
+
+        if unalloc.get("skipped_by_mvr_plates"):
+            breakdown_lines.append("")
+            breakdown_lines.append(f"CATEGORY B: SKIPPED BY MVR ({unalloc['skipped_by_mvr_count']} Kit(s)) — In Stock, Missing in Orders:")
+            breakdown_lines.append("  (Verified on warehouse stock; MVR Officer action required to allocate orders)")
+            for idx, p in enumerate(unalloc["skipped_by_mvr_plates"], start=1):
+                breakdown_lines.append(f"    {idx:2d}. {p}")
+
         docket_lines = [
             "==================================================",
             f"{warehouse_name.upper()} — MVR ALLOCATION EXCEPTION DOCKET",
@@ -581,15 +663,20 @@ class KitUnallocationService:
             f"  • Pending System Sync (Photos):    {unalloc['pending_sync_count']:>4}",
             f"  • UNALLOCATED FLOOR DISCREPANCY:   {unalloc['unresolved_discrepancy_count']:>4}",
             "--------------------------------------------------",
+            f"    - Category A (Not on Stock):     {unalloc['not_on_stock_count']:>4}",
+            f"    - Category B (Skipped by MVR):   {unalloc['skipped_by_mvr_count']:>4}",
+            "--------------------------------------------------",
             f"  • MVR Misallocations Detected:     {misalloc['misallocated_count']:>4}",
             f"  • Spiked (Undispatched) in ITMS:   {spiked['total_spiked_count']:>4}",
             "==================================================",
             "ACTION REQUIRED FOR MVR ALLOCATION TEAM:",
             f"The following {len(unallocated_plates)} kit(s) were physically issued to the line,",
             "are NOT returned to safe room, and have NO matching ITMS order or archive:",
-            "",
-            plates_block,
         ]
+        if breakdown_lines:
+            docket_lines.extend(breakdown_lines)
+        else:
+            docket_lines.append(plates_block)
         if misalloc_lines:
             docket_lines.extend(misalloc_lines)
 
@@ -610,6 +697,12 @@ class KitUnallocationService:
             "active_bond_code": active_code,
             "unallocated_plates": unallocated_plates,
             "count": len(unallocated_plates),
+            "not_on_stock_count": unalloc.get("not_on_stock_count", 0),
+            "not_on_stock_plates": unalloc.get("not_on_stock_plates", []),
+            "not_on_stock_items": unalloc.get("not_on_stock_items", []),
+            "skipped_by_mvr_count": unalloc.get("skipped_by_mvr_count", 0),
+            "skipped_by_mvr_plates": unalloc.get("skipped_by_mvr_plates", []),
+            "skipped_by_mvr_items": unalloc.get("skipped_by_mvr_items", []),
             "pending_sync_count": unalloc["pending_sync_count"],
             "pending_sync_plates": unalloc["pending_sync_plates"],
             "unresolved_discrepancy_count": unalloc["unresolved_discrepancy_count"],

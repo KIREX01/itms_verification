@@ -607,6 +607,32 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
                     "code": "ORDER_ALREADY_ASSIGNED",
                 }, status=400)
 
+        # Sibling Series Collision Guard (e.g. UMA496QV vs UMA496QW)
+        confirm_sibling = str(request.POST.get("confirm_sibling") or body_data.get("confirm_sibling") or "").strip().lower() in ("1", "true", "yes")
+        from core.services.sibling_detector import detect_sibling_collision
+        cand_plate_to_check = (target_order.registration_number if target_order else raw_val) or pair.registration_number_detected
+        collision = detect_sibling_collision(
+            cand_plate_to_check,
+            account_email=pair.account_email,
+            exclude_pair_id=pair.id,
+            exclude_order_id=target_order.id if target_order else None,
+        )
+        if collision["has_sibling_collision"] and not confirm_sibling:
+            return JsonResponse({
+                "success": False,
+                "requires_confirmation": True,
+                "confirmation_type": "SIBLING_PLATE_COLLISION",
+                "error": collision["warning"],
+                "target_plate": collision["target_plate"],
+                "numeric_digits": collision["numeric_digits"],
+                "sibling_plates": collision["sibling_plates"],
+                "sibling_orders": collision["sibling_orders"],
+                "order_id": target_order.id if target_order else None,
+                "order_number": target_order.order_number if target_order else "",
+                "code": "SIBLING_PLATE_COLLISION",
+            }, status=200)
+
+        if target_order:
             # 3. Activate target order status
             target_order.status = InstallationOrder.Status.MATCHED
             target_order.is_active_on_itms = True
@@ -648,12 +674,13 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
 
         pair.refresh_completeness()
 
+        sibling_tag = f" [SIBLING_OVERRIDE_CONFIRMED: {', '.join(collision['sibling_plates'])}]" if collision.get("has_sibling_collision") and confirm_sibling else ""
         if operator_note is not None and str(operator_note).strip():
-            pair.operator_note = str(operator_note).strip()
+            pair.operator_note = str(operator_note).strip() + sibling_tag
         elif target_order:
-            pair.operator_note = f"Linked to Order #{target_order.order_number} ({target_order.registration_number})"
+            pair.operator_note = f"Linked to Order #{target_order.order_number} ({target_order.registration_number}){sibling_tag}"
         elif canonical_plate:
-            pair.operator_note = f"Manual plate updated: {canonical_plate}"
+            pair.operator_note = f"Manual plate updated: {canonical_plate}{sibling_tag}"
 
         if operator_user:
             pair.operator = operator_user

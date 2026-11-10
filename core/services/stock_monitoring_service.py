@@ -548,31 +548,24 @@ def record_dispatch_scans(
                 
         readiness = verify_res
 
-        # If NO plates are valid, block dispatch completely
-        if not verified_plates:
-            reasons = []
-            if rejected_not_on_stock:
-                reasons.append(f"Not on ITMS stock ({len(rejected_not_on_stock)}): {', '.join(rejected_not_on_stock)}")
-            if already_installed:
-                reasons.append(f"Already installed ({len(already_installed)}): {', '.join(already_installed)}")
-            err_msg = f"Kits not on stock cannot be taken out! {'; '.join(reasons)}"
-            blocked_all = rejected_not_on_stock + already_installed
-            if blocked_all:
-                record_blocked_plates(
-                    blocked_all,
-                    suffix,
-                    operator_name=operator_name or "Operator",
-                    scanned_by=dispatched_by,
-                    plate_category=category,
-                    bond_code=b_code,
-                )
-            docket = get_stock_transfer_request_docket(suffix, blocked_plates=blocked_all)
+        # If all plates are already installed on existing bikes, block re-dispatch
+        if already_installed and not verified_plates and not rejected_not_on_stock:
+            err_msg = f"Kits already installed on other orders ({len(already_installed)}): {', '.join(already_installed)}"
+            record_blocked_plates(
+                already_installed,
+                suffix,
+                operator_name=operator_name or "Operator",
+                scanned_by=dispatched_by,
+                plate_category=category,
+                bond_code=b_code,
+            )
+            docket = get_stock_transfer_request_docket(suffix, blocked_plates=already_installed)
             return {
                 "success": False,
                 "error": err_msg,
                 "rejected_not_on_stock": rejected_not_on_stock,
                 "already_installed": already_installed,
-                "blocked_plates": blocked_all,
+                "blocked_plates": already_installed,
                 "verified_plates": [],
                 "synced_from_itms": [],
                 "total_submitted": len(clean_plates) + dup_count,
@@ -583,6 +576,9 @@ def record_dispatch_scans(
                 "stock_readiness": readiness,
                 "docket": docket,
             }
+
+    # All target plates to issue to floor: clean plates excluding already installed
+    all_target_plates = [p for p in clean_plates if p not in already_installed]
 
     # Commit dispatch scans with SQLite lock retry resilience before running reconciliation
     from django.db import OperationalError
@@ -598,20 +594,39 @@ def record_dispatch_scans(
                         get_kits_matching_plates_q(verified_plates),
                     ).update(status="Dispatched")
 
+                # Auto-create provisional InstallationKit for physical dispatches awaiting ITMS inbound
+                for p in rejected_not_on_stock:
+                    if not InstallationKit.objects.filter(get_kits_matching_plates_q([p])).exists():
+                        try:
+                            InstallationKit.objects.create(
+                                registration_number=p,
+                                kit_code=f"IK-{p}",
+                                warehouse=active_bond.get("name", "AGM SPIRO"),
+                                status="Dispatched",
+                                notes="[DISPATCHED_NOT_ON_STOCK: Awaiting ITMS Stock Inbound]",
+                            )
+                        except Exception as ik_err:
+                            logger.debug("Provisional kit creation notice for %s: %s", p, ik_err)
+
                 existing_rows = list(
                     StockDispatchScan.objects.filter(
-                        work_date_suffix=suffix,
-                        registration_number__in=verified_plates,
+                        Q(work_date_suffix=suffix) | Q(work_date_suffix=target_date_suffix) | Q(work_date=work_d),
+                        registration_number__in=all_target_plates,
                     )
                 )
+                # Overwrite system auto-generated records with operator ground-truth credentials
                 staged_rows = [
                     r for r in existing_rows
                     if (r.notes or "").strip() in (AUTO_INSPECT_STAGED_NOTE, AUTO_ORDER_DISPATCH_NOTE)
+                    or (r.operator_name or "").strip() in ("System", "System Auto-Sync")
+                    or r.dispatched_by is None
                 ]
                 confirmed_existing = {
                     r.registration_number
                     for r in existing_rows
                     if (r.notes or "").strip() not in (AUTO_INSPECT_STAGED_NOTE, AUTO_ORDER_DISPATCH_NOTE)
+                    and (r.operator_name or "").strip() not in ("System", "System Auto-Sync")
+                    and r.dispatched_by is not None
                 }
                 staged_plates = {r.registration_number for r in staged_rows}
 
@@ -622,14 +637,18 @@ def record_dispatch_scans(
                         plate_category=category,
                         dispatched_by=dispatched_by,
                         operator_name=operator_name or "Operator",
-                        notes=notes or "",
+                        notes=notes or "Verified physical dispatch by operator (Pasted from Excel)",
                     )
                     promoted_count = len(staged_rows)
 
                 existing_dispatches = confirmed_existing
                 new_scans = []
-                for p in verified_plates:
+                for p in all_target_plates:
                     if p not in confirmed_existing and p not in staged_plates:
+                        is_unstocked = p in rejected_not_on_stock
+                        scan_note = notes or ""
+                        if is_unstocked:
+                            scan_note = (scan_note + " [DISPATCHED_NOT_ON_STOCK]").strip()
                         new_scans.append(
                             StockDispatchScan(
                                 registration_number=p,
@@ -640,7 +659,7 @@ def record_dispatch_scans(
                                 dispatched_by=dispatched_by,
                                 operator_name=operator_name or "Operator",
                                 status=StockDispatchScan.Status.ON_LINE_ACTIVE,
-                                notes=notes or "",
+                                notes=scan_note,
                             )
                         )
 
@@ -2417,24 +2436,65 @@ def resolve_transferred_blocked_plates(
         orders_q = Q()
         for p in current_blocked:
             sp = format_display_plate(p)
+            c_p = normalizer.canonicalize(p)
             orders_q |= Q(registration_number__iexact=p)
             if sp and sp != p:
                 orders_q |= Q(registration_number__iexact=sp)
+            if c_p and c_p != p:
+                orders_q |= Q(registration_number__iexact=c_p)
         if orders_q:
             for reg in InstallationOrder.objects.filter(orders_q).values_list("registration_number", flat=True):
                 if reg:
                     order_plates_canon.add(normalizer.canonicalize(reg))
-    except Exception:
-        pass
+    except Exception as e_ord:
+        logger.debug("Notice querying orders for blocked plates: %s", e_ord)
+
+    # 2. Check if any blocked plate has an approved/submitted VehicleInstallationPair
+    pair_plates_canon: Set[str] = set()
+    try:
+        pairs_q = Q()
+        for p in current_blocked:
+            sp = format_display_plate(p)
+            c_p = normalizer.canonicalize(p)
+            pairs_q |= Q(registration_number_detected__iexact=p) | Q(manual_plate_override__iexact=p)
+            if sp and sp != p:
+                pairs_q |= Q(registration_number_detected__iexact=sp) | Q(manual_plate_override__iexact=sp)
+            if c_p and c_p != p:
+                pairs_q |= Q(registration_number_detected__iexact=c_p) | Q(manual_plate_override__iexact=c_p)
+        if pairs_q:
+            for reg in VehicleInstallationPair.objects.filter(is_deleted=False).filter(pairs_q).filter(
+                Q(verification_status__in=[VehicleInstallationPair.VerificationStatus.SUBMITTED, VehicleInstallationPair.VerificationStatus.APPROVED])
+                | Q(order__isnull=False)
+            ).values_list("registration_number_detected", flat=True):
+                if reg:
+                    pair_plates_canon.add(normalizer.canonicalize(reg))
+    except Exception as e_pair:
+        logger.debug("Notice querying pairs for blocked plates: %s", e_pair)
+
+    # 3. Check local synced InstallationKit records
+    kit_plates_canon: Set[str] = set()
+    try:
+        for k in InstallationKit.objects.filter(get_kits_matching_plates_q(current_blocked)):
+            if (k.status or "").lower() in ("new", "dispatched", "allocated", "installed", "archived"):
+                kit_plates_canon.add(normalizer.canonicalize(k.registration_number))
+    except Exception as e_kit:
+        logger.debug("Notice querying kits for blocked plates: %s", e_kit)
+
+    local_resolved = order_plates_canon | pair_plates_canon | kit_plates_canon
 
     from core.services import kit_provisioning_service
-    allow_live = bool(check_itms_live and len(current_blocked) <= 200)
-    verify_res = kit_provisioning_service.verify_scanned_kits_stock(
-        current_blocked,
-        check_itms_live=allow_live,
-        max_live_itms_queries=200,
-    )
-    now_in_stock = set(parse_plate_input(verify_res.get("verified_plates", []))) | order_plates_canon
+    live_verified: Set[str] = set()
+    if check_itms_live and current_blocked:
+        remaining_to_check = [p for p in current_blocked if normalizer.canonicalize(p) not in local_resolved]
+        if remaining_to_check and len(remaining_to_check) <= 100:
+            verify_res = kit_provisioning_service.verify_scanned_kits_stock(
+                remaining_to_check,
+                check_itms_live=True,
+                max_live_itms_queries=100,
+            )
+            live_verified = set(parse_plate_input(verify_res.get("verified_plates", [])))
+
+    now_in_stock = local_resolved | live_verified
     if not now_in_stock:
         return {
             "work_date_suffix": suffix,
@@ -2541,12 +2601,15 @@ def _classify_docket_item(
     if p in installed_orders or (kit and (kit.status or "").lower() in ("installed", "archived")):
         status = "ALREADY_INSTALLED"
         item_reason = "Already installed / archived on an order"
+        action = "Pruned (Installed / Closed)"
     elif kit and (kit.status or "").lower() == "new":
         status = "AWAITING_ALLOCATION"
         item_reason = f"Kit exists in {kit.warehouse or 'Safe Room'} - awaiting MVR allocation"
+        action = "Ready for MVR Allocation"
     else:
         status = "NOT_ON_STOCK"
         item_reason = default_reason
+        action = "Request Inbound / Stock Transfer"
 
     return {
         "index": idx,
@@ -2554,7 +2617,7 @@ def _classify_docket_item(
         "category": category,
         "status": status,
         "reason": item_reason,
-        "action": "Set Box Aside",
+        "action": action,
     }
 
 
@@ -2637,13 +2700,30 @@ def get_stock_transfer_request_docket(
     installed_orders = set(
         InstallationOrder.objects.filter(
             registration_number__in=clean_plates,
-        ).filter(Q(is_archived=True) | Q(order_status__iexact="Installed")).values_list("registration_number", flat=True)
+        ).filter(Q(is_archived=True) | Q(order_status__iexact="Installed") | Q(status=InstallationOrder.Status.INSTALLED)).values_list("registration_number", flat=True)
     )
+    pair_installed = set(
+        VehicleInstallationPair.objects.filter(
+            is_deleted=False,
+            verification_status=VehicleInstallationPair.VerificationStatus.SUBMITTED,
+            registration_number_detected__in=clean_plates,
+        ).values_list("registration_number_detected", flat=True)
+    )
+    installed_all = installed_orders | pair_installed
 
     items = []
     for idx, p in enumerate(clean_plates, start=1):
         kit = known_kits.get(p) or known_kits.get(f"IK-{p}")
-        items.append(_classify_docket_item(idx, p, kit, installed_orders, reason))
+        items.append(_classify_docket_item(idx, p, kit, installed_all, reason))
+
+    # Auto-prune any plates that are ALREADY_INSTALLED so they never linger in StockBlockedScan
+    installed_to_prune = [item["plate"] for item in items if item["status"] == "ALREADY_INSTALLED"]
+    if installed_to_prune:
+        remove_blocked_plates(installed_to_prune, target_date_suffix=suffix)
+        items = [item for item in items if item["status"] != "ALREADY_INSTALLED"]
+        clean_plates = [p for p in clean_plates if p not in installed_to_prune]
+        for idx, item in enumerate(items, start=1):
+            item["index"] = idx
 
     raw_plates = "\n".join(clean_plates)
     count = len(clean_plates)

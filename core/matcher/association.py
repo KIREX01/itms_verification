@@ -133,17 +133,62 @@ from typing import Optional
 
 
 def _plate_similarity(p1: str, p2: str) -> float:
-    """Returns character similarity between two plates (0.0 to 1.0)."""
+    """Returns character similarity between two plates (0.0 to 1.0).
+
+    Strict Guardrails:
+    1. If both strings are valid complete plates (or canonicalized Ugandan plates)
+       and are not equal (e.g. UMA496QV vs UMA496QW), they belong to TWO DIFFERENT
+       vehicles. Similarity MUST be 0.0 to prevent cross-pairing sibling series plates.
+    2. If both plates contain numeric digits, and their digits differ (e.g. 496 vs 497),
+       similarity MUST be 0.0.
+    3. If both plates share the same numeric digits (e.g. 496) but their letter suffixes
+       differ (e.g. QV vs QW), they are sibling series plates, NOT an OCR mistake!
+       Similarity MUST be 0.0.
+    4. Two plates are only similar (>0.0) if one is an OCR confusable/noisy corruption
+       of the other, or they canonicalize to the identical plate string.
+    """
     if not p1 or not p2:
         return 0.0
     p1_clean = "".join(c for c in p1.upper() if c.isalnum())
     p2_clean = "".join(c for c in p2.upper() if c.isalnum())
     if p1_clean == p2_clean:
         return 1.0
+
+    from core.vision import normalizer
+
+    # 1. If both are valid Ugandan plates and differ, they are distinct physical vehicles
+    if normalizer.is_valid_plate(p1_clean) and normalizer.is_valid_plate(p2_clean):
+        return 0.0
+
+    # 2. Positional normalization comparison (e.g. OCR read 0 as O or 8 as B in letter/digit slots)
+    norm1 = normalizer.normalize_plate(p1_clean)
+    norm2 = normalizer.normalize_plate(p2_clean)
+    if norm1.get("canonical") and norm2.get("canonical"):
+        if norm1["canonical"] == norm2["canonical"]:
+            return 0.98
+
+    # 3. Numeric sequence & sibling suffix comparison
+    import re
+    d1_match = re.findall(r"\d+", p1_clean)
+    d2_match = re.findall(r"\d+", p2_clean)
+    if d1_match and d2_match:
+        digits1 = "".join(d1_match)
+        digits2 = "".join(d2_match)
+        # If numbers differ completely (e.g. 496 vs 497), never pair
+        if digits1 != digits2:
+            return 0.0
+        # If numbers are identical (e.g. both '496')
+        # Check suffixes: if both have trailing letters and they differ, they are sibling plates!
+        sfx1 = re.sub(r"^\D*\d+", "", p1_clean)
+        sfx2 = re.sub(r"^\D*\d+", "", p2_clean)
+        if sfx1 and sfx2 and sfx1 != sfx2:
+            return 0.0
+
     # Guard against short prefixes (like 'UMA') matching every plate via substring
-    if (p1_clean in p2_clean or p2_clean in p1_clean) and min(len(p1_clean), len(p2_clean)) >= 6:
+    if (p1_clean in p2_clean or p2_clean in p1_clean) and min(len(p1_clean), len(p2_clean)) >= 7:
         return 0.85
-    return SequenceMatcher(None, p1_clean, p2_clean).ratio()
+    ratio = SequenceMatcher(None, p1_clean, p2_clean).ratio()
+    return ratio if ratio < 0.85 else 0.0
 
 
 def _clean_stem_name(path_str: str) -> str:

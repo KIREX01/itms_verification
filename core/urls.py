@@ -109,6 +109,7 @@ urlpatterns = [
     path("api/stock/export/category/<str:category>/", views.api_stock_export_category_csv, name="api_stock_export_category_csv"),
     path("api/stock/delivery-notes/", views.api_stock_delivery_notes, name="api_stock_delivery_notes"),
     path("api/stock/mvr-docket/", views.api_stock_mvr_docket, name="api_stock_mvr_docket"),
+    path("api/stock/unallocated/", views.api_stock_unallocated, name="api_stock_unallocated"),
     path("api/stock/blocked-plates/", views.api_stock_blocked_plates, name="api_stock_blocked_plates"),
     path("api/stock/verify-batch/", views.api_stock_verify_batch, name="api_stock_verify_batch"),
     path("api/stock/kits/sync/", views.api_stock_kits_sync, name="api_stock_kits_sync"),

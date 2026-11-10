@@ -618,3 +618,55 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
   3. **Dynamic Sorting & Database Catalog (`core/services/bond_service.py` & `core/services/itms_web_client.py`)**:
      - Removed hardcoded AGM overrides in `fetch_warehouses_from_itms()` and `get_all_discovered_warehouses()`.
      - Sorts the user's active operating bond to the top dynamically.
+
+
+---
+
+## 8. Feature: Sibling Collision Prevention, Pasted Dispatch Ground Truth & Dual Unallocated Tracking - [COMPLETED]
+
+### 8.1 Sibling Series Collision Prevention (`UMA496QV` vs `UMA496QW`) - `COMPLETED`
+- **Core Problem Addressed**: When plates in sequential manufacturing batches differ by suffix letter but share identical numeric digits (e.g. `UMA496QV` vs `UMA496QW`), `_plate_similarity` evaluated to 87.5% similarity (14/16 chars) and paired front photos of one bike with rear photos of its sibling.
+- **Architectural Enhancements**:
+  1. **Strict Anchor Plate Similarity Guard (`core/matcher/association.py:_plate_similarity`)**:
+     - If both strings are valid complete Ugandan plates (via `normalizer.is_valid_plate`) and not equal: similarity is strictly `0.0`.
+     - If both plates share numeric digits (e.g. `496`), but suffix letters differ (e.g. `QV` vs `QW`), similarity is strictly `0.0`.
+     - Completely prevents fuzzy pairing between two different valid vehicles in Tier 2 and trajectory matching.
+  2. **Sibling Collision Detection Service (`core/services/sibling_detector.py`)**:
+     - `detect_sibling_collision(plate, account_email, exclude_order_id, exclude_pair_id)`: Extracts 3-4 digit core (`496`). Searches active `InstallationOrder`, `StockDispatchScan`, and `VehicleInstallationPair` sharing those digits.
+     - Returns `has_sibling_collision=True`, `sibling_plates=[...]`, `requires_confirmation=True`.
+  3. **Pair Action Confirmation Enforcer (`core/views/pairs.py:api_pair_action`)**:
+     - On `link_order` and `edit_plate`: If sibling collision is detected and `confirm_sibling != True`, returns HTTP 200 with `requires_confirmation: True`, warning the operator to inspect photos before confirming.
+     - When `confirm_sibling: True` is supplied, proceeds and appends `[SIBLING_OVERRIDE_CONFIRMED: UMA496QW]` to `pair.operator_note` and audit log.
+
+### 8.2 Excel Pasted Dispatches Ground Truth & Auto-Generated Overwrite - `COMPLETED`
+- **Core Problem Addressed**: When operators pasted plates from Excel sheets into the dispatch modal, plates not yet in ITMS stock were blocked as "SET ASIDE in safe room" even though they were already physically on assembly floor bikes. Furthermore, auto-generated dispatches from orders weren't overwritten with operator credentials when pasted late.
+- **Architectural Enhancements**:
+  1. **Non-Blocking Physical Dispatch Ingress (`core/services/stock_monitoring_service.py:record_dispatch_scans`)**:
+     - All clean submitted plates are recorded in `StockDispatchScan` (`all_target_plates`).
+     - Plates not yet on ITMS stock are flagged as `[DISPATCHED_NOT_ON_STOCK]` with provisional `InstallationKit` created for floor tracking, without blocking the shift or requiring physical set-aside.
+     - Background stock enrichment monitors ITMS to auto-resolve them as soon as central depot inbounds them.
+  2. **Operator Provenance Overwrite (`record_dispatch_scans`)**:
+     - When an operator pastes or scans plates, any existing `StockDispatchScan` marked with `AUTO_ORDER_DISPATCH_NOTE` or operator `"System"` / `"System Auto-Sync"` is strictly **OVERWRITTEN** with the operator's username, user object, timestamp, and verification note. Operator physical handling is the ultimate source of truth.
+
+### 8.3 Dual-Category Unallocated Kit Tracking - `COMPLETED`
+- **Core Problem Addressed**: All unallocated floor kits were previously bundled together without distinguishing between kits missing from ITMS stock vs kits skipped by MVR officers.
+- **Architectural Enhancements**:
+  1. **Domain Service Categorization (`core/services/kit_unallocation_service.py:get_unallocated_kits`)**:
+     - Evaluates all unallocated plates against `InstallationKit` and dispatch metadata:
+       - **Category A: `NOT_ON_STOCK` (Awaiting ITMS Inbound)**: Dispatched by operator, but absent from ITMS database. MVR cannot allocate it because ITMS doesn't show it. Action: Request inbound from Central Depot.
+       - **Category B: `SKIPPED_BY_MVR` (Pending Order Allocation)**: Confirmed in safe-room stock, but missing from orders and archives. Action: MVR officer must allocate order.
+  2. **Actionable MVR Docket & REST Endpoint (`core/views/bond.py:api_stock_unallocated`)**:
+     - `GET /api/stock/unallocated/?date_suffix=<suffix>` returns structured JSON with counts, plates, and metadata for both categories.
+     - Supports `?format=csv` for direct CSV download.
+     - `api_stock_mvr_docket` formats separate Category A and Category B sections in the formal text docket.
+
+### 8.4 Stock Modal Open Performance (<50ms) & Dynamic Status Pruning - `COMPLETED`
+- **Core Problem Addressed**: Opening the stock modal took 15–30 seconds because `api_stock_blocked_plates` ran synchronous HTTP scraping requests against ITMS on every GET request. Furthermore, kits previously marked "not on stock / set aside" still displayed as "Set Box Aside" even when already installed or archived on an order.
+- **Architectural Enhancements**:
+  1. **Instant GET Response & Background Live Scrape (`core/views/bond.py:api_stock_blocked_plates`)**:
+     - Removed synchronous live web scraping from standard GET calls. Local DB resolution runs in < 5ms.
+     - If `recheck=1` is passed, the live ITMS query runs in a background worker thread (`live_sync_in_progress=True`) without freezing the UI.
+  2. **Dynamic Installed/Archived Pruning (`stock_monitoring_service.py:resolve_transferred_blocked_plates` & `_classify_docket_item`)**:
+     - Checks `InstallationOrder` (installed/archived) and `VehicleInstallationPair` (submitted).
+     - Automatically removes/prunes installed plates from `StockBlockedScan`.
+     - In docket items, updates status dynamically to `Pruned (Installed / Closed)` instead of `Set Box Aside`.

@@ -733,10 +733,10 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
      - Outer container and cards set to pure white (`#ffffff`) with subtle cool-gray table zebra striping (`#f8fafc`) and slate borders (`#e2e8f0`).
      - Deep slate typography (`#0f172a`, `#334155`, `#64748b`) ensures 100% legibility in Outlook, Gmail, and Apple Mail without color wash issues.
      - Subtle 3px top accent bar (`_render_accent_line`) replaces national ribbon.
-  2. **Strict Prototype Identity ("Copilot" Only)**:
-     - Sender display name configured strictly as `Copilot <notifications@info.kirex.online>`.
-     - All references to "Ministry of Works", "ITMS", and government disclaimers removed to avoid miscommunication during prototype trials.
-     - Minimalist footer: "Copilot • Automated Prototype Transmission".
+  2. **Brand & Identity Standards**:
+     - Sender display name configured as `CLOSE Copilot <notifications@info.kirex.online>`.
+     - Stock report subject line formatted according to operational purpose: `Daily Report for {bond_name} - {report_date}` (e.g. `Daily Report for AGM / SPIRO - 10.11.2026`).
+     - Minimalist footer: "CLOSE Copilot • Operational Shift Summary • Automated Transmission".
   3. **Executive Daily Stock Reconciliation Report Email (`send_stock_reconciliation_report_email`)**:
      - **Direct to the Point**: Header immediately presents bond name, shift suffix, and date.
      - **4-Card Executive KPI Stat Grid**: Opening Stock, Inbound Received, Kits Installed, and Closing Stock.
@@ -747,4 +747,31 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
      - `send_2fa_verification_code`: Clean white card, 36px monospace OTP digits, 10-minute expiry badge, 1-click verify button, and concise ignore notice.
      - `send_access_request_admin_alert`: Clean white alert card with device/IP table, activation code, and 1-click approval button.
      - `send_access_activated_email`: Clean white invitation card with activation code and direct portal link.
+
+---
+
+## 11. Feature: Batches Shift Date Scoping & Quick Install Order Resolution - [COMPLETED]
+
+### 11.1 Batches List Date Filtering Endpoint (`GET /api/batches/`)
+- **File**: `core/views/upload.py:api_batches_list`
+- **Enhancement**:
+  - Accepts `?date=<suffix>` (e.g., `101126`), `?date=<YYYY-MM-DD>`, or `?target_date=...`.
+  - Normalizes date using `date_service.parse_date_input(...)`.
+  - When a date parameter is supplied, strictly filters batches by that operating shift day (`qs = qs.filter(created_at__date=target_date)`).
+  - Returns `target_date` and `date_suffix` in JSON payload for synchronized UI tab scoping.
+
+### 11.2 Orders List & Search Envelope Decoupling (`GET /api/orders/`)
+- **File**: `core/views/orders.py:api_orders_list`
+- **Enhancement**:
+  - Decorated with `@require_itms_envelope(allow_expired=True, allow_unlinked=True)`.
+  - Allows Quick Install autocomplete and yard searches to operate seamlessly even when ITMS credentials are unlinked or expired.
+  - Prioritizes exact matches on plate or order number, then prefix matches.
+
+### 11.3 Quick Install Stock-Kit Order Auto-Provisioning (`POST /api/orders/<order_ident>/install/`)
+- **File**: `core/views/orders.py:api_itms_order_install`
+- **Enhancement**:
+  - If a plate or order identifier is not found in the local database or live ITMS explorer, checks `InstallationKit` records.
+  - Automatically provisions the `InstallationOrder` using safe-room hardware serials (`front_plate`, `rear_plate`, `gps_tracker`).
+  - Allows operators to search any plate on stock in Quick Install, attach photos, and finalize installation in a single step.
+
 

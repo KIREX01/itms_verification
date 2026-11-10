@@ -373,8 +373,19 @@ def api_batches_list(request: HttpRequest) -> JsonResponse:
     if not (request.user and getattr(request.user, "is_authenticated", False)):
         return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
 
-    today = timezone.localdate()
-    scope = request.GET.get("scope", "TODAY").upper().strip()
+    from core.services import date_service
+    date_param = (
+        request.GET.get("date")
+        or request.GET.get("date_suffix")
+        or request.GET.get("suffix")
+        or request.GET.get("target_date")
+    )
+    target_date = None
+    if date_param and str(date_param).strip().upper() not in ("ALL", ""):
+        target_date = date_service.parse_date_input(date_param)
+
+    today = target_date or date_service.today_kampala()
+    scope = request.GET.get("scope", "DATE" if target_date else "TODAY").upper().strip()
 
     qs = IngestionBatch.objects.all().order_by("-created_at")
     envelope = getattr(request, "envelope", None)
@@ -391,7 +402,9 @@ def api_batches_list(request: HttpRequest) -> JsonResponse:
     today_batches_cnt = qs.filter(created_at__date=today).count()
     carryover_batches_cnt = qs.exclude(created_at__date=today).count()
 
-    if scope == "TODAY":
+    if target_date:
+        qs = qs.filter(created_at__date=target_date)
+    elif scope == "TODAY":
         qs = qs.filter(created_at__date=today)
     elif scope == "ACTIVE_BATCH" and latest_batch:
         qs = qs.filter(id=latest_batch.id)
@@ -415,10 +428,13 @@ def api_batches_list(request: HttpRequest) -> JsonResponse:
         }
         for b in qs[:60]
     ]
+    date_suffix = date_service.format_date_suffix(today) if today else ""
     return JsonResponse({
         "success": True,
         "batches": batches,
         "scope": scope,
+        "target_date": today.isoformat() if today else None,
+        "date_suffix": date_suffix,
         "latest_batch_id": latest_batch.batch_id if latest_batch else None,
         "total_batches": total_batches,
         "today_batches": today_batches_cnt,

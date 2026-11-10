@@ -41,21 +41,21 @@ def get_resend_api_key() -> str:
 
 def get_resend_from_email() -> str:
     """
-    Retrieves sender email address formatted as 'Copilot <email>'.
-    Ensures clean Copilot branding without external agency or project prefixes.
+    Retrieves sender email address formatted as 'CLOSE Copilot <email>'.
+    Ensures clean CLOSE Copilot branding without external agency or government claims.
     """
     raw_from = getattr(settings, "RESEND_FROM_EMAIL", "") or os.environ.get("RESEND_FROM_EMAIL", "")
     raw_from = raw_from.strip()
     if not raw_from:
-        return "Copilot <notifications@info.kirex.online>"
+        return "CLOSE Copilot <notifications@info.kirex.online>"
     # Upgrade legacy addresses if present
     if "auth@info.kirex.online" in raw_from:
         raw_from = raw_from.replace("auth@info.kirex.online", "notifications@info.kirex.online")
-    # If already formatted with brackets, extract the email part and enforce "Copilot" name
+    # If already formatted with brackets, extract the email part and enforce "CLOSE Copilot" name
     if "<" in raw_from and ">" in raw_from:
         email_part = raw_from[raw_from.find("<") : raw_from.find(">") + 1]
-        return f"Copilot {email_part}"
-    return f"Copilot <{raw_from}>"
+        return f"CLOSE Copilot {email_part}"
+    return f"CLOSE Copilot <{raw_from}>"
 
 
 # -----------------------------------------------------------------------------
@@ -117,10 +117,10 @@ def _render_email_footer(extra_disclaimer: str = "") -> str:
           <tr>
             <td align="center">
               <div style="font-weight:700; color:#334155; font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">
-                Copilot
+                CLOSE Copilot
               </div>
               <div style="font-size:11px; color:#64748b; margin-top:2px;">
-                Automated Prototype Transmission
+                Operational Shift Summary &bull; Automated Transmission
               </div>
               {disclaimer_html}
             </td>
@@ -565,7 +565,8 @@ def send_stock_reconciliation_report_email(
         )
         return True, f"Simulated report generated for {len(clean_recipients)} recipient(s).", clean_recipients
 
-    subject = f"Copilot: Daily Stock Report - {report_date}"
+    bond_label = bond_name or "AGM / SPIRO"
+    subject = f"Daily Report for {bond_label} - {report_date}"
 
     payload = {
         "from": from_email,

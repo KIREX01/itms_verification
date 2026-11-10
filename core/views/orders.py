@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 @require_GET
-@require_itms_envelope
+@require_itms_envelope(allow_expired=True, allow_unlinked=True)
 def api_orders_list(request: HttpRequest) -> JsonResponse:
     """Returns list of installation orders for search / manual linking dropdowns."""
     search = request.GET.get("search", "").strip()
@@ -1219,6 +1219,32 @@ def api_itms_order_install(request: HttpRequest, order_ident: str) -> JsonRespon
                 )
         except Exception as exc:
             logger.warning("Error fetching live order info for '%s': %s", order_ident, exc)
+
+    if not order:
+        try:
+            from core.models import InstallationKit
+            from core.services import date_service
+            clean_reg = normalizer.canonicalize(order_ident) or order_ident.replace(" ", "").upper()
+            kit = InstallationKit.objects.filter(
+                Q(registration_number__iexact=order_ident) |
+                Q(registration_number__iexact=clean_reg) |
+                Q(kit_code__icontains=clean_reg)
+            ).first()
+            if kit:
+                sfx = date_service.format_date_suffix(date_service.today_kampala())
+                order_num = f"PO-{kit.registration_number}-{sfx}"
+                order, _ = InstallationOrder.objects.get_or_create(
+                    order_number=order_num,
+                    defaults={
+                        "registration_number": kit.registration_number,
+                        "front_plate_serial": kit.front_plate or "",
+                        "rear_plate_serial": kit.rear_plate or "",
+                        "gps_tracker_id": kit.gps_tracker or kit.front_tracker or kit.rear_tracker or "",
+                        "warehouse_name": "AGM / SPIRO",
+                    }
+                )
+        except Exception as kit_err:
+            logger.debug("Could not resolve kit for quick order: %s", kit_err)
 
     if not order:
         return JsonResponse({"success": False, "error": f"Order '{order_ident}' was not found in the local registry or ITMS."}, status=404)

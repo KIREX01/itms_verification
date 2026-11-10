@@ -1750,3 +1750,79 @@ The Backend & DevOps team has completed and verified the core backend services, 
      - Read `lastReconData.returned_count` or `lastReconData.total.returned` and populate `edit-ledger-returned`.
    - In `submitEditLedger()`:
      - Include `returned_count: optInt('edit-ledger-returned')` in the JSON payload sent to `/api/stock/ledger/entry/`.
+
+---
+
+## 25. Feature: Mobile Companion Stability (IndexedDB), Shutter Auto-Switch, Calendar Date Selector & Quick Install UI
+
+### 25.1 Mobile Companion: Off-Conveyor Camera Shutter Auto-Switch
+- **Files**:
+  - `core/templates/core/mobile_companion.html`
+  - `core/static/core/js/mobile_companion.js`
+- **Identified Issue**:
+  - When starting off-conveyor walks with FRONT first (`startLeg === "FRONT"`), the camera shutter button does not switch to REAR, and tapping the road steps uses blocking browser `confirm()` calls that mobile browsers often suppress.
+- **Frontend Action Items**:
+  1. In `safeSwitchLeg(targetLeg)` and `confirmTurnaround()`:
+     - Remove blocking native `confirm(...)` modal dialogs which mobile Chrome suppresses.
+     - Replace with instant switch + vibrating haptic feedback (`navigator.vibrate([60])`) and toast notification (`showMobileToast("Switched to snapping REARS")`).
+  2. In `applyUturnPhaseUI(phase)`:
+     - Ensure the primary shutter button (`#btn-big-shutter`) updates its title and styling dynamically to `Snap Rear #...` immediately upon switching phase from FRONT.
+
+### 25.2 Mobile Companion: Low-Memory Crash Prevention (Persistent IndexedDB)
+- **Files**:
+  - `core/static/core/js/mobile_companion.js`
+- **Identified Issue**:
+  - Snapping 40–80 high-resolution photos in memory fills JavaScript heap and crashes low-RAM mobile browsers when receiving push notifications or backgrounding.
+- **Frontend Action Items**:
+  1. **Zero-In-Memory-Blobs Architecture**:
+     - Do NOT hold full `File` or `Blob` objects or large Base64 DataURLs in global arrays (`MobileState.uturn.recentTiles`, `MobileOrderState`).
+     - Immediately save captured Blobs to IndexedDB store (`STORE_NAME = "outbox_queue"`).
+     - Store only lightweight metadata in memory: `{ id, orientation, seqNum, timestamp }`.
+  2. **On-Demand Inspection**:
+     - When an operator taps a preview tile to open `photo-lightbox-modal`, load the photo Blob on-demand from IndexedDB by `id` using `URL.createObjectURL(blob)`.
+     - Call `URL.revokeObjectURL()` upon closing the inspector.
+  3. **Auto-Purge on Server Confirmation**:
+     - When the background sync worker drains the outbox and receives HTTP 200 `{ success: true, ... }` from `/api/mobile/upload/`, delete the item from IndexedDB immediately to free device storage.
+
+### 25.3 Global Shift Date Selector: Modern Calendar Module
+- **Files**:
+  - `core/templates/core/base.html`
+  - `core/static/core/js/pipeline.js`
+- **Identified Issue**:
+  - The legacy `<select>` dropdown feels dated and does not allow selecting arbitrary dates easily.
+- **Frontend Action Items**:
+  1. In `core/templates/core/base.html` (`.drawer-shift-box` and header):
+     - Replace or supplement the `<select>` dropdown with an interactive `<input type="date" class="header-shift-datepicker">` matching the design in Settings under Shift Data (`#settings-manual-date-picker`).
+  2. In `core/static/core/js/pipeline.js`:
+     - Bind date picker `onchange` to `window.setGlobalShiftDate(this.value)`.
+     - Ensure all components update when `shiftDateChanged` event fires.
+
+### 25.4 Batches Tab: Global Shift Date Scoping
+- **Files**:
+  - `core/static/core/js/tab_batches.js`
+  - `core/static/core/js/pipeline.js`
+- **Identified Issue**:
+  - The Batches tab ignores the active operating shift date and only loads today's batches.
+- **Backend Contract Added**:
+  - `GET /api/batches/?date=<suffix>` or `GET /api/batches/?date=<YYYY-MM-DD>` strictly filters batches for that selected shift date and returns `{ success: true, batches: [...], target_date: "...", date_suffix: "..." }`.
+- **Frontend Action Items**:
+  1. In `tab_batches.js:loadBatchesList()`:
+     - Pass the active shift date: `fetch('/api/batches/?date=' + encodeURIComponent(currentShiftDate))`.
+  2. In `pipeline.js:setGlobalShiftDate()`:
+     - Trigger batch reload: `if (typeof loadBatchesList === "function") { loadBatchesList(); }`.
+
+### 25.5 Quick Install: Instant Search & Submission Flow
+- **Files**:
+  - `core/templates/core/mobile_companion.html`
+  - `core/static/core/js/mobile_companion.js`
+- **Backend Endpoints Verified**:
+  - `GET /api/orders/?search=<query>&limit=10` (instant search by Order #, Registration Plate, or VIN).
+  - `POST /api/orders/<order_ident>/install/` (FormData: `action=submit`, `front_photo`, `rear_photo`, `front_plate_id`, `rear_plate_id`, `tracker_id`, `dry_run`).
+- **Frontend Action Items**:
+  1. In `mobile_companion.html`:
+     - Replace the bulky `<select id="m-order-picker-select">` with a fast search input `<input type="text" id="m-order-search-input" placeholder="Search Order # or Number Plate...">` with a debounced autocomplete list.
+     - Reduce repetitive instructions and card padding for a clean, single-screen layout.
+  2. In `mobile_companion.js`:
+     - Verify `submitMobileOrderInstall()` reads the selected order, attaches `front_photo` and `rear_photo` from the dropzone files, and submits via `POST /api/orders/${orderNumber}/install/`.
+     - On HTTP 200, update status badge to `INSTALLED`, show a confirmation toast, and reset form for the next order.
+

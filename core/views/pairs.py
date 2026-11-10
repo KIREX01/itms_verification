@@ -49,9 +49,9 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
     scope = request.GET.get("scope", "").upper().strip()
     search = request.GET.get("search", "").strip()
     try:
-        limit = max(1, min(1000, int(request.GET.get("limit", 250))))
+        limit = max(1, min(5000, int(request.GET.get("limit", 2500))))
     except (ValueError, TypeError):
-        limit = 250
+        limit = 2500
 
     latest_batch = IngestionBatch.objects.order_by("-created_at").first()
 

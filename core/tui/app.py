@@ -333,6 +333,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
                 self.query_one("#dashboard-pane", DashboardPane).refresh_dashboard()
             except Exception:
                 pass
+            self.reload_data()
             self._check_vault_startup()
         else:
             self.push_screen(LandingAuthScreen(), self._on_auth_completed)

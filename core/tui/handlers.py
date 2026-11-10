@@ -57,6 +57,25 @@ class NavigationHandlersMixin:
                     pass
             else:
                 activity.display = True
+                if pane_id == "tab-batches" and hasattr(self, "_reload_batches_table"):
+                    try:
+                        self._update_batches_scope_bar()
+                        self._reload_batches_table()
+                    except Exception:
+                        pass
+                elif pane_id == "tab-queue" and hasattr(self, "_reload_queue_table"):
+                    try:
+                        self._update_queue_scope_bar()
+                        self._reload_queue_table()
+                    except Exception:
+                        pass
+                elif pane_id == "tab-history" and hasattr(self, "_reload_history_table"):
+                    try:
+                        self._update_history_filter_bar()
+                        self._reload_history_table()
+                    except Exception:
+                        pass
+
                 target_focus_map = {
                     "tab-queue": "#table-queue",
                     "tab-history": "#table-history",

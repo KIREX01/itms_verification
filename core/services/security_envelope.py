@@ -149,10 +149,14 @@ def build_operator_envelope(request: HttpRequest) -> OperatorRequestEnvelope:
 def require_itms_envelope(
     view_func: Optional[Callable[..., HttpResponse]] = None,
     allow_expired: bool = False,
+    allow_unlinked: bool = False,
 ) -> Callable[..., HttpResponse]:
     """
     Decorator for views requiring an active, verified ITMS connection.
     Blocks unlinked and expired operators from accessing facility data.
+    When allow_expired=True, expired ITMS sessions are permitted to proceed.
+    When allow_unlinked=True, authenticated Copilot users who have not yet linked an
+    external ITMS account are permitted to proceed (useful for local warehouse/stock bookkeeping).
     """
     def decorator(func: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
         @functools.wraps(func)
@@ -175,7 +179,9 @@ def require_itms_envelope(
                         request=request,
                     )
 
-                if envelope.itms_auth_status == "EXPIRED" and not allow_expired:
+                if envelope.itms_auth_status == "EXPIRED":
+                    if allow_expired:
+                        return func(request, *args, **kwargs)
                     error = create_error_detail(
                         code="ITMS_SESSION_EXPIRED",
                         message="Your official ITMS session has expired. Please sign in to ITMS again in Tab 2.",
@@ -188,7 +194,29 @@ def require_itms_envelope(
                         request=request,
                     )
 
-                # UNLINKED / NOT LINKED
+                if envelope.itms_auth_status == "UNLINKED":
+                    if allow_unlinked:
+                        return func(request, *args, **kwargs)
+                    error = create_error_detail(
+                        code="ITMS_ACCOUNT_NOT_LINKED",
+                        message="Please connect your official ITMS account in Tab 2 to access orders and kits.",
+                        field="itms_session",
+                        details={
+                            "status": "UNLINKED",
+                            "facility_code": envelope.facility_code,
+                            "legacy_code": "ITMS_CONNECTION_REQUIRED",
+                        },
+                    )
+                    return format_api_response(
+                        errors=[error],
+                        status_code=412,
+                        request=request,
+                    )
+
+                # UNLINKED / NOT LINKED fallback
+                if allow_unlinked or (allow_expired and envelope.itms_auth_status == "EXPIRED"):
+                    return func(request, *args, **kwargs)
+
                 error = create_error_detail(
                     code="ITMS_ACCOUNT_NOT_LINKED",
                     message="Please connect your official ITMS account in Tab 2 to access orders and kits.",

@@ -1699,3 +1699,54 @@ The Backend & DevOps team has completed and verified the core backend services, 
   - If a plate was previously in `StockBlockedScan` ("Set Aside / Not on stock") but now appears in an installed/archived order or submitted vehicle pair:
     - Backend automatically prunes the record from the database.
     - Status dynamically displays as `Pruned (Installed / Closed)` rather than `Set Box Aside`.
+
+---
+
+## 24. Feature: Edit Ledger Modal Overrides & Returned Count Support
+
+### 24.1 Endpoint Contract: `POST /api/stock/ledger/entry/`
+- **Decorator Update**:
+  - Endpoint now allows expired or unlinked authenticated Copilot operators to save overrides without 412 or 401 error blocks (`allow_expired=True, allow_unlinked=True`).
+- **Supported Payload Fields**:
+  ```json
+  {
+    "target_date_suffix": "101126",
+    "storage_bond_name": "AGM / SPIRO",
+    "opening_balance_psv": 175,
+    "opening_balance_pmo": 0,
+    "kits_received_psv": 200,
+    "kits_received_pmo": 0,
+    "scheduled_psv": 320,
+    "scheduled_pmo": 0,
+    "scheduled_total": 320,
+    "kits_installed_psv": 319,
+    "kits_installed_pmo": 0,
+    "bond_transfer_in_psv": 0,
+    "bond_transfer_in_pmo": 0,
+    "bond_transfer_out_psv": 0,
+    "bond_transfer_out_pmo": 0,
+    "returned_count": 3,
+    "dispatched_count": 322,
+    "closing_balance_psv": 56,
+    "closing_balance_pmo": 0,
+    "closing_stock": 56,
+    "physical_count": 56,
+    "notes": "Reconciled daily shift: Opening 175, Received 200, Scheduled 320, Installed 319, Returned 03, Closing 56"
+  }
+  ```
+
+### 24.2 UI Recommendations for `modal-edit-ledger` (`core/templates/core/modals.html` & `tab_stock.js`)
+1. **Optional "Returned Kits" Row in Modal Table**:
+   - In `modal-edit-ledger`, add an input row for `Returned Kits`:
+     ```html
+     <tr>
+         <td style="font-weight:700; color:#ffffff !important;">Returned to Safe Room</td>
+         <td colspan="2"><input type="number" id="edit-ledger-returned" class="form-control" style="width:100%; text-align:center; font-family:var(--font-mono); font-weight:700; background:#0c1017; color:#ffffff; border:1px solid rgba(255,255,255,0.2);" placeholder="e.g. 3"></td>
+         <td id="edit-ledger-returned-total" style="text-align:center; font-family:var(--font-mono); font-weight:800; color:#ffffff !important;">0</td>
+     </tr>
+     ```
+2. **`tab_stock.js` Updates**:
+   - In `prefillEditLedgerFromCurrent()`:
+     - Read `lastReconData.returned_count` or `lastReconData.total.returned` and populate `edit-ledger-returned`.
+   - In `submitEditLedger()`:
+     - Include `returned_count: optInt('edit-ledger-returned')` in the JSON payload sent to `/api/stock/ledger/entry/`.

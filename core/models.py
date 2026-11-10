@@ -1128,6 +1128,10 @@ class DailyStockLedger(models.Model):
 
     physical_count = models.IntegerField(null=True, blank=True, help_text="Optional manual physical count audit")
     variance = models.IntegerField(default=0, help_text="Variance between physical count and closing stock")
+    override_opening = models.BooleanField(
+        default=False,
+        help_text="True if opening stock was manually entered/overridden rather than auto-carried from previous day closing",
+    )
     override_installed = models.BooleanField(
         default=False,
         help_text="True if installed count was manually entered/overridden rather than auto-counted from orders",
@@ -1139,6 +1143,10 @@ class DailyStockLedger(models.Model):
     override_transfers = models.BooleanField(
         default=False,
         help_text="True if bond transfers were manually entered rather than counted from scan transfers",
+    )
+    override_returned = models.BooleanField(
+        default=False,
+        help_text="True if returned count was manually entered/overridden rather than counted from scan returns",
     )
     override_closing = models.BooleanField(
         default=False,

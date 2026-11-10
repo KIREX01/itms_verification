@@ -670,3 +670,50 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
      - Checks `InstallationOrder` (installed/archived) and `VehicleInstallationPair` (submitted).
      - Automatically removes/prunes installed plates from `StockBlockedScan`.
      - In docket items, updates status dynamically to `Pruned (Installed / Closed)` instead of `Set Box Aside`.
+
+---
+
+## 9. Feature: Daily Stock Ledger Persistence & Unlinked/Expired Session Decoupling - [COMPLETED]
+
+### 9.1 Root Cause of Ledger Edit Inability
+- **Identified Issues**:
+  1. **Decorator Fallthrough in `@require_itms_envelope` (`core/services/security_envelope.py`)**:
+     - When `allow_expired=True` was used and `envelope.itms_auth_status == "EXPIRED"`, the decorator failed to return `func(request, *args, **kwargs)` and instead fell through to the `UNLINKED` block, returning HTTP 412 `ITMS_ACCOUNT_NOT_LINKED`!
+     - In addition, authenticated Copilot users who hadn't linked an ITMS technician account were blocked from internal safe-room bookkeeping (opening balance, inbound deliveries, scheduled targets, manual ledger edits).
+  2. **Auto-Carry Opening Balance Regression (`compute_daily_reconciliation`)**:
+     - `DailyStockLedger` lacked an `override_opening` boolean column in the schema.
+     - When an operator edited the ledger or saved an opening balance (e.g. 175 PSV), `compute_daily_reconciliation` immediately wiped out their opening balance and reset it to the previous day's closing balance (which was 0 or negative on the production server).
+  3. **Auto-Calculation Overwriting Manual Closing Overrides**:
+     - In `compute_daily_reconciliation`, lines 1581–1584 unconditionally calculated `closing_psv` and `total_closing` from orders, overwriting `ledger.closing_stock` even when `ledger.override_closing` was `True`.
+  4. **Missing `returned_count` in Ledger Overrides**:
+     - `update_ledger_entry` and `api_stock_ledger_entry` did not accept `returned_count` or `returned` parameters, preventing operators from entering returned plate counts (e.g. 3 public kits returned uninstalled).
+
+### 9.2 Architecture & Database Enhancements
+- **Files Modified**:
+  - `core/models.py`
+  - `core/migrations/0030_dailystockledger_override_opening_and_more.py`
+  - `core/services/security_envelope.py`
+  - `core/services/stock_monitoring_service.py`
+  - `core/views/bond.py`
+  - `core/tests/test_stock_monitoring.py`
+
+- **Key Fixes**:
+  1. **Decoupled Warehouse Stock Operations (`core/services/security_envelope.py`)**:
+     - Added `allow_unlinked: bool = False` to `require_itms_envelope`.
+     - Fixed the fallthrough: when `allow_expired=True` and status is `"EXPIRED"`, or `allow_unlinked=True` and status is `"UNLINKED"`, authenticated Copilot operators are permitted to proceed.
+     - Decorated all internal facility stock views (`api_stock_ledger_entry`, `api_stock_reconciliation`, `api_stock_opening`, `api_stock_scheduled`, `api_stock_delivery`, `api_stock_return`, `api_stock_bond_transfer`, `api_stock_physical_count`, `api_stock_shift_details`, `api_stock_inspect`, `api_stock_unallocated`, `api_stock_blocked_plates`, `api_stock_verify_batch`) with `allow_expired=True, allow_unlinked=True`.
+  2. **Schema & Model Fields (`core/models.py:DailyStockLedger`)**:
+     - Added `override_opening = models.BooleanField(default=False)`: locks manual opening balance and prevents previous-day auto-carry from overwriting shift inputs.
+     - Added `override_returned = models.BooleanField(default=False)`: locks manual returned count.
+     - Applied migration `0030_dailystockledger_override_opening_and_more`.
+  3. **Reconciliation Formula & Override Protection (`core/services/stock_monitoring_service.py`)**:
+     - `update_ledger_entry`: Sets `override_opening=True`, `override_returned=True`, and `override_closing=True` when values are supplied. Accepts `returned_count` and `dispatched_count`.
+     - `set_opening_balances`: Sets `override_opening=True`.
+     - `compute_daily_reconciliation`:
+       - Checks `if prev_ledger and not getattr(ledger, "override_opening", False):` before carrying previous closing balance.
+       - If `ledger.override_closing` is `True`, preserves existing closing balances without recalculation overwrites.
+       - If `ledger.override_returned` is `True`, preserves existing `returned_count`.
+       - Exposes `opening_stock`, `opening_balance_psv`, `opening_balance_pmo`, `kits_received_psv`, `kits_received_pmo`, `scheduled_total`, `installed_count`, `returned_count` at root level of `reconciliation` dictionary for streamlined API ingestion.
+  4. **Shift Ingestion for 10.11.2026 Shift**:
+     - Reconciled metrics: Opening PSV: 175, Inbound Received: 200, Scheduled Target: 320, Installed: 319, Returned: 3, Closing PSV: 56.
+     - Perfectly satisfies the Ugandan ITMS ledger formula: `175 (Opening) + 200 (Received) - 319 (Installed) = 56 (Closing)`.

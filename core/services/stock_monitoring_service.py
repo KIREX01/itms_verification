@@ -893,6 +893,7 @@ def set_opening_balances(
             work_date=work_d,
             defaults={"work_date_suffix": suffix},
         )
+        ledger.override_opening = True
         if opening_total is not None and opening_psv == 0 and opening_pmo == 0:
             ledger.opening_stock = max(0, int(opening_total))
             ledger.opening_balance_psv = ledger.opening_stock
@@ -1426,21 +1427,26 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
 
     # 4. Closing Balance calculations:
     # closing stock = opening stock + kits received - kits installed - bond transfer out + bond transfer in
-    closing_psv = (
-        ledger.opening_balance_psv
-        + kits_received_psv
-        - installed_psv_count
-        - transfer_out_psv
-        + transfer_in_psv
-    )
-    closing_pmo = (
-        ledger.opening_balance_pmo
-        + kits_received_pmo
-        - installed_pmo_count
-        - transfer_out_pmo
-        + transfer_in_pmo
-    )
-    total_closing = closing_psv + closing_pmo
+    if ledger.override_closing:
+        closing_psv = ledger.closing_balance_psv
+        closing_pmo = ledger.closing_balance_pmo
+        total_closing = ledger.closing_stock
+    else:
+        closing_psv = (
+            ledger.opening_balance_psv
+            + kits_received_psv
+            - installed_psv_count
+            - transfer_out_psv
+            + transfer_in_psv
+        )
+        closing_pmo = (
+            ledger.opening_balance_pmo
+            + kits_received_pmo
+            - installed_pmo_count
+            - transfer_out_pmo
+            + transfer_in_pmo
+        )
+        total_closing = closing_psv + closing_pmo
 
     # 5. Scheduled Target, Daily Performance % & Backlog Level (from official report)
     scheduled_total = ledger.scheduled_total if ledger.scheduled_total > 0 else (ledger.scheduled_psv + ledger.scheduled_pmo)
@@ -1578,12 +1584,14 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         ledger.kits_installed_pmo = installed_pmo_count
         ledger.installed_count = total_installed
 
-    ledger.closing_balance_psv = closing_psv
-    ledger.closing_balance_pmo = closing_pmo
-    ledger.closing_stock = total_closing
+    if not ledger.override_closing:
+        ledger.closing_balance_psv = closing_psv
+        ledger.closing_balance_pmo = closing_pmo
+        ledger.closing_stock = total_closing
 
     ledger.dispatched_count = dispatched_count
-    ledger.returned_count = returned_count
+    if not getattr(ledger, "override_returned", False):
+        ledger.returned_count = returned_count
     ledger.pending_count = itms_pending_count
     ledger.unallocated_count = len(unresolved_discrepancy)
 
@@ -1592,19 +1600,20 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         ledger.physical_count = audit_scans_count
 
     if ledger.physical_count is not None:
-        ledger.variance = ledger.physical_count - total_closing
+        ledger.variance = ledger.physical_count - ledger.closing_stock
     else:
         ledger.variance = 0
 
     ledger.last_reconciled_at = timezone.now()
     ledger.save(update_fields=[
-        "opening_balance_psv", "opening_balance_pmo", "opening_stock",
-        "delivered_count", "kits_received_psv", "kits_received_pmo",
-        "bond_transfer_in_total", "bond_transfer_in_psv", "bond_transfer_in_pmo",
+        "opening_balance_psv", "opening_balance_pmo", "opening_stock", "override_opening",
+        "delivered_count", "kits_received_psv", "kits_received_pmo", "override_received",
+        "bond_transfer_in_total", "bond_transfer_in_psv", "bond_transfer_in_pmo", "override_transfers",
         "bond_transfer_out_total", "bond_transfer_out_psv", "bond_transfer_out_pmo",
-        "installed_count", "kits_installed_psv", "kits_installed_pmo",
-        "closing_balance_psv", "closing_balance_pmo", "closing_stock",
-        "dispatched_count", "returned_count", "pending_count", "unallocated_count",
+        "scheduled_psv", "scheduled_pmo", "scheduled_total",
+        "installed_count", "kits_installed_psv", "kits_installed_pmo", "override_installed",
+        "closing_balance_psv", "closing_balance_pmo", "closing_stock", "override_closing",
+        "dispatched_count", "returned_count", "override_returned", "pending_count", "unallocated_count",
         "physical_count", "variance", "last_reconciled_at", "updated_at",
     ])
 
@@ -1621,6 +1630,14 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         "active_shift": get_active_shift_info(),
         "warehouse_name": ledger.warehouse_name,
         "active_bond_code": active_bond_code,
+        "opening_stock": ledger.opening_stock,
+        "opening_balance_psv": ledger.opening_balance_psv,
+        "opening_balance_pmo": ledger.opening_balance_pmo,
+        "kits_received_psv": kits_received_psv,
+        "kits_received_pmo": kits_received_pmo,
+        "scheduled_total": scheduled_total,
+        "installed_count": total_installed,
+        "returned_count": ledger.returned_count,
         "closing_stock": total_closing,
         "closing_balance_psv": closing_psv,
         "closing_balance_pmo": closing_pmo,
@@ -1887,12 +1904,14 @@ def update_ledger_entry(
     closing_balance_psv: Optional[int] = None,
     closing_stock: Optional[int] = None,
     physical_count: Optional[int] = None,
+    returned_count: Optional[int] = None,
+    dispatched_count: Optional[int] = None,
     notes: Optional[str] = None,
     operator_name: str = "Operator",
 ) -> Dict[str, Any]:
     """
     Updates daily stock ledger metrics directly with full flexibility for safe-room workflows.
-    Sets manual override flags when received, installed, transfers, or closing counts are explicitly supplied.
+    Sets manual override flags when received, installed, transfers, opening, or closing counts are explicitly supplied.
     Recalculates closing balances and logs an immutable audit trail.
     """
     work_d, suffix = resolve_date_and_suffix(target_date_suffix)
@@ -1911,14 +1930,16 @@ def update_ledger_entry(
         if bond_nm:
             ledger.warehouse_name = bond_nm
 
-        if opening_balance_pmo is not None:
-            ledger.opening_balance_pmo = max(0, int(opening_balance_pmo))
-        if opening_balance_psv is not None:
-            ledger.opening_balance_psv = max(0, int(opening_balance_psv))
-        if opening_balance_pmo is not None or opening_balance_psv is not None:
-            ledger.opening_stock = ledger.opening_balance_psv + ledger.opening_balance_pmo
-        elif opening_stock is not None:
-            ledger.opening_stock = max(0, int(opening_stock))
+        if opening_balance_pmo is not None or opening_balance_psv is not None or opening_stock is not None:
+            ledger.override_opening = True
+            if opening_balance_pmo is not None:
+                ledger.opening_balance_pmo = max(0, int(opening_balance_pmo))
+            if opening_balance_psv is not None:
+                ledger.opening_balance_psv = max(0, int(opening_balance_psv))
+            if opening_balance_pmo is not None or opening_balance_psv is not None:
+                ledger.opening_stock = ledger.opening_balance_psv + ledger.opening_balance_pmo
+            elif opening_stock is not None:
+                ledger.opening_stock = max(0, int(opening_stock))
 
         if kits_received_pmo is not None or kits_received_psv is not None:
             ledger.override_received = True
@@ -1963,6 +1984,13 @@ def update_ledger_entry(
             if bond_transfer_out_psv is not None:
                 ledger.bond_transfer_out_psv = max(0, int(bond_transfer_out_psv))
             ledger.bond_transfer_out_total = ledger.bond_transfer_out_psv + ledger.bond_transfer_out_pmo
+
+        if returned_count is not None:
+            ledger.override_returned = True
+            ledger.returned_count = max(0, int(returned_count))
+
+        if dispatched_count is not None:
+            ledger.dispatched_count = max(0, int(dispatched_count))
 
         if physical_count is not None:
             ledger.physical_count = max(0, int(physical_count))

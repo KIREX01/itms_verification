@@ -33,7 +33,7 @@ def api_stock_shift_dates(request: HttpRequest) -> JsonResponse:
 
 
 @require_GET
-@require_itms_envelope(allow_expired=True)
+@require_itms_envelope(allow_expired=True, allow_unlinked=True)
 def api_stock_reconciliation(request: HttpRequest) -> JsonResponse:
     """
     Returns live daily stock reconciliation metrics, opening/closing balance,
@@ -153,7 +153,7 @@ def api_stock_dispatch(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
-@require_itms_envelope
+@require_itms_envelope(allow_expired=True, allow_unlinked=True)
 def api_stock_delivery(request: HttpRequest) -> JsonResponse:
     """
     Records an inbound delivery of license plates into warehouse physical stock.
@@ -240,7 +240,7 @@ def api_stock_delivery(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
-@require_itms_envelope
+@require_itms_envelope(allow_expired=True, allow_unlinked=True)
 def api_stock_return(request: HttpRequest) -> JsonResponse:
     """
     Records plates returned to stock uninstalled (motorcycle no-show, defect, cancellation).
@@ -296,7 +296,7 @@ def api_stock_return(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
-@require_itms_envelope
+@require_itms_envelope(allow_expired=True, allow_unlinked=True)
 def api_stock_bond_transfer(request: HttpRequest) -> JsonResponse:
     """
     Records a bond transfer:
@@ -361,7 +361,7 @@ def api_stock_bond_transfer(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
-@require_itms_envelope
+@require_itms_envelope(allow_expired=True, allow_unlinked=True)
 def api_stock_scheduled(request: HttpRequest) -> JsonResponse:
     """
     Manually feeds in the target scheduled number of plates to be installed
@@ -414,7 +414,7 @@ def api_stock_scheduled(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
-@require_itms_envelope
+@require_itms_envelope(allow_expired=True, allow_unlinked=True)
 def api_stock_opening(request: HttpRequest) -> JsonResponse:
     """Manually sets or adjusts Opening Balance for PSV (White) and PMO (Yellow)."""
     from core.services import stock_monitoring_service
@@ -461,7 +461,7 @@ def api_stock_opening(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
-@require_itms_envelope
+@require_itms_envelope(allow_expired=True, allow_unlinked=True)
 def api_stock_physical_count(request: HttpRequest) -> JsonResponse:
     """Records an end-of-shift physical stock count audit and computes variance."""
     from core.services import stock_monitoring_service
@@ -1751,12 +1751,12 @@ def api_stock_export_unregistered_csv(request: HttpRequest) -> HttpResponse:
 
 
 @require_POST
-@require_itms_envelope(allow_expired=True)
+@require_itms_envelope(allow_expired=True, allow_unlinked=True)
 def api_stock_ledger_entry(request: HttpRequest) -> JsonResponse:
     """
     POST /api/stock/ledger/entry/
     Allows flexible manual entry/overrides of daily stock ledger metrics
-    (opening, received, scheduled, installed, bond transfers, closing, physical count, notes).
+    (opening, received, scheduled, installed, bond transfers, closing, returned, physical count, notes).
     """
     data = {}
     if request.content_type == "application/json" and request.body:
@@ -1797,6 +1797,8 @@ def api_stock_ledger_entry(request: HttpRequest) -> JsonResponse:
     closing_balance_psv = _opt_int("closing_balance_psv")
     closing_stock = _opt_int("closing_stock")
     physical_count = _opt_int("physical_count")
+    returned_count = _opt_int("returned_count") if _opt_int("returned_count") is not None else _opt_int("returned")
+    dispatched_count = _opt_int("dispatched_count") if _opt_int("dispatched_count") is not None else _opt_int("dispatched")
     notes = data.get("notes")
     operator_name = (
         data.get("operator_name")
@@ -1826,6 +1828,8 @@ def api_stock_ledger_entry(request: HttpRequest) -> JsonResponse:
             closing_balance_psv=closing_balance_psv,
             closing_stock=closing_stock,
             physical_count=physical_count,
+            returned_count=returned_count,
+            dispatched_count=dispatched_count,
             notes=notes,
             operator_name=operator_name,
         )

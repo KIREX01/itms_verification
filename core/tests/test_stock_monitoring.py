@@ -1910,6 +1910,74 @@ class StockMonitoringTests(TestCase):
         self.assertEqual(data["reconciliation"]["closing_balance_psv"], 740)
         self.assertEqual(data["reconciliation"]["closing_balance_pmo"], 0)
 
+    def test_ledger_edit_with_previous_shift_and_unlinked_or_expired_auth(self):
+        """
+        Verifies that when a previous shift ledger exists, editing the current daily ledger
+        persists manual opening and closing balances without auto-carry regression,
+        and allows expired or unlinked authenticated Copilot operators to manage the ledger.
+        """
+        from datetime import date
+        from core.models import DailyStockLedger
+
+        # 1. Create previous day ledger with closing stock of 997
+        DailyStockLedger.objects.create(
+            work_date=date(2026, 11, 9),
+            work_date_suffix="091126",
+            opening_stock=1000,
+            opening_balance_psv=1000,
+            kits_installed_psv=3,
+            installed_count=3,
+            closing_stock=997,
+            closing_balance_psv=997,
+        )
+
+        # 2. Expire ITMS session cookies
+        self.sess.cookies = {}
+        self.sess.is_authenticated = False
+        self.sess.save()
+
+        # 3. Post today's report (101126): Opening 175, Received 200, Sched 320, Inst 319, Ret 3, Close 56
+        resp = self.client.post(
+            "/api/stock/ledger/entry/",
+            data=json.dumps({
+                "target_date_suffix": "101126",
+                "storage_bond_name": "AGM / SPIRO",
+                "opening_balance_psv": 175,
+                "opening_balance_pmo": 0,
+                "kits_received_psv": 200,
+                "kits_received_pmo": 0,
+                "scheduled_psv": 320,
+                "scheduled_total": 320,
+                "kits_installed_psv": 319,
+                "kits_installed_pmo": 0,
+                "returned_count": 3,
+                "closing_balance_psv": 56,
+                "closing_balance_pmo": 0,
+                "closing_stock": 56,
+                "notes": "Shift reconciled with safe room",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200, f"Expected 200 but got {resp.status_code}: {resp.content}")
+        body = resp.json()
+        self.assertTrue(body["success"])
+
+        recon = body["reconciliation"]
+        self.assertEqual(recon["opening_balance_psv"], 175)
+        self.assertEqual(recon["kits_received_psv"], 200)
+        self.assertEqual(recon["scheduled_total"], 320)
+        self.assertEqual(recon["installed_count"], 319)
+        self.assertEqual(recon["returned_count"], 3)
+        self.assertEqual(recon["closing_balance_psv"], 56)
+        self.assertEqual(recon["closing_stock"], 56)
+
+        # 4. Verify subsequent GET /api/stock/reconciliation/ keeps opening=175 and closing=56
+        get_resp = self.client.get("/api/stock/reconciliation/?date_suffix=101126")
+        self.assertEqual(get_resp.status_code, 200)
+        get_recon = get_resp.json()["reconciliation"]
+        self.assertEqual(get_recon["opening_balance_psv"], 175)
+        self.assertEqual(get_recon["closing_balance_psv"], 56)
+
     @patch("core.services.email_service.send_stock_reconciliation_report_email")
     def test_stock_report_email_dispatch(self, mock_send_email):
         """Verifies report email dispatch with recipient resolution and audit logging."""

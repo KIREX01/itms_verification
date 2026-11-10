@@ -720,37 +720,31 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
 
 ---
 
-## 10. Feature: Executive Dark-Mode Transactional HTML Email Overhaul - [COMPLETED]
+## 10. Feature: High-Contrast Clean White Email Overhaul & Prototype Branding - [COMPLETED]
 
-### 10.1 Core Problem & Design Requirements
-- **Previous Limitations**:
-  - Email templates lacked consistent branding, visual hierarchy, mobile responsiveness, and dark mode support.
-  - Fragile CSS constructs (`display: flex`, CSS grid, inline SVGs) caused broken rendering across Outlook desktop, Gmail mobile, and Apple Mail.
-  - Executive Daily Stock Reconciliation Report lacked high-contrast balance sheet tables, KPI summary cards, safe-room returns verification, and shift handover remarks.
+### 10.1 Core Problem & Refinement Requirements
+- **Issues Identified in Client Testing**:
+  - Email clients like Outlook desktop rendered dark emails with a murky gray background wash, hindering readability and table scanability.
+  - Emails contained verbose boilerplate and disclaimers that detracted from core shift data.
+  - References to external government agencies ("Ministry of Works", "Uganda ribbon", "ITMS") were inappropriate for internal prototype stages.
+  - The floor movement section added unnecessary clutter to the executive email summary.
 - **Architectural Enhancements Implemented in `core/services/email_service.py`**:
-  1. **Modular Dark-Mode Components**:
-     - `_render_uganda_ribbon(height=5)`: Official 6-stripe national ribbon (`#000000`, `#ffd100`, `#d90000`) for headers.
-     - `_render_email_head(title)`: XHTML transitional doctype with `<meta name="color-scheme" content="dark light">`, system font stacks (`-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial`), and `@media only screen and (max-width: 620px)` mobile rules.
-     - `_render_email_footer()`: Automated transmission disclosure, confidentiality warning, and Ugandan jurisdiction attribution.
-  2. **Executive Daily Stock Reconciliation Report Email (`send_stock_reconciliation_report_email`)**:
-     - **4-Card Executive KPI Stat Grid**: Opening Stock, Inbound Received, Kits Installed, Closing Balance with large monospace counts, series breakdowns (PSV/PMO), and high-contrast pill badges.
-     - **9-Row Standardized Balance Sheet Table**: High-contrast dark cards with zebra striping, monospace counts, performance % badges, and gold-highlighted closing stock row.
-     - **Floor Line Movement & Safe Room Return Verification**: Dispatched, Installed, Returned to Safe Room, and Shift Variance with automated status tags (`RECONCILED` / `DISCREPANCY`).
-     - **Shift Handover Remarks & Dispatcher Attribution**: Prominent callout box for shift handover notes, timestamp, and audit trail.
-  3. **2FA Verification Code Email (`send_2fa_verification_code`)**:
-     - Glowing gold 36px monospace digits in a distinct container.
-     - Copyable OTP hints, expiration countdown badge, and security ignore notice.
-     - 1-click verification CTA button (`🔐 Verify & Continue`).
-  4. **Administrator Security Alert Email (`send_access_request_admin_alert`)**:
-     - Red/gold security badge for unrecognized device / IP access requests.
-     - Device metadata table (Username, IP address, MAC / Device Name, Request Timestamp).
-     - 6-digit activation code box and 1-click approval CTA button (`🛡️ Review & Approve Access`).
-  5. **Operator Access Activated Email (`send_access_activated_email`)**:
-     - Emerald authorization badge with welcome greeting.
-     - 6-digit activation code container with glowing gold border.
-     - 1-click portal sign-in CTA button (`🚀 Open CLOSE Copilot →`).
-     - 3-step quick start guide for seamless onboarding.
-  6. **Cross-Client & Fallback Resilience**:
-     - 100% nested HTML table architecture (`role="presentation"`) with inline styles.
-     - Dual-payload dispatch via Resend REST API: Rich HTML + plain-text ASCII fallback for terminal / text-only clients.
+  1. **Clean White Layout with Crisp Typography**:
+     - Outer container and cards set to pure white (`#ffffff`) with subtle cool-gray table zebra striping (`#f8fafc`) and slate borders (`#e2e8f0`).
+     - Deep slate typography (`#0f172a`, `#334155`, `#64748b`) ensures 100% legibility in Outlook, Gmail, and Apple Mail without color wash issues.
+     - Subtle 3px top accent bar (`_render_accent_line`) replaces national ribbon.
+  2. **Strict Prototype Identity ("Copilot" Only)**:
+     - Sender display name configured strictly as `Copilot <notifications@info.kirex.online>`.
+     - All references to "Ministry of Works", "ITMS", and government disclaimers removed to avoid miscommunication during prototype trials.
+     - Minimalist footer: "Copilot • Automated Prototype Transmission".
+  3. **Executive Daily Stock Reconciliation Report Email (`send_stock_reconciliation_report_email`)**:
+     - **Direct to the Point**: Header immediately presents bond name, shift suffix, and date.
+     - **4-Card Executive KPI Stat Grid**: Opening Stock, Inbound Received, Kits Installed, and Closing Stock.
+     - **Standard 9-Row Balance Sheet Table**: Deep slate header (`#0f172a`), alternating white/light-gray rows, monospace figures, warm-gold highlighted closing row, and performance badges.
+     - **Floor Movement Section Removed**: Excluded entirely per request to maintain clean executive focus.
+     - **Shift Handover Remarks**: Streamlined callout box for shift handover notes.
+  4. **Transactional Templates Refined**:
+     - `send_2fa_verification_code`: Clean white card, 36px monospace OTP digits, 10-minute expiry badge, 1-click verify button, and concise ignore notice.
+     - `send_access_request_admin_alert`: Clean white alert card with device/IP table, activation code, and 1-click approval button.
+     - `send_access_activated_email`: Clean white invitation card with activation code and direct portal link.
 

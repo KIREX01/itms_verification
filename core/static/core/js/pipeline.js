@@ -1055,6 +1055,13 @@ window.setGlobalShiftDate = async function(targetVal) {
             if (typeof loadItmsOrders === "function") {
                 void loadItmsOrders();
             }
+
+            // Update Batches Ingestion Tab (Global Shift Scoping)
+            if (typeof loadBatchesList === "function") {
+                void loadBatchesList();
+            } else if (typeof fetchBatchesList === "function") {
+                void fetchBatchesList();
+            }
         } else {
             if (typeof showToast === "function") {
                 showToast(`Shift date update failed: ${data.error || "Unknown error"}`, "error");
@@ -1072,10 +1079,25 @@ window.syncAllDateSelectorsUI = function(shiftInfo) {
     const shiftLabel = shiftInfo.formatted_date ? `${shiftInfo.formatted_date} (${sfx})` : (shiftInfo.display || sfx || "Live Shift");
 
     // Synchronize all shift selectors across desktop and mobile header/drawer
-    const shiftSelects = document.querySelectorAll("select.header-shift-select, #global-shift-select, #dash-global-shift-select, #drawer-global-shift-select");
+    const shiftSelects = document.querySelectorAll("select.header-shift-select, #global-shift-select, #dash-global-shift-select, #drawer-global-shift-select, #header-global-shift-select");
     shiftSelects.forEach(sel => {
         if (sfx) {
             sel.value = sfx;
+        }
+    });
+
+    // Synchronize interactive calendar date pickers across header, drawer, and settings
+    const datePickers = document.querySelectorAll("input.header-shift-datepicker, #settings-manual-date-picker, #header-global-shift-date, #drawer-global-shift-date");
+    let isoVal = "";
+    if (shiftInfo.date && shiftInfo.date !== "ALL") {
+        isoVal = shiftInfo.date;
+    } else if (shiftInfo.suffix && /^\d{6}$/.test(shiftInfo.suffix)) {
+        const s = shiftInfo.suffix;
+        isoVal = `20${s.substring(4, 6)}-${s.substring(2, 4)}-${s.substring(0, 2)}`;
+    }
+    datePickers.forEach(dp => {
+        if (isoVal) {
+            dp.value = isoVal;
         }
     });
 
@@ -1117,4 +1139,10 @@ window.syncAllDateSelectorsUI = function(shiftInfo) {
 
 document.addEventListener("DOMContentLoaded", () => {
     void initGlobalShiftDate();
+});
+
+window.addEventListener("shiftDateChanged", (e) => {
+    if (e && e.detail) {
+        syncAllDateSelectorsUI(e.detail);
+    }
 });

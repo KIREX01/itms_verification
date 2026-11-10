@@ -1753,7 +1753,7 @@ The Backend & DevOps team has completed and verified the core backend services, 
 
 ---
 
-## 25. Feature: Mobile Companion Stability (IndexedDB), Shutter Auto-Switch, Calendar Date Selector & Quick Install UI
+## 25. Feature: Mobile Companion Stability (IndexedDB), Shutter Auto-Switch, Calendar Date Selector & Quick Install UI - [COMPLETED]
 
 ### 25.1 Mobile Companion: Off-Conveyor Camera Shutter Auto-Switch
 - **Files**:

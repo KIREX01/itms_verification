@@ -445,32 +445,27 @@
         <!-- ================================================================= -->
         <main class="mode-container" id="container-order" style="display:none;">
             <!-- Lookup Card -->
-            <div class="bike-status-card">
-                <div class="bike-status-header">
+            <div class="bike-status-card" style="position:relative; padding:12px 14px;">
+                <div class="bike-status-header" style="margin-bottom:8px;">
                     <div>
-                        <h2 class="bike-target-title" style="font-size:1.1rem; color:#ffffff;">Order Lookup &amp; Verify</h2>
+                        <h2 class="bike-target-title" style="font-size:1.05rem; color:#ffffff; margin:0;">Quick Order Install</h2>
                     </div>
                     <span class="badge badge-yellow" id="m-order-stage-badge">Enter Order</span>
                 </div>
 
-                <div style="margin-top:10px; display:flex; gap:6px;">
-                    <input type="text" id="m-order-search-input" class="form-control" placeholder="Scan or type Order # / Plate..." style="flex:1; background:#0c1017; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-weight:700; padding:10px 12px; border-radius:6px; font-size:0.9rem;" onkeydown="if(event.key==='Enter') lookupMobileOrder()">
-                    <button type="button" class="btn btn-primary" onclick="lookupMobileOrder()" id="btn-m-order-lookup" style="padding:0 14px; font-weight:800; font-size:0.85rem; background:#2563eb; border:1px solid #3b82f6; border-radius:6px; color:#ffffff; display:flex; align-items:center; gap:4px;">
-                        <span>🔍</span> Find
-                    </button>
-                </div>
-
-                <!-- Active Orders Quick-Picker Dropdown -->
-                <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.08);">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
-                        <span style="font-size:0.72rem; color:var(--ug-yellow, #fcdc04); font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">📋 Or Select Yard Order:</span>
-                        <button type="button" class="btn btn-xs btn-secondary" onclick="loadMobilePendingOrdersList()" style="font-size:0.7rem; padding:2px 8px; color:#ffffff; background:#1e293b; border:1px solid #334155; border-radius:4px;">
-                            🔄 Refresh
+                <div style="position:relative; width:100%;">
+                    <div style="display:flex; gap:6px;">
+                        <input type="text" id="m-order-search-input" class="form-control" placeholder="Search Order # or Number Plate..." autocomplete="off" style="flex:1; background:#0c1017; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-weight:700; padding:10px 12px; border-radius:6px; font-size:0.9rem;" onkeydown="if(event.key==='Enter') lookupMobileOrder()" oninput="handleMobileOrderSearchInput(this.value)">
+                        <button type="button" class="btn btn-primary" onclick="lookupMobileOrder()" id="btn-m-order-lookup" style="padding:0 14px; font-weight:800; font-size:0.85rem; background:#2563eb; border:1px solid #3b82f6; border-radius:6px; color:#ffffff; display:flex; align-items:center; gap:4px; flex-shrink:0;">
+                            <span>🔍</span> Find
                         </button>
                     </div>
-                    <select id="m-order-picker-select" class="form-select" onchange="if(this.value){ lookupMobileOrder(this.value); }" style="width:100%; box-sizing:border-box; background:#0c1017; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-weight:700; padding:8px 10px; border-radius:6px; font-size:0.82rem; min-height:38px;">
-                        <option value="">-- Tap to Select Active Installation Order --</option>
-                    </select>
+
+                    <!-- Instant Autocomplete Dropdown List -->
+                    <div id="m-order-autocomplete-list" class="order-autocomplete-dropdown" style="display:none; position:absolute; top:calc(100% + 4px); left:0; right:0; max-height:220px; overflow-y:auto; background:#111622; border:1px solid #334155; border-radius:6px; box-shadow:0 8px 24px rgba(0,0,0,0.7); z-index:1050;">
+                    </div>
+                    <!-- Hidden select for backwards compatibility -->
+                    <select id="m-order-picker-select" style="display:none;"></select>
                 </div>
             </div>
 

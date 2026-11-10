@@ -82,13 +82,18 @@ function cycleBatchesDateScope() {
     }
 }
 
-async function fetchBatchesList() {
+async function fetchBatchesList(shiftDate = null) {
     const container = document.getElementById("batches-stream-container");
     const countBadge = document.getElementById("batches-count-badge");
     const summaryTag = document.getElementById("batches-scope-summary-tag");
     try {
         const activeScope = currentBatchesDateScope || "TODAY";
-        const res = await fetch(`/api/batches/?scope=${encodeURIComponent(activeScope)}`);
+        const currentShiftDate = shiftDate || (window.activeShiftDateInfo && (window.activeShiftDateInfo.date || window.activeShiftDateInfo.suffix)) || "";
+        let url = `/api/batches/?scope=${encodeURIComponent(activeScope)}`;
+        if (currentShiftDate && currentShiftDate !== "ALL" && activeScope !== "ALL") {
+            url += `&date=${encodeURIComponent(currentShiftDate)}`;
+        }
+        const res = await fetch(url);
         const data = await res.json();
         if (data.success && data.batches) {
             batchesData = data.batches;
@@ -892,4 +897,13 @@ async function startIngestionPipelineTracking(batchId, batchData) {
             });
     }, 1000);
 }
+
+// Global exports for pipeline.js and cross-module synchronization
+window.fetchBatchesList = fetchBatchesList;
+window.loadBatchesList = fetchBatchesList;
+
+window.addEventListener("shiftDateChanged", (e) => {
+    const sfx = (e && e.detail && (e.detail.date || e.detail.suffix)) || "";
+    void fetchBatchesList(sfx);
+});
 

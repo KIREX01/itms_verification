@@ -249,6 +249,23 @@ async function getPendingOutboxItems() {
     }
 }
 
+async function getOutboxItem(id) {
+    if (!id) return null;
+    try {
+        const db = await openOutboxDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, "readonly");
+            const store = tx.objectStore(STORE_NAME);
+            const req = store.get(id);
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => reject(req.error);
+        });
+    } catch (err) {
+        console.error("IndexedDB read item error:", err);
+        return null;
+    }
+}
+
 async function markOutboxItemSynced(id) {
     try {
         const db = await openOutboxDB();
@@ -1935,7 +1952,7 @@ function handlePreviewCardClick(orientation) {
     }
 }
 
-function openPhotoInspector(orientation, url, customTitle, context = null) {
+async function openPhotoInspector(orientation, url, customTitle, context = null) {
     MobileState.inspectedOrientation = orientation;
     MobileState.inspectedContext = context;
     const modal = document.getElementById("photo-lightbox-modal");
@@ -1949,7 +1966,27 @@ function openPhotoInspector(orientation, url, customTitle, context = null) {
     const prevBtn = document.getElementById("lightbox-nav-prev");
     const nextBtn = document.getElementById("lightbox-nav-next");
 
-    if (img) img.src = url;
+    // Revoke previous on-demand inspection object URL if exists
+    if (MobileState.activeInspectorBlobUrl) {
+        URL.revokeObjectURL(MobileState.activeInspectorBlobUrl);
+        MobileState.activeInspectorBlobUrl = null;
+    }
+
+    let activeSrc = url || "";
+    const itemId = (context && context.id) || (typeof orientation === "object" && orientation ? orientation.id : null);
+    if (itemId) {
+        try {
+            const outboxItem = await getOutboxItem(itemId);
+            if (outboxItem && outboxItem.blob) {
+                activeSrc = URL.createObjectURL(outboxItem.blob);
+                MobileState.activeInspectorBlobUrl = activeSrc;
+            }
+        } catch (e) {
+            console.warn("Could not load photo on-demand from IndexedDB:", e);
+        }
+    }
+
+    if (img) img.src = activeSrc;
     if (title) {
         const titleSpan = title.querySelector("span") || title;
         titleSpan.innerHTML = customTitle || `${orientation} Photo`;
@@ -2036,7 +2073,7 @@ function openPhotoInspector(orientation, url, customTitle, context = null) {
     if (modal) modal.style.display = "flex";
 }
 
-function navigatePhotoInspector(direction) {
+async function navigatePhotoInspector(direction) {
     const list = MobileState.inspectedList || [];
     if (list.length <= 1) return;
     const currentIdx = (MobileState.inspectedIndex !== undefined && MobileState.inspectedIndex >= 0) ? MobileState.inspectedIndex : 0;
@@ -2046,6 +2083,11 @@ function navigatePhotoInspector(direction) {
     const item = list[newIdx];
     if (!item) return;
 
+    if (MobileState.activeInspectorBlobUrl) {
+        URL.revokeObjectURL(MobileState.activeInspectorBlobUrl);
+        MobileState.activeInspectorBlobUrl = null;
+    }
+
     if (item.mode === "conveyor") {
         let url = item.url;
         if (!url && item.blob) {
@@ -2053,14 +2095,10 @@ function navigatePhotoInspector(direction) {
             if (item.orientation === "FRONT") MobileState.conveyor.frontUrl = url;
             else MobileState.conveyor.rearUrl = url;
         }
-        openPhotoInspector(item.orientation, url, item.title, { mode: "conveyor", orientation: item.orientation });
+        await openPhotoInspector(item.orientation, url, item.title, { mode: "conveyor", orientation: item.orientation });
     } else {
-        let itemUrl = item.url;
-        if (!itemUrl && item.file) {
-            itemUrl = URL.createObjectURL(item.file);
-            item.url = itemUrl;
-        }
-        const title = `U-Turn ${item.orientation} #${item.seqNum}`;
+        let itemUrl = item.url || null;
+        const title = item.title || `U-Turn ${item.orientation} #${item.seqNum}`;
         const targetTile = item.tileElement || document.querySelector(`.mini-tile[data-orientation="${item.orientation}"][data-seq-num="${item.seqNum}"]`);
         const ctx = {
             mode: "uturn",
@@ -2069,13 +2107,19 @@ function navigatePhotoInspector(direction) {
             id: item.id,
             tileElement: targetTile
         };
-        openPhotoInspector(item.orientation, itemUrl, title, ctx);
+        await openPhotoInspector(item.orientation, itemUrl, title, ctx);
     }
 }
 
 function closePhotoInspector() {
     const modal = document.getElementById("photo-lightbox-modal");
     if (modal) modal.style.display = "none";
+    const img = document.getElementById("lightbox-img");
+    if (img) img.src = "";
+    if (MobileState.activeInspectorBlobUrl) {
+        URL.revokeObjectURL(MobileState.activeInspectorBlobUrl);
+        MobileState.activeInspectorBlobUrl = null;
+    }
 }
 
 function handleLightboxRetake() {
@@ -2315,6 +2359,17 @@ function applyUturnPhaseUI(phase) {
     const isOutbound = (phase === startLeg);
     const outboundCount = (startLeg === "REAR") ? MobileState.uturn.rearCount : MobileState.uturn.frontCount;
 
+    // Road step numbers & orientation flow
+    const rearStepNum = document.querySelector("#road-step-rear .step-num");
+    const frontStepNum = document.querySelector("#road-step-front .step-num");
+    if (startLeg === "FRONT") {
+        if (frontStepNum) frontStepNum.textContent = "1";
+        if (rearStepNum) rearStepNum.textContent = "2";
+    } else {
+        if (rearStepNum) rearStepNum.textContent = "1";
+        if (frontStepNum) frontStepNum.textContent = "2";
+    }
+
     if (startLeg === "REAR") {
         if (phase === "FRONT") {
             if (roadRear) { roadRear.classList.remove("active"); roadRear.classList.add("completed"); }
@@ -2342,14 +2397,20 @@ function applyUturnPhaseUI(phase) {
     } else if (!isOutbound) {
         if (guidanceBar) guidanceBar.className = "uturn-guidance-bar return-mode";
         if (guidanceIcon) guidanceIcon.textContent = "↩️";
-        if (instruction) instruction.innerHTML = `Walking back: snap all <strong>${phase}S</strong>.`;
+        const returnLegName = (phase === "REAR") ? "REARS" : "FRONTS";
+        if (instruction) instruction.innerHTML = `Walking back: snap all <strong>${returnLegName}</strong>.`;
 
         if (turnaroundCallout) turnaroundCallout.style.display = "none";
         if (returnMatchBanner) returnMatchBanner.style.display = "flex";
+        const returnLegBtn = document.querySelector(".btn-switch-back");
+        if (returnLegBtn) {
+            returnLegBtn.textContent = `↩️ Switch back to ${startLeg === "REAR" ? "Rears" : "Fronts"}`;
+        }
     } else {
         if (guidanceBar) guidanceBar.className = "uturn-guidance-bar";
         if (guidanceIcon) guidanceIcon.textContent = "🚶";
-        if (instruction) instruction.innerHTML = `Walking out: snap all <strong>${phase}S</strong>.`;
+        const outboundLegName = (phase === "REAR") ? "REARS" : "FRONTS";
+        if (instruction) instruction.innerHTML = `Walking out: snap all <strong>${outboundLegName}</strong>.`;
 
         if (returnMatchBanner) returnMatchBanner.style.display = "none";
         if (turnaroundCallout) {
@@ -2377,7 +2438,9 @@ function applyUturnPhaseUI(phase) {
             shutterText.textContent = "Take Photo";
         } else {
             const count = (phase === "REAR") ? MobileState.uturn.rearCount : MobileState.uturn.frontCount;
-            shutterText.textContent = `Snap ${phase === "REAR" ? "Rear" : "Front"} #${count + 1}`;
+            const newLabel = `Snap ${phase === "REAR" ? "Rear" : "Front"} #${count + 1}`;
+            shutterText.textContent = newLabel;
+            if (shutter) shutter.setAttribute("title", newLabel);
         }
     }
 }
@@ -2398,6 +2461,7 @@ function saveUturnSessionState() {
                 id: t.id,
                 orientation: t.orientation,
                 seqNum: t.seqNum,
+                timestamp: t.timestamp || new Date().toISOString()
             })),
             lastUpdated: new Date().toISOString(),
         };
@@ -2463,8 +2527,7 @@ function restoreUturnPreviewTiles(tiles) {
         tile.dataset.seqNum = t.seqNum;
         if (t.id) tile.dataset.id = t.id;
         tile.onclick = () => {
-            const blobUrl = t.file ? URL.createObjectURL(t.file) : "";
-            openPhotoInspector(t.orientation, blobUrl, `U-Turn ${t.orientation} #${t.seqNum}`, {
+            openPhotoInspector(t.orientation, null, `U-Turn ${t.orientation} #${t.seqNum}`, {
                 mode: "uturn",
                 orientation: t.orientation,
                 seqNum: t.seqNum,
@@ -2472,12 +2535,26 @@ function restoreUturnPreviewTiles(tiles) {
                 tileElement: tile
             });
         };
-        tile.innerHTML = `
-            <div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#1e293b; color:#94a3b8; font-size:0.75rem; font-weight:700;">
-                ${t.orientation === 'FRONT' ? '🚙 FRONT' : '🏍️ REAR'}
-            </div>
-            <span class="mini-tile-badge" style="background:${t.orientation === 'FRONT' ? '#0284c7' : '#10b981'}">${t.orientation[0]}${t.seqNum}</span>
-        `;
+
+        const img = document.createElement("img");
+        img.alt = t.orientation;
+        if (t.id) {
+            getOutboxItem(t.id).then(item => {
+                if (item && item.blob) {
+                    const tempUrl = URL.createObjectURL(item.blob);
+                    img.src = tempUrl;
+                    img.onload = () => { URL.revokeObjectURL(tempUrl); };
+                }
+            }).catch(() => {});
+        }
+        tile.appendChild(img);
+
+        const badge = document.createElement("span");
+        badge.className = "mini-tile-badge";
+        badge.style.background = (t.orientation === "FRONT") ? "#0284c7" : "#10b981";
+        badge.textContent = `${t.orientation[0]}${t.seqNum}`;
+        tile.appendChild(badge);
+
         strip.appendChild(tile);
     });
 
@@ -2519,21 +2596,20 @@ function confirmTurnaround() {
         showMobileToast(`Snap some ${legName} first before turning around!`, true);
         return;
     }
-    if (confirm(`Finished all ${outbound} ${legName}?\n\nTurn around now to snap ${returnLegName} walking back.`)) {
-        toggleUturnTurnaround();
-    }
+    if (navigator.vibrate) navigator.vibrate([60]);
+    toggleUturnTurnaround();
+    showMobileToast(`Switched to snapping ${returnLegName.toUpperCase()}`);
 }
 
 function confirmSwitchBack() {
     const outboundLeg = MobileState.uturn.startLeg || "REAR";
     const legName = (outboundLeg === "REAR") ? "Rears" : "Fronts";
-    if (confirm(`Switch back to ${legName}?`)) {
-        MobileState.uturn.phase = outboundLeg;
-        applyUturnPhaseUI(MobileState.uturn.phase);
-        updateUturnShutterCounter();
-        saveUturnSessionState();
-        showMobileToast(`↩️ Switched back to ${legName}`);
-    }
+    if (navigator.vibrate) navigator.vibrate([60]);
+    MobileState.uturn.phase = outboundLeg;
+    applyUturnPhaseUI(MobileState.uturn.phase);
+    updateUturnShutterCounter();
+    saveUturnSessionState();
+    showMobileToast(`↩️ Switched back to ${legName}`);
 }
 
 function safeSwitchLeg(targetLeg) {
@@ -2543,12 +2619,12 @@ function safeSwitchLeg(targetLeg) {
         setUturnStartLeg(targetLeg);
         return;
     }
-    if (confirm(`Switch to snapping ${targetName}?`)) {
-        MobileState.uturn.phase = targetLeg;
-        applyUturnPhaseUI(MobileState.uturn.phase);
-        updateUturnShutterCounter();
-        saveUturnSessionState();
-    }
+    if (navigator.vibrate) navigator.vibrate([60]);
+    MobileState.uturn.phase = targetLeg;
+    applyUturnPhaseUI(MobileState.uturn.phase);
+    updateUturnShutterCounter();
+    saveUturnSessionState();
+    showMobileToast(`Switched to snapping ${targetName.toUpperCase()}`);
 }
 
 function updateUturnShutterCounter() {
@@ -2699,7 +2775,7 @@ async function handleNativeUturnFileCaptured(inputElem) {
             replace_sequence_number: String(seqNum),
         };
 
-        // 3. Update in recentTiles array
+        // 3. Update in recentTiles array (lightweight metadata only)
         if (Array.isArray(MobileState.uturn.recentTiles)) {
             const rIdx = MobileState.uturn.recentTiles.findIndex(
                 t => t.id === replacing.id || (t.orientation === orientation && t.seqNum === seqNum)
@@ -2709,22 +2785,25 @@ async function handleNativeUturnFileCaptured(inputElem) {
                     id: itemId,
                     orientation: orientation,
                     seqNum: seqNum,
-                    file: file
+                    timestamp: nowIso
                 };
             }
         }
 
         // 4. Update the DOM tile in recent strip
-        const newUrl = URL.createObjectURL(file);
         let targetTile = replacing.tileElement;
         if (!targetTile || !targetTile.parentNode) {
             targetTile = document.querySelector(`.mini-tile[data-orientation="${orientation}"][data-seq-num="${seqNum}"]`);
         }
         if (targetTile) {
             const img = targetTile.querySelector("img");
-            if (img) img.src = newUrl;
+            if (img && file) {
+                const tempUrl = URL.createObjectURL(file);
+                img.src = tempUrl;
+                img.onload = () => URL.revokeObjectURL(tempUrl);
+            }
             targetTile.dataset.id = itemId;
-            targetTile.onclick = () => openPhotoInspector(orientation, newUrl, `U-Turn ${orientation} #${seqNum}`, {
+            targetTile.onclick = () => openPhotoInspector(orientation, null, `U-Turn ${orientation} #${seqNum}`, {
                 mode: "uturn",
                 orientation: orientation,
                 seqNum: seqNum,
@@ -2772,12 +2851,12 @@ async function handleNativeUturnFileCaptured(inputElem) {
         batch_label: `Walk Batch #${MobileState.uturn.batchIndex}`,
     };
 
-    // Store in recent tiles for undo / retake
+    // Store in recent tiles for undo / retake (lightweight metadata only - zero memory Blobs!)
     MobileState.uturn.recentTiles.push({
         id: itemId,
         orientation: orientation,
         seqNum: seqNum,
-        file: file
+        timestamp: nowIso
     });
 
     saveUturnSessionState();
@@ -2785,10 +2864,16 @@ async function handleNativeUturnFileCaptured(inputElem) {
     await savePhotoToOutbox(outboxItem);
     await refreshOutboxCount();
 
-    // Show turnaround callout if in REAR phase and at least 1 rear photo snapped
+    // Show turnaround callout if on outbound leg and at least 1 outbound photo snapped (works for FRONT or REAR start)
     const turnaroundCallout = document.getElementById("turnaround-callout");
-    if (turnaroundCallout && orientation === "REAR") {
+    const startLeg = MobileState.uturn.startLeg || "REAR";
+    const outboundCount = (startLeg === "REAR") ? MobileState.uturn.rearCount : MobileState.uturn.frontCount;
+    if (turnaroundCallout && MobileState.uturn.phase === startLeg && outboundCount > 0) {
         turnaroundCallout.style.display = "flex";
+        const turnaroundLabel = document.getElementById("turnaround-btn-label");
+        if (turnaroundLabel) {
+            turnaroundLabel.textContent = `Turn Around ➔ Switch to ${startLeg === "REAR" ? "Fronts" : "Rears"}`;
+        }
     }
 
     // Show undo button
@@ -2812,24 +2897,34 @@ function addMiniPreviewTile(file, orientation, seqNum, itemId = null) {
     const emptyMsg = strip.querySelector(".empty-strip-msg");
     if (emptyMsg) emptyMsg.remove();
 
-    const url = URL.createObjectURL(file);
     const tile = document.createElement("div");
     tile.className = "mini-tile";
     tile.dataset.orientation = orientation;
     tile.dataset.seqNum = seqNum;
     if (itemId) tile.dataset.id = itemId;
 
-    tile.onclick = () => openPhotoInspector(orientation, url, `U-Turn ${orientation} #${seqNum}`, {
+    tile.onclick = () => openPhotoInspector(orientation, null, `U-Turn ${orientation} #${seqNum}`, {
         mode: "uturn",
         orientation: orientation,
         seqNum: seqNum,
         id: itemId,
         tileElement: tile
     });
-    tile.innerHTML = `
-        <img src="${url}" alt="${orientation}">
-        <span class="mini-tile-badge" style="background:${orientation === 'FRONT' ? '#0284c7' : '#10b981'}">${orientation[0]}${seqNum}</span>
-    `;
+
+    const img = document.createElement("img");
+    img.alt = orientation;
+    if (file) {
+        const tempUrl = URL.createObjectURL(file);
+        img.src = tempUrl;
+        img.onload = () => { URL.revokeObjectURL(tempUrl); };
+    }
+    tile.appendChild(img);
+
+    const badge = document.createElement("span");
+    badge.className = "mini-tile-badge";
+    badge.style.background = (orientation === "FRONT") ? "#0284c7" : "#10b981";
+    badge.textContent = `${orientation[0]}${seqNum}`;
+    tile.appendChild(badge);
 
     strip.prepend(tile);
 }
@@ -2840,10 +2935,8 @@ async function undoLastUturnSnap() {
     const last = MobileState.uturn.recentTiles.pop();
     if (!last) return;
 
-    if (!confirm(`Retake last photo (${last.orientation} #${last.seqNum})? It will be removed from queue.`)) {
-        MobileState.uturn.recentTiles.push(last);
-        return;
-    }
+    if (navigator.vibrate) navigator.vibrate([60]);
+    showMobileToast(`↩️ Retaking last photo: ${last.orientation} #${last.seqNum}`);
 
     // Decrement counters
     if (last.orientation === "REAR") {
@@ -2885,9 +2978,11 @@ async function undoLastUturnSnap() {
         btnUndo.style.display = "none";
     }
 
-    // Update Turnaround card visibility if rearCount becomes 0
+    // Update Turnaround card visibility if outbound count becomes 0
     const turnaroundCallout = document.getElementById("turnaround-callout");
-    if (turnaroundCallout && MobileState.uturn.phase === "REAR" && MobileState.uturn.rearCount === 0) {
+    const startLeg = MobileState.uturn.startLeg || "REAR";
+    const outboundCount = (startLeg === "REAR") ? MobileState.uturn.rearCount : MobileState.uturn.frontCount;
+    if (turnaroundCallout && MobileState.uturn.phase === startLeg && outboundCount === 0) {
         turnaroundCallout.style.display = "none";
     }
 
@@ -3248,10 +3343,86 @@ function initLightboxGestures() {
 
 window.MobileOrderState = {
     currentOrder: null,
-    frontPhotoFile: null,
-    rearPhotoFile: null,
+    frontPhotoId: null,
+    rearPhotoId: null,
     isSubmitting: false,
 };
+
+let mobileOrderSearchTimeout = null;
+
+async function handleMobileOrderSearchInput(query) {
+    const listEl = document.getElementById("m-order-autocomplete-list");
+    if (!listEl) return;
+
+    if (mobileOrderSearchTimeout) clearTimeout(mobileOrderSearchTimeout);
+
+    const q = (query || "").trim();
+    if (!q || q.length < 2) {
+        listEl.innerHTML = "";
+        listEl.style.display = "none";
+        return;
+    }
+
+    mobileOrderSearchTimeout = setTimeout(async () => {
+        try {
+            const resp = await fetch(`/api/orders/?search=${encodeURIComponent(q)}&limit=10`, {
+                headers: { Accept: "application/json" }
+            });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const orders = (data && data.orders) ? data.orders : [];
+
+            if (orders.length === 0) {
+                listEl.innerHTML = `
+                    <div style="padding:10px 12px; color:#94a3b8; font-size:0.8rem; text-align:center;">
+                        No local match found. Press <strong>Find</strong> to query ITMS live.
+                    </div>
+                `;
+                listEl.style.display = "block";
+                return;
+            }
+
+            listEl.innerHTML = orders.map(o => {
+                const plate = o.registration_number || "NO PLATE";
+                const num = o.order_number || "";
+                const st = o.status || "Pending";
+                const isInstalled = String(st).toUpperCase().includes("INSTALLED");
+                const badgeColor = isInstalled ? "#10b981" : "#f59e0b";
+                return `
+                    <div class="m-order-autocomplete-item" onclick="selectMobileOrderAutocomplete('${num || plate}')" style="padding:10px 12px; border-bottom:1px solid #1f293d; cursor:pointer; display:flex; justify-content:space-between; align-items:center; transition:background 0.15s;" onmouseover="this.style.background='#1e293b'" onmouseout="this.style.background='transparent'">
+                        <div>
+                            <div style="font-size:0.88rem; font-weight:800; color:#ffffff; font-family:var(--font-mono);">${plate}</div>
+                            <div style="font-size:0.75rem; color:#38bdf8; font-family:var(--font-mono);">#${num}${o.vin ? ' &bull; ' + o.vin.substring(0, 10) : ''}</div>
+                        </div>
+                        <span style="font-size:0.68rem; font-weight:700; padding:2px 8px; border-radius:10px; background:${badgeColor}22; color:${badgeColor}; border:1px solid ${badgeColor}55;">${st}</span>
+                    </div>
+                `;
+            }).join("");
+            listEl.style.display = "block";
+        } catch (err) {
+            console.warn("Autocomplete error:", err);
+        }
+    }, 250);
+}
+
+function selectMobileOrderAutocomplete(ident) {
+    const listEl = document.getElementById("m-order-autocomplete-list");
+    if (listEl) listEl.style.display = "none";
+    const input = document.getElementById("m-order-search-input");
+    if (input) input.value = ident;
+    lookupMobileOrder(ident);
+}
+
+// Global click outside to dismiss autocomplete dropdown
+document.addEventListener("click", (e) => {
+    const listEl = document.getElementById("m-order-autocomplete-list");
+    const input = document.getElementById("m-order-search-input");
+    if (listEl && listEl.style.display !== "none") {
+        if (!listEl.contains(e.target) && e.target !== input) {
+            listEl.style.display = "none";
+        }
+    }
+});
 
 async function loadMobilePendingOrdersList() {
     const picker = document.getElementById("m-order-picker-select");
@@ -3287,15 +3458,24 @@ async function loadMobilePendingOrdersList() {
 }
 
 function clearSelectedMobileOrder() {
+    if (window.MobileOrderState.frontPhotoId) {
+        markOutboxItemSynced(window.MobileOrderState.frontPhotoId).catch(() => {});
+    }
+    if (window.MobileOrderState.rearPhotoId) {
+        markOutboxItemSynced(window.MobileOrderState.rearPhotoId).catch(() => {});
+    }
     window.MobileOrderState.currentOrder = null;
-    window.MobileOrderState.frontPhotoFile = null;
-    window.MobileOrderState.rearPhotoFile = null;
+    window.MobileOrderState.frontPhotoId = null;
+    window.MobileOrderState.rearPhotoId = null;
 
     const profileCard = document.getElementById("m-order-profile-card");
     if (profileCard) profileCard.style.display = "none";
 
     const sInput = document.getElementById("m-order-search-input");
     if (sInput) sInput.value = "";
+
+    const autoList = document.getElementById("m-order-autocomplete-list");
+    if (autoList) autoList.style.display = "none";
 
     const picker = document.getElementById("m-order-picker-select");
     if (picker) picker.value = "";
@@ -3556,29 +3736,40 @@ async function onMobileOrderPhotoPicked(angle, input) {
             ? await compressImageForUpload(rawFile, 1920, 0.85) 
             : rawFile;
 
+        // Zero-In-Memory-Blobs: Immediately persist to IndexedDB outbox_queue
+        const o = window.MobileOrderState?.currentOrder;
+        const orderNum = o?.order_number || "quick";
+        const photoId = `order_${orderNum}_${angle}_${Date.now()}`;
+        const outboxItem = {
+            id: photoId,
+            mode: "install",
+            orientation: angle.toUpperCase(),
+            blob: file,
+            filename: `order_${orderNum}_${angle}.jpg`,
+            captured_at: new Date().toISOString(),
+            status: "local_draft"
+        };
+        await savePhotoToOutbox(outboxItem);
+
+        // Track only lightweight ID in memory
         if (angle === "front") {
-            window.MobileOrderState.frontPhotoFile = file;
+            if (window.MobileOrderState.frontPhotoId) {
+                markOutboxItemSynced(window.MobileOrderState.frontPhotoId).catch(() => {});
+            }
+            window.MobileOrderState.frontPhotoId = photoId;
         } else {
-            window.MobileOrderState.rearPhotoFile = file;
+            if (window.MobileOrderState.rearPhotoId) {
+                markOutboxItemSynced(window.MobileOrderState.rearPhotoId).catch(() => {});
+            }
+            window.MobileOrderState.rearPhotoId = photoId;
         }
 
-        const reader = new FileReader();
-        reader.onload = function (e) {
-            setMobilePhotoPreview(angle, e.target.result);
-        };
-        reader.readAsDataURL(file);
+        // Preview with temporary ObjectURL and revoke it immediately once loaded
+        const tempUrl = URL.createObjectURL(file);
+        setMobilePhotoPreview(angle, tempUrl);
     } catch (err) {
-        console.error("Photo compression error:", err);
-        if (angle === "front") {
-            window.MobileOrderState.frontPhotoFile = rawFile;
-        } else {
-            window.MobileOrderState.rearPhotoFile = rawFile;
-        }
-        const reader = new FileReader();
-        reader.onload = function (e) {
-            setMobilePhotoPreview(angle, e.target.result);
-        };
-        reader.readAsDataURL(rawFile);
+        console.error("Photo pick error:", err);
+        showToastNotification("Failed to process photo.", "error");
     }
 }
 
@@ -3591,6 +3782,9 @@ function setMobilePhotoPreview(angle, url) {
     if (img) {
         img.src = url;
         img.style.display = "block";
+        if (url && url.startsWith("blob:")) {
+            img.onload = () => URL.revokeObjectURL(url);
+        }
     }
     if (status) {
         status.className = "badge badge-green";
@@ -3639,8 +3833,30 @@ async function submitMobileOrderInstall() {
     fd.append("rear_plate_id", rSerial);
     fd.append("tracker_id", gId);
 
-    if (sess.frontPhotoFile) fd.append("front_photo", sess.frontPhotoFile);
-    if (sess.rearPhotoFile) fd.append("rear_photo", sess.rearPhotoFile);
+    // Retrieve front & rear photo Blobs on-demand from IndexedDB (or dropzone inputs)
+    if (sess.frontPhotoId) {
+        const item = await getOutboxItem(sess.frontPhotoId);
+        if (item && item.blob) {
+            fd.append("front_photo", item.blob, item.filename || "front.jpg");
+        }
+    } else {
+        const fInput = document.getElementById("m-front-file-input");
+        if (fInput && fInput.files && fInput.files[0]) {
+            fd.append("front_photo", fInput.files[0]);
+        }
+    }
+
+    if (sess.rearPhotoId) {
+        const item = await getOutboxItem(sess.rearPhotoId);
+        if (item && item.blob) {
+            fd.append("rear_photo", item.blob, item.filename || "rear.jpg");
+        }
+    } else {
+        const rInput = document.getElementById("m-rear-file-input");
+        if (rInput && rInput.files && rInput.files[0]) {
+            fd.append("rear_photo", rInput.files[0]);
+        }
+    }
 
     sess.isSubmitting = true;
     if (btn) {
@@ -3649,11 +3865,22 @@ async function submitMobileOrderInstall() {
     }
 
     try {
-        const resp = await fetch(`/api/itms/orders/${encodeURIComponent(o.order_number)}/install/`, {
+        // Submit via POST /api/orders/${orderNumber}/install/
+        let resp = await fetch(`/api/orders/${encodeURIComponent(o.order_number)}/install/`, {
             method: "POST",
             headers: { "X-CSRFToken": getCsrfToken() },
             body: fd,
         });
+
+        // Fallback to /api/itms/orders/${orderNumber}/install/ if needed
+        if (resp.status === 404) {
+            resp = await fetch(`/api/itms/orders/${encodeURIComponent(o.order_number)}/install/`, {
+                method: "POST",
+                headers: { "X-CSRFToken": getCsrfToken() },
+                body: fd,
+            });
+        }
+
         const res = await resp.json();
 
         if (!res.success) {
@@ -3662,13 +3889,31 @@ async function submitMobileOrderInstall() {
         }
 
         const simMsg = res.dry_run ? " [Simulation Mode]" : "";
-        showToastNotification(`🎉 Order #${res.order_number || o.order_number} submitted to ITMS!${simMsg}`, "success");
+        showToastNotification(`🎉 Order #${res.order_number || o.order_number} installed & submitted!${simMsg}`, "success");
+        if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
 
         const stageBadge = document.getElementById("m-order-stage-badge");
         if (stageBadge) {
             stageBadge.className = "badge badge-green";
             stageBadge.innerText = "INSTALLED";
         }
+
+        // Clean up draft photos from IndexedDB
+        if (sess.frontPhotoId) {
+            await markOutboxItemSynced(sess.frontPhotoId);
+            sess.frontPhotoId = null;
+        }
+        if (sess.rearPhotoId) {
+            await markOutboxItemSynced(sess.rearPhotoId);
+            sess.rearPhotoId = null;
+        }
+
+        // Reset form for next order after 2.2s confirmation window
+        setTimeout(() => {
+            clearSelectedMobileOrder();
+            showToastNotification("Ready for next installation order.", "info");
+        }, 2200);
+
     } catch (err) {
         console.error("[MobileOrder] Submission error:", err);
         showToastNotification("Network error submitting installation.", "error");
@@ -3681,6 +3926,8 @@ async function submitMobileOrderInstall() {
     }
 }
 
+window.handleMobileOrderSearchInput = handleMobileOrderSearchInput;
+window.selectMobileOrderAutocomplete = selectMobileOrderAutocomplete;
 window.loadMobilePendingOrdersList = loadMobilePendingOrdersList;
 window.clearSelectedMobileOrder = clearSelectedMobileOrder;
 window.lookupMobileOrder = lookupMobileOrder;

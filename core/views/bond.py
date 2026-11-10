@@ -1844,7 +1844,7 @@ def api_stock_ledger_entry(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
-@require_itms_envelope
+@require_itms_envelope(allow_expired=True, allow_unlinked=True)
 def api_stock_report_email(request: HttpRequest) -> JsonResponse:
     """
     POST /api/stock/report/email/

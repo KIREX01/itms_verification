@@ -45,6 +45,7 @@ urlpatterns = [
     path("api/reports/totals/", views.api_reports_totals, name="api_reports_totals"),
     path("api/stats/", views.api_stats, name="api_stats"),
     path("api/pairs/", views.api_pairs_list, name="api_pairs_list"),
+    path("api/pairs/create/", views.api_pair_create, name="api_pair_create"),
     path("api/pairs/<int:pair_id>/", views.api_pair_detail, name="api_pair_detail"),
     path("api/pairs/<int:pair_id>/action/", views.api_pair_action, name="api_pair_action"),
     path("api/orders/", views.api_orders_list, name="api_orders_list"),

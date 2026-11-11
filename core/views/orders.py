@@ -40,7 +40,9 @@ logger = logging.getLogger(__name__)
 def api_orders_list(request: HttpRequest) -> JsonResponse:
     """Returns list of installation orders for search / manual linking dropdowns."""
     search = request.GET.get("search", "").strip()
-    gate = require_itms_envelope(allow_expired=bool(search), allow_unlinked=bool(search))
+    for_linking = request.GET.get("for_linking", "").lower() in ("1", "true", "yes")
+    allow_unrestricted = bool(search) or for_linking
+    gate = require_itms_envelope(allow_expired=allow_unrestricted, allow_unlinked=allow_unrestricted)
     return gate(_api_orders_list_inner)(request)
 
 

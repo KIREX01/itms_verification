@@ -602,11 +602,18 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
                 ).exclude(id=pair.id).first()
             )
             if other_pair:
-                return JsonResponse({
-                    "success": False,
-                    "error": f"Order #{target_order.order_number} ({target_order.registration_number}) is already assigned to Pair #{other_pair.id} ({other_pair.registration_number_detected}). Each order can only be assigned to one vehicle pair.",
-                    "code": "ORDER_ALREADY_ASSIGNED",
-                }, status=400)
+                if other_pair.verification_status == VehicleInstallationPair.VerificationStatus.SUBMITTED:
+                    return JsonResponse({
+                        "success": False,
+                        "error": f"Order #{target_order.order_number} ({target_order.registration_number}) was already submitted to ITMS on Pair #{other_pair.id}.",
+                        "code": "ORDER_ALREADY_ASSIGNED",
+                    }, status=400)
+                else:
+                    # Safely unbind from previous unsubmitted pair and reassign to this pair
+                    other_pair.order = None
+                    if other_pair.verification_status == VehicleInstallationPair.VerificationStatus.APPROVED:
+                        other_pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
+                    other_pair.save(update_fields=["order", "verification_status"])
 
         # Sibling Series Collision Guard (e.g. UMA496QV vs UMA496QW)
         confirm_sibling = str(request.POST.get("confirm_sibling") or body_data.get("confirm_sibling") or "").strip().lower() in ("1", "true", "yes")
@@ -618,7 +625,9 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
             exclude_pair_id=pair.id,
             exclude_order_id=target_order.id if target_order else None,
         )
-        if collision["has_sibling_collision"] and not confirm_sibling:
+        # If the operator explicitly picked an order_id from the UI, or confirm_sibling=True,
+        # we consider this deliberate operator intent and do not block the linking action.
+        if collision["has_sibling_collision"] and not confirm_sibling and not order_id:
             return JsonResponse({
                 "success": False,
                 "requires_confirmation": True,
@@ -667,15 +676,19 @@ def api_pair_action(request: HttpRequest, pair_id: int) -> JsonResponse:
                 pair.rear_image.detected_plate = canonical_plate
                 pair.rear_image.save(update_fields=["detected_plate"])
 
+        pair.refresh_completeness()
         if target_order:
-            # Promoting directly to APPROVED on manual order link saves operator review friction
-            pair.verification_status = VehicleInstallationPair.VerificationStatus.APPROVED
+            # Promoting directly to APPROVED on complete manual order link saves operator review friction;
+            # if missing rear or front image, set to PENDING_REVIEW instead of CONFLICT
+            pair.verification_status = (
+                VehicleInstallationPair.VerificationStatus.APPROVED
+                if pair.is_complete
+                else VehicleInstallationPair.VerificationStatus.PENDING_REVIEW
+            )
         else:
             pair.verification_status = VehicleInstallationPair.VerificationStatus.CONFLICT
 
-        pair.refresh_completeness()
-
-        sibling_tag = f" [SIBLING_OVERRIDE_CONFIRMED: {', '.join(collision['sibling_plates'])}]" if collision.get("has_sibling_collision") and confirm_sibling else ""
+        sibling_tag = f" [SIBLING_OVERRIDE_CONFIRMED: {', '.join(collision['sibling_plates'])}]" if collision.get("has_sibling_collision") and (confirm_sibling or order_id) else ""
         if operator_note is not None and str(operator_note).strip():
             pair.operator_note = str(operator_note).strip() + sibling_tag
         elif target_order:
@@ -1045,5 +1058,66 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
         "scope": scope,
         "message": f"{'[DRY RUN] ' if is_dry_run else ''}Batch submission complete ({scope}): {succeeded} succeeded, {failed} failed (Outbox: {outbox_queued}).",
     })
+
+
+@require_POST
+def api_pair_create(request: HttpRequest) -> JsonResponse:
+    """Creates a new VehicleInstallationPair on the fly from an unassigned EvidenceImage."""
+    if not (request.user and getattr(request.user, "is_authenticated", False)):
+        return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
+
+    image_id = request.POST.get("image_id")
+    if not image_id:
+        return JsonResponse({"success": False, "error": "image_id is required."}, status=400)
+
+    image = EvidenceImage.objects.filter(id=image_id).select_related("batch").first()
+    if not image:
+        return JsonResponse({"success": False, "error": f"Image #{image_id} not found."}, status=404)
+
+    # Check if already belongs to an active pair
+    existing_pair = VehicleInstallationPair.objects.filter(
+        is_deleted=False
+    ).filter(
+        Q(front_image=image) | Q(rear_image=image)
+    ).first()
+    if existing_pair:
+        return JsonResponse({
+            "success": True,
+            "created": False,
+            "pair_id": existing_pair.id,
+            "detected_plate": existing_pair.registration_number_detected,
+            "message": f"Photo already belongs to Pair #{existing_pair.id}.",
+        })
+
+    orient = (image.orientation or "FRONT").upper()
+    front_img = image if orient == "FRONT" else None
+    rear_img = image if orient == "REAR" else None
+    plate_detected = image.detected_plate or "UNREAD"
+
+    envelope = getattr(request, "envelope", None)
+    facility = envelope.facility_code if (envelope and envelope.is_valid) else (getattr(image.batch, "facility_code", "AGM") or "AGM")
+
+    new_pair = VehicleInstallationPair.objects.create(
+        registration_number_detected=plate_detected,
+        front_image=front_img,
+        rear_image=rear_img,
+        verification_status=VehicleInstallationPair.VerificationStatus.CONFLICT,
+        facility_code=facility,
+        operator=request.user,
+        account_email=request.user.email if getattr(request.user, "email", None) else "",
+        operator_note="Pair created manually from unassigned photo in batch.",
+        matched_via=VehicleInstallationPair.MatchedVia.MANUAL,
+    )
+    new_pair.refresh_completeness()
+    new_pair.save()
+
+    return JsonResponse({
+        "success": True,
+        "created": True,
+        "pair_id": new_pair.id,
+        "detected_plate": new_pair.registration_number_detected,
+        "message": f"Created Pair #{new_pair.id} from photo.",
+    })
+
 
 

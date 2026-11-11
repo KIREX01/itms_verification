@@ -35,6 +35,7 @@ from .pairs import (
     api_pairs_list,
     api_pair_detail,
     api_pair_action,
+    api_pair_create,
     api_batch_submit,
 )
 

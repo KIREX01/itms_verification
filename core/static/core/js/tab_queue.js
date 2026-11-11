@@ -747,20 +747,39 @@ function openLinkOrderModal() {
     openUnifiedLinkModal();
 }
 
-function openUnifiedLinkModal() {
-    if (!selectedPairDetail) {
+async function openUnifiedLinkModal(pairId = null, defaultPlate = "") {
+    if (pairId) {
+        selectedPairId = pairId;
+        if (!selectedPairDetail || selectedPairDetail.id !== pairId) {
+            try {
+                const res = await fetch(`/api/pairs/${pairId}/`);
+                const data = await res.json();
+                if (data.success && data.pair) {
+                    selectedPairDetail = data.pair;
+                    updateLinkerBanner();
+                }
+            } catch (e) {
+                console.warn("Could not fetch pair detail:", e);
+            }
+        }
+    }
+
+    if (!selectedPairId && !selectedPairDetail) {
         showToast("Please select a pair first", "warning");
         return;
     }
+
     const input = document.getElementById("input-edit-plate");
-    const currentPlate = selectedPairDetail.registration_number_detected || "";
-    const cleanPlate = (currentPlate.startsWith("PAIR-") || currentPlate.startsWith("MISSING-")) ? "" : currentPlate;
+    let initialPlate = defaultPlate || (selectedPairDetail && selectedPairDetail.registration_number_detected) || "";
+    if (initialPlate.startsWith("PAIR-") || initialPlate.startsWith("MISSING-") || initialPlate === "UNREAD" || initialPlate === "UNKNOWN") {
+        initialPlate = "";
+    }
     if (input) {
-        input.value = cleanPlate;
+        input.value = initialPlate;
     }
 
     openModal("modal-edit-plate");
-    searchOrdersForLinking(cleanPlate);
+    searchOrdersForLinking(initialPlate);
     setTimeout(() => {
         if (input) {
             input.focus();
@@ -768,6 +787,7 @@ function openUnifiedLinkModal() {
         }
     }, 100);
 }
+window.openUnifiedLinkModal = openUnifiedLinkModal;
 
 let linkSearchTimeout = null;
 function onUnifiedPlateInput(val) {
@@ -777,7 +797,7 @@ function onUnifiedPlateInput(val) {
     }, 180);
 }
 
-async function submitUnifiedLinkOrder() {
+async function submitUnifiedLinkOrder(confirmSibling = false) {
     if (!selectedPairId) return;
     const input = document.getElementById("input-edit-plate");
     const query = input ? input.value.trim() : "";
@@ -791,6 +811,9 @@ async function submitUnifiedLinkOrder() {
         const bodyParams = new URLSearchParams();
         bodyParams.append("action", "link_order");
         bodyParams.append("query", query);
+        if (confirmSibling) {
+            bodyParams.append("confirm_sibling", "1");
+        }
 
         // If query matches any order in the currently filtered list, pass order_id for immediate linking
         const cleanQ = query.replace(/\s+/g, "").toUpperCase();
@@ -816,6 +839,14 @@ async function submitUnifiedLinkOrder() {
             await selectPair(selectedPairId);
             fetchStats();
             fetchPairs();
+            if (typeof fetchBatchesList === "function") {
+                void fetchBatchesList();
+            }
+        } else if (data.requires_confirmation) {
+            const warningMsg = data.error || "A sibling collision was detected. Do you want to proceed and link this order anyway?";
+            if (confirm(`⚠️ Warning: ${warningMsg}\n\nProceed with linking?`)) {
+                await submitUnifiedLinkOrder(true);
+            }
         } else {
             showToast(data.error || "Linking/update failed", "error");
         }
@@ -823,6 +854,7 @@ async function submitUnifiedLinkOrder() {
         showToast("Error: " + err, "error");
     }
 }
+window.submitUnifiedLinkOrder = submitUnifiedLinkOrder;
 
 async function submitEditPlate() {
     return submitUnifiedLinkOrder();
@@ -843,6 +875,9 @@ async function unlinkOrderFromSelectedPair() {
             updateLinkerBanner();
             fetchStats();
             fetchPairs();
+            if (typeof fetchBatchesList === "function") {
+                void fetchBatchesList();
+            }
         } else {
             showToast(data.error || "Failed to unlink order", "error");
         }
@@ -854,77 +889,119 @@ async function unlinkOrderFromSelectedPair() {
 async function searchOrdersForLinking(q) {
     const container = document.getElementById("linker-orders-list");
     const countEl = document.getElementById("linker-orders-count");
+    if (!container) return;
+
     try {
-        const res = await fetch(`/api/orders/?search=${encodeURIComponent(q)}&limit=50`);
+        const cleanQ = (q || "").trim();
+        const isUnknown = !cleanQ || cleanQ.toUpperCase() === "UNKNOWN" || cleanQ.toUpperCase() === "UNREAD";
+        const url = isUnknown ? `/api/orders/?for_linking=1&limit=50` : `/api/orders/?search=${encodeURIComponent(cleanQ)}&limit=50`;
+
+        const res = await fetch(url);
         const data = await res.json();
-        if (data.success && data.orders) {
-            currentFilteredOrders = data.orders;
-            if (countEl) countEl.innerText = data.orders.length === 0 ? "0 orders found" : `${data.orders.length} order(s) found`;
-            if (data.orders.length === 0) {
-                container.innerHTML = `
-                    <div style="padding:28px 16px; text-align:center;">
-                        <div style="font-size:1.8rem; margin-bottom:8px;">⚠️</div>
-                        <div style="font-size:0.92rem; font-weight:800; color:#ef4444;">Order not available</div>
-                        <div style="color:var(--ug-text-muted); font-size:0.78rem; margin-top:4px;">
-                            No active ITMS installation order found matching "<strong>${escapeHtml(q || '')}</strong>".
-                        </div>
-                        <div style="margin-top:10px; color:var(--ug-text-dim); font-size:0.73rem;">
-                            Press <strong style="color:var(--ug-green);">Enter</strong> to save plate directly, or trigger an ITMS sync if this order was recently created.
-                        </div>
-                    </div>`;
-                return;
+        
+        let orders = (data.success && data.orders) ? data.orders : [];
+        let isFallback = false;
+
+        // If specific search yielded 0 results, fall back to fetching all active orders
+        if (orders.length === 0 && !isUnknown) {
+            const fallbackRes = await fetch(`/api/orders/?for_linking=1&limit=50`);
+            const fallbackData = await fallbackRes.json();
+            if (fallbackData.success && fallbackData.orders && fallbackData.orders.length > 0) {
+                orders = fallbackData.orders;
+                isFallback = true;
             }
-            container.innerHTML = `
-                <table class="itms-grid-table">
-                    <thead>
-                        <tr>
-                            <th style="width:130px;">Order #</th>
-                            <th style="width:120px;">Plate</th>
-                            <th style="width:140px;">VIN / Chassis</th>
-                            <th style="width:90px;">Status</th>
-                            <th>Warehouse</th>
-                            <th style="width:85px; text-align:right;">Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${data.orders.map(o => `
-                            <tr style="cursor:pointer;" onclick="linkOrderToPair(${o.id})" title="Click to link Order #${escapeHtml(o.order_number)}">
-                                <td data-label="Order #"><strong style="color:var(--ug-yellow); font-family:var(--font-mono);">${escapeHtml(o.order_number)}</strong></td>
-                                <td data-label="Plate"><strong style="color:#fff;">${escapeHtml(o.registration_number)}</strong></td>
-                                <td data-label="VIN / Chassis" style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${escapeHtml(o.vin || '—')}</td>
-                                <td data-label="Status"><span class="badge badge-muted">${escapeHtml(o.status || 'Active')}</span></td>
-                                <td data-label="Warehouse" style="font-size:0.78rem; color:var(--ug-text-dim);">${escapeHtml(o.warehouse_name || '—')}</td>
-                                <td data-label="Action" style="text-align:right;">
-                                    <button class="btn btn-primary" style="padding:3px 10px; font-size:0.75rem;" onclick="event.stopPropagation(); linkOrderToPair(${o.id})">
-                                        Link ➜
-                                    </button>
-                                </td>
-                            </tr>
-                        `).join("")}
-                    </tbody>
-                </table>
-            `;
         }
+
+        currentFilteredOrders = orders;
+
+        if (countEl) {
+            countEl.innerText = orders.length === 0 ? "0 orders found" : `${orders.length} order(s) available`;
+        }
+
+        if (orders.length === 0) {
+            container.innerHTML = `
+                <div style="padding:28px 16px; text-align:center;">
+                    <div style="font-size:1.8rem; margin-bottom:8px;">⚠️</div>
+                    <div style="font-size:0.92rem; font-weight:800; color:#ef4444;">No Available Orders</div>
+                    <div style="color:var(--ug-text-muted); font-size:0.78rem; margin-top:4px;">
+                        No active ITMS orders are currently available to link.
+                    </div>
+                </div>`;
+            return;
+        }
+
+        const noteBanner = (isUnknown || isFallback) ? `
+            <div style="padding:8px 12px; background:rgba(56, 189, 248, 0.1); border-bottom:1px solid rgba(56, 189, 248, 0.25); color:#38bdf8; font-size:0.78rem; font-weight:700; display:flex; align-items:center; gap:6px;">
+                <span>⚡</span>
+                <span>${isFallback ? `No exact match for "${escapeHtml(cleanQ)}". Select an active order below to link &amp; close:` : 'Select an active order below to link &amp; close:'}</span>
+            </div>
+        ` : '';
+
+        container.innerHTML = `
+            ${noteBanner}
+            <table class="itms-grid-table">
+                <thead>
+                    <tr>
+                        <th style="width:130px;">Order #</th>
+                        <th style="width:120px;">Plate</th>
+                        <th style="width:140px;">VIN / Chassis</th>
+                        <th style="width:90px;">Status</th>
+                        <th>Warehouse</th>
+                        <th style="width:85px; text-align:right;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${orders.map(o => `
+                        <tr style="cursor:pointer;" onclick="linkOrderToPair(${o.id})" title="Click to link Order #${escapeHtml(o.order_number)}">
+                            <td data-label="Order #"><strong style="color:var(--ug-yellow); font-family:var(--font-mono);">${escapeHtml(o.order_number)}</strong></td>
+                            <td data-label="Plate"><strong style="color:#fff;">${escapeHtml(o.registration_number)}</strong></td>
+                            <td data-label="VIN / Chassis" style="font-family:var(--font-mono); font-size:0.75rem; color:var(--ug-text-muted);">${escapeHtml(o.vin || '—')}</td>
+                            <td data-label="Status"><span class="badge badge-muted">${escapeHtml(o.status || 'Active')}</span></td>
+                            <td data-label="Warehouse" style="font-size:0.78rem; color:var(--ug-text-dim);">${escapeHtml(o.warehouse_name || '—')}</td>
+                            <td data-label="Action" style="text-align:right;">
+                                <button class="btn btn-primary" style="padding:3px 10px; font-size:0.75rem; font-weight:800;" onclick="event.stopPropagation(); linkOrderToPair(${o.id})">
+                                    Link ➜
+                                </button>
+                            </td>
+                        </tr>
+                    `).join("")}
+                </tbody>
+            </table>
+        `;
     } catch (err) {
         console.warn("Linker search error:", err);
     }
 }
+window.searchOrdersForLinking = searchOrdersForLinking;
 
-async function linkOrderToPair(orderId) {
+async function linkOrderToPair(orderId, confirmSibling = false) {
+    if (!selectedPairId) return;
     try {
+        let body = `action=link_order&order_id=${orderId}`;
+        if (confirmSibling) {
+            body += "&confirm_sibling=1";
+        }
         const res = await fetch(`/api/pairs/${selectedPairId}/action/`, {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: `action=link_order&order_id=${orderId}`,
+            body: body,
         });
         const data = await res.json();
         if (data.success) {
-            showToast(data.message, "success");
+            showToast(data.message || "Order linked successfully!", "success");
             closeModal("modal-edit-plate");
             await selectPair(selectedPairId);
             updateLinkerBanner();
             fetchStats();
             fetchPairs();
+            if (typeof fetchBatchesList === "function") {
+                void fetchBatchesList();
+            }
+        } else if (data.requires_confirmation) {
+            const warningMsg = data.error || "A sibling collision was detected. Do you want to proceed and link this order anyway?";
+            if (confirm(`⚠️ Warning: ${warningMsg}\n\nProceed with linking?`)) {
+                await linkOrderToPair(orderId, true);
+            }
         } else {
             showToast(data.error || "Linking failed", "error");
         }
@@ -932,6 +1009,7 @@ async function linkOrderToPair(orderId) {
         showToast("Linking error: " + err, "error");
     }
 }
+window.linkOrderToPair = linkOrderToPair;
 
 // Mobile Navigation Functions
 function openQueueMobileInspector() {

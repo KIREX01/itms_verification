@@ -373,6 +373,7 @@ def api_batches_list(request: HttpRequest) -> JsonResponse:
     if not (request.user and getattr(request.user, "is_authenticated", False)):
         return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
 
+    from datetime import datetime
     from core.services import date_service
     date_param = (
         request.GET.get("date")
@@ -380,36 +381,48 @@ def api_batches_list(request: HttpRequest) -> JsonResponse:
         or request.GET.get("suffix")
         or request.GET.get("target_date")
     )
+    is_all_dates = bool(date_param and str(date_param).strip().upper() == "ALL")
     target_date = None
-    if date_param and str(date_param).strip().upper() not in ("ALL", ""):
+    if date_param and not is_all_dates and str(date_param).strip() != "":
         target_date = date_service.parse_date_input(date_param)
 
     today = target_date or date_service.today_kampala()
-    scope = request.GET.get("scope", "DATE" if target_date else "TODAY").upper().strip()
+    scope = request.GET.get("scope", "DATE" if target_date else "ALL" if is_all_dates else "SHIFT").upper().strip()
 
     qs = IngestionBatch.objects.all().order_by("-created_at")
     envelope = getattr(request, "envelope", None)
-    if envelope and envelope.is_valid:
+    if envelope and envelope.is_valid and envelope.facility_code:
         qs = qs.filter(
-            Q(operator=request.user) | Q(operator__isnull=True),
-            facility_code=envelope.facility_code,
+            Q(facility_code=envelope.facility_code) | Q(facility_code="") | Q(facility_code__isnull=True)
         )
-    elif request.user and getattr(request.user, "is_authenticated", False):
-        qs = qs.filter(Q(operator=request.user) | Q(operator__isnull=True))
+    if request.user and getattr(request.user, "is_authenticated", False):
+        if not getattr(request.user, "is_superuser", False):
+            qs = qs.filter(Q(operator=request.user) | Q(operator__isnull=True))
 
     latest_batch = qs.first()
     total_batches = qs.count()
     today_batches_cnt = qs.filter(created_at__date=today).count()
     carryover_batches_cnt = qs.exclude(created_at__date=today).count()
 
-    if target_date:
-        qs = qs.filter(created_at__date=target_date)
-    elif scope == "TODAY":
-        qs = qs.filter(created_at__date=today)
+    if is_all_dates or scope == "ALL":
+        # All batches across history - no date restriction
+        pass
+    elif target_date:
+        start_dt = timezone.make_aware(datetime.combine(target_date, datetime.min.time()), date_service.KAMPALA_TZ)
+        end_dt = timezone.make_aware(datetime.combine(target_date, datetime.max.time()), date_service.KAMPALA_TZ)
+        date_str = target_date.strftime("%Y%m%d")
+        qs = qs.filter(Q(created_at__range=(start_dt, end_dt)) | Q(batch_id__icontains=date_str))
+    elif scope in ("TODAY", "SHIFT", "DATE"):
+        live_today = date_service.today_kampala()
+        start_dt = timezone.make_aware(datetime.combine(live_today, datetime.min.time()), date_service.KAMPALA_TZ)
+        end_dt = timezone.make_aware(datetime.combine(live_today, datetime.max.time()), date_service.KAMPALA_TZ)
+        date_str = live_today.strftime("%Y%m%d")
+        qs = qs.filter(Q(created_at__range=(start_dt, end_dt)) | Q(batch_id__icontains=date_str))
     elif scope == "ACTIVE_BATCH" and latest_batch:
         qs = qs.filter(id=latest_batch.id)
     elif scope == "CARRYOVER":
-        qs = qs.exclude(created_at__date=today)
+        live_today = date_service.today_kampala()
+        qs = qs.exclude(created_at__date=live_today)
 
     batches = [
         {

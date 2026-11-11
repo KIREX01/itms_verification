@@ -1902,5 +1902,73 @@ The Backend & DevOps team has completed and verified the core backend services, 
   2. In `core/templates/core/modals.html` & `core/static/core/css/modals.css`:
      - Ensured `.candidate-tile` styling provides crisp dark background (`#111622`), subtle 2px border, clean hover lifts, and high-visibility `#ffd100` 2px selected border.
 
+---
+
+## 28. Feature: Conflict Tab Order Linking Fix, Batches Scope Consolidation & Quick Photo-to-Order Link Workflow [COMPLETED]
+
+### 28.1 Queue Tab: Fix Order Linking from Conflict Tab [COMPLETED]
+- **Identified Issue**:
+  - Operators were unable to link orders to pairs in the Conflict filter.
+  - Sibling series collision checks on the backend returned `requires_confirmation: True`, but `tab_queue.js` had zero handling for `requires_confirmation` / `confirm_sibling`, treating it as a fatal error and showing a red toast.
+  - Additionally, if `search` was empty or plate was unrecognized, `api_orders_list` threw HTTP 412 if the operator's ITMS web session was unlinked/expired.
+- **Backend Fix Landed**:
+  - `core/views/pairs.py`: Explicit operator order selection (`order_id` passed) or `confirm_sibling=1` now bypasses blocking and links the order cleanly. If claimed by another unsubmitted pair, it safely reassigns.
+  - `core/views/orders.py`: `api_orders_list` now has `allow_unlinked=True, allow_expired=True` so browsing orders for linking never 412s.
+- **Target Files**:
+  - `core/static/core/js/tab_queue.js`
+  - `core/templates/core/tabs/tab_queue.html`
+- **Frontend Action Items Completed**:
+  1. In `core/static/core/js/tab_queue.js`:
+     - In `linkOrderToPair(orderId, confirmSibling=false)`:
+       - Sends `confirm_sibling=1` when `confirmSibling` is true.
+       - Intercepts `data.requires_confirmation`: Prompts the operator with warning confirmation dialog and, if confirmed, re-calls `linkOrderToPair(orderId, true)`.
+     - In `submitUnifiedLinkOrder(confirmSibling=false)`:
+       - Intercepts `data.requires_confirmation`: Prompts the operator and re-sends with `confirm_sibling=1`.
+     - In `searchOrdersForLinking(q)`:
+       - When `q` is empty, "UNKNOWN", or yields no exact match, falls back to fetching all active unlinked orders from `/api/orders/?limit=50`.
+       - Renders a clean notice *"Select an active order below to link & close:"* with 1-click `Link ➜` buttons on every row.
+     - In `openUnifiedLinkModal(pairId, defaultPlate)`:
+       - Pre-populates the modal and queries orders on demand, exported on `window.openUnifiedLinkModal`.
+
+### 28.2 Batches Tab: Scope Filter Consolidation [COMPLETED]
+- **Identified Issue**:
+  - The Batches tab had multiple competing date scope buttons (`Today's Batches`, `Active Batch`, `Prior Carryover`, `All Batches` on desktop and mobile) which conflicted with the top header shift date selector.
+  - Selecting a date from the top header caused the Batches tab to fail or show contradictory labels.
+- **Backend Fix Landed**:
+  - `core/views/upload.py` (`api_batches_list`): Fully supports `scope=ALL` (all historical batches) and `scope=SHIFT` / `date=<date>` (Kampala timezone range filtering + `batch_id` date matching). Removed restrictive operator filtering so batches are never hidden between facility operators.
+- **Target Files**:
+  - `core/templates/core/tabs/tab_batches.html`
+  - `core/static/core/js/tab_batches.js`
+- **Frontend Action Items Completed**:
+  1. In `core/templates/core/tabs/tab_batches.html`:
+     - Replaced the 4 scope buttons on both desktop and mobile with a consolidated 2-way toggle:
+       - `[📅 Shift Batches]` (`id="btn-bscope-shift"`, active by default)
+       - `[🌐 All Batches]` (`id="btn-bscope-all"`)
+     - Updated `#batches-scope-summary-tag` to show clear status: `Shift: <label> • X batch(es)` or `All Batches • Y total`.
+  2. In `core/static/core/js/tab_batches.js`:
+     - Implemented `setBatchesScopeMode(mode)` ("SHIFT" vs "ALL").
+     - In `fetchBatchesList(shiftDate)`:
+       - Queries `/api/batches/?scope=ALL` when in "ALL" mode.
+       - Queries `/api/batches/?scope=SHIFT&date=${encodeURIComponent(currentShiftDate)}` when in "SHIFT" mode.
+     - Listens for `shiftDateChanged` events from the global header date selector and automatically re-fetches batches in shift mode.
+
+### 28.3 Fast Photo-to-Order Linking ("pictures i need quickly and any order to close") [COMPLETED]
+- **Backend Fix Landed**:
+  - Created `POST /api/pairs/create/` (accepts `image_id`, creates a new `VehicleInstallationPair` on the fly, and returns `pair_id`).
+- **Target Files**:
+  - `core/static/core/js/tab_batches.js`
+- **Frontend Action Items Completed**:
+  1. In `renderFullScaleBatchPhotos(batchId, images)`:
+     - For paired photos: Added direct `⚡ Quick Link Order` action button invoking `quickLinkFromBatch(img.pair.pair_id, img.pair.detected_plate)`.
+     - For unassigned photos: Added direct `⚡ Pair & Link Order` action button invoking `quickPairAndLinkUnassignedPhoto(img.id, img.orientation, img.detected_plate)`.
+  2. Implemented `quickPairAndLinkUnassignedPhoto(imageId, orientation, detectedPlate)`:
+     - Posts to `/api/pairs/create/` with `image_id=${imageId}`.
+     - Upon receiving `data.pair_id`, automatically invokes `quickLinkFromBatch(data.pair_id, detectedPlate)`.
+  3. Implemented `quickLinkFromBatch(pairId, detectedPlate)`:
+     - Sets target pair context, opens `modal-edit-plate`, pre-fills plate search, and immediately lists active ITMS orders for 1-click linking.
+  4. In `core/templates/core/base.html`:
+     - Bumped script query versions: `tab_batches.js?v=28` and `tab_queue.js?v=31`.
+
+
 
 

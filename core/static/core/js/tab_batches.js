@@ -57,28 +57,33 @@ function initDropzones() {
     });
 }
 
-function setBatchesDateScope(scope) {
-    currentBatchesDateScope = scope;
-    const scopeButtons = {
-        "TODAY": "btn-bscope-today",
-        "ACTIVE_BATCH": "btn-bscope-active",
-        "CARRYOVER": "btn-bscope-carryover",
-        "ALL": "btn-bscope-all"
-    };
-    Object.keys(scopeButtons).forEach(k => {
-        const el = document.getElementById(scopeButtons[k]);
-        if (el) el.classList.toggle("active", k === scope);
-    });
+let currentBatchesDateScope = "SHIFT";
+
+function setBatchesScopeMode(mode) {
+    currentBatchesDateScope = (mode === "ALL") ? "ALL" : "SHIFT";
+    const btnShift = document.getElementById("btn-bscope-shift");
+    const btnAll = document.getElementById("btn-bscope-all");
+    const btnShiftMob = document.getElementById("btn-bscope-shift-mob");
+    const btnAllMob = document.getElementById("btn-bscope-all-mob");
+
+    if (btnShift) btnShift.classList.toggle("active", currentBatchesDateScope === "SHIFT");
+    if (btnAll) btnAll.classList.toggle("active", currentBatchesDateScope === "ALL");
+    if (btnShiftMob) btnShiftMob.classList.toggle("active", currentBatchesDateScope === "SHIFT");
+    if (btnAllMob) btnAllMob.classList.toggle("active", currentBatchesDateScope === "ALL");
+
     fetchBatchesList();
 }
+window.setBatchesScopeMode = setBatchesScopeMode;
+
+function setBatchesDateScope(scope) {
+    setBatchesScopeMode(scope === "ALL" ? "ALL" : "SHIFT");
+}
+window.setBatchesDateScope = setBatchesDateScope;
 
 function cycleBatchesDateScope() {
-    const scopes = ["TODAY", "ACTIVE_BATCH", "CARRYOVER", "ALL"];
-    const idx = scopes.indexOf(currentBatchesDateScope);
-    const nextScope = scopes[(idx + 1) % scopes.length];
-    setBatchesDateScope(nextScope);
+    setBatchesScopeMode(currentBatchesDateScope === "SHIFT" ? "ALL" : "SHIFT");
     if (typeof showToast === "function") {
-        showToast(`Batches Scope: ${nextScope}`, "info");
+        showToast(`Batches Scope: ${currentBatchesDateScope === "ALL" ? "All Batches" : "Shift Batches"}`, "info");
     }
 }
 
@@ -87,20 +92,24 @@ async function fetchBatchesList(shiftDate = null) {
     const countBadge = document.getElementById("batches-count-badge");
     const summaryTag = document.getElementById("batches-scope-summary-tag");
     try {
-        const activeScope = currentBatchesDateScope || "TODAY";
+        const isAll = (currentBatchesDateScope === "ALL");
         const currentShiftDate = shiftDate || (window.activeShiftDateInfo && (window.activeShiftDateInfo.date || window.activeShiftDateInfo.suffix)) || "";
-        let url = `/api/batches/?scope=${encodeURIComponent(activeScope)}`;
-        if (currentShiftDate && currentShiftDate !== "ALL" && activeScope !== "ALL") {
+        let url = isAll ? "/api/batches/?scope=ALL" : "/api/batches/?scope=SHIFT";
+        if (!isAll && currentShiftDate && currentShiftDate !== "ALL") {
             url += `&date=${encodeURIComponent(currentShiftDate)}`;
         }
         const res = await fetch(url);
         const data = await res.json();
         if (data.success && data.batches) {
             batchesData = data.batches;
-            if (countBadge) countBadge.innerText = `${batchesData.length} Batches (${activeScope})`;
+            if (countBadge) {
+                countBadge.innerText = isAll ? `${batchesData.length} Batches (All-Time)` : `${batchesData.length} Batches (Shift)`;
+            }
             if (summaryTag) {
-                const totalText = data.total_batches ? ` • ${data.total_batches} all-time` : '';
-                summaryTag.innerText = `Scope: ${activeScope} • ${batchesData.length} batch(es) shown${totalText}`;
+                const shiftLabel = window.activeShiftDateInfo?.formatted_date || window.activeShiftDateInfo?.display || currentShiftDate || "Active Shift";
+                summaryTag.innerText = isAll
+                    ? `All Batches • ${batchesData.length} total`
+                    : `Shift: ${shiftLabel} • ${batchesData.length} batch(es)`;
             }
 
             if (batchesData.length === 0) {
@@ -108,16 +117,13 @@ async function fetchBatchesList(shiftDate = null) {
                     container.innerHTML = `
                         <div class="batches-empty-state">
                             <span style="font-size:2.5rem;">📦</span>
-                            <h4 style="color:#fff; font-size:1.1rem; margin-top:8px;">No Batches in Scope (${activeScope})</h4>
+                            <h4 style="color:#fff; font-size:1.1rem; margin-top:8px;">${isAll ? "No Batches Found" : "No Batches in Active Shift"}</h4>
                             <p style="font-size:0.8rem; max-width:400px; margin-top:4px;">
-                                ${activeScope === 'TODAY' ? "No photos ingested during today's shift yet. Check prior carryover or upload a new batch." : "No batches found matching the selected scope."}
+                                ${isAll ? "No photo ingestion batches found in database." : "No batches found for the active shift date. Switch to All Batches to browse history, or upload a new batch."}
                             </p>
                             <div style="display:flex; gap:8px; margin-top:12px;">
-                                ${activeScope === 'TODAY' ? `
-                                    <button class="btn btn-secondary" onclick="setBatchesDateScope('CARRYOVER')">
-                                        ⏳ Check Carryover
-                                    </button>
-                                    <button class="btn btn-secondary" onclick="setBatchesDateScope('ALL')">
+                                ${!isAll ? `
+                                    <button class="btn btn-secondary" onclick="setBatchesScopeMode('ALL')">
                                         🌐 All Batches
                                     </button>
                                 ` : ''}
@@ -370,16 +376,24 @@ function renderFullScaleBatchPhotos(batchId, images) {
                             <div style="color:#ffffff !important; font-weight:700; font-size:0.78rem;">Detected Plate: ${escapeHtml(img.pair.detected_plate || '—')}</div>
                             <div style="color:rgba(255,255,255,0.8) !important; font-size:0.74rem;">Order: ${img.pair.order_number ? '#' + escapeHtml(img.pair.order_number) : 'Unlinked'}</div>
                         </div>
-                        <button type="button" class="btn btn-secondary" style="padding:6px 12px; font-size:0.76rem; min-height:36px; font-weight:700; color:#ffffff !important;" onclick="jumpToPairInQueue(${img.pair.pair_id})">
-                            🔍 Inspect in Queue
-                        </button>
+                        <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                            <button type="button" class="btn btn-primary btn-sm" style="padding:6px 12px; font-size:0.76rem; min-height:36px; font-weight:800; color:#000000 !important; background:var(--ug-yellow);" onclick="event.stopPropagation(); quickLinkFromBatch(${img.pair.pair_id}, '${escapeHtml(img.pair.detected_plate || '')}')">
+                                ⚡ Quick Link Order
+                            </button>
+                            <button type="button" class="btn btn-secondary btn-sm" style="padding:6px 12px; font-size:0.76rem; min-height:36px; font-weight:700; color:#ffffff !important;" onclick="jumpToPairInQueue(${img.pair.pair_id})">
+                                🔍 Queue
+                            </button>
+                        </div>
                     </div>
                 ` : `
                     <div class="batch-photo-pair-strip" style="border-color:rgba(255, 255, 255, 0.2);">
                         <div>
                             <div style="color:#ffffff !important; font-weight:800; font-size:0.8rem;">⚠️ Unassigned Evidence Photo</div>
-                            <div style="color:rgba(255,255,255,0.8) !important; font-size:0.72rem;">Available for pairing. Click 'Match Pairs [M]' on Dashboard to associate.</div>
+                            <div style="color:rgba(255,255,255,0.8) !important; font-size:0.72rem;">Available for fast pairing. Link to any active ITMS order in 1 click.</div>
                         </div>
+                        <button type="button" class="btn btn-primary btn-sm" onclick="event.stopPropagation(); quickPairAndLinkUnassignedPhoto('${escapeHtml(img.id)}', '${escapeHtml(img.orientation || 'FRONT')}', '${escapeHtml(img.detected_plate || '')}')" style="padding:6px 12px; font-size:0.76rem; min-height:36px; font-weight:800; background:var(--ug-yellow); color:#000;">
+                            ⚡ Pair &amp; Link Order
+                        </button>
                     </div>
                 `;
 
@@ -502,6 +516,46 @@ function jumpToPairInQueue(pairId) {
         selectPair(pairId);
     }, 150);
 }
+
+async function quickLinkFromBatch(pairId, detectedPlate) {
+    if (typeof window.openUnifiedLinkModal === "function") {
+        await window.openUnifiedLinkModal(pairId, detectedPlate);
+    } else if (typeof openUnifiedLinkModal === "function") {
+        await openUnifiedLinkModal(pairId, detectedPlate);
+    } else {
+        if (typeof switchNavTab === "function") switchNavTab(4);
+        if (typeof selectPair === "function") selectPair(pairId);
+    }
+}
+window.quickLinkFromBatch = quickLinkFromBatch;
+
+async function quickPairAndLinkUnassignedPhoto(imageId, orientation, detectedPlate) {
+    if (!imageId) return;
+    try {
+        if (typeof showToast === "function") showToast("Creating pair on-the-fly from photo...", "info");
+        const body = new URLSearchParams();
+        body.append("image_id", imageId);
+
+        const res = await fetch("/api/pairs/create/", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: body.toString()
+        });
+        const data = await res.json();
+        if (data.success && data.pair_id) {
+            if (typeof showToast === "function") {
+                showToast(`✓ Pair #${data.pair_id} created! Opening order linker...`, "success");
+            }
+            if (typeof fetchStats === "function") fetchStats();
+            await quickLinkFromBatch(data.pair_id, data.detected_plate || detectedPlate);
+        } else {
+            if (typeof showToast === "function") showToast(data.error || "Failed creating pair", "error");
+        }
+    } catch (err) {
+        if (typeof showToast === "function") showToast("Error: " + err, "error");
+    }
+}
+window.quickPairAndLinkUnassignedPhoto = quickPairAndLinkUnassignedPhoto;
 
 function jumpToNewBatchInQueue() {
     closeModal("modal-batch-upload");
@@ -904,6 +958,8 @@ window.loadBatchesList = fetchBatchesList;
 
 window.addEventListener("shiftDateChanged", (e) => {
     const sfx = (e && e.detail && (e.detail.date || e.detail.suffix)) || "";
-    void fetchBatchesList(sfx);
+    if (currentBatchesDateScope !== "ALL") {
+        void fetchBatchesList(sfx);
+    }
 });
 

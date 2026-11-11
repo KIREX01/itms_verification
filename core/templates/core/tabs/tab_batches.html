@@ -51,37 +51,29 @@
                             📷 + Upload Batch
                         </button>
                     </div>
-                    <!-- Mobile Date Scope Pills (Collapsed inside Drawer on Phone) -->
-                    <div class="scope-pills-group hide-desktop" style="display:flex; flex-wrap:wrap; gap:4px; width:100%; padding-top:4px; border-top:1px solid rgba(255,255,255,0.08);">
-                        <button type="button" class="scope-pill-btn active" onclick="setBatchesDateScope('TODAY')" style="flex:1; text-align:center; font-size:0.72rem; padding:5px 4px;">📅 Today</button>
-                        <button type="button" class="scope-pill-btn" onclick="setBatchesDateScope('ACTIVE_BATCH')" style="flex:1; text-align:center; font-size:0.72rem; padding:5px 4px;">⚡ Active</button>
-                        <button type="button" class="scope-pill-btn" onclick="setBatchesDateScope('CARRYOVER')" style="flex:1; text-align:center; font-size:0.72rem; padding:5px 4px;">⏳ Prior</button>
-                        <button type="button" class="scope-pill-btn" onclick="setBatchesDateScope('ALL')" style="flex:1; text-align:center; font-size:0.72rem; padding:5px 4px;">🌐 All</button>
+                    <!-- Mobile Date Scope Toggle (Inside Drawer on Phone) -->
+                    <div class="scope-pills-group hide-desktop" style="display:flex; gap:6px; width:100%; padding-top:4px; border-top:1px solid rgba(255,255,255,0.08);">
+                        <button type="button" class="scope-pill-btn active" id="btn-bscope-shift-mob" onclick="setBatchesScopeMode('SHIFT')" style="flex:1; text-align:center; font-size:0.75rem; padding:6px 8px; font-weight:700;">📅 Shift Batches</button>
+                        <button type="button" class="scope-pill-btn" id="btn-bscope-all-mob" onclick="setBatchesScopeMode('ALL')" style="flex:1; text-align:center; font-size:0.75rem; padding:6px 8px; font-weight:700;">🌐 All Batches</button>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Batches Date Scope Bar (TUI Mirror - Desktop; Mobile inside drawer) -->
+        <!-- Batches Date Scope Bar (Desktop Toolbar) -->
         <div class="scope-filter-bar hide-mobile">
             <div class="scope-filter-bar-left">
                 <span class="scope-filter-label" style="color:#ffffff !important; font-weight:800;">📅 SCOPE:</span>
                 <div class="scope-pills-group">
-                    <button class="scope-pill-btn active" id="btn-bscope-today" onclick="setBatchesDateScope('TODAY')" title="Batches created during today's shift (Hotkey: D)">
-                        📅 Today's Batches
+                    <button type="button" class="scope-pill-btn active" id="btn-bscope-shift" onclick="setBatchesScopeMode('SHIFT')" title="Filter batches for active operating shift date selected in top header">
+                        📅 Shift Batches
                     </button>
-                    <button class="scope-pill-btn" id="btn-bscope-active" onclick="setBatchesDateScope('ACTIVE_BATCH')" title="Focus solely on the active latest batch">
-                        ⚡ Active Batch
-                    </button>
-                    <button class="scope-pill-btn" id="btn-bscope-carryover" onclick="setBatchesDateScope('CARRYOVER')" title="Batches from previous shifts">
-                        ⏳ Prior Carryover
-                    </button>
-                    <button class="scope-pill-btn" id="btn-bscope-all" onclick="setBatchesDateScope('ALL')" title="All batches across history">
+                    <button type="button" class="scope-pill-btn" id="btn-bscope-all" onclick="setBatchesScopeMode('ALL')" title="All batches across history">
                         🌐 All Batches
                     </button>
                 </div>
             </div>
-            <span class="scope-summary-tag" id="batches-scope-summary-tag" style="color:rgba(255,255,255,0.85) !important;">Showing today's shift</span>
+            <span class="scope-summary-tag" id="batches-scope-summary-tag" style="color:rgba(255,255,255,0.85) !important;">Shift Batches</span>
         </div>
 
         <!-- Full-Width Batches Accordion Stream -->

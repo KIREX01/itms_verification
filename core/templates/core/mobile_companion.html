@@ -405,7 +405,7 @@
                 <div style="padding:10px 12px; background:var(--ug-black-surface); display:flex; flex-direction:column; gap:6px;">
                     <label style="color:#94a3b8; font-size:0.72rem; text-transform:uppercase; font-weight:700;">Manual Entry</label>
                     <div class="stock-manual-input-box">
-                        <input type="text" id="input-stock-barcode" class="stock-barcode-input" placeholder="Type plate (e.g. UMA711PW)..." onkeydown="if(event.key==='Enter') submitSingleStockPlate();">
+                        <input type="text" id="input-stock-barcode" class="stock-barcode-input" placeholder="Type plate (e.g. UMA711PW)..." aria-label="Manual stock registration plate entry" onkeydown="if(event.key==='Enter') submitSingleStockPlate();">
                         <button class="stock-add-btn" onclick="submitSingleStockPlate()">+ Scan</button>
                     </div>
                 </div>
@@ -455,7 +455,7 @@
 
                 <div style="position:relative; width:100%;">
                     <div style="display:flex; gap:6px;">
-                        <input type="text" id="m-order-search-input" class="form-control" placeholder="Search Order # or Number Plate..." autocomplete="off" style="flex:1; background:#0c1017; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-weight:700; padding:10px 12px; border-radius:6px; font-size:0.9rem;" onkeydown="if(event.key==='Enter') lookupMobileOrder()" oninput="handleMobileOrderSearchInput(this.value)">
+                        <input type="text" id="m-order-search-input" class="form-control" placeholder="Search Order # or Number Plate..." aria-label="Search Order Number or Registration Plate" autocomplete="off" style="flex:1; background:#0c1017; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-weight:700; padding:10px 12px; border-radius:6px; font-size:0.9rem;" onkeydown="if(event.key==='Enter') lookupMobileOrder()" oninput="handleMobileOrderSearchInput(this.value)">
                         <button type="button" class="btn btn-primary" onclick="lookupMobileOrder()" id="btn-m-order-lookup" style="padding:0 14px; font-weight:800; font-size:0.85rem; background:#2563eb; border:1px solid #3b82f6; border-radius:6px; color:#ffffff; display:flex; align-items:center; gap:4px; flex-shrink:0;">
                             <span>🔍</span> Find
                         </button>
@@ -465,7 +465,7 @@
                     <div id="m-order-autocomplete-list" class="order-autocomplete-dropdown" style="display:none; position:absolute; top:calc(100% + 4px); left:0; right:0; max-height:220px; overflow-y:auto; background:#111622; border:1px solid #334155; border-radius:6px; box-shadow:0 8px 24px rgba(0,0,0,0.7); z-index:1050;">
                     </div>
                     <!-- Hidden select for backwards compatibility -->
-                    <select id="m-order-picker-select" style="display:none;"></select>
+                    <select id="m-order-picker-select" aria-label="Select yard order from list" style="display:none;"></select>
                 </div>
             </div>
 
@@ -504,29 +504,29 @@
                     </div>
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                         <div>
-                            <label style="font-size:0.68rem; color:rgba(255,255,255,0.6); display:block; margin-bottom:2px;">Front Plate ID</label>
-                            <input type="text" id="m-order-front-serial" list="m-order-front-options" style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
+                            <label for="m-order-front-serial" style="font-size:0.68rem; color:rgba(255,255,255,0.6); display:block; margin-bottom:2px;">Front Plate ID</label>
+                            <input type="text" id="m-order-front-serial" aria-label="Front Plate ID" list="m-order-front-options" style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
                             <datalist id="m-order-front-options"></datalist>
                         </div>
                         <div>
-                            <label style="font-size:0.68rem; color:rgba(255,255,255,0.6); display:block; margin-bottom:2px;">Rear Plate ID</label>
-                            <input type="text" id="m-order-rear-serial" list="m-order-rear-options" style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
+                            <label for="m-order-rear-serial" style="font-size:0.68rem; color:rgba(255,255,255,0.6); display:block; margin-bottom:2px;">Rear Plate ID</label>
+                            <input type="text" id="m-order-rear-serial" aria-label="Rear Plate ID" list="m-order-rear-options" style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
                             <datalist id="m-order-rear-options"></datalist>
                         </div>
                     </div>
                     <div>
-                        <label style="font-size:0.68rem; color:rgba(255,255,255,0.6); display:block; margin-bottom:2px;">GPS Tracker ID</label>
-                        <input type="text" id="m-order-gps-id" list="m-order-gps-options" style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
+                        <label for="m-order-gps-id" style="font-size:0.68rem; color:rgba(255,255,255,0.6); display:block; margin-bottom:2px;">GPS Tracker ID</label>
+                        <input type="text" id="m-order-gps-id" aria-label="GPS Tracker ID" list="m-order-gps-options" style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#ffffff; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
                         <datalist id="m-order-gps-options"></datalist>
                     </div>
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                         <div>
-                            <label style="font-size:0.68rem; color:rgba(255,255,255,0.6); display:block; margin-bottom:2px;">Front Beacon (BLE)</label>
-                            <input type="text" id="m-order-fb-id" placeholder="e.g. 8ADC4710..." style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#38bdf8; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
+                            <label for="m-order-fb-id" style="font-size:0.68rem; color:rgba(255,255,255,0.6); display:block; margin-bottom:2px;">Front Beacon (BLE)</label>
+                            <input type="text" id="m-order-fb-id" aria-label="Front Beacon Identifier" placeholder="e.g. 8ADC4710..." style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#38bdf8; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
                         </div>
                         <div>
-                            <label style="font-size:0.68rem; color:rgba(255,255,255,0.6); display:block; margin-bottom:2px;">Rear Beacon (BLE)</label>
-                            <input type="text" id="m-order-rb-id" placeholder="e.g. 8ADC4710..." style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#38bdf8; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
+                            <label for="m-order-rb-id" style="font-size:0.68rem; color:rgba(255,255,255,0.6); display:block; margin-bottom:2px;">Rear Beacon (BLE)</label>
+                            <input type="text" id="m-order-rb-id" aria-label="Rear Beacon Identifier" placeholder="e.g. 8ADC4710..." style="width:100%; box-sizing:border-box; background:#141722; border:1px solid #334155; color:#38bdf8; font-family:var(--font-mono); font-size:0.78rem; padding:6px; border-radius:4px; font-weight:700;">
                         </div>
                     </div>
                 </div>
@@ -547,7 +547,7 @@
                                 <img id="m-front-img" style="display:none; width:100%; height:100%; object-fit:cover;" alt="Front Preview">
                             </div>
                         </label>
-                        <input type="file" id="m-front-file-input" accept="image/*" capture="environment" onchange="onMobileOrderPhotoPicked('front', this)" style="position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;">
+                        <input type="file" id="m-front-file-input" aria-label="Front installation photo file" accept="image/*" capture="environment" onchange="onMobileOrderPhotoPicked('front', this)" style="position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;">
                         <label for="m-front-file-input" class="btn btn-secondary btn-sm" style="width:100%; margin:0; padding:6px 0; font-size:0.75rem; font-weight:700; display:flex; align-items:center; justify-content:center; cursor:pointer; color:#ffffff; background:#1e293b; border:1px solid #334155; border-radius:4px;">
                             📷 Capture Front
                         </label>
@@ -567,7 +567,7 @@
                                 <img id="m-rear-img" style="display:none; width:100%; height:100%; object-fit:cover;" alt="Rear Preview">
                             </div>
                         </label>
-                        <input type="file" id="m-rear-file-input" accept="image/*" capture="environment" onchange="onMobileOrderPhotoPicked('rear', this)" style="position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;">
+                        <input type="file" id="m-rear-file-input" aria-label="Rear installation photo file" accept="image/*" capture="environment" onchange="onMobileOrderPhotoPicked('rear', this)" style="position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;">
                         <label for="m-rear-file-input" class="btn btn-secondary btn-sm" style="width:100%; margin:0; padding:6px 0; font-size:0.75rem; font-weight:700; display:flex; align-items:center; justify-content:center; cursor:pointer; color:#ffffff; background:#1e293b; border:1px solid #334155; border-radius:4px;">
                             📷 Capture Rear
                         </label>
@@ -577,8 +577,8 @@
                 <!-- Submission Controls -->
                 <div style="margin-top:6px; display:flex; flex-direction:column; gap:8px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 2px;">
-                        <label style="display:inline-flex; align-items:center; gap:6px; font-size:0.75rem; color:#ffffff; font-weight:700;">
-                            <input type="checkbox" id="m-order-dry-run-chk" checked style="accent-color:var(--ug-yellow);">
+                        <label for="m-order-dry-run-chk" style="display:inline-flex; align-items:center; gap:6px; font-size:0.75rem; color:#ffffff; font-weight:700; cursor:pointer;">
+                            <input type="checkbox" id="m-order-dry-run-chk" aria-label="Enable dry run simulation mode" checked style="accent-color:var(--ug-yellow);">
                             <span>Dry Run Mode</span>
                         </label>
                     </div>
@@ -619,9 +619,9 @@
     </div>
 
     <!-- Hidden Native Camera Inputs (Full Megapixel Optical Hardware) -->
-    <input type="file" id="input-native-front" accept="image/*" capture="environment" style="display:none;" onchange="handleNativeFileCaptured(this, 'FRONT')">
-    <input type="file" id="input-native-rear" accept="image/*" capture="environment" style="display:none;" onchange="handleNativeFileCaptured(this, 'REAR')">
-    <input type="file" id="input-native-uturn" accept="image/*" capture="environment" style="display:none;" onchange="handleNativeUturnFileCaptured(this)">
+    <input type="file" id="input-native-front" aria-label="Capture Front Optical Conveyor Photo" accept="image/*" capture="environment" style="display:none;" onchange="handleNativeFileCaptured(this, 'FRONT')">
+    <input type="file" id="input-native-rear" aria-label="Capture Rear Optical Conveyor Photo" accept="image/*" capture="environment" style="display:none;" onchange="handleNativeFileCaptured(this, 'REAR')">
+    <input type="file" id="input-native-uturn" aria-label="Capture Mobile U-Turn Photo" accept="image/*" capture="environment" style="display:none;" onchange="handleNativeUturnFileCaptured(this)">
 
     <!-- Photo Inspector Lightbox Modal (Full photo review & retake) -->
     <div class="photo-lightbox-modal" id="photo-lightbox-modal" style="display:none;" onclick="if(event.target===this) closePhotoInspector();">

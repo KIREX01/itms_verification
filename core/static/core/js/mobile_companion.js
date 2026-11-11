@@ -31,6 +31,16 @@
     };
 })();
 
+function escapeHtml(str) {
+    if (str === null || str === undefined) return "";
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
 function getOrCreateDeviceId() {
     let id = localStorage.getItem("itms_mobile_device_id");
     if (!id) {
@@ -1643,12 +1653,26 @@ function renderBlockedPlatesTray() {
     }
 
     tray.style.display = "block";
-    listElem.innerHTML = blocked.map((p) => `
-        <div style="display:inline-flex; align-items:center; gap:6px; background:#450a0a; border:1px solid #ef4444; border-radius:6px; padding:4px 8px;">
-            <span style="font-weight:900; color:#fecaca; font-size:0.85rem;">🔴 ${p}</span>
-            <button type="button" onclick="dismissBlockedPlate('${p}')" style="background:none; border:none; color:#f87171; cursor:pointer; font-weight:bold; font-size:0.85rem; padding:0 2px;" title="Dismiss">✕</button>
-        </div>
-    `).join("");
+    listElem.replaceChildren();
+    blocked.forEach((p) => {
+        const item = document.createElement("div");
+        item.style.cssText = "display:inline-flex; align-items:center; gap:6px; background:#450a0a; border:1px solid #ef4444; border-radius:6px; padding:4px 8px;";
+
+        const span = document.createElement("span");
+        span.style.cssText = "font-weight:900; color:#fecaca; font-size:0.85rem;";
+        span.textContent = `🔴 ${p}`;
+
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.style.cssText = "background:none; border:none; color:#f87171; cursor:pointer; font-weight:bold; font-size:0.85rem; padding:0 2px;";
+        btn.title = "Dismiss";
+        btn.textContent = "✕";
+        btn.addEventListener("click", () => dismissBlockedPlate(p));
+
+        item.appendChild(span);
+        item.appendChild(btn);
+        listElem.appendChild(item);
+    });
 }
 
 // Backward compatibility stubs for legacy calls
@@ -2706,19 +2730,19 @@ function updateUturnShutterCounter() {
         if (outboundCount > 0 && returnCount === 0) {
             btnFinish.classList.remove("ready");
             const missingLeg = (startLeg === "REAR") ? "Fronts" : "Rears";
-            btnFinish.innerHTML = `<span>⚠️ Need ${missingLeg} (${outboundCount} ${startLeg}s Taken)</span>`;
+            btnFinish.textContent = `⚠️ Need ${missingLeg} (${outboundCount} ${startLeg}s Taken)`;
         } else if (returnCount > 0 && outboundCount === 0) {
             btnFinish.classList.remove("ready");
-            btnFinish.innerHTML = `<span>⚠️ Incomplete Session</span>`;
+            btnFinish.textContent = "⚠️ Incomplete Session";
         } else if (rears > 0 && fronts === rears) {
             btnFinish.classList.add("ready");
-            btnFinish.innerHTML = `<span>✓ All ${rears} Pairs Matched ➔ Submit Batch</span>`;
+            btnFinish.textContent = `✓ All ${rears} Pairs Matched ➔ Submit Batch`;
         } else if (rears > 0 && fronts > 0) {
             btnFinish.classList.remove("ready");
-            btnFinish.innerHTML = `<span>🏁 Submit Batch (${Math.min(rears, fronts)} Pairs, ${Math.abs(rears - fronts)} Unpaired)</span>`;
+            btnFinish.textContent = `🏁 Submit Batch (${Math.min(rears, fronts)} Pairs, ${Math.abs(rears - fronts)} Unpaired)`;
         } else {
             btnFinish.classList.remove("ready");
-            btnFinish.innerHTML = `<span>🏁 Complete U-Turn Batch (${total} photos)</span>`;
+            btnFinish.textContent = `🏁 Complete U-Turn Batch (${total} photos)`;
         }
     }
 }
@@ -3382,22 +3406,41 @@ async function handleMobileOrderSearchInput(query) {
                 return;
             }
 
-            listEl.innerHTML = orders.map(o => {
+            listEl.replaceChildren();
+            orders.forEach(o => {
                 const plate = o.registration_number || "NO PLATE";
                 const num = o.order_number || "";
                 const st = o.status || "Pending";
                 const isInstalled = String(st).toUpperCase().includes("INSTALLED");
                 const badgeColor = isInstalled ? "#10b981" : "#f59e0b";
-                return `
-                    <div class="m-order-autocomplete-item" onclick="selectMobileOrderAutocomplete('${num || plate}')" style="padding:10px 12px; border-bottom:1px solid #1f293d; cursor:pointer; display:flex; justify-content:space-between; align-items:center; transition:background 0.15s;" onmouseover="this.style.background='#1e293b'" onmouseout="this.style.background='transparent'">
-                        <div>
-                            <div style="font-size:0.88rem; font-weight:800; color:#ffffff; font-family:var(--font-mono);">${plate}</div>
-                            <div style="font-size:0.75rem; color:#38bdf8; font-family:var(--font-mono);">#${num}${o.vin ? ' &bull; ' + o.vin.substring(0, 10) : ''}</div>
-                        </div>
-                        <span style="font-size:0.68rem; font-weight:700; padding:2px 8px; border-radius:10px; background:${badgeColor}22; color:${badgeColor}; border:1px solid ${badgeColor}55;">${st}</span>
-                    </div>
-                `;
-            }).join("");
+
+                const item = document.createElement("div");
+                item.className = "m-order-autocomplete-item";
+                item.style.cssText = "padding:10px 12px; border-bottom:1px solid #1f293d; cursor:pointer; display:flex; justify-content:space-between; align-items:center; transition:background 0.15s;";
+                item.addEventListener("mouseover", () => item.style.background = "#1e293b");
+                item.addEventListener("mouseout", () => item.style.background = "transparent");
+                item.addEventListener("click", () => selectMobileOrderAutocomplete(num || plate));
+
+                const leftCol = document.createElement("div");
+                const plateDiv = document.createElement("div");
+                plateDiv.style.cssText = "font-size:0.88rem; font-weight:800; color:#ffffff; font-family:var(--font-mono);";
+                plateDiv.textContent = plate;
+
+                const subDiv = document.createElement("div");
+                subDiv.style.cssText = "font-size:0.75rem; color:#38bdf8; font-family:var(--font-mono);";
+                subDiv.textContent = `#${num}${o.vin ? ' • ' + o.vin.substring(0, 10) : ''}`;
+
+                leftCol.appendChild(plateDiv);
+                leftCol.appendChild(subDiv);
+
+                const badge = document.createElement("span");
+                badge.style.cssText = `font-size:0.68rem; font-weight:700; padding:2px 8px; border-radius:10px; background:${badgeColor}22; color:${badgeColor}; border:1px solid ${badgeColor}55;`;
+                badge.textContent = st;
+
+                item.appendChild(leftCol);
+                item.appendChild(badge);
+                listEl.appendChild(item);
+            });
             listEl.style.display = "block";
         } catch (err) {
             console.warn("Autocomplete error:", err);
@@ -3438,7 +3481,11 @@ async function loadMobilePendingOrdersList() {
         const data = await resp.json();
         if (data && data.success && Array.isArray(data.orders)) {
             const currentSelected = window.MobileOrderState?.currentOrder?.order_number || "";
-            picker.innerHTML = `<option value="">-- Tap to Select Active Order (${data.orders.length} available) --</option>`;
+            picker.replaceChildren();
+            const defaultOpt = document.createElement("option");
+            defaultOpt.value = "";
+            defaultOpt.textContent = `-- Tap to Select Active Order (${data.orders.length} available) --`;
+            picker.appendChild(defaultOpt);
             data.orders.forEach(o => {
                 const opt = document.createElement("option");
                 const num = o.order_number || "";

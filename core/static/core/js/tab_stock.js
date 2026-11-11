@@ -11,6 +11,16 @@ let lastReconData = null;
 let cachedShiftDates = null;
 let isSyncingStock = false;
 
+function escapeHtml(str) {
+    if (str === null || str === undefined) return "";
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
 // -----------------------------------------------------------------------------
 // DOM Ready & Event Listeners
 // -----------------------------------------------------------------------------
@@ -1087,13 +1097,18 @@ async function openNotOnStockModal(data) {
                     ? '<span class="badge badge-yellow" style="font-size: 0.75rem;">ALREADY INSTALLED</span>'
                     : '<span class="badge badge-danger" style="font-size: 0.75rem;">NOT ON STOCK</span>';
 
+                const safeIdx = escapeHtml(item.index || idx + 1);
+                const safePlate = escapeHtml(item.plate);
+                const safeCategory = escapeHtml(item.category || 'PSV');
+                const safeReason = escapeHtml(item.reason || 'Missing from ITMS Safe Room stock');
+
                 tr.innerHTML = `
-                    <td style="color: var(--ug-text-muted); font-size: 0.85rem;">${item.index || idx + 1}</td>
-                    <td style="font-weight: 700; font-family: monospace; font-size: 0.95rem; color: #fff;">${item.plate}</td>
-                    <td><span class="badge badge-muted" style="font-size: 0.75rem;">${item.category || 'PSV'}</span></td>
+                    <td style="color: var(--ug-text-muted); font-size: 0.85rem;">${safeIdx}</td>
+                    <td style="font-weight: 700; font-family: monospace; font-size: 0.95rem; color: #fff;">${safePlate}</td>
+                    <td><span class="badge badge-muted" style="font-size: 0.75rem;">${safeCategory}</span></td>
                     <td style="font-size: 0.85rem;">
                         ${statusBadge}
-                        <div style="font-size: 0.78rem; color: var(--ug-text-muted); margin-top: 2px;">${item.reason || 'Missing from ITMS Safe Room stock'}</div>
+                        <div style="font-size: 0.78rem; color: var(--ug-text-muted); margin-top: 2px;">${safeReason}</div>
                     </td>
                     <td style="text-align: center;">
                         <span class="badge badge-danger" style="font-size: 0.75rem; background: rgba(220,53,69,0.2); border: 1px solid #dc3545; color: #ff6b6b;">
@@ -1108,9 +1123,11 @@ async function openNotOnStockModal(data) {
             if (rawList.length > 0) {
                 rawList.forEach((p, idx) => {
                     const tr = document.createElement('tr');
+                    const safeIdx = escapeHtml(idx + 1);
+                    const safeP = escapeHtml(p);
                     tr.innerHTML = `
-                        <td style="color: var(--ug-text-muted); font-size: 0.85rem;">${idx + 1}</td>
-                        <td style="font-weight: 700; font-family: monospace; font-size: 0.95rem; color: #fff;">${p}</td>
+                        <td style="color: var(--ug-text-muted); font-size: 0.85rem;">${safeIdx}</td>
+                        <td style="font-weight: 700; font-family: monospace; font-size: 0.95rem; color: #fff;">${safeP}</td>
                         <td><span class="badge badge-muted" style="font-size: 0.75rem;">PSV</span></td>
                         <td style="font-size: 0.85rem;">
                             <span class="badge badge-danger" style="font-size: 0.75rem;">NOT ON STOCK</span>

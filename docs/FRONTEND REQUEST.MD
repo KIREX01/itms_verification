@@ -1828,38 +1828,39 @@ The Backend & DevOps team has completed and verified the core backend services, 
 
 ---
 
-## 26. SonarQube Code Quality & Security Gate Remediation [PENDING]
+## 26. SonarQube Code Quality & Security Gate Remediation [COMPLETED]
 
-### 26.1 Blocker: Undeclared Global Variables (`javascript:S2703`)
+### 26.1 Blocker: Undeclared Global Variables (`javascript:S2703`) [RESOLVED]
 - **Files**:
-  - `core/static/core/js/tab_itms.js` (lines 283, 335)
-  - `core/static/core/js/navigation.js` (line 15)
+  - `core/static/core/js/tab_itms.js` (lines 223–229, 283, 335)
+  - `core/static/core/js/navigation.js` (lines 15, 56)
   - `core/static/core/js/pipeline.js` (lines 1040, 1048)
-- **Problem**:
-  Variables assigned without `let`, `const`, or `var`, creating implicit globals in sloppy mode:
-  - `tab_itms.js:283`: `itmsExplorerSource = ...` -> add `let` or `const`.
-  - `tab_itms.js:335`: `itmsExplorerOrders = ...` -> add `let` or `const`.
-  - `navigation.js:15`: `activeNavTab = ...` -> add `let` or `const`.
-  - `pipeline.js:1040`: `reportCurrentDate = ...` -> add `let` or `const`.
-  - `pipeline.js:1048`: `currentStockDateSuffix = ...` -> add `let` or `const`.
-
-### 26.2 Blocker: DOM XSS via Unsanitized User Input (`jssecurity:S5696`)
-- **Files**:
-  - `core/static/core/js/mobile_companion.js` (lines 1646, 2709, 2721, 3441)
-  - `core/static/core/js/tab_stock.js` (line 1090)
-- **Problem**:
-  Direct interpolation into `.innerHTML` with unsanitized user inputs (e.g. search input, query params, plate strings).
 - **Remediation**:
-  - Replace `.innerHTML = ...` with `.textContent = ...` or `.innerText = ...` where only text is needed.
-  - For HTML templates containing user values, sanitize values using an HTML escape helper (e.g. `encodeURIComponent` / `escapeHtml(val)` or creating text nodes).
+  - In `tab_itms.js`: Added explicit module-scoped `let` declarations (`itmsCurrentSubview`, `itmsExplorerSource`, `itmsExplorerOrders`, `itmsExplorerPage`, `itmsExplorerSearch`, `selectedItmsOrder`).
+  - In `navigation.js`: Declared `let activeNavTab = typeof window.activeNavTab !== "undefined" ? window.activeNavTab : 1; window.activeNavTab = activeNavTab;` and synchronized `window.activeNavTab` in `switchNavTab`.
+  - In `pipeline.js`: Declared `let reportCurrentDate = data.active_shift.suffix;` and `let currentStockDateSuffix = data.active_shift.suffix;` with safe `window` property synchronization.
 
-### 26.3 Major: Accessibility - Form Inputs Without Labels (`Web:InputWithoutLabelCheck`)
+### 26.2 Blocker: DOM XSS via Unsanitized User Input (`jssecurity:S5696`) [RESOLVED]
+- **Files**:
+  - `core/static/core/js/mobile_companion.js` (lines 33, 1646, 2709, 2721, 3441)
+  - `core/static/core/js/tab_stock.js` (lines 14, 1090)
+- **Remediation**:
+  - In `mobile_companion.js`:
+    - Added standard `escapeHtml(str)` utility.
+    - Converted `renderBlockedPlatesTray()` to safe DOM element creation (`document.createElement` / `replaceChildren` / `.textContent`) and attached discrete event listeners, eliminating inline string interpolation.
+    - Refactored `btnFinish.innerHTML` in off-conveyor walk mode to `btnFinish.textContent`.
+    - Sanitized order autocomplete dropdown generation using programmatic DOM node generation (`replaceChildren`, `.textContent`, `addEventListener`).
+    - Refactored `m-order-picker-select` option generation using `replaceChildren()` and `document.createElement("option")`.
+  - In `tab_stock.js`:
+    - Added `escapeHtml(str)` utility.
+    - Sanitized all dynamic user / plate / category / reason variables before inserting into `not-on-stock-table-body` innerHTML.
+
+### 26.3 Major: Accessibility - Form Inputs Without Labels (`Web:InputWithoutLabelCheck`) [RESOLVED]
 - **Files**:
   - `core/templates/core/base.html` (lines 122, 123, 179, 183)
-  - `core/templates/core/mobile_companion.html` (lines 458, 468, 513, 519)
-- **Problem**:
-  Input elements without associated `<label for="...">` or `aria-label="..."`.
+  - `core/templates/core/mobile_companion.html` (lines 408, 458, 468, 508, 513, 519, 525, 529, 550, 570, 581, 622, 623, 624)
 - **Remediation**:
-  - Add explicit `aria-label="..."` or `<label for="...">` to each input element (date pickers, search fields, checkboxes).
+  - Added descriptive `aria-label` attributes to desktop and drawer shift calendar datepickers (`#header-global-shift-date`, `#drawer-global-shift-date`) and shift selects (`#header-global-shift-select`, `#drawer-global-shift-select`).
+  - Added descriptive `aria-label` and `for="..."` pairings across all input and select fields in `mobile_companion.html` (order search, hardware serial inputs, file upload camera inputs, and dry-run checkbox).
 
 

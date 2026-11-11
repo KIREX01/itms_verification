@@ -12,7 +12,8 @@
  * 8: History
  */
 
-activeNavTab = typeof activeNavTab !== "undefined" ? activeNavTab : 1;
+let activeNavTab = typeof window.activeNavTab !== "undefined" ? window.activeNavTab : 1;
+window.activeNavTab = activeNavTab;
 
 const NAV_TAB_NAMES = {
     1: "dashboard",
@@ -53,6 +54,7 @@ function switchNavTab(target, updateUrl = true) {
     }
 
     activeNavTab = tabIndex;
+    window.activeNavTab = tabIndex;
 
     // Persist active tab in localStorage so refresh/reload never resets to Dashboard
     try {

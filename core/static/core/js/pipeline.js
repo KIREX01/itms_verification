@@ -1036,16 +1036,18 @@ window.setGlobalShiftDate = async function(targetVal) {
             window.dispatchEvent(new CustomEvent("shiftDateChanged", { detail: data.active_shift }));
 
             // Update Reports Hub
-            if (typeof reportCurrentDate !== "undefined") {
-                reportCurrentDate = data.active_shift.suffix;
+            let reportCurrentDate = data.active_shift.suffix;
+            if (typeof window.reportCurrentDate !== "undefined") {
+                window.reportCurrentDate = reportCurrentDate;
             }
             if (typeof fetchReportTotals === "function") {
                 void fetchReportTotals();
             }
 
             // Update Stock Hub
-            if (typeof currentStockDateSuffix !== "undefined") {
-                currentStockDateSuffix = data.active_shift.suffix;
+            let currentStockDateSuffix = data.active_shift.suffix;
+            if (typeof window.currentStockDateSuffix !== "undefined") {
+                window.currentStockDateSuffix = currentStockDateSuffix;
             }
             if (typeof refreshStockLedger === "function") {
                 void refreshStockLedger();

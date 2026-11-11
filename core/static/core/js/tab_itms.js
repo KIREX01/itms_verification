@@ -220,6 +220,13 @@ async function disconnectItms() {
     }
 }
 
+let itmsCurrentSubview = "ORDERS";
+let itmsExplorerSource = "live";
+let itmsExplorerOrders = [];
+let itmsExplorerPage = 1;
+let itmsExplorerSearch = "";
+let selectedItmsOrder = null;
+
 function switchItmsSubview(subview) {
     itmsCurrentSubview = subview;
     const mobBar = document.getElementById("itms-mobile-selected-bar");

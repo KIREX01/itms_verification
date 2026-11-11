@@ -667,7 +667,7 @@ class StockPane(Vertical):
                     item.plate_serial or "—",
                     "—",
                     "—",
-                    key=f'{p}#audit_{a.id}_{idx}',
+                    key=f'{p}#deliv_{item.id}_{idx}',
                 )
             return
 

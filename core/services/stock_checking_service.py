@@ -56,9 +56,9 @@ class StockCheckingService:
     def validate_plates_stock_availability(
         self,
         plates: Iterable[str],
-        category: Optional[str] = None,
         target_date_suffix: Optional[str] = None,
         warehouse_code: Optional[str] = None,
+        **_kwargs: Any,
     ) -> Dict[str, Any]:
         """
         Validates a list of plate numbers or barcodes against warehouse inventory.
@@ -94,13 +94,13 @@ class StockCheckingService:
             }
 
         # Check existing dispatches for shift
-        existing_dispatches = set(
+        existing_dispatches = {
             normalizer.canonicalize(p)
             for p in StockDispatchScan.objects.filter(
                 Q(work_date_suffix=suffix) | Q(work_date=work_d)
             ).values_list("registration_number", flat=True)
             if p
-        )
+        }
 
         # Check InstallationKit records
         q_filter = Q()
@@ -207,8 +207,6 @@ class StockCheckingService:
 
         active_bond = bond_service.get_active_bond()
         active_bond_code = active_bond.get("code", "AGM")
-        active_bond_name = active_bond.get("name", "AGM Bonded Warehouse")
-
         # 1. Kits Received (Inbound Deliveries)
         if ledger.override_received:
             kits_received_psv = ledger.kits_received_psv
@@ -217,13 +215,13 @@ class StockCheckingService:
         else:
             deliveries_qs = StockDelivery.objects.filter(
                 Q(target_date_suffix=suffix) | Q(delivery_date=work_d)
-            )
+            ).prefetch_related("items")
             kits_received_psv = 0
             kits_received_pmo = 0
             for d in deliveries_qs:
-                items_qs = d.items.all()
-                if items_qs.exists():
-                    for itm in items_qs:
+                items_list = list(d.items.all())
+                if items_list:
+                    for itm in items_list:
                         if itm.plate_category == PlateCategory.PMO:
                             kits_received_pmo += 1
                         else:
@@ -530,32 +528,32 @@ class StockCheckingService:
     def update_ledger_entry(
         self,
         target_date_suffix: Optional[str] = None,
-        storage_bond_name: Optional[str] = None,
-        opening_balance_pmo: Optional[int] = None,
-        opening_balance_psv: Optional[int] = None,
-        opening_stock: Optional[int] = None,
-        kits_received_pmo: Optional[int] = None,
-        kits_received_psv: Optional[int] = None,
-        scheduled_pmo: Optional[int] = None,
-        scheduled_psv: Optional[int] = None,
-        scheduled_total: Optional[int] = None,
-        kits_installed_pmo: Optional[int] = None,
-        kits_installed_psv: Optional[int] = None,
-        bond_transfer_in_pmo: Optional[int] = None,
-        bond_transfer_in_psv: Optional[int] = None,
-        bond_transfer_out_pmo: Optional[int] = None,
-        bond_transfer_out_psv: Optional[int] = None,
-        closing_balance_pmo: Optional[int] = None,
-        closing_balance_psv: Optional[int] = None,
-        closing_stock: Optional[int] = None,
-        physical_count: Optional[int] = None,
-        notes: Optional[str] = None,
-        operator_name: Optional[str] = None,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         """
         Updates the daily stock ledger with manual values or overrides.
         Allows setting opening, targets, closing overrides, physical count, and remarks atomically.
         """
+        storage_bond_name = kwargs.get("storage_bond_name")
+        opening_balance_pmo = kwargs.get("opening_balance_pmo")
+        opening_balance_psv = kwargs.get("opening_balance_psv")
+        opening_stock = kwargs.get("opening_stock")
+        kits_received_pmo = kwargs.get("kits_received_pmo")
+        kits_received_psv = kwargs.get("kits_received_psv")
+        scheduled_pmo = kwargs.get("scheduled_pmo")
+        scheduled_psv = kwargs.get("scheduled_psv")
+        scheduled_total = kwargs.get("scheduled_total")
+        kits_installed_pmo = kwargs.get("kits_installed_pmo")
+        kits_installed_psv = kwargs.get("kits_installed_psv")
+        bond_transfer_in_pmo = kwargs.get("bond_transfer_in_pmo")
+        bond_transfer_in_psv = kwargs.get("bond_transfer_in_psv")
+        bond_transfer_out_pmo = kwargs.get("bond_transfer_out_pmo")
+        bond_transfer_out_psv = kwargs.get("bond_transfer_out_psv")
+        closing_balance_pmo = kwargs.get("closing_balance_pmo")
+        closing_balance_psv = kwargs.get("closing_balance_psv")
+        closing_stock = kwargs.get("closing_stock")
+        physical_count = kwargs.get("physical_count")
+        notes = kwargs.get("notes")
         work_d, suffix = resolve_date_and_suffix(target_date_suffix)
         ledger, _ = self.get_or_create_daily_ledger(suffix)
 

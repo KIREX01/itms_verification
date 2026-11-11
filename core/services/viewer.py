@@ -257,24 +257,22 @@ def show_side_by_side(
 
     if block:
         _run_window(front_path, rear_path, window_title)
-        return tmp_path
+    else:
+        cmd = [
+            sys.executable,
+            "-m",
+            "core.services.viewer",
+            front_path,
+            rear_path,
+            "--title",
+            window_title,
+        ]
+        try:
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            _run_window(front_path, rear_path, window_title)
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "core.services.viewer",
-        front_path,
-        rear_path,
-        "--title",
-        window_title,
-    ]
-
-    try:
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return tmp_path
-    except Exception:
-        _run_window(front_path, rear_path, window_title)
-        return tmp_path
+    return tmp_path
 
 
 def show_pair_evidence(pair, window_title: Optional[str] = None, block: bool = False) -> Optional[str]:
@@ -472,30 +470,29 @@ def show_single_image(
 
     if block:
         _run_single_window(image_path, bbox, window_title, plate_label, orient_label)
-        return tmp_path
+    else:
+        cmd = [
+            sys.executable,
+            "-m",
+            "core.services.viewer",
+            "--single",
+            image_path,
+            "--title",
+            window_title,
+        ]
+        if bbox and len(bbox) == 4:
+            cmd.extend(["--bbox"] + [str(int(v)) for v in bbox])
+        if plate_label:
+            cmd.extend(["--plate", plate_label])
+        if orient_label:
+            cmd.extend(["--orient", orient_label])
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "core.services.viewer",
-        "--single",
-        image_path,
-        "--title",
-        window_title,
-    ]
-    if bbox and len(bbox) == 4:
-        cmd.extend(["--bbox"] + [str(int(v)) for v in bbox])
-    if plate_label:
-        cmd.extend(["--plate", plate_label])
-    if orient_label:
-        cmd.extend(["--orient", orient_label])
+        try:
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            _run_single_window(image_path, bbox, window_title, plate_label, orient_label)
 
-    try:
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return tmp_path
-    except Exception:
-        _run_single_window(image_path, bbox, window_title, plate_label, orient_label)
-        return tmp_path
+    return tmp_path
 
 
 if __name__ == "__main__":

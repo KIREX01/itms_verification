@@ -700,10 +700,10 @@ class MorningKitSyncDaemon:
                 cls._instance.interval = max(int(interval_seconds), MIN_KIT_SYNC_INTERVAL_SECONDS)
             return cls._instance
 
-    def start(self) -> bool:
+    def start(self) -> None:
         with self._lock:
             if self._is_running and self._thread and self._thread.is_alive():
-                return True
+                return
             self._stop_event.clear()
             self._thread = threading.Thread(
                 target=self._run_loop,
@@ -713,7 +713,6 @@ class MorningKitSyncDaemon:
             self._is_running = True
             self._thread.start()
             logger.info("MorningKitSyncDaemon started in background (interval: %ds / %.1fh).", self.interval, self.interval / 3600.0)
-            return True
 
     def stop(self) -> None:
         with self._lock:

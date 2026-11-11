@@ -487,7 +487,7 @@ def access_request_view(request: HttpRequest) -> HttpResponse:
         "success_message": message,
         "error": error,
         "request_submitted": request_submitted,
-        "prefill_email": request.GET.get("email", ""),
+        "prefill_email": request.session.pop("prefill_email", "") or request.POST.get("email", ""),
     })
 
 

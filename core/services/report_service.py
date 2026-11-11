@@ -30,6 +30,9 @@ from core.vision import normalizer
 
 logger = logging.getLogger(__name__)
 
+STAGE_READY_FOR_INSTALLATION = "Ready for installation"
+DEFAULT_LINE_FLOOR_WAREHOUSE = "Line Floor (AGM)"
+
 
 from core.services import date_service
 from core.services.date_service import (
@@ -112,7 +115,7 @@ def get_date_driven_plate_totals(target_date: Optional[str] = None) -> Dict[str,
     # Exact database aggregation across ALL pending order stages (eliminates 100 item cutoff)
     stage_counts: Dict[str, int] = {}
     for st_group in pending_qs.values("order_status", "itms_stage").annotate(c=Count("id")).order_by("-c"):
-        st_name = st_group.get("itms_stage") or st_group.get("order_status") or "Ready for installation"
+        st_name = st_group.get("itms_stage") or st_group.get("order_status") or STAGE_READY_FOR_INSTALLATION
         stage_counts[st_name] = stage_counts.get(st_name, 0) + st_group["c"]
 
     # Exact aggregation across ALL order stages for this scope
@@ -123,7 +126,7 @@ def get_date_driven_plate_totals(target_date: Optional[str] = None) -> Dict[str,
 
     pending_items: List[Dict[str, Any]] = []
     for o in pending_qs[:100]:
-        st = o.itms_stage or o.order_status or "Ready for installation"
+        st = o.itms_stage or o.order_status or STAGE_READY_FOR_INSTALLATION
         pending_items.append({
             "plate": o.registration_number,
             "display_plate": format_display_plate(o.registration_number),
@@ -216,7 +219,7 @@ def get_date_driven_plate_totals(target_date: Optional[str] = None) -> Dict[str,
         c_u = item["plate"]
         dispatched_unallocated_count += 1
         matching_kit = kit_by_reg.get(c_u) or kit_by_code.get(f"IK-{c_u}") or kit_by_code.get(c_u)
-        wh_name = matching_kit.warehouse if (matching_kit and matching_kit.warehouse) else "Line Floor (AGM)"
+        wh_name = matching_kit.warehouse if (matching_kit and matching_kit.warehouse) else DEFAULT_LINE_FLOOR_WAREHOUSE
         unallocated_items.append({
             "plate": c_u,
             "display_plate": format_display_plate(c_u),
@@ -320,7 +323,7 @@ def get_date_driven_plate_totals(target_date: Optional[str] = None) -> Dict[str,
                 "problem_class": "badge-warning",
                 "reason": "Plate fitted on line without safe-room dispatch scan",
                 "action_required": "Perform retrospective safe audit registration",
-                "warehouse": (o.warehouse_name if o else "") or "Line Floor (AGM)",
+                "warehouse": (o.warehouse_name if o else "") or DEFAULT_LINE_FLOOR_WAREHOUSE,
                 "date": formatted_date,
             })
 
@@ -334,13 +337,13 @@ def get_date_driven_plate_totals(target_date: Optional[str] = None) -> Dict[str,
                 "display_plate": format_display_plate(p),
                 "order_number": o.order_number if o else "—",
                 "vin": (o.vin if o else "") or "—",
-                "stage": (o.itms_stage or o.order_status) if o else "Ready for installation",
+                "stage": (o.itms_stage or o.order_status) if o else STAGE_READY_FOR_INSTALLATION,
                 "problem_type": "SKIPPED_SAFE_ROOM_SCAN",
                 "problem_badge": "⚠️ Skipped Safe Room",
                 "problem_class": "badge-warning",
                 "reason": "Active order in queue without safe-room dispatch scan",
                 "action_required": "Verify physical kit location in safe room before fitment",
-                "warehouse": (o.warehouse_name if o else "") or "Line Floor (AGM)",
+                "warehouse": (o.warehouse_name if o else "") or DEFAULT_LINE_FLOOR_WAREHOUSE,
                 "date": formatted_date,
             })
 
@@ -362,7 +365,7 @@ def get_date_driven_plate_totals(target_date: Optional[str] = None) -> Dict[str,
                 "problem_class": "badge-red",
                 "reason": "Order installed on ITMS without front/rear camera evidence",
                 "action_required": "Capture front & rear vehicle verification photos",
-                "warehouse": o.warehouse_name or "Line Floor (AGM)",
+                "warehouse": o.warehouse_name or DEFAULT_LINE_FLOOR_WAREHOUSE,
                 "date": formatted_date,
             })
 

@@ -3,6 +3,7 @@ Pair Review & Approval REST APIs (queue, detail, action, batch submission).
 """
 import json
 import logging
+import time
 
 from django.db.models import Q
 from django.http import HttpRequest, JsonResponse
@@ -989,7 +990,6 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
         }, status=409)
 
     # Pacing and detailed result tracking
-    from core.services import config_service
     pacing_seconds = float(config_service.get_setting("submission.batch_pacing_seconds", 2.0))
     succeeded = 0
     failed = 0

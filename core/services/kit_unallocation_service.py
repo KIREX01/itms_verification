@@ -158,17 +158,17 @@ class KitUnallocationService:
                 disp = format_display_plate(c_plate)
                 q_ev |= Q(detected_plate__iexact=c_plate) | Q(detected_plate__iexact=disp) | Q(order_guided_plate__iexact=c_plate)
                 q_pair |= Q(registration_number_detected__iexact=c_plate) | Q(registration_number_detected__iexact=disp) | Q(manual_plate_override__iexact=c_plate)
-            plates_with_evidence = set(
+            plates_with_evidence = {
                 normalizer.canonicalize(p)
                 for p in EvidenceImage.objects.filter(q_ev).values_list("detected_plate", flat=True)
                 if p
-            )
+            }
             # Also check VehicleInstallationPair
-            pair_plates = set(
+            pair_plates = {
                 normalizer.canonicalize(p)
                 for p in VehicleInstallationPair.objects.filter(q_pair).values_list("registration_number_detected", flat=True)
                 if p
-            )
+            }
             plates_with_evidence.update(pair_plates)
 
         for c_plate in sorted(physical_dispatched_set):
@@ -515,20 +515,20 @@ class KitUnallocationService:
                 "auto_registered_count": 0,
             }
 
-        existing_dispatches = set(
+        existing_dispatches = {
             normalizer.canonicalize(p)
             for p in StockDispatchScan.objects.filter(
                 Q(work_date_suffix=suffix) | Q(work_date=work_d)
             ).values_list("registration_number", flat=True)
             if p
-        )
-        existing_returns = set(
+        }
+        existing_returns = {
             normalizer.canonicalize(p)
             for p in StockReturnScan.objects.filter(
                 Q(work_date_suffix=suffix) | Q(work_date=work_d)
             ).values_list("registration_number", flat=True)
             if p
-        )
+        }
 
         scans_to_create: List[StockDispatchScan] = []
         auto_registered_plates: List[str] = []
@@ -635,16 +635,20 @@ class KitUnallocationService:
         # Structured breakdown by Category A (Not on Stock) vs Category B (Skipped by MVR)
         breakdown_lines: List[str] = []
         if unalloc.get("not_on_stock_plates"):
-            breakdown_lines.append("")
-            breakdown_lines.append(f"CATEGORY A: NOT ON ITMS STOCK ({unalloc['not_on_stock_count']} Kit(s)) — Awaiting Depot Inbound:")
-            breakdown_lines.append("  (Physically on floor; MVR cannot allocate until Inbound is recorded in ITMS)")
+            breakdown_lines.extend([
+                "",
+                f"CATEGORY A: NOT ON ITMS STOCK ({unalloc['not_on_stock_count']} Kit(s)) — Awaiting Depot Inbound:",
+                "  (Physically on floor; MVR cannot allocate until Inbound is recorded in ITMS)",
+            ])
             for idx, p in enumerate(unalloc["not_on_stock_plates"], start=1):
                 breakdown_lines.append(f"    {idx:2d}. {p}")
 
         if unalloc.get("skipped_by_mvr_plates"):
-            breakdown_lines.append("")
-            breakdown_lines.append(f"CATEGORY B: SKIPPED BY MVR ({unalloc['skipped_by_mvr_count']} Kit(s)) — In Stock, Missing in Orders:")
-            breakdown_lines.append("  (Verified on warehouse stock; MVR Officer action required to allocate orders)")
+            breakdown_lines.extend([
+                "",
+                f"CATEGORY B: SKIPPED BY MVR ({unalloc['skipped_by_mvr_count']} Kit(s)) — In Stock, Missing in Orders:",
+                "  (Verified on warehouse stock; MVR Officer action required to allocate orders)",
+            ])
             for idx, p in enumerate(unalloc["skipped_by_mvr_plates"], start=1):
                 breakdown_lines.append(f"    {idx:2d}. {p}")
 

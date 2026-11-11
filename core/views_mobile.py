@@ -496,7 +496,18 @@ def api_mobile_uturn_status(request: HttpRequest) -> JsonResponse:
     if not (request.user and getattr(request.user, "is_authenticated", False)):
         return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
 
-    uturn_session_id = request.GET.get("session_id", "").strip() or request.GET.get("uturn_session_id", "").strip()
+    uturn_session_id = (
+        request.POST.get("session_id", "").strip()
+        or request.POST.get("walk_id", "").strip()
+        or request.headers.get("X-Uturn-Session-Id", "").strip()
+        or request.GET.get("walk_id", "").strip()
+        or request.GET.get("walk_session", "").strip()
+    )
+    if not uturn_session_id:
+        for k, v in request.GET.items():
+            if k in ("session_id", "uturn_session_id") and str(v).strip():
+                uturn_session_id = str(v).strip()
+                break
     if not uturn_session_id:
         return JsonResponse({"success": False, "error": "session_id parameter required.", "code": "PARAM_REQUIRED"}, status=400)
 

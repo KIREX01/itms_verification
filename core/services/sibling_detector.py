@@ -142,7 +142,7 @@ def detect_sibling_collision(
         if p_clean and p_clean != target_clean and num_pattern.search(p_clean):
             sibling_plates_set.add(p_clean)
 
-    sorted_siblings = sorted(list(sibling_plates_set))
+    sorted_siblings = sorted(sibling_plates_set)
     has_collision = len(sorted_siblings) > 0
 
     warning_msg = ""

@@ -706,7 +706,7 @@ def api_stock_unallocated(request: HttpRequest):
             "unallocated_plates": data["unallocated_plates"],
         })
     except Exception as exc:
-        logger.error("api_stock_unallocated error: %s", exc)
+        logger.exception("api_stock_unallocated error: %s", exc)
         return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 

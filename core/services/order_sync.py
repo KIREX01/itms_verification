@@ -999,10 +999,10 @@ class ShiftOrderSyncDaemon:
                 self._pending_day_triggers.add(clean_sfx)
         self._wake_event.set()
 
-    def start(self) -> bool:
+    def start(self) -> None:
         with self._lock:
             if self._is_running and self._thread and self._thread.is_alive():
-                return True
+                return
             self._stop_event.clear()
             self._wake_event.clear()
             self._thread = threading.Thread(
@@ -1018,7 +1018,6 @@ class ShiftOrderSyncDaemon:
                 self.archive_interval,
                 self.kits_interval,
             )
-            return True
 
     def stop(self) -> None:
         with self._lock:

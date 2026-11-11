@@ -76,7 +76,7 @@ def suppress_windows_error_dialogs() -> None:
             pass
 
 
-def ensure_directories() -> bool:
+def ensure_directories() -> None:
     """Creates all required runtime directories if missing."""
     log_step("Checking required directory structure...")
     for d in REQUIRED_DIRS:
@@ -86,17 +86,16 @@ def ensure_directories() -> bool:
             if not d.is_dir():
                 log_warning(f"Could not create directory {d}: Permission denied.")
     log_success("Runtime directories verified.")
-    return True
 
 
-def ensure_env_file() -> bool:
+def ensure_env_file() -> None:
     """Ensures .env exists; copies from .env.example with generated SECRET_KEY if missing."""
     env_file = PROJECT_ROOT / ".env"
     env_example = PROJECT_ROOT / ".env.example"
 
     if env_file.is_file():
         log_success(".env configuration file found.")
-        return True
+        return
 
     log_step("No .env found. Initializing client configuration from .env.example...")
     secret_key = secrets.token_urlsafe(50)
@@ -131,7 +130,6 @@ ITMS_REQUEST_TIMEOUT_SECONDS=30
 
     env_file.write_text(content, encoding="utf-8")
     log_success("Created .env with secure random DJANGO_SECRET_KEY and SQLite default.")
-    return True
 
 
 def ensure_dependencies(install_missing: bool = True, upgrade: bool = False) -> bool:

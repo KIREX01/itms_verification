@@ -1826,3 +1826,40 @@ The Backend & DevOps team has completed and verified the core backend services, 
      - Verify `submitMobileOrderInstall()` reads the selected order, attaches `front_photo` and `rear_photo` from the dropzone files, and submits via `POST /api/orders/${orderNumber}/install/`.
      - On HTTP 200, update status badge to `INSTALLED`, show a confirmation toast, and reset form for the next order.
 
+---
+
+## 26. SonarQube Code Quality & Security Gate Remediation [PENDING]
+
+### 26.1 Blocker: Undeclared Global Variables (`javascript:S2703`)
+- **Files**:
+  - `core/static/core/js/tab_itms.js` (lines 283, 335)
+  - `core/static/core/js/navigation.js` (line 15)
+  - `core/static/core/js/pipeline.js` (lines 1040, 1048)
+- **Problem**:
+  Variables assigned without `let`, `const`, or `var`, creating implicit globals in sloppy mode:
+  - `tab_itms.js:283`: `itmsExplorerSource = ...` -> add `let` or `const`.
+  - `tab_itms.js:335`: `itmsExplorerOrders = ...` -> add `let` or `const`.
+  - `navigation.js:15`: `activeNavTab = ...` -> add `let` or `const`.
+  - `pipeline.js:1040`: `reportCurrentDate = ...` -> add `let` or `const`.
+  - `pipeline.js:1048`: `currentStockDateSuffix = ...` -> add `let` or `const`.
+
+### 26.2 Blocker: DOM XSS via Unsanitized User Input (`jssecurity:S5696`)
+- **Files**:
+  - `core/static/core/js/mobile_companion.js` (lines 1646, 2709, 2721, 3441)
+  - `core/static/core/js/tab_stock.js` (line 1090)
+- **Problem**:
+  Direct interpolation into `.innerHTML` with unsanitized user inputs (e.g. search input, query params, plate strings).
+- **Remediation**:
+  - Replace `.innerHTML = ...` with `.textContent = ...` or `.innerText = ...` where only text is needed.
+  - For HTML templates containing user values, sanitize values using an HTML escape helper (e.g. `encodeURIComponent` / `escapeHtml(val)` or creating text nodes).
+
+### 26.3 Major: Accessibility - Form Inputs Without Labels (`Web:InputWithoutLabelCheck`)
+- **Files**:
+  - `core/templates/core/base.html` (lines 122, 123, 179, 183)
+  - `core/templates/core/mobile_companion.html` (lines 458, 468, 513, 519)
+- **Problem**:
+  Input elements without associated `<label for="...">` or `aria-label="..."`.
+- **Remediation**:
+  - Add explicit `aria-label="..."` or `<label for="...">` to each input element (date pickers, search fields, checkboxes).
+
+

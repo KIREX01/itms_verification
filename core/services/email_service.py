@@ -22,6 +22,8 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_EMAIL_LOGO_URL = "https://close.kirex.online/static/core/logos/android-chrome-192x192.png"
+
 
 def generate_2fa_code() -> str:
     """Generates a cryptographically secure 6-digit numeric verification code."""
@@ -165,7 +167,7 @@ def send_2fa_verification_code(
         )
         return True, "Simulated 2FA code generated (Check server console/logs)."
 
-    logo_src = logo_url or getattr(settings, "EMAIL_LOGO_URL", "") or "https://close.kirex.online/static/core/logos/android-chrome-192x192.png"
+    logo_src = logo_url or getattr(settings, "EMAIL_LOGO_URL", "") or DEFAULT_EMAIL_LOGO_URL
 
     quick_verify_html = ""
     if verify_url:
@@ -335,7 +337,7 @@ def send_stock_reconciliation_report_email(
     api_key = get_resend_api_key()
     from_email = get_resend_from_email()
 
-    logo_src = logo_url or getattr(settings, "EMAIL_LOGO_URL", "") or "https://close.kirex.online/static/core/logos/android-chrome-192x192.png"
+    logo_src = logo_url or getattr(settings, "EMAIL_LOGO_URL", "") or DEFAULT_EMAIL_LOGO_URL
     bond_name = recon_data.get("storage_bond_name") or recon_data.get("warehouse_name") or "Depot Bond"
     report_date = recon_data.get("formatted_date") or recon_data.get("work_date") or "Current Shift"
     suffix = recon_data.get("work_date_suffix") or ""
@@ -377,11 +379,17 @@ def send_stock_reconciliation_report_email(
 
         if is_perf:
             tot_str = str(tot).replace("%", "").strip()
+            badge_bg = "#fee2e2"
+            badge_color = "#b91c1c"
             try:
                 tot_val = float(tot_str)
-                badge_bg = "#dcfce7" if tot_val >= 100 else ("#fef3c7" if tot_val >= 80 else "#fee2e2")
-                badge_color = "#15803d" if tot_val >= 100 else ("#b45309" if tot_val >= 80 else "#b91c1c")
-            except Exception:
+                if tot_val >= 100:
+                    badge_bg = "#dcfce7"
+                    badge_color = "#15803d"
+                elif tot_val >= 80:
+                    badge_bg = "#fef3c7"
+                    badge_color = "#b45309"
+            except (ValueError, TypeError):
                 badge_bg = "#f1f5f9"
                 badge_color = "#0f172a"
             tot_cell = f"<span style='background-color:{badge_bg}; color:{badge_color}; padding:2px 8px; border-radius:10px; font-weight:800; font-size:11px; display:inline-block;'>{tot}</span>"
@@ -645,7 +653,7 @@ def send_access_request_admin_alert(
         )
         return True, "Simulated admin alert logged."
 
-    logo_src = logo_url or getattr(settings, "EMAIL_LOGO_URL", "") or "https://close.kirex.online/static/core/logos/android-chrome-192x192.png"
+    logo_src = logo_url or getattr(settings, "EMAIL_LOGO_URL", "") or DEFAULT_EMAIL_LOGO_URL
 
     approve_btn = ""
     if approve_url:
@@ -792,7 +800,7 @@ def send_access_activated_email(
     from_email = get_resend_from_email()
     target_url = login_url or "https://close.kirex.online/signup/"
     heading = "Copilot Access Invitation" if is_invitation else "Copilot Access Granted"
-    logo_src = logo_url or getattr(settings, "EMAIL_LOGO_URL", "") or "https://close.kirex.online/static/core/logos/android-chrome-192x192.png"
+    logo_src = logo_url or getattr(settings, "EMAIL_LOGO_URL", "") or DEFAULT_EMAIL_LOGO_URL
 
     exp_line_txt = f"Valid Until:     {expires_at_display}\n" if expires_at_display else ""
     text_content = (

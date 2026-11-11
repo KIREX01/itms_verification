@@ -223,7 +223,8 @@ def match_pair_to_order(
         )
 
         if is_placeholder_plate:
-            pair.operator_note = "Plate not yet detected or entered. Please review photos or link an order."
+            orig_note = f" ({pair.operator_note})" if pair.operator_note else ""
+            pair.operator_note = f"Plate not yet detected or entered. Please review photos or link an order.{orig_note}"
         else:
             # Check if an order exists in local DB but is closed/installed/submitted/archived
             closed_order = (

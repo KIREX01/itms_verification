@@ -480,6 +480,14 @@ def api_batch_candidates(request: HttpRequest, batch_id: str) -> JsonResponse:
 
         vault_p = str(img.vault_file).replace("\\", "/").strip().lstrip("/")
         img_url = f"/{vault_p}" if vault_p.startswith("media/") else f"/media/{vault_p}"
+
+        # Ensure high-fidelity preview and thumbnail exist
+        if not img.preview_file or not img.thumbnail_file:
+            try:
+                vault_service.ensure_image_thumbnails(img)
+            except Exception:
+                pass
+
         thumb_p = str(img.thumbnail_file or "").replace("\\", "/").strip().lstrip("/")
         thumb_url = (f"/{thumb_p}" if thumb_p.startswith("media/") else f"/media/{thumb_p}") if thumb_p else img_url
         preview_p = str(img.preview_file or "").replace("\\", "/").strip().lstrip("/")

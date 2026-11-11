@@ -1863,4 +1863,44 @@ The Backend & DevOps team has completed and verified the core backend services, 
   - Added descriptive `aria-label` attributes to desktop and drawer shift calendar datepickers (`#header-global-shift-date`, `#drawer-global-shift-date`) and shift selects (`#header-global-shift-select`, `#drawer-global-shift-select`).
   - Added descriptive `aria-label` and `for="..."` pairings across all input and select fields in `mobile_companion.html` (order search, hardware serial inputs, file upload camera inputs, and dry-run checkbox).
 
+---
+
+## 27. Feature: Shift Date Selector Consolidation, Laptop Calendar Picker & High-Res Replace Evidence Photo Modal [COMPLETED]
+
+### 27.1 Consolidated Single Shift Date Selector (Header Bar Only) [COMPLETED]
+- **User Request & Rationale**:
+  - Screenshot `Screenshot 2026-11-11 072757.png` showed multiple redundant shift date selection areas on the desktop view. The user specified: *"one shows many shift date selection areas; yet we need one; we keep the one very top; i have also noted the date picker calender works on phones not laptops"*.
+- **Target Files**:
+  - `core/templates/core/base.html`
+  - `core/templates/core/tabs/tab_dashboard.html`
+  - `core/templates/core/tabs/tab_stock.html`
+  - `core/static/core/css/app_layout.css`
+  - `core/static/core/js/pipeline.js`
+- **Frontend Action Items Completed**:
+  1. **Hide Mobile Drawer Shift Box on Desktop (`core/static/core/css/app_layout.css`)**:
+     - Added `.drawer-shift-box { display: none; }` to desktop scope and `.drawer-shift-box { display: block; }` inside `@media (max-width: 991px)`, eliminating desktop drawer leakage into navigation tabs.
+  2. **Remove Redundant Selectors on Dashboard & Stock Tabs**:
+     - In `core/templates/core/tabs/tab_dashboard.html`: Removed redundant `.dash-shift-selector-wrap` (`#dash-global-shift-select` and Today button). Retained informative status badge and shift date text.
+     - In `core/templates/core/tabs/tab_stock.html`: Removed `#stock-date-display` which duplicated `#stock-active-shift-badge`.
+  3. **Laptop Calendar Picker Support (`.showPicker()`)**:
+     - In `core/templates/core/base.html`: Added `onclick="try{if(typeof this.showPicker==='function'){this.showPicker();}}catch(e){}"` directly to `#header-global-shift-date` and `#drawer-global-shift-date`.
+     - In `core/static/core/js/pipeline.js`: Added `attachLaptopCalendarPicker` to register click handlers invoking `.showPicker()` across all `.header-shift-datepicker` inputs on DOM ready and dynamically during shift sync.
+     - In `core/static/core/css/app_layout.css`: Styled `.header-shift-datepicker` and `::-webkit-calendar-picker-indicator` with pointer cursor and bright cyan inverted calendar icon filter.
+
+### 27.2 Crisp High-Resolution Replace Evidence Photo Modal [COMPLETED]
+- **User Request & Rationale**:
+  - Screenshot `Screenshot 2026-11-10 201742.png` showed blurred, pixelated thumbnail images in the "Pick from Batch" grid inside `#modal-replace-image`.
+  - Backend now generates high-fidelity WebP previews (960x720, Lanczos) and returns `preview_url` and full `url`.
+- **Target Files**:
+  - `core/static/core/js/tab_queue.js`
+  - `core/templates/core/modals.html`
+- **Frontend Action Items Completed**:
+  1. In `core/static/core/js/tab_queue.js`:
+     - Updated candidate image source from `thumb_url` to `c.preview_url || c.url || c.thumb_url`.
+     - Added `loading="lazy"` and `image-rendering: -webkit-optimize-contrast; object-fit: contain; width: 100%; height: 100%;`.
+     - Placed preview inside a clean dark canvas container (`#070a10`) with `height: 165px;`.
+  2. In `core/templates/core/modals.html` & `core/static/core/css/modals.css`:
+     - Ensured `.candidate-tile` styling provides crisp dark background (`#111622`), subtle 2px border, clean hover lifts, and high-visibility `#ffd100` 2px selected border.
+
+
 

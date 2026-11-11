@@ -1074,6 +1074,20 @@ window.setGlobalShiftDate = async function(targetVal) {
     }
 };
 
+function attachLaptopCalendarPicker(picker) {
+    if (!picker || picker.dataset.hasPickerListener === "1") return;
+    picker.dataset.hasPickerListener = "1";
+    picker.addEventListener("click", () => {
+        try {
+            if (typeof picker.showPicker === "function") {
+                picker.showPicker();
+            }
+        } catch (e) {
+            // Browser might already show picker or not support method
+        }
+    });
+}
+
 window.syncAllDateSelectorsUI = function(shiftInfo) {
     if (!shiftInfo) return;
     window.activeShiftDateInfo = shiftInfo;
@@ -1098,6 +1112,7 @@ window.syncAllDateSelectorsUI = function(shiftInfo) {
         isoVal = `20${s.substring(4, 6)}-${s.substring(2, 4)}-${s.substring(0, 2)}`;
     }
     datePickers.forEach(dp => {
+        attachLaptopCalendarPicker(dp);
         if (isoVal) {
             dp.value = isoVal;
         }
@@ -1141,6 +1156,7 @@ window.syncAllDateSelectorsUI = function(shiftInfo) {
 
 document.addEventListener("DOMContentLoaded", () => {
     void initGlobalShiftDate();
+    document.querySelectorAll("input.header-shift-datepicker, #header-global-shift-date, #drawer-global-shift-date, #settings-manual-date-picker").forEach(attachLaptopCalendarPicker);
 });
 
 window.addEventListener("shiftDateChanged", (e) => {

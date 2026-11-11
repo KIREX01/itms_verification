@@ -341,7 +341,7 @@ def extract_exif_timestamp(path: Union[str, Path]) -> Optional[datetime]:
 
 
 def generate_thumbnails(vault_abs_path: Union[str, Path]) -> Tuple[str, str]:
-    """Generates small (160x120) and medium (640x480) WebP thumbnails for an image in the vault.
+    """Generates small (320x240) and medium (960x720) high-fidelity WebP thumbnails for an image in the vault.
     Returns: (thumb_relative_path, preview_relative_path)
     """
     from PIL import Image
@@ -358,21 +358,21 @@ def generate_thumbnails(vault_abs_path: Union[str, Path]) -> Tuple[str, str]:
         with Image.open(src_path) as img:
             rgb_img = img.convert("RGB") if img.mode in ("RGBA", "LA", "P") else img
             try:
-                # 1. Medium Preview (640x480 max bounds)
+                # 1. Medium Preview (960x720 max bounds, high fidelity)
                 if not preview_path.exists():
                     preview = rgb_img.copy()
                     try:
-                        preview.thumbnail((640, 480), Image.Resampling.LANCZOS)
-                        preview.save(preview_path, format="WEBP", quality=80, method=4)
+                        preview.thumbnail((960, 720), Image.Resampling.LANCZOS)
+                        preview.save(preview_path, format="WEBP", quality=85, method=4)
                     finally:
                         preview.close()
 
-                # 2. Small Thumbnail (160x120 max bounds)
+                # 2. Small Thumbnail (320x240 max bounds, crisp retina display)
                 if not thumb_path.exists():
                     thumb = rgb_img.copy()
                     try:
-                        thumb.thumbnail((160, 120), Image.Resampling.BILINEAR)
-                        thumb.save(thumb_path, format="WEBP", quality=75, method=2)
+                        thumb.thumbnail((320, 240), Image.Resampling.LANCZOS)
+                        thumb.save(thumb_path, format="WEBP", quality=82, method=3)
                     finally:
                         thumb.close()
             finally:

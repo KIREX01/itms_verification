@@ -1204,14 +1204,15 @@ async function loadBatchCandidates() {
             if (empty) empty.style.display = "none";
             grid.innerHTML = data.candidates.map(c => {
                 const isSelected = activeReplaceContext.selectedCandidateId === c.id;
+                const imgSrc = escapeHtml(c.preview_url || c.url || c.thumb_url || "");
                 return `
-                    <div class="candidate-tile ${isSelected ? 'selected' : ''}" onclick="selectBatchCandidate('${escapeHtml(c.id)}')" id="cand-tile-${escapeHtml(c.id)}" style="background:#111622; border:1px solid rgba(255,255,255,0.15); border-radius:6px; overflow:hidden; cursor:pointer;">
-                        <div style="height:160px; background:#05070a; display:flex; align-items:center; justify-content:center; overflow:hidden;">
-                            <img src="${escapeHtml(c.thumb_url || c.url)}" alt="Candidate" style="width:100%; height:100%; object-fit:contain;">
+                    <div class="candidate-tile ${isSelected ? 'selected' : ''}" onclick="selectBatchCandidate('${escapeHtml(c.id)}')" id="cand-tile-${escapeHtml(c.id)}">
+                        <div style="height:165px; background:#070a10; display:flex; align-items:center; justify-content:center; overflow:hidden;">
+                            <img src="${imgSrc}" alt="Candidate" loading="lazy" style="width:100%; height:100%; object-fit:contain; image-rendering:-webkit-optimize-contrast;">
                         </div>
                         <div style="padding:6px 8px; font-size:0.72rem; display:flex; flex-direction:column; gap:3px;">
                             <div style="display:flex; justify-content:space-between; align-items:center;">
-                                <span class="badge ${c.orientation === 'REAR' ? 'badge-yellow' : 'badge-green'}" style="font-size:0.64rem; padding:1px 5px; color:#ffffff !important; font-weight:800;">${escapeHtml(c.orientation)}</span>
+                                <span class="badge ${c.orientation === 'REAR' ? 'badge-yellow' : 'badge-green'}" style="font-size:0.64rem; padding:1px 5px; color:#ffffff !important; font-weight:800;">${escapeHtml(c.orientation || 'PHOTO')}</span>
                                 <span style="color:rgba(255,255,255,0.75); font-size:0.65rem;">${escapeHtml(c.captured_at || '')}</span>
                             </div>
                             <div style="font-weight:800; font-family:var(--font-mono); color:#ffffff !important; font-size:0.82rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">

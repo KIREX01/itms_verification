@@ -100,6 +100,21 @@ header.app-header {
     display: none;
 }
 
+/* Hide mobile drawer shift box on desktop */
+.drawer-shift-box {
+    display: none;
+}
+
+/* Header Shift Datepicker (Laptop & Touch Ergonomics) */
+.header-shift-datepicker {
+    cursor: pointer;
+}
+.header-shift-datepicker::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    filter: invert(0.8) sepia(1) saturate(5) hue-rotate(175deg);
+    opacity: 0.9;
+}
+
 /* Primary Navigation Tabs (Mirroring TUI: 1 to 8) */
 nav.main-nav-tabs {
     display: flex;
@@ -513,6 +528,11 @@ footer.app-footer {
     nav.main-nav-tabs.show-mobile {
         transform: translateX(0);
         box-shadow: 12px 0 36px rgba(0, 0, 0, 0.8);
+    }
+
+    /* Mobile Drawer Operating Shift Box */
+    .drawer-shift-box {
+        display: block;
     }
 
     /* Mobile Drawer Header */

@@ -33,7 +33,7 @@
     
     <!-- Dedicated Modular Stylesheets (Uganda National Flag Design System) -->
     <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}?v=27">
-    <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}?v=27">
+    <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}?v=28">
     <link rel="stylesheet" href="{% static 'core/css/tab_dashboard.css' %}?v=27">
     <link rel="stylesheet" href="{% static 'core/css/tab_itms.css' %}?v=29">
     <link rel="stylesheet" href="{% static 'core/css/tab_batches.css' %}?v=27">
@@ -42,7 +42,7 @@
     <link rel="stylesheet" href="{% static 'core/css/tab_settings.css' %}?v=27">
     <link rel="stylesheet" href="{% static 'core/css/tab_reports.css' %}?v=27">
     <link rel="stylesheet" href="{% static 'core/css/tab_stock.css' %}?v=30">
-    <link rel="stylesheet" href="{% static 'core/css/modals.css' %}?v=27">
+    <link rel="stylesheet" href="{% static 'core/css/modals.css' %}?v=28">
     <meta name="csrf-token" content="{{ csrf_token }}">
     <style>
         @media (min-width: 769px) {
@@ -119,7 +119,7 @@
                 <div class="header-badges desktop-badges">
                     <div class="header-shift-control" style="display:inline-flex; align-items:center; gap:6px; background:#0c1017; border:1px solid #1f293d; padding:2px 8px; border-radius:6px;" title="Active Operating Shift Date">
                         <span style="font-size:0.75rem; color:var(--ug-yellow, #ffd100); font-weight:800; white-space:nowrap;">📅 Shift:</span>
-                        <input type="date" id="header-global-shift-date" class="header-shift-datepicker" title="Select Global Operating Shift Date" aria-label="Global operating shift calendar date" style="padding: 2px 6px; background-color: var(--ug-black-surface, #0c1017); border: 1px solid var(--ug-border, #334155); color: #38bdf8; border-radius: 4px; font-size: 0.78rem; font-family:var(--font-mono); cursor:pointer;" onchange="window.setGlobalShiftDate(this.value)">
+                        <input type="date" id="header-global-shift-date" class="header-shift-datepicker" title="Select Global Operating Shift Date" aria-label="Global operating shift calendar date" style="padding: 2px 6px; background-color: var(--ug-black-surface, #0c1017); border: 1px solid var(--ug-border, #334155); color: #38bdf8; border-radius: 4px; font-size: 0.78rem; font-family:var(--font-mono); cursor:pointer;" onchange="window.setGlobalShiftDate(this.value)" onclick="try{if(typeof this.showPicker==='function'){this.showPicker();}}catch(e){}">
                         <select id="header-global-shift-select" class="form-select header-shift-select" aria-label="Select active operating shift" onchange="window.setGlobalShiftDate(this.value)" style="min-height:26px; background:#0c1017; color:#fff; font-size:0.75rem; font-weight:700; border:1px solid #334155; border-radius:4px; max-width:145px; cursor:pointer;">
                             <option value="">Loading shift...</option>
                         </select>
@@ -176,7 +176,7 @@
             <div class="drawer-shift-box" style="padding:10px 16px; background:rgba(15,23,42,0.95); border-bottom:1px solid var(--ug-border);">
                 <div style="font-size:0.72rem; color:var(--ug-yellow); font-weight:800; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:6px;">Active Operating Shift:</div>
                 <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
-                    <input type="date" id="drawer-global-shift-date" class="header-shift-datepicker" title="Select Calendar Date" aria-label="Mobile drawer global shift calendar date" style="flex:1; min-height:34px; padding: 4px 8px; background-color: var(--ug-black-surface, #0c1017); border: 1px solid var(--ug-border, #334155); color: #38bdf8; border-radius: 4px; font-size: 0.85rem; font-family:var(--font-mono); cursor:pointer;" onchange="window.setGlobalShiftDate(this.value); closeMobileMenu();">
+                    <input type="date" id="drawer-global-shift-date" class="header-shift-datepicker" title="Select Calendar Date" aria-label="Mobile drawer global shift calendar date" style="flex:1; min-height:34px; padding: 4px 8px; background-color: var(--ug-black-surface, #0c1017); border: 1px solid var(--ug-border, #334155); color: #38bdf8; border-radius: 4px; font-size: 0.85rem; font-family:var(--font-mono); cursor:pointer;" onchange="window.setGlobalShiftDate(this.value); closeMobileMenu();" onclick="try{if(typeof this.showPicker==='function'){this.showPicker();}}catch(e){}">
                     <button type="button" class="btn btn-secondary btn-sm" onclick="window.setGlobalShiftDate('today'); closeMobileMenu();" style="min-height:34px; color:#fff; font-weight:700;">Today</button>
                 </div>
                 <div style="display:flex; gap:6px; align-items:center;">
@@ -278,12 +278,12 @@
     <script src="{% static 'core/js/tab_itms.js' %}?v=29"></script>
     <script src="{% static 'core/js/tab_orders.js' %}?v=27"></script>
     <script src="{% static 'core/js/tab_batches.js' %}?v=27"></script>
-    <script src="{% static 'core/js/tab_queue.js' %}?v=29"></script>
+    <script src="{% static 'core/js/tab_queue.js' %}?v=30"></script>
     <script src="{% static 'core/js/tab_history.js' %}?v=27"></script>
     <script src="{% static 'core/js/tab_settings.js' %}?v=27"></script>
     <script src="{% static 'core/js/tab_reports.js' %}?v=27"></script>
-    <script src="{% static 'core/js/tab_stock.js' %}?v=30"></script>
-    <script src="{% static 'core/js/pipeline.js' %}?v=28"></script>
+    <script src="{% static 'core/js/tab_stock.js' %}?v=31"></script>
+    <script src="{% static 'core/js/pipeline.js' %}?v=29"></script>
     <script src="{% static 'core/js/app.js' %}?v=27"></script>
 
     {% block extra_js %}{% endblock %}

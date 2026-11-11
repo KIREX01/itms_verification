@@ -176,7 +176,7 @@ def upload_photos_view(request: HttpRequest) -> HttpResponse:
     return render(request, "core/upload.html", {"recent_batches": recent_batches})
 
 
-@csrf_exempt
+@require_POST
 def api_upload_photos(request: HttpRequest) -> JsonResponse:
     """REST API endpoint for multi-photo upload from curl or third-party tools."""
     if not (request.user and getattr(request.user, "is_authenticated", False)):

@@ -972,7 +972,6 @@ if ($res -eq [System.Windows.Forms.DialogResult]::OK) {
     return JsonResponse({"success": False, "error": "Native browsing not supported on this OS"})
 
 
-@csrf_exempt
 def api_shift_date(request: HttpRequest) -> JsonResponse:
     """
     GET: Returns current active shift date and available shift dates.

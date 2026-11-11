@@ -247,7 +247,6 @@ def api_mobile_status(request: HttpRequest) -> JsonResponse:
     })
 
 
-@csrf_exempt
 @require_POST
 def api_mobile_upload(request: HttpRequest) -> JsonResponse:
     """
@@ -607,7 +606,6 @@ def api_mobile_uturn_abort(request: HttpRequest) -> JsonResponse:
     })
 
 
-@csrf_exempt
 @require_POST
 def api_mobile_uturn_undo_snap(request: HttpRequest) -> JsonResponse:
     """

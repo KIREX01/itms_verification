@@ -37,9 +37,14 @@ logger = logging.getLogger(__name__)
 
 
 @require_GET
-@require_itms_envelope(allow_expired=True, allow_unlinked=True)
 def api_orders_list(request: HttpRequest) -> JsonResponse:
     """Returns list of installation orders for search / manual linking dropdowns."""
+    search = request.GET.get("search", "").strip()
+    gate = require_itms_envelope(allow_expired=bool(search), allow_unlinked=bool(search))
+    return gate(_api_orders_list_inner)(request)
+
+
+def _api_orders_list_inner(request: HttpRequest) -> JsonResponse:
     search = request.GET.get("search", "").strip()
     try:
         limit = max(1, min(500, int(request.GET.get("limit", 50))))
@@ -1161,7 +1166,6 @@ def _format_evidence_url(img) -> str:
     return ""
 
 
-@csrf_exempt
 def api_itms_order_install(request: HttpRequest, order_ident: str) -> JsonResponse:
     """
     Direct Single-Order Installation & Submission API (Two-Way ITMS Flow).

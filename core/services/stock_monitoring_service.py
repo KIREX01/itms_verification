@@ -46,6 +46,7 @@ from core.models import (
     StockDispatchScan,
     StockReturnScan,
     SubmissionAuditLog,
+    VehicleInstallationPair,
 )
 from core.services import bond_service
 from core.services.plate_lifecycle_service import format_display_plate

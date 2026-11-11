@@ -22,7 +22,7 @@ var itmsExplorerOrders = [];
 var selectedItmsOrder = null;
 
 // Batches & Ingestion State
-var currentBatchesDateScope = "TODAY"; // "TODAY" | "ACTIVE_BATCH" | "CARRYOVER" | "ALL"
+var currentBatchesDateScope = "SHIFT"; // "SHIFT" | "ALL"
 var batchesData = [];
 var batchDetailsCache = {};
 var expandedBatches = new Set();

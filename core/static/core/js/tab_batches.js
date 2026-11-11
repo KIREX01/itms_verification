@@ -56,8 +56,9 @@ function initDropzones() {
         });
     });
 }
+window.initDropzones = initDropzones;
 
-let currentBatchesDateScope = "SHIFT";
+currentBatchesDateScope = "SHIFT";
 
 function setBatchesScopeMode(mode) {
     currentBatchesDateScope = (mode === "ALL") ? "ALL" : "SHIFT";

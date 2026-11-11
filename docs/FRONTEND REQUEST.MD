@@ -1969,6 +1969,29 @@ The Backend & DevOps team has completed and verified the core backend services, 
   4. In `core/templates/core/base.html`:
      - Bumped script query versions: `tab_batches.js?v=28` and `tab_queue.js?v=31`.
 
+---
+
+## 29. Bugfix: Resolve `currentBatchesDateScope` Duplicate Declaration & `initDropzones` ReferenceError [COMPLETED]
+
+### 29.1 Context & Errors Encountered
+- Browser console errors reported:
+  1. `tab_batches.js?v=28:1 Uncaught SyntaxError: Identifier 'currentBatchesDateScope' has already been declared`
+  2. `app.js?v=27:12 Uncaught ReferenceError: initDropzones is not defined at HTMLDocument.<anonymous> (app.js?v=27:12:5)`
+- **Root Cause**:
+  - `core/static/core/js/state.js` (line 25) declares `var currentBatchesDateScope = "TODAY";` in global scope.
+  - `core/static/core/js/tab_batches.js` (line 60) redeclared `let currentBatchesDateScope = "SHIFT";` in the same global scope, causing a fatal `SyntaxError` that aborted parsing of `tab_batches.js` before `initDropzones` could be registered.
+
+### 29.2 Implemented Fixes [COMPLETED]
+1. **`core/static/core/js/state.js`**:
+   - Updated line 25 to `var currentBatchesDateScope = "SHIFT"; // "SHIFT" | "ALL"`.
+2. **`core/static/core/js/tab_batches.js`**:
+   - Removed `let` keyword, using `currentBatchesDateScope = "SHIFT";` assignment to reuse the declaration from `state.js`.
+   - Explicitly exported `window.initDropzones = initDropzones;` immediately after the `initDropzones` definition.
+   - Verified that no other top-level `let`/`const` variables in `tab_batches.js` collide with `state.js`.
+3. **`core/templates/core/base.html`**:
+   - Bumped cache-busting query versions: `state.js?v=29` and `tab_batches.js?v=29`.
+
+
 
 
 

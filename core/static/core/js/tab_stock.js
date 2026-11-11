@@ -1087,35 +1087,69 @@ async function openNotOnStockModal(data) {
     // Populate Table
     const tbody = document.getElementById('not-on-stock-table-body');
     if (tbody) {
-        tbody.innerHTML = '';
+        tbody.replaceChildren();
         const items = data.items || [];
         if (items.length > 0) {
             items.forEach((item, idx) => {
                 const tr = document.createElement('tr');
+
+                // Col 1: Index
+                const tdIndex = document.createElement('td');
+                tdIndex.style.color = 'var(--ug-text-muted)';
+                tdIndex.style.fontSize = '0.85rem';
+                tdIndex.textContent = String(item.index || idx + 1);
+                tr.appendChild(tdIndex);
+
+                // Col 2: Plate
+                const tdPlate = document.createElement('td');
+                tdPlate.style.fontWeight = '700';
+                tdPlate.style.fontFamily = 'monospace';
+                tdPlate.style.fontSize = '0.95rem';
+                tdPlate.style.color = '#fff';
+                tdPlate.textContent = item.plate || '';
+                tr.appendChild(tdPlate);
+
+                // Col 3: Category badge
+                const tdCat = document.createElement('td');
+                const badgeCat = document.createElement('span');
+                badgeCat.className = 'badge badge-muted';
+                badgeCat.style.fontSize = '0.75rem';
+                badgeCat.textContent = item.category || 'PSV';
+                tdCat.appendChild(badgeCat);
+                tr.appendChild(tdCat);
+
+                // Col 4: Status badge & reason
+                const tdStatus = document.createElement('td');
+                tdStatus.style.fontSize = '0.85rem';
+
                 const isInstalled = item.status === 'ALREADY_INSTALLED';
-                const statusBadge = isInstalled
-                    ? '<span class="badge badge-yellow" style="font-size: 0.75rem;">ALREADY INSTALLED</span>'
-                    : '<span class="badge badge-danger" style="font-size: 0.75rem;">NOT ON STOCK</span>';
+                const statusBadge = document.createElement('span');
+                statusBadge.className = isInstalled ? 'badge badge-yellow' : 'badge badge-danger';
+                statusBadge.style.fontSize = '0.75rem';
+                statusBadge.textContent = isInstalled ? 'ALREADY INSTALLED' : 'NOT ON STOCK';
+                tdStatus.appendChild(statusBadge);
 
-                const safeIdx = escapeHtml(item.index || idx + 1);
-                const safePlate = escapeHtml(item.plate);
-                const safeCategory = escapeHtml(item.category || 'PSV');
-                const safeReason = escapeHtml(item.reason || 'Missing from ITMS Safe Room stock');
+                const reasonDiv = document.createElement('div');
+                reasonDiv.style.fontSize = '0.78rem';
+                reasonDiv.style.color = 'var(--ug-text-muted)';
+                reasonDiv.style.marginTop = '2px';
+                reasonDiv.textContent = item.reason || 'Missing from ITMS Safe Room stock';
+                tdStatus.appendChild(reasonDiv);
+                tr.appendChild(tdStatus);
 
-                tr.innerHTML = `
-                    <td style="color: var(--ug-text-muted); font-size: 0.85rem;">${safeIdx}</td>
-                    <td style="font-weight: 700; font-family: monospace; font-size: 0.95rem; color: #fff;">${safePlate}</td>
-                    <td><span class="badge badge-muted" style="font-size: 0.75rem;">${safeCategory}</span></td>
-                    <td style="font-size: 0.85rem;">
-                        ${statusBadge}
-                        <div style="font-size: 0.78rem; color: var(--ug-text-muted); margin-top: 2px;">${safeReason}</div>
-                    </td>
-                    <td style="text-align: center;">
-                        <span class="badge badge-danger" style="font-size: 0.75rem; background: rgba(220,53,69,0.2); border: 1px solid #dc3545; color: #ff6b6b;">
-                            Set Box Aside
-                        </span>
-                    </td>
-                `;
+                // Col 5: Action badge
+                const tdAction = document.createElement('td');
+                tdAction.style.textAlign = 'center';
+                const actionBadge = document.createElement('span');
+                actionBadge.className = 'badge badge-danger';
+                actionBadge.style.fontSize = '0.75rem';
+                actionBadge.style.background = 'rgba(220,53,69,0.2)';
+                actionBadge.style.border = '1px solid #dc3545';
+                actionBadge.style.color = '#ff6b6b';
+                actionBadge.textContent = 'Set Box Aside';
+                tdAction.appendChild(actionBadge);
+                tr.appendChild(tdAction);
+
                 tbody.appendChild(tr);
             });
         } else {
@@ -1123,26 +1157,76 @@ async function openNotOnStockModal(data) {
             if (rawList.length > 0) {
                 rawList.forEach((p, idx) => {
                     const tr = document.createElement('tr');
-                    const safeIdx = escapeHtml(idx + 1);
-                    const safeP = escapeHtml(p);
-                    tr.innerHTML = `
-                        <td style="color: var(--ug-text-muted); font-size: 0.85rem;">${safeIdx}</td>
-                        <td style="font-weight: 700; font-family: monospace; font-size: 0.95rem; color: #fff;">${safeP}</td>
-                        <td><span class="badge badge-muted" style="font-size: 0.75rem;">PSV</span></td>
-                        <td style="font-size: 0.85rem;">
-                            <span class="badge badge-danger" style="font-size: 0.75rem;">NOT ON STOCK</span>
-                            <div style="font-size: 0.78rem; color: var(--ug-text-muted); margin-top: 2px;">Not found in local stock or live ITMS /installation-kits</div>
-                        </td>
-                        <td style="text-align: center;">
-                            <span class="badge badge-danger" style="font-size: 0.75rem; background: rgba(220,53,69,0.2); border: 1px solid #dc3545; color: #ff6b6b;">
-                                Set Box Aside
-                            </span>
-                        </td>
-                    `;
+
+                    // Col 1: Index
+                    const tdIndex = document.createElement('td');
+                    tdIndex.style.color = 'var(--ug-text-muted)';
+                    tdIndex.style.fontSize = '0.85rem';
+                    tdIndex.textContent = String(idx + 1);
+                    tr.appendChild(tdIndex);
+
+                    // Col 2: Plate
+                    const tdPlate = document.createElement('td');
+                    tdPlate.style.fontWeight = '700';
+                    tdPlate.style.fontFamily = 'monospace';
+                    tdPlate.style.fontSize = '0.95rem';
+                    tdPlate.style.color = '#fff';
+                    tdPlate.textContent = String(p || '');
+                    tr.appendChild(tdPlate);
+
+                    // Col 3: Category badge
+                    const tdCat = document.createElement('td');
+                    const badgeCat = document.createElement('span');
+                    badgeCat.className = 'badge badge-muted';
+                    badgeCat.style.fontSize = '0.75rem';
+                    badgeCat.textContent = 'PSV';
+                    tdCat.appendChild(badgeCat);
+                    tr.appendChild(tdCat);
+
+                    // Col 4: Status badge & reason
+                    const tdStatus = document.createElement('td');
+                    tdStatus.style.fontSize = '0.85rem';
+
+                    const statusBadge = document.createElement('span');
+                    statusBadge.className = 'badge badge-danger';
+                    statusBadge.style.fontSize = '0.75rem';
+                    statusBadge.textContent = 'NOT ON STOCK';
+                    tdStatus.appendChild(statusBadge);
+
+                    const reasonDiv = document.createElement('div');
+                    reasonDiv.style.fontSize = '0.78rem';
+                    reasonDiv.style.color = 'var(--ug-text-muted)';
+                    reasonDiv.style.marginTop = '2px';
+                    reasonDiv.textContent = 'Not found in local stock or live ITMS /installation-kits';
+                    tdStatus.appendChild(reasonDiv);
+                    tr.appendChild(tdStatus);
+
+                    // Col 5: Action badge
+                    const tdAction = document.createElement('td');
+                    tdAction.style.textAlign = 'center';
+                    const actionBadge = document.createElement('span');
+                    actionBadge.className = 'badge badge-danger';
+                    actionBadge.style.fontSize = '0.75rem';
+                    actionBadge.style.background = 'rgba(220,53,69,0.2)';
+                    actionBadge.style.border = '1px solid #dc3545';
+                    actionBadge.style.color = '#ff6b6b';
+                    actionBadge.textContent = 'Set Box Aside';
+                    tdAction.appendChild(actionBadge);
+                    tr.appendChild(tdAction);
+
                     tbody.appendChild(tr);
                 });
             } else {
-                tbody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding: 20px; color: var(--ug-text-muted);">No blocked plates recorded for this shift.</td></tr>`;
+                tbody.replaceChildren();
+                const trEmpty = document.createElement('tr');
+                const tdEmpty = document.createElement('td');
+                tdEmpty.colSpan = 5;
+                tdEmpty.className = 'text-center';
+                tdEmpty.style.padding = '20px';
+                tdEmpty.style.color = 'var(--ug-text-muted)';
+                tdEmpty.textContent = 'No blocked plates recorded for this shift.';
+                trEmpty.appendChild(tdEmpty);
+                tbody.appendChild(trEmpty);
             }
         }
     }

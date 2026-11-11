@@ -74,10 +74,15 @@ function setQueueBatchFilter(batchVal) {
     renderQueueCards();
 }
 
-async function fetchPairs() {
+async function fetchPairs(shiftDate = null) {
     try {
         const activeScope = currentQueueDateScope || "TODAY";
-        const res = await fetch(`/api/pairs/?scope=${encodeURIComponent(activeScope)}`);
+        const currentShiftDate = shiftDate || (window.activeShiftDateInfo && (window.activeShiftDateInfo.date || window.activeShiftDateInfo.suffix)) || "";
+        let url = `/api/pairs/?scope=${encodeURIComponent(activeScope)}`;
+        if (activeScope !== "ALL" && currentShiftDate && currentShiftDate !== "ALL") {
+            url += `&date=${encodeURIComponent(currentShiftDate)}`;
+        }
+        const res = await fetch(url);
         const data = await res.json();
         if (data.success) {
             pairsData = data.pairs || [];
@@ -86,9 +91,10 @@ async function fetchPairs() {
             const select = document.getElementById("queue-batch-select");
             if (select) {
                 const currentVal = select.value || ("SCOPE:" + activeScope);
+                const shiftOptionLabel = `📅 Selected Shift (${escapeHtml(data.shift_display || 'Active Shift')})`;
                 let optionsHtml = `
                     <optgroup label="Date Scope">
-                        <option value="SCOPE:TODAY" ${activeScope === "TODAY" ? "selected" : ""}>🔥 Today's Shift</option>
+                        <option value="SCOPE:TODAY" ${activeScope === "TODAY" ? "selected" : ""}>${shiftOptionLabel}</option>
                         <option value="SCOPE:ACTIVE_BATCH" ${activeScope === "ACTIVE_BATCH" ? "selected" : ""}>⚡ Active Batch</option>
                         <option value="SCOPE:CARRYOVER" ${activeScope === "CARRYOVER" ? "selected" : ""}>⏳ Carryover</option>
                         <option value="SCOPE:ALL" ${activeScope === "ALL" ? "selected" : ""}>🌐 All Records</option>
@@ -119,10 +125,10 @@ async function fetchPairs() {
                 approvedBtn.disabled = (approvedCount === 0);
                 approvedBtn.style.opacity = approvedCount === 0 ? "0.6" : "1";
                 approvedBtn.style.cursor = approvedCount === 0 ? "not-allowed" : "pointer";
-                approvedBtn.onclick = () => triggerBatchSubmit(activeScope);
+                approvedBtn.onclick = () => triggerBatchSubmit(activeScope, currentShiftDate);
             }
             if (approvedText) {
-                approvedText.innerText = `${approvedCount} approved ready (${activeScope})`;
+                approvedText.innerText = `${pairsData.length} pairs (${data.shift_display || activeScope}) • ${approvedCount} ready`;
             }
             setText("kpi-approved", approvedCount);
 
@@ -135,6 +141,7 @@ async function fetchPairs() {
         console.warn("Queue fetch error:", err);
     }
 }
+window.fetchPairs = fetchPairs;
 
 function setWorkQueueFilter(filter) {
     currentQueueFilter = filter;
@@ -1455,3 +1462,15 @@ async function submitReplaceImage() {
         }
     }
 }
+
+window.addEventListener("shiftDateChanged", (e) => {
+    const info = (e && e.detail) ? e.detail : null;
+    currentQueueBatchFilter = "ALL";
+    if (info && (info.suffix === "ALL" || info.date === "ALL")) {
+        currentQueueDateScope = "ALL";
+    } else if (currentQueueDateScope === "ALL") {
+        currentQueueDateScope = "TODAY";
+    }
+    const d = info ? (info.date || info.suffix || null) : null;
+    void fetchPairs(d);
+});

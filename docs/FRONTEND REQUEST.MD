@@ -1991,6 +1991,43 @@ The Backend & DevOps team has completed and verified the core backend services, 
 3. **`core/templates/core/base.html`**:
    - Bumped cache-busting query versions: `state.js?v=29` and `tab_batches.js?v=29`.
 
+---
+
+## 30. Feature: Scope Review Queue by Selected Shift Date [COMPLETED]
+
+### 30.1 Context & Requirement
+- **User Request**: *"we need to improve the queue page to also scope based on seleceted date; to show all pairs worked on that date selected"*
+- **Backend Fix Landed**:
+  - `core/views/pairs.py` (`api_pairs_list` & `api_batch_submit`):
+    - Accepts `?date=<YYYY-MM-DD or DDMMYY or ALL>` and resolves against `date_service.get_active_shift_info()` when omitted.
+    - Filters pairs by Kampala timezone day range across `created_at`, `updated_at`, `front_image__captured_at`, `rear_image__captured_at`, `front_image__batch__created_at`, `rear_image__batch__created_at`, `batch_id` date tokens, and `order__order_number__endswith=suffix_str`.
+    - Returns `"shift_date"`, `"shift_suffix"`, and `"shift_display"` in `/api/pairs/` JSON response.
+
+### 30.2 Implemented Frontend Changes [COMPLETED]
+1. **`core/static/core/js/tab_queue.js`**:
+   - Updated `fetchPairs(shiftDate = null)`:
+     - Resolves `currentShiftDate` from `shiftDate || (window.activeShiftDateInfo && (window.activeShiftDateInfo.date || window.activeShiftDateInfo.suffix)) || ""`
+     - Appends `&date=${encodeURIComponent(currentShiftDate)}` when `activeScope !== "ALL"`.
+     - In `#queue-batch-select` dropdown options:
+       - Displays `📅 Selected Shift (${escapeHtml(data.shift_display || 'Active Shift')})` on the primary shift option.
+     - Updates `#queue-approved-count-text` to display `${pairsData.length} pairs (${data.shift_display || activeScope}) • ${approvedCount} ready`.
+     - Exports `window.fetchPairs = fetchPairs`.
+   - Added global `shiftDateChanged` event listener:
+     - Resets `currentQueueBatchFilter = "ALL"`.
+     - Automatically adapts `currentQueueDateScope` between `"ALL"` and `"TODAY"`.
+     - Re-fetches pairs for the newly selected shift date: `void fetchPairs(d)`.
+   - Wired `approvedBtn.onclick = () => triggerBatchSubmit(activeScope, currentShiftDate);` to pass shift date context.
+2. **`core/static/core/js/pipeline.js`**:
+   - In `window.setGlobalShiftDate`:
+     - Added automatic Queue refresh: `if (typeof fetchPairs === "function") { void fetchPairs(data.active_shift.date || data.active_shift.suffix); }`.
+   - In `triggerBatchSubmit(requestedScope, shiftDate = null)`:
+     - Passes `&date=${encodeURIComponent(currentShiftDate)}` when loading approved pairs for submission.
+3. **`core/templates/core/tabs/tab_queue.html`**:
+   - Updated initial `<option value="SCOPE:TODAY" selected>` text to `📅 Selected Shift`.
+4. **`core/templates/core/base.html`**:
+   - Bumped cache-busting query versions: `tab_queue.js?v=32` and `pipeline.js?v=30`.
+
+
 
 
 

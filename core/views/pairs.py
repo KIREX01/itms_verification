@@ -39,54 +39,102 @@ def _clean_media_url(file_path):
 
 @require_GET
 def api_pairs_list(request: HttpRequest) -> JsonResponse:
-    """Returns filtered list of vehicle installation pairs for the work queue with batch clarity."""
+    """Returns filtered list of vehicle installation pairs for the work queue scoped to the selected shift date."""
     if not (request.user and getattr(request.user, "is_authenticated", False)):
         return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
 
+    from datetime import datetime, time as dt_time
+    from zoneinfo import ZoneInfo
+    from core.services import date_service
+
     today = timezone.localdate()
+    tz_eat = ZoneInfo("Africa/Kampala")
 
     status_filter = request.GET.get("status", "ALL").upper().strip()
     batch_filter = request.GET.get("batch", "ALL").strip()
-    scope = request.GET.get("scope", "").upper().strip()
+    scope = request.GET.get("scope", "SHIFT").upper().strip()
+    date_param = (
+        request.GET.get("date")
+        or request.GET.get("date_suffix")
+        or request.GET.get("suffix")
+        or ""
+    ).strip()
     search = request.GET.get("search", "").strip()
     try:
         limit = max(1, min(5000, int(request.GET.get("limit", 2500))))
     except (ValueError, TypeError):
         limit = 2500
 
-    latest_batch = IngestionBatch.objects.order_by("-created_at").first()
+    # Resolve target shift date from query param or global active shift setting
+    active_shift = date_service.get_active_shift_info()
+    is_all_dates = (
+        scope == "ALL"
+        or date_param.upper() == "ALL"
+        or (not date_param and active_shift.get("mode") == "all")
+    )
+
+    target_date = None
+    if not is_all_dates:
+        if date_param:
+            target_date = date_service.parse_date_input(date_param)
+        if not target_date:
+            target_date = date_service.get_active_shift_date() or today
+    else:
+        target_date = today
+
+    start_dt = datetime.combine(target_date, dt_time.min, tzinfo=tz_eat)
+    end_dt = datetime.combine(target_date, dt_time.max, tzinfo=tz_eat)
+    ymd_str = target_date.strftime("%Y%m%d")
+    suffix_str = date_service.format_date_suffix(target_date)
+    shift_display = "All Dates" if is_all_dates else f"{date_service.format_readable_date(target_date)} [{suffix_str}]"
+
+    # Match all pairs worked on, captured on, ingested on, or linked to orders for the selected date
+    shift_date_q = (
+        Q(created_at__range=(start_dt, end_dt))
+        | Q(updated_at__range=(start_dt, end_dt))
+        | Q(front_image__captured_at__range=(start_dt, end_dt))
+        | Q(rear_image__captured_at__range=(start_dt, end_dt))
+        | Q(front_image__batch__created_at__range=(start_dt, end_dt))
+        | Q(rear_image__batch__created_at__range=(start_dt, end_dt))
+        | Q(front_image__batch__batch_id__icontains=ymd_str)
+        | Q(rear_image__batch__batch_id__icontains=ymd_str)
+        | Q(front_image__batch__batch_id__icontains=suffix_str)
+        | Q(rear_image__batch__batch_id__icontains=suffix_str)
+        | Q(order__order_number__endswith=suffix_str)
+    )
+
+    shift_batches_qs = IngestionBatch.objects.filter(
+        Q(created_at__range=(start_dt, end_dt))
+        | Q(batch_id__icontains=ymd_str)
+        | Q(batch_id__icontains=suffix_str)
+    ).order_by("-created_at")
+    latest_batch = (
+        shift_batches_qs.first()
+        if (not is_all_dates and shift_batches_qs.exists())
+        else IngestionBatch.objects.order_by("-created_at").first()
+    )
 
     qs = VehicleInstallationPair.objects.filter(is_deleted=False).select_related(
         "order", "front_image", "rear_image", "front_image__batch", "rear_image__batch"
-    ).order_by("created_at", "id")
+    ).order_by("-updated_at", "-created_at", "-id")
 
     envelope = getattr(request, "envelope", None)
-    if envelope and envelope.is_valid:
-        if request.user and request.user.is_superuser:
-            qs = qs.filter(facility_code=envelope.facility_code)
-        else:
-            qs = qs.filter(
-                Q(operator=request.user) | Q(front_image__batch__operator=request.user) | Q(operator__isnull=True),
-                facility_code=envelope.facility_code,
-            )
-    elif request.user and getattr(request.user, "is_authenticated", False):
-        if request.user.is_superuser:
-            pass
-        else:
-            qs = qs.filter(Q(operator=request.user) | Q(front_image__batch__operator=request.user) | Q(operator__isnull=True))
+    if envelope and envelope.is_valid and envelope.facility_code:
+        qs = qs.filter(
+            Q(facility_code=envelope.facility_code)
+            | Q(facility_code="")
+            | Q(facility_code__isnull=True)
+        )
 
-    today_q = (
-        Q(created_at__date=today) |
-        Q(front_image__batch__created_at__date=today) |
-        Q(rear_image__batch__created_at__date=today)
-    )
-
-    if scope == "TODAY":
-        qs = qs.filter(today_q)
+    if batch_filter not in ("ALL", "", "LATEST", "CARRYOVER"):
+        # Explicit batch selected in dropdown: filter directly to that batch
+        qs = qs.filter(Q(front_image__batch__batch_id=batch_filter) | Q(rear_image__batch__batch_id=batch_filter))
+    elif scope in ("TODAY", "SHIFT", "") and not is_all_dates:
+        qs = qs.filter(shift_date_q)
     elif scope == "ACTIVE_BATCH" and latest_batch:
         qs = qs.filter(Q(front_image__batch=latest_batch) | Q(rear_image__batch=latest_batch))
     elif scope == "CARRYOVER":
-        qs = qs.exclude(today_q)
+        qs = qs.exclude(shift_date_q)
 
     if status_filter == "PENDING":
         qs = qs.filter(verification_status=VehicleInstallationPair.VerificationStatus.PENDING_REVIEW, order__isnull=False)
@@ -133,9 +181,13 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
         batch_obj = (p.front_image.batch if p.front_image and p.front_image.batch else None) or (
             p.rear_image.batch if p.rear_image and p.rear_image.batch else None
         )
-        is_today = bool(batch_obj and batch_obj.created_at and timezone.localdate(batch_obj.created_at) == today)
+        batch_dt = timezone.localtime(batch_obj.created_at, tz_eat).date() if (batch_obj and batch_obj.created_at) else None
+        is_today = bool(
+            (batch_dt and batch_dt == target_date)
+            or (batch_obj and (ymd_str in batch_obj.batch_id or suffix_str in batch_obj.batch_id))
+        )
         is_latest = bool(batch_obj and latest_batch and batch_obj.id == latest_batch.id)
-        is_carryover = bool(batch_obj and batch_obj.created_at and timezone.localdate(batch_obj.created_at) < today)
+        is_carryover = bool(batch_dt and batch_dt < target_date and not is_today)
 
         op_obj = p.operator or (batch_obj.operator if batch_obj else None)
         op_name = (op_obj.get_full_name().strip() or op_obj.username) if op_obj else ""
@@ -160,7 +212,7 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
             "operator_email": op_email,
             "batch_id": batch_obj.batch_id if batch_obj else "Carryover",
             "batch_label": (batch_obj.source_label or batch_obj.batch_id) if batch_obj else "Carryover Batch",
-            "batch_created_at": batch_obj.created_at.strftime("%Y-%m-%d %H:%M") if (batch_obj and batch_obj.created_at) else "",
+            "batch_created_at": timezone.localtime(batch_obj.created_at, tz_eat).strftime("%Y-%m-%d %H:%M") if (batch_obj and batch_obj.created_at) else "",
             "is_today": is_today,
             "is_latest_batch": is_latest,
             "is_carryover": is_carryover,
@@ -188,33 +240,45 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
                 "front_beacon": (p.order.front_beacon_id if p.order else "") or "—",
                 "rear_beacon": (p.order.rear_beacon_id if p.order else "") or "—",
             },
-            "updated_at": p.updated_at.strftime("%H:%M:%S") if p.updated_at else "",
+            "updated_at": timezone.localtime(p.updated_at, tz_eat).strftime("%H:%M:%S") if p.updated_at else "",
         })
 
+    dropdown_batches_qs = (
+        shift_batches_qs[:30]
+        if (not is_all_dates and scope in ("TODAY", "SHIFT", ""))
+        else IngestionBatch.objects.order_by("-created_at")[:30]
+    )
     batches_list = [
         {
             "batch_id": b.batch_id,
             "source_label": b.source_label or b.batch_id,
-            "created_at": b.created_at.strftime("%Y-%m-%d %H:%M") if b.created_at else "",
+            "created_at": timezone.localtime(b.created_at, tz_eat).strftime("%Y-%m-%d %H:%M") if b.created_at else "",
             "is_latest": bool(latest_batch and b.id == latest_batch.id),
-            "is_today": bool(b.created_at and b.created_at.date() == today),
+            "is_today": bool(
+                (b.created_at and timezone.localtime(b.created_at, tz_eat).date() == target_date)
+                or ymd_str in b.batch_id
+                or suffix_str in b.batch_id
+            ),
         }
-        for b in IngestionBatch.objects.order_by("-created_at")[:20]
+        for b in dropdown_batches_qs
     ]
 
     today_approved_count = VehicleInstallationPair.objects.filter(
         is_deleted=False,
         verification_status=VehicleInstallationPair.VerificationStatus.APPROVED
-    ).filter(today_q).count()
+    ).filter(shift_date_q).count()
     carryover_approved_count = VehicleInstallationPair.objects.filter(
         is_deleted=False,
         verification_status=VehicleInstallationPair.VerificationStatus.APPROVED
-    ).exclude(today_q).count()
+    ).exclude(shift_date_q).count()
 
     return JsonResponse({
         "success": True,
         "count": len(pairs_data),
-        "scope": scope or "ALL",
+        "scope": "ALL" if is_all_dates else (scope or "SHIFT"),
+        "shift_date": "ALL" if is_all_dates else target_date.strftime("%Y-%m-%d"),
+        "shift_suffix": "ALL" if is_all_dates else suffix_str,
+        "shift_display": shift_display,
         "pairs": pairs_data,
         "latest_batch_id": latest_batch.batch_id if latest_batch else None,
         "today_approved_count": today_approved_count,
@@ -923,7 +987,12 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
     if not (request.user and getattr(request.user, "is_authenticated", False)):
         return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
 
+    from datetime import datetime, time as dt_time
+    from zoneinfo import ZoneInfo
+    from core.services import date_service
+
     today = timezone.localdate()
+    tz_eat = ZoneInfo("Africa/Kampala")
 
     dry_run_param = request.POST.get("dry_run")
     if dry_run_param is not None and str(dry_run_param).strip() != "":
@@ -932,6 +1001,21 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
         is_dry_run = config_service.get_setting("submission.dry_run_mode", True)
 
     scope = request.POST.get("scope", "TODAY").upper().strip()
+    date_param = (
+        request.POST.get("date")
+        or request.GET.get("date")
+        or ""
+    ).strip()
+
+    target_date = date_service.parse_date_input(date_param) if date_param else None
+    if not target_date:
+        target_date = date_service.get_active_shift_date() or today
+
+    start_dt = datetime.combine(target_date, dt_time.min, tzinfo=tz_eat)
+    end_dt = datetime.combine(target_date, dt_time.max, tzinfo=tz_eat)
+    ymd_str = target_date.strftime("%Y%m%d")
+    suffix_str = date_service.format_date_suffix(target_date)
+
     latest_batch = IngestionBatch.objects.order_by("-created_at").first()
 
     qs = VehicleInstallationPair.objects.filter(
@@ -948,12 +1032,20 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
     ).select_related("order", "front_image", "rear_image")
 
     today_q = (
-        Q(created_at__date=today) |
-        Q(front_image__batch__created_at__date=today) |
-        Q(rear_image__batch__created_at__date=today)
+        Q(created_at__range=(start_dt, end_dt))
+        | Q(updated_at__range=(start_dt, end_dt))
+        | Q(front_image__captured_at__range=(start_dt, end_dt))
+        | Q(rear_image__captured_at__range=(start_dt, end_dt))
+        | Q(front_image__batch__created_at__range=(start_dt, end_dt))
+        | Q(rear_image__batch__created_at__range=(start_dt, end_dt))
+        | Q(front_image__batch__batch_id__icontains=ymd_str)
+        | Q(rear_image__batch__batch_id__icontains=ymd_str)
+        | Q(front_image__batch__batch_id__icontains=suffix_str)
+        | Q(rear_image__batch__batch_id__icontains=suffix_str)
+        | Q(order__order_number__endswith=suffix_str)
     )
 
-    if scope == "TODAY":
+    if scope in ("TODAY", "SHIFT"):
         approved_pairs = list(qs.filter(today_q))
         carryover_cnt = qs.exclude(today_q).count()
         if not approved_pairs:

@@ -280,7 +280,7 @@ async function openSingleSubmissionModal(pair) {
 /**
  * Opens pre-submission review & confirmation modal for ALL approved pairs (Batch).
  */
-async function triggerBatchSubmit(requestedScope) {
+async function triggerBatchSubmit(requestedScope, shiftDate = null) {
     if (isBatchSubmitting) {
         reopenSubmissionModal();
         return;
@@ -295,13 +295,18 @@ async function triggerBatchSubmit(requestedScope) {
     }
 
     const scope = requestedScope || (typeof currentQueueDateScope !== "undefined" ? currentQueueDateScope : "TODAY");
+    const currentShiftDate = shiftDate || (window.activeShiftDateInfo && (window.activeShiftDateInfo.date || window.activeShiftDateInfo.suffix)) || "";
 
     try {
         // Scope query by both date and active batch selection
         const batchParam = (typeof currentQueueBatchFilter !== "undefined" && currentQueueBatchFilter !== "ALL")
             ? `&batch=${encodeURIComponent(currentQueueBatchFilter)}`
             : "";
-        const res = await fetch(`/api/pairs/?scope=${encodeURIComponent(scope)}${batchParam}&limit=500`);
+        let pairsUrl = `/api/pairs/?scope=${encodeURIComponent(scope)}${batchParam}&limit=500`;
+        if (scope !== "ALL" && currentShiftDate && currentShiftDate !== "ALL") {
+            pairsUrl += `&date=${encodeURIComponent(currentShiftDate)}`;
+        }
+        const res = await fetch(pairsUrl);
         const data = await res.json();
         let allScopePairs = data.pairs || [];
 
@@ -1063,6 +1068,11 @@ window.setGlobalShiftDate = async function(targetVal) {
                 void loadBatchesList();
             } else if (typeof fetchBatchesList === "function") {
                 void fetchBatchesList();
+            }
+
+            // Update Review Queue Tab (Global Shift Scoping)
+            if (typeof fetchPairs === "function") {
+                void fetchPairs(data.active_shift.date || data.active_shift.suffix);
             }
         } else {
             if (typeof showToast === "function") {

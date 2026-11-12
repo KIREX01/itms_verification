@@ -41,6 +41,17 @@
             font-weight: 800 !important;
             box-shadow: 0 0 8px rgba(252, 220, 4, 0.25) !important;
         }
+        .queue-filter-pill .pill-count {
+            display: inline-block;
+            margin-left: 3px;
+            font-size: 0.68rem;
+            opacity: 0.85;
+            font-weight: 700;
+        }
+        .queue-filter-pill.active .pill-count {
+            color: var(--ug-yellow, #fcdc04);
+            opacity: 1;
+        }
     </style>
 
     <div class="queue-workspace-split">
@@ -51,19 +62,19 @@
                 <div class="queue-subnav-strip">
                     <div class="queue-filter-pills" role="tablist">
                         <button type="button" class="queue-filter-pill active" data-filter="ALL" onclick="setWorkQueueFilter('ALL')" title="All items in queue">
-                            All
+                            All <span class="pill-count" id="qcount-all"></span>
                         </button>
                         <button type="button" class="queue-filter-pill" data-filter="PENDING" onclick="setWorkQueueFilter('PENDING')" title="Ready for review">
-                            Review
+                            Review <span class="pill-count" id="qcount-review"></span>
                         </button>
                         <button type="button" class="queue-filter-pill" data-filter="APPROVED" onclick="setWorkQueueFilter('APPROVED')" title="Approved &amp; ready to submit">
-                            Approved
+                            Approved <span class="pill-count" id="qcount-approved"></span>
                         </button>
                         <button type="button" class="queue-filter-pill" data-filter="ISSUES" onclick="setWorkQueueFilter('ISSUES')" title="Needs operator attention">
-                            ⚠️ Issues
+                            ⚠️ Issues <span class="pill-count" id="qcount-issues"></span>
                         </button>
                         <button type="button" class="queue-filter-pill" data-filter="SUBMITTED" onclick="setWorkQueueFilter('SUBMITTED')" title="Successfully submitted">
-                            Done
+                            Done <span class="pill-count" id="qcount-done"></span>
                         </button>
                     </div>
                 </div>
@@ -75,12 +86,12 @@
                         <input type="text" class="queue-search-input" id="queue-search-input" placeholder="Search Plate, Order, VIN... (Esc)" oninput="onQueueSearchInput(this.value)">
                         <button type="button" class="queue-search-clear" id="queue-search-clear" onclick="clearQueueSearch()" title="Clear search" style="display:none;" aria-label="Clear Search">✕</button>
                     </div>
-                    <select class="queue-scope-select" id="queue-batch-select" onchange="onQueueScopeSelectChanged(this.value)" title="Filter work queue by scope or batch">
-                        <optgroup label="Date Scope">
-                            <option value="SCOPE:TODAY" selected>📅 Selected Shift</option>
-                            <option value="SCOPE:ACTIVE_BATCH">⚡ Active Batch</option>
-                            <option value="SCOPE:CARRYOVER">⏳ Carryover</option>
-                            <option value="SCOPE:ALL">🌐 All Records</option>
+                    <select class="queue-scope-select" id="queue-batch-select" onchange="onQueueScopeSelectChanged(this.value)" title="Filter work queue by batch">
+                        <optgroup label="Shift Batches">
+                            <option value="ACTIVE" selected>⚡ Active Batch</option>
+                            <option value="ALL">📁 All Shift Batches</option>
+                        </optgroup>
+                        <optgroup label="Individual Batches" id="queue-batch-options">
                         </optgroup>
                     </select>
                     <div class="queue-toolbar-actions">

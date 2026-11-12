@@ -2027,6 +2027,68 @@ The Backend & DevOps team has completed and verified the core backend services, 
 4. **`core/templates/core/base.html`**:
    - Bumped cache-busting query versions: `tab_queue.js?v=32` and `pipeline.js?v=30`.
 
+---
+
+## 31. Feature: Multi-Layer Queue Filtering Hierarchy (Date -> Batch -> Status) [COMPLETED]
+
+### 31.1 Problem Statement & User Request
+- **User Request**:
+  *"for the queue tab we need to improve the filturing logic and layers; so first we start with date; these are batches created on that day; two we move the batches; ACTIVE BACTCH; and other batches selected; then once a batch is selected the we move to pairs and show ALL, REVIEW, ISSUEE; DONE; currently i am seeing old batch photos under conflicts"*
+- **Defects Identified**:
+  - Previously, the queue dropdown mixed scopes (`SCOPE:TODAY`, `SCOPE:ACTIVE_BATCH`, `SCOPE:CARRYOVER`, `SCOPE:ALL`) with individual batch IDs.
+  - Selecting `SCOPE:CARRYOVER` or `SCOPE:ALL` (or clicking the empty-state button) dumped all historical conflicts from prior dates (e.g., 207 conflicts from October 25) into the current operator's work queue.
+  - When filtering by `ISSUES`, pairs from unrelated old batches were leaking into view because the query was not strictly constrained by the selected batch.
+
+### 31.2 Backend API Capabilities Landed (`core/views/pairs.py`)
+1. **Layer 1 (Shift Date)**:
+   - `api_pairs_list` accepts `?date=<YYYY-MM-DD | DDMMYY | ALL>`.
+   - Strictly scopes to batches created on that target date: `IngestionBatch.objects.filter(Q(created_at__range=(start_dt, end_dt)) | Q(batch_id__icontains=ymd_str) | Q(batch_id__icontains=suffix_str))`.
+   - Never leaks old pairs based on transient `updated_at` timestamps.
+2. **Layer 2 (Batch Scoping)**:
+   - Accepts `?batch=ACTIVE` (or `ACTIVE_BATCH`): strictly filters pairs to the active/latest batch created on that date.
+   - Accepts `?batch=ALL` (or `ALL_BATCHES`): filters pairs to all batches created on that date.
+   - Accepts specific `?batch=<batch_id>`: strictly filters pairs to that specific batch.
+3. **Layer 3 (Status Filtering)**:
+   - Accepts `?status=ALL`, `?status=PENDING` / `REVIEW`, `?status=ISSUES` / `CONFLICT`, `?status=APPROVED`, `?status=SUBMITTED`, `?status=DONE`.
+   - Returns real-time counts for the selected batch scope in `data.counts`:
+     ```json
+     "counts": {
+       "all": 35,
+       "review": 0,
+       "approved": 0,
+       "submitted": 0,
+       "done": 0,
+       "issues": 35
+     }
+     ```
+   - Returns `data.active_batch_id`, `data.active_batch_label`, and `data.batches` list for that shift date.
+
+### 31.3 Implemented Frontend Changes [COMPLETED]
+
+#### 1. `core/templates/core/tabs/tab_queue.html`
+- Updated `#queue-batch-select` dropdown:
+  - Replaced mixed `Date Scope` optgroup with clean batch-focused options (`⚡ Active Batch` as `ACTIVE`, `📁 All Shift Batches` as `ALL`, and dynamic `Individual Batches` optgroup).
+- Updated status filter pills:
+  - Added count badges: `#qcount-all`, `#qcount-review`, `#qcount-approved`, `#qcount-issues`, `#qcount-done`.
+  - Added scoped CSS for `.queue-filter-pill .pill-count`.
+
+#### 2. `core/static/core/js/tab_queue.js`
+- Set initial batch state: `let currentQueueBatchFilter = "ACTIVE";`.
+- Updated `onQueueScopeSelectChanged(val)`: sets `currentQueueBatchFilter = val || "ACTIVE";` and calls `fetchPairs()`.
+- Updated `setWorkQueueFilter(filter)`: activates selected pill and calls `fetchPairs()`.
+- Updated `fetchPairs(shiftDate = null)`:
+  - Queries `/api/pairs/?batch=${currentQueueBatchFilter}&status=${currentQueueFilter}&date=${currentShiftDate}`.
+  - Dynamically populates `#queue-batch-select` with `ACTIVE`, `ALL`, and all shift batches.
+  - Dynamically updates pill counters (`#qcount-all`, `#qcount-review`, `#qcount-approved`, `#qcount-issues`, `#qcount-done`) using `data.counts`.
+  - Replaced legacy empty-state buttons ("Check Carryover", "View All") with a clean message: *"No pairs in selected batch for this shift date. Upload photos or switch batch."*
+- Updated `shiftDateChanged` event listener:
+  - Resets `currentQueueBatchFilter = "ACTIVE"`.
+  - Re-queries queue pairs for the new shift date: `fetchPairs(d)`.
+
+#### 3. `core/templates/core/base.html`
+- Bumped query version to `tab_queue.js?v=33`.
+
+
 
 
 

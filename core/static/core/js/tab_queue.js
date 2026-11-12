@@ -4,38 +4,20 @@
  * manual plate overrides, and live order linking/unlinking.
  */
 
-let currentQueueBatchFilter = "ALL";
+let currentQueueBatchFilter = "ACTIVE";
 
 function setQueueDateScope(scope) {
     currentQueueDateScope = scope;
-    const scopeButtons = {
-        "TODAY": "btn-qscope-today",
-        "ACTIVE_BATCH": "btn-qscope-active",
-        "CARRYOVER": "btn-qscope-carryover",
-        "ALL": "btn-qscope-all"
-    };
-    Object.keys(scopeButtons).forEach(k => {
-        const el = document.getElementById(scopeButtons[k]);
-        if (el) el.classList.toggle("active", k === scope);
-    });
-    const select = document.getElementById("queue-batch-select");
-    if (select) {
-        select.value = "SCOPE:" + scope;
-    }
     fetchPairs();
 }
 
 function onQueueScopeSelectChanged(val) {
     if (!val) return;
     if (val.startsWith("SCOPE:")) {
-        const scope = val.replace("SCOPE:", "");
-        currentQueueBatchFilter = "ALL";
-        currentQueueDateScope = scope;
-        fetchPairs();
-    } else {
-        currentQueueBatchFilter = val;
-        renderQueueCards();
+        val = val.replace("SCOPE:", "");
     }
+    currentQueueBatchFilter = val || "ACTIVE";
+    fetchPairs();
 }
 
 function onQueueSearchInput(val) {
@@ -76,10 +58,12 @@ function setQueueBatchFilter(batchVal) {
 
 async function fetchPairs(shiftDate = null) {
     try {
-        const activeScope = currentQueueDateScope || "TODAY";
         const currentShiftDate = shiftDate || (window.activeShiftDateInfo && (window.activeShiftDateInfo.date || window.activeShiftDateInfo.suffix)) || "";
-        let url = `/api/pairs/?scope=${encodeURIComponent(activeScope)}`;
-        if (activeScope !== "ALL" && currentShiftDate && currentShiftDate !== "ALL") {
+        const batchParam = currentQueueBatchFilter || "ACTIVE";
+        const statusParam = currentQueueFilter || "ALL";
+
+        let url = `/api/pairs/?batch=${encodeURIComponent(batchParam)}&status=${encodeURIComponent(statusParam)}`;
+        if (currentShiftDate && currentShiftDate !== "ALL") {
             url += `&date=${encodeURIComponent(currentShiftDate)}`;
         }
         const res = await fetch(url);
@@ -87,37 +71,63 @@ async function fetchPairs(shiftDate = null) {
         if (data.success) {
             pairsData = data.pairs || [];
             
-            // Populate batch filter options if available
+            // Populate batch filter options
             const select = document.getElementById("queue-batch-select");
             if (select) {
-                const currentVal = select.value || ("SCOPE:" + activeScope);
-                const shiftOptionLabel = `📅 Selected Shift (${escapeHtml(data.shift_display || 'Active Shift')})`;
+                const curBatch = currentQueueBatchFilter || "ACTIVE";
+                const activeLabel = data.active_batch_id 
+                    ? `⚡ Active Batch (${escapeHtml(data.active_batch_label || data.active_batch_id)})`
+                    : `⚡ Active Batch (None)`;
+                const allLabel = `📁 All Shift Batches (${escapeHtml(data.shift_display || 'Selected Shift')})`;
+
                 let optionsHtml = `
-                    <optgroup label="Date Scope">
-                        <option value="SCOPE:TODAY" ${activeScope === "TODAY" ? "selected" : ""}>${shiftOptionLabel}</option>
-                        <option value="SCOPE:ACTIVE_BATCH" ${activeScope === "ACTIVE_BATCH" ? "selected" : ""}>⚡ Active Batch</option>
-                        <option value="SCOPE:CARRYOVER" ${activeScope === "CARRYOVER" ? "selected" : ""}>⏳ Carryover</option>
-                        <option value="SCOPE:ALL" ${activeScope === "ALL" ? "selected" : ""}>🌐 All Records</option>
+                    <optgroup label="Shift Batches">
+                        <option value="ACTIVE" ${curBatch === "ACTIVE" ? "selected" : ""}>${activeLabel}</option>
+                        <option value="ALL" ${curBatch === "ALL" ? "selected" : ""}>${allLabel}</option>
                     </optgroup>
                 `;
                 if (data.batches && data.batches.length > 0) {
                     optionsHtml += `
-                        <optgroup label="Ingestion Batches">
-                            ${data.batches.map(b => `<option value="${escapeHtml(b.batch_id)}">${b.is_today ? '●' : '⏳'} ${escapeHtml(b.source_label || b.batch_id)} (${escapeHtml(b.created_at)})</option>`).join("")}
+                        <optgroup label="Individual Batches">
+                            ${data.batches.map((b, idx) => {
+                                const isSel = (curBatch === b.batch_id);
+                                const mark = b.is_active ? '● ' : '○ ';
+                                return `<option value="${escapeHtml(b.batch_id)}" ${isSel ? "selected" : ""}>${mark}Batch ${idx + 1}: ${escapeHtml(b.source_label || b.batch_id)} (${escapeHtml(b.created_at)})</option>`;
+                            }).join("")}
+                        </optgroup>
+                    `;
+                } else {
+                    optionsHtml += `
+                        <optgroup label="Individual Batches">
+                            <option value="" disabled>No batches created for this date</option>
                         </optgroup>
                     `;
                 }
                 select.innerHTML = optionsHtml;
-                if (select.querySelector(`option[value="${currentVal}"]`)) {
-                    select.value = currentVal;
+                if (select.querySelector(`option[value="${curBatch}"]`)) {
+                    select.value = curBatch;
                 }
             }
 
-            // Update queue filter counts (All issues: conflicts, unlinked orders, incomplete, failed, unregistered)
-            const cntApproved = pairsData.filter(p => p.verification_status === "APPROVED").length;
+            // Update status filter counters dynamically with data.counts
+            if (data.counts) {
+                const countAll = document.getElementById("qcount-all");
+                const countReview = document.getElementById("qcount-review");
+                const countApproved = document.getElementById("qcount-approved");
+                const countIssues = document.getElementById("qcount-issues");
+                const countDone = document.getElementById("qcount-done");
+
+                if (countAll) countAll.textContent = data.counts.all !== undefined ? `(${data.counts.all})` : "";
+                if (countReview) countReview.textContent = data.counts.review !== undefined ? `(${data.counts.review})` : "";
+                if (countApproved) countApproved.textContent = data.counts.approved !== undefined ? `(${data.counts.approved})` : "";
+                if (countIssues) countIssues.textContent = data.counts.issues !== undefined ? `(${data.counts.issues})` : "";
+                if (countDone) countDone.textContent = data.counts.done !== undefined ? `(${data.counts.done})` : (data.counts.submitted !== undefined ? `(${data.counts.submitted})` : "");
+            }
 
             // Update queue approved counter & quick batch submit button
-            const approvedCount = cntApproved;
+            const approvedCount = (data.counts && data.counts.approved !== undefined)
+                ? data.counts.approved
+                : pairsData.filter(p => p.verification_status === "APPROVED").length;
             const approvedBtn = document.getElementById("btn-queue-batch-submit");
             const approvedText = document.getElementById("queue-approved-count-text");
             if (approvedBtn) {
@@ -125,10 +135,11 @@ async function fetchPairs(shiftDate = null) {
                 approvedBtn.disabled = (approvedCount === 0);
                 approvedBtn.style.opacity = approvedCount === 0 ? "0.6" : "1";
                 approvedBtn.style.cursor = approvedCount === 0 ? "not-allowed" : "pointer";
-                approvedBtn.onclick = () => triggerBatchSubmit(activeScope, currentShiftDate);
+                approvedBtn.onclick = () => triggerBatchSubmit(currentQueueBatchFilter, currentShiftDate);
             }
             if (approvedText) {
-                approvedText.innerText = `${pairsData.length} pairs (${data.shift_display || activeScope}) • ${approvedCount} ready`;
+                const batchTag = (currentQueueBatchFilter === "ACTIVE") ? "Active Batch" : ((currentQueueBatchFilter === "ALL") ? "All Batches" : currentQueueBatchFilter);
+                approvedText.innerText = `${pairsData.length} pairs (${batchTag}) • ${approvedCount} ready`;
             }
             setText("kpi-approved", approvedCount);
 
@@ -148,7 +159,7 @@ function setWorkQueueFilter(filter) {
     document.querySelectorAll(".queue-filter-pill").forEach(p => {
         p.classList.toggle("active", p.getAttribute("data-filter") === filter);
     });
-    renderQueueCards();
+    fetchPairs();
 }
 
 function filterWorkQueue() {
@@ -159,23 +170,18 @@ function getFilteredQueuePairs() {
     const searchVal = (document.getElementById("queue-search-input") ? document.getElementById("queue-search-input").value : "").trim().toUpperCase();
 
     return pairsData.filter(p => {
-        // Tab status filter (All problems under ISSUES)
-        if (currentQueueFilter === "PENDING") {
+        // Tab status filter
+        if (currentQueueFilter === "PENDING" || currentQueueFilter === "REVIEW") {
             if (p.verification_status !== "PENDING_REVIEW" || (!p.order && !p.order_number)) return false;
         } else if (currentQueueFilter === "APPROVED") {
             if (p.verification_status !== "APPROVED") return false;
         } else if (currentQueueFilter === "SUBMITTED") {
             if (p.verification_status !== "SUBMITTED") return false;
+        } else if (currentQueueFilter === "DONE") {
+            if (p.verification_status !== "APPROVED" && p.verification_status !== "SUBMITTED") return false;
         } else if (currentQueueFilter === "ISSUES" || currentQueueFilter === "CONFLICT") {
             const isIssue = ["INCOMPLETE", "CONFLICT", "FAILED", "UNREGISTERED", "OFFLINE_OUTBOX"].includes(p.verification_status) || (!p.order && !p.order_number);
             if (!isIssue) return false;
-        }
-
-        // Batch filter
-        if (currentQueueBatchFilter === "LATEST" && !p.is_latest_batch) return false;
-        if (currentQueueBatchFilter === "CARRYOVER" && !p.is_carryover) return false;
-        if (currentQueueBatchFilter !== "ALL" && currentQueueBatchFilter !== "LATEST" && currentQueueBatchFilter !== "CARRYOVER") {
-            if (p.batch_id !== currentQueueBatchFilter) return false;
         }
 
         // Search text
@@ -194,7 +200,7 @@ function renderQueueCards() {
     const filtered = getFilteredQueuePairs();
 
     if (filtered.length === 0) {
-        if (currentQueueFilter === "PENDING") {
+        if (currentQueueFilter === "PENDING" || currentQueueFilter === "REVIEW") {
             const approvedCount = pairsData.filter(p => p.verification_status === "APPROVED" && (p.order || p.order_number)).length;
             if (approvedCount > 0) {
                 container.innerHTML = `
@@ -204,7 +210,7 @@ function renderQueueCards() {
                         <p style="font-size:0.78rem; color:var(--ug-text-muted); max-width:280px; margin:0;">
                             No pairs are waiting for review in this queue. Ready to submit <strong>${approvedCount}</strong> verified motorcycle pair(s) to ITMS.
                         </p>
-                        <button class="btn btn-primary" onclick="triggerBatchSubmit(currentQueueDateScope)" style="background:var(--ug-green); border-color:var(--ug-green); padding:8px 18px; font-weight:800; font-size:0.85rem; box-shadow:0 4px 14px rgba(16,185,129,0.35);">
+                        <button class="btn btn-primary" onclick="triggerBatchSubmit(currentQueueBatchFilter)" style="background:var(--ug-green); border-color:var(--ug-green); padding:8px 18px; font-weight:800; font-size:0.85rem; box-shadow:0 4px 14px rgba(16,185,129,0.35);">
                             🚀 Submit Approved Pairs to ITMS <span class="hotkey">B</span>
                         </button>
                     </div>
@@ -227,27 +233,15 @@ function renderQueueCards() {
             `;
             return;
         }
-        if (currentQueueDateScope === "TODAY") {
-            container.innerHTML = `
-                <div style="text-align:center; padding:36px 14px; display:flex; flex-direction:column; align-items:center; gap:10px;">
-                    <span style="font-size:2.5rem;">📅</span>
-                    <h4 style="color:#fff; font-size:1rem; font-weight:800; margin:0;">No Pairs in Today's Shift</h4>
-                    <p style="font-size:0.78rem; color:var(--ug-text-muted); max-width:280px; margin:0;">
-                        No evidence photos or pairs ingested today yet. Switch scope to inspect prior days or upload new photos.
-                    </p>
-                    <div style="display:flex; gap:8px; margin-top:6px;">
-                        <button class="btn btn-secondary" onclick="setQueueDateScope('CARRYOVER')" style="font-size:0.75rem; padding:5px 10px;">
-                            ⏳ Check Carryover
-                        </button>
-                        <button class="btn btn-secondary" onclick="setQueueDateScope('ALL')" style="font-size:0.75rem; padding:5px 10px;">
-                            🌐 View All
-                        </button>
-                    </div>
-                </div>
-            `;
-            return;
-        }
-        container.innerHTML = `<div style="text-align:center; padding:40px; color:var(--ug-text-dim);">No pairs match criteria</div>`;
+        container.innerHTML = `
+            <div style="text-align:center; padding:36px 14px; display:flex; flex-direction:column; align-items:center; gap:10px;">
+                <span style="font-size:2.5rem;">📁</span>
+                <h4 style="color:#fff; font-size:1rem; font-weight:800; margin:0;">No Pairs in Selected Batch</h4>
+                <p style="font-size:0.78rem; color:var(--ug-text-muted); max-width:280px; margin:0;">
+                    No pairs match the selected filter for this shift date. Upload photos or switch batch.
+                </p>
+            </div>
+        `;
         return;
     }
 
@@ -1465,12 +1459,7 @@ async function submitReplaceImage() {
 
 window.addEventListener("shiftDateChanged", (e) => {
     const info = (e && e.detail) ? e.detail : null;
-    currentQueueBatchFilter = "ALL";
-    if (info && (info.suffix === "ALL" || info.date === "ALL")) {
-        currentQueueDateScope = "ALL";
-    } else if (currentQueueDateScope === "ALL") {
-        currentQueueDateScope = "TODAY";
-    }
+    currentQueueBatchFilter = "ACTIVE";
     const d = info ? (info.date || info.suffix || null) : null;
     void fetchPairs(d);
 });

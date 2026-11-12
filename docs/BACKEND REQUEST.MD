@@ -774,4 +774,31 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
   - Automatically provisions the `InstallationOrder` using safe-room hardware serials (`front_plate`, `rear_plate`, `gps_tracker`).
   - Allows operators to search any plate on stock in Quick Install, attach photos, and finalize installation in a single step.
 
+---
+
+## 12. Feature: Review Queue 3-Tier Filtering Hierarchy (`GET /api/pairs/` & `POST /api/pairs/batch-submit/`) - [COMPLETED]
+
+### 12.1 Scoped Hierarchy Overview
+- **Layer 1 (Shift Date)**: Pinned to the global shift date selector (`?date=YYYY-MM-DD` or `?target_date=YYYY-MM-DD` or `?date=DDMMYY`). Queries batches created within that operating shift window. Historical backlogs or unrelated dates are isolated.
+- **Layer 2 (Batch Context)**:
+  - `batch=ACTIVE` / `ACTIVE_BATCH` / `LATEST`: Resolves to the active/most recent batch created strictly on the selected date. If no batch exists on that date, returns an empty queryset (0 pairs) without falling back to older dates.
+  - `batch=ALL`: Scopes to all batches created on that selected date.
+  - `batch=<batch_id>`: Filters strictly to the requested batch.
+- **Layer 3 (Pair Status Tabs)**:
+  - `ALL`: All pairs within the scoped batch(es).
+  - `REVIEW` / `PENDING`: Unreviewed pairs requiring operator verification.
+  - `APPROVED`: Pairs validated and ready for submission.
+  - `SUBMITTED`: Pairs successfully pushed to ITMS.
+  - `DONE`: Completed pairs (`APPROVED` + `SUBMITTED`).
+  - `ISSUES` / `CONFLICT`: Mismatched plates, unlinked orders, or flagged items strictly within the selected batch scope (eliminating leakage of old historical conflicts).
+
+### 12.2 Implementation Details in `core/views/pairs.py`
+- **`api_pairs_list`**:
+  - Eliminates `updated_at__range` and fallback `order__order_number__endswith` which allowed old touched pairs to leak into the active shift.
+  - Dynamically computes real-time counts dictionary (`all`, `review`, `approved`, `submitted`, `done`, `issues`) within the scoped batch.
+  - Returns `active_batch_id`, `active_batch_label`, and `batches` array containing `{batch_id, label, total_pairs}` for client UI dropdown binding.
+- **`api_batch_submit`**:
+  - Accepts `batch=<batch_id>` or `batch=ACTIVE` to submit approved pairs strictly within that batch.
+
+
 

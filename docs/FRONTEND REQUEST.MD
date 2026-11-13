@@ -2088,6 +2088,48 @@ The Backend & DevOps team has completed and verified the core backend services, 
 #### 3. `core/templates/core/base.html`
 - Bumped query version to `tab_queue.js?v=33`.
 
+---
+
+## 32. Feature: Fix Batch Submission Button & Scope to All Shift Batches - [COMPLETED]
+
+### 32.1 Problem Statement & Background
+1. After the 3-tier filtering hierarchy update in Section 31, the `🚀 Submit Approved` batch submission button stopped working:
+   - When the queue defaulted to `currentQueueBatchFilter = "ACTIVE"`, `triggerBatchSubmit` in `pipeline.js` attempted to filter `allScopePairs.filter(p => p.batch_id === currentQueueBatchFilter)`. Since pair batch IDs are concrete strings (e.g. `BATCH-20261112-...`), comparing `p.batch_id === "ACTIVE"` filtered out 100% of pairs, immediately popping up a toast *"No approved pairs ready for submission in ACTIVE"* and preventing the submission confirmation modal from ever opening.
+   - The queue toolbar button count was only reading `data.counts.approved` for the active batch. If the active batch had 0 approved pairs while earlier batches on the same shift date had approved pairs, the button remained disabled (`disabled = true`, `opacity: 0.6`) and operators could not submit.
+2. The operational requirement is that the batch submission button (`#btn-queue-batch-submit`) must submit **ALL approved pairs for ALL batches** within the selected shift to ITMS.
+
+### 32.2 Backend API Enhancements Landed (`core/views/pairs.py`)
+1. `GET /api/pairs/`:
+   - Calculates `shift_approved_count`: total approved pairs across **all batches** for the target shift date.
+   - Returns `data.shift_approved_count` and `data.counts.shift_approved` in the JSON response alongside per-batch counts.
+2. `POST /api/pairs/batch-submit/`:
+   - Supports `clean_batch_param in ("ALL", "ALL_BATCHES", "SHIFT")` and `scope="ALL"` or `date="ALL"` to submit approved pairs across all batches in the shift.
+
+### 32.3 Implemented Frontend Changes [COMPLETED]
+
+#### 1. `core/static/core/js/pipeline.js` (`triggerBatchSubmit`)
+- In `triggerBatchSubmit(requestedScope, shiftDate = null)`:
+  - Removed the broken filter `allScopePairs.filter(p => p.batch_id === currentQueueBatchFilter)`.
+  - Queries all approved pairs across all shift batches using `/api/pairs/?batch=ALL&status=APPROVED&limit=500` (scoped by `date=${currentShiftDate}`).
+  - Sets target label dynamically: `Shift Batches (${data.shift_display || currentShiftDate})`.
+  - Populates modal with `approvedPairs` and sequential execution queue.
+
+#### 2. `core/static/core/js/tab_queue.js`
+- In `fetchPairs`:
+  - Bound `#btn-queue-batch-submit` and `#queue-approved-count-text` to `shift_approved_count` (`data.shift_approved_count || data.counts.shift_approved`).
+  - Wired `approvedBtn.onclick = () => triggerBatchSubmit("ALL", currentShiftDate);`.
+- In optimistic approval handler (`approvePairQuick` / `onApprovePair`):
+  - Preserved `approvedBtn.onclick = () => triggerBatchSubmit("ALL", currentShiftDate);` and updated approved counters.
+- In `renderQueueCards()`:
+  - Updated empty-state button to `onclick="triggerBatchSubmit('ALL')"`.
+
+#### 3. `core/templates/core/tabs/tab_queue.html`
+- Updated line 116 `#btn-queue-batch-submit` inline onclick to `onclick="triggerBatchSubmit('ALL')"`.
+
+#### 4. `core/templates/core/base.html`
+- Bumped cache-busting version to `tab_queue.js?v=34` and `pipeline.js?v=30`.
+
+
 
 
 

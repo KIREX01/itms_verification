@@ -294,55 +294,31 @@ async function triggerBatchSubmit(requestedScope, shiftDate = null) {
         return;
     }
 
-    const scope = requestedScope || (typeof currentQueueDateScope !== "undefined" ? currentQueueDateScope : "TODAY");
     const currentShiftDate = shiftDate || (window.activeShiftDateInfo && (window.activeShiftDateInfo.date || window.activeShiftDateInfo.suffix)) || "";
 
     try {
-        // Scope query by both date and active batch selection
-        const batchParam = (typeof currentQueueBatchFilter !== "undefined" && currentQueueBatchFilter !== "ALL")
-            ? `&batch=${encodeURIComponent(currentQueueBatchFilter)}`
-            : "";
-        let pairsUrl = `/api/pairs/?scope=${encodeURIComponent(scope)}${batchParam}&limit=500`;
-        if (scope !== "ALL" && currentShiftDate && currentShiftDate !== "ALL") {
+        // Always query for all approved pairs across all shift batches for the active shift date
+        let pairsUrl = `/api/pairs/?batch=ALL&status=APPROVED&limit=500`;
+        if (currentShiftDate && currentShiftDate !== "ALL") {
             pairsUrl += `&date=${encodeURIComponent(currentShiftDate)}`;
         }
         const res = await fetch(pairsUrl);
         const data = await res.json();
-        let allScopePairs = data.pairs || [];
-
-        // Strictly constrain pairs to the active batch filter if the user selected a specific batch
-        if (typeof currentQueueBatchFilter !== "undefined" && currentQueueBatchFilter !== "ALL") {
-            if (currentQueueBatchFilter === "LATEST") {
-                allScopePairs = allScopePairs.filter(p => p.is_latest_batch);
-            } else if (currentQueueBatchFilter === "CARRYOVER") {
-                allScopePairs = allScopePairs.filter(p => p.is_carryover);
-            } else {
-                allScopePairs = allScopePairs.filter(p => p.batch_id === currentQueueBatchFilter);
-            }
-        }
+        const allPairs = data.pairs || [];
 
         // Exclude pairs that are already SUBMITTED to ITMS to prevent false discrepancy alarms
-        const activeUnsubmittedPairs = allScopePairs.filter(p => p.submission_status !== "SUBMITTED" && p.verification_status !== "SUBMITTED");
-        const approvedPairs = activeUnsubmittedPairs.filter(p => p.verification_status === "APPROVED");
-        const totalInScope = activeUnsubmittedPairs.length;
+        const approvedPairs = allPairs.filter(p => 
+            p.verification_status === "APPROVED" && 
+            p.submission_status !== "SUBMITTED"
+        );
+        const totalInScope = (data.counts && data.counts.all !== undefined) ? data.counts.all : allPairs.length;
         const approvedInScope = approvedPairs.length;
-        const unapprovedCount = totalInScope - approvedInScope;
+        const unapprovedCount = (data.counts && data.counts.issues !== undefined) ? data.counts.issues : Math.max(0, totalInScope - approvedInScope);
 
         // User-friendly label for the current working target
-        let targetLabel = scope;
-        if (typeof currentQueueBatchFilter !== "undefined" && currentQueueBatchFilter !== "ALL") {
-            if (currentQueueBatchFilter === "LATEST") {
-                targetLabel = "Latest Batch";
-            } else if (currentQueueBatchFilter === "CARRYOVER") {
-                targetLabel = "Carryover Batches";
-            } else {
-                targetLabel = `Batch #${currentQueueBatchFilter}`;
-            }
-        } else if (scope === "TODAY") {
-            targetLabel = "Today's Shift";
-        } else if (scope === "ACTIVE_BATCH") {
-            targetLabel = "Active Ingestion Batch";
-        }
+        const targetLabel = (currentShiftDate && currentShiftDate !== "ALL") 
+            ? `Shift Batches (${data.shift_display || currentShiftDate})` 
+            : "All Shift Batches";
 
         if (approvedPairs.length === 0) {
             showToast(`No approved pairs ready for submission in ${targetLabel} (${unapprovedCount} pair(s) awaiting review/issue resolution).`, "info");
@@ -354,7 +330,7 @@ async function triggerBatchSubmit(requestedScope, shiftDate = null) {
         currentSubmissionTask = {
             type: "batch",
             pairs: approvedPairs,
-            scope: scope,
+            scope: "ALL",
             targetLabel: targetLabel,
             totalInScope: totalInScope,
             approvedInScope: approvedInScope,

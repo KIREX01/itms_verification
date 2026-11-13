@@ -125,23 +125,22 @@ async function fetchPairs(shiftDate = null) {
             }
 
             // Update queue approved counter & quick batch submit button
-            const approvedCount = (data.counts && data.counts.approved !== undefined)
-                ? data.counts.approved
-                : pairsData.filter(p => p.verification_status === "APPROVED").length;
+            const shiftApprovedCount = (data.shift_approved_count !== undefined)
+                ? data.shift_approved_count
+                : (data.counts && data.counts.shift_approved !== undefined ? data.counts.shift_approved : (data.counts ? data.counts.approved : pairsData.filter(p => p.verification_status === "APPROVED").length));
             const approvedBtn = document.getElementById("btn-queue-batch-submit");
             const approvedText = document.getElementById("queue-approved-count-text");
             if (approvedBtn) {
-                approvedBtn.innerHTML = `🚀 Submit Approved (${approvedCount}) <span class="hotkey">B</span>`;
-                approvedBtn.disabled = (approvedCount === 0);
-                approvedBtn.style.opacity = approvedCount === 0 ? "0.6" : "1";
-                approvedBtn.style.cursor = approvedCount === 0 ? "not-allowed" : "pointer";
-                approvedBtn.onclick = () => triggerBatchSubmit(currentQueueBatchFilter, currentShiftDate);
+                approvedBtn.innerHTML = `🚀 Submit Approved (${shiftApprovedCount}) <span class="hotkey">B</span>`;
+                approvedBtn.disabled = (shiftApprovedCount === 0);
+                approvedBtn.style.opacity = shiftApprovedCount === 0 ? "0.6" : "1";
+                approvedBtn.style.cursor = shiftApprovedCount === 0 ? "not-allowed" : "pointer";
+                approvedBtn.onclick = () => triggerBatchSubmit("ALL", currentShiftDate);
             }
             if (approvedText) {
-                const batchTag = (currentQueueBatchFilter === "ACTIVE") ? "Active Batch" : ((currentQueueBatchFilter === "ALL") ? "All Batches" : currentQueueBatchFilter);
-                approvedText.innerText = `${pairsData.length} pairs (${batchTag}) • ${approvedCount} ready`;
+                approvedText.innerText = `${shiftApprovedCount} approved ready (All Batches)`;
             }
-            setText("kpi-approved", approvedCount);
+            setText("kpi-approved", shiftApprovedCount);
 
             renderQueueCards();
             if (pairsData.length > 0 && !selectedPairId) {
@@ -210,7 +209,7 @@ function renderQueueCards() {
                         <p style="font-size:0.78rem; color:var(--ug-text-muted); max-width:280px; margin:0;">
                             No pairs are waiting for review in this queue. Ready to submit <strong>${approvedCount}</strong> verified motorcycle pair(s) to ITMS.
                         </p>
-                        <button class="btn btn-primary" onclick="triggerBatchSubmit(currentQueueBatchFilter)" style="background:var(--ug-green); border-color:var(--ug-green); padding:8px 18px; font-weight:800; font-size:0.85rem; box-shadow:0 4px 14px rgba(16,185,129,0.35);">
+                        <button class="btn btn-primary" onclick="triggerBatchSubmit('ALL')" style="background:var(--ug-green); border-color:var(--ug-green); padding:8px 18px; font-weight:800; font-size:0.85rem; box-shadow:0 4px 14px rgba(16,185,129,0.35);">
                             🚀 Submit Approved Pairs to ITMS <span class="hotkey">B</span>
                         </button>
                     </div>
@@ -573,19 +572,21 @@ async function executePairAction(action) {
         }
 
         // Update queue approved counter & quick batch submit button optimistically
-        const approvedCount = pairsData.filter(p => p.verification_status === "APPROVED").length;
+        const shiftApprovedCount = pairsData.filter(p => p.verification_status === "APPROVED").length;
         const approvedBtn = document.getElementById("btn-queue-batch-submit");
         const approvedText = document.getElementById("queue-approved-count-text");
+        const currentShiftDate = (window.activeShiftDateInfo && (window.activeShiftDateInfo.date || window.activeShiftDateInfo.suffix)) || "";
         if (approvedBtn) {
-            approvedBtn.innerHTML = `🚀 Submit Approved (${approvedCount}) <span class="hotkey">B</span>`;
-            approvedBtn.disabled = (approvedCount === 0);
-            approvedBtn.style.opacity = approvedCount === 0 ? "0.6" : "1";
-            approvedBtn.style.cursor = approvedCount === 0 ? "not-allowed" : "pointer";
+            approvedBtn.innerHTML = `🚀 Submit Approved (${shiftApprovedCount}) <span class="hotkey">B</span>`;
+            approvedBtn.disabled = (shiftApprovedCount === 0);
+            approvedBtn.style.opacity = shiftApprovedCount === 0 ? "0.6" : "1";
+            approvedBtn.style.cursor = shiftApprovedCount === 0 ? "not-allowed" : "pointer";
+            approvedBtn.onclick = () => triggerBatchSubmit("ALL", currentShiftDate);
         }
         if (approvedText) {
-            approvedText.innerText = `${approvedCount} approved ready (${currentQueueDateScope || "TODAY"})`;
+            approvedText.innerText = `${shiftApprovedCount} approved ready (All Batches)`;
         }
-        setText("kpi-approved", approvedCount);
+        setText("kpi-approved", shiftApprovedCount);
 
         // Immediate DOM update and auto-advance
         renderQueueCards();

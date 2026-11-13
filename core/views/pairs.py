@@ -118,6 +118,24 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
             | Q(facility_code__isnull=True)
         )
 
+    # Base shift pairs across ALL batches for the selected shift date
+    if is_all_dates:
+        shift_all_batches_qs = qs
+    else:
+        if shift_batches_qs.exists():
+            shift_all_batches_qs = qs.filter(
+                Q(front_image__batch__in=shift_batches_qs)
+                | Q(rear_image__batch__in=shift_batches_qs)
+                | (Q(front_image__batch__isnull=True) & Q(rear_image__batch__isnull=True) & Q(created_at__range=(start_dt, end_dt)))
+            )
+        else:
+            shift_all_batches_qs = qs.none()
+
+    # Shift-wide approved count across ALL batches ready for submission
+    shift_approved_count = shift_all_batches_qs.filter(
+        verification_status=VehicleInstallationPair.VerificationStatus.APPROVED,
+    ).count()
+
     # Layer 2: Batch Filter
     # Normalize batch_filter and scope
     clean_batch_filter = batch_filter.upper()
@@ -129,17 +147,9 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
             qs = qs.filter(Q(front_image__batch=active_batch) | Q(rear_image__batch=active_batch))
         else:
             qs = qs.none()
-    elif not is_all_dates:
+    else:
         # All batches of the selected shift date
-        if shift_batches_qs.exists():
-            qs = qs.filter(
-                Q(front_image__batch__in=shift_batches_qs)
-                | Q(rear_image__batch__in=shift_batches_qs)
-                | (Q(front_image__batch__isnull=True) & Q(rear_image__batch__isnull=True) & Q(created_at__range=(start_dt, end_dt)))
-            )
-        else:
-            # No batches exist for this date
-            qs = qs.none()
+        qs = shift_all_batches_qs
 
     # Pre-filter counts for Status Badges (within the selected batch/date scope)
     counts_qs = qs
@@ -293,10 +303,12 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
         "active_batch_label": (active_batch.source_label or active_batch.batch_id) if active_batch else None,
         "selected_batch": batch_filter or ("ACTIVE" if active_batch else "ALL"),
         "batches": batches_list,
+        "shift_approved_count": shift_approved_count,
         "counts": {
             "all": total_in_batch,
             "review": review_in_batch,
             "approved": approved_in_batch,
+            "shift_approved": shift_approved_count,
             "submitted": submitted_in_batch,
             "done": done_in_batch,
             "issues": issues_in_batch,
@@ -1024,9 +1036,13 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
         or ""
     ).strip()
 
-    target_date = date_service.parse_date_input(date_param) if date_param else None
-    if not target_date:
-        target_date = date_service.get_active_shift_date() or today
+    is_all_dates = (date_param.upper() == "ALL" or scope == "ALL")
+    if is_all_dates:
+        target_date = today
+    else:
+        target_date = date_service.parse_date_input(date_param) if date_param else None
+        if not target_date:
+            target_date = date_service.get_active_shift_date() or today
 
     start_dt = datetime.combine(target_date, dt_time.min, tzinfo=tz_eat)
     end_dt = datetime.combine(target_date, dt_time.max, tzinfo=tz_eat)
@@ -1066,8 +1082,10 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
             approved_pairs = list(qs.filter(Q(front_image__batch=active_b) | Q(rear_image__batch=active_b)))
         else:
             approved_pairs = []
-    elif scope in ("TODAY", "SHIFT", ""):
-        if shift_batches_qs.exists():
+    elif scope in ("TODAY", "SHIFT", "") or clean_batch_param in ("ALL", "ALL_BATCHES", "SHIFT"):
+        if is_all_dates:
+            approved_pairs = list(qs)
+        elif shift_batches_qs.exists():
             approved_pairs = list(qs.filter(Q(front_image__batch__in=shift_batches_qs) | Q(rear_image__batch__in=shift_batches_qs)))
         else:
             approved_pairs = list(qs.filter(created_at__range=(start_dt, end_dt)))

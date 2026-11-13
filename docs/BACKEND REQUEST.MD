@@ -799,6 +799,15 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
   - Returns `active_batch_id`, `active_batch_label`, and `batches` array containing `{batch_id, label, total_pairs}` for client UI dropdown binding.
 - **`api_batch_submit`**:
   - Accepts `batch=<batch_id>` or `batch=ACTIVE` to submit approved pairs strictly within that batch.
+  - Enhanced to accept `batch=ALL` or empty batch param to submit ALL approved pairs across ALL batches for the selected shift date (`shift_batches_qs`).
+  - Supports `date=ALL` or `scope=ALL` to submit all approved pairs across all dates.
+
+### 12.3 Shift-Wide Approved Metrics (`shift_approved_count`)
+- In `api_pairs_list`:
+  - Added `shift_approved_count`: computes total approved pairs across all batches for the shift date, independent of the individual batch currently filtered on screen.
+  - Returned in `data.shift_approved_count` and `data.counts.shift_approved`.
+  - Enables the queue toolbar `🚀 Submit Approved (N)` button to stay enabled and accurately display the total batch workload ready for submission across all shift batches.
+
 
 
 

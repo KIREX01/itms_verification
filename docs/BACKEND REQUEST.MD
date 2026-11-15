@@ -643,7 +643,7 @@ All endpoints and lifecycle actions verified with 100% pass rate in `core/tests/
 - **Architectural Enhancements**:
   1. **Non-Blocking Physical Dispatch Ingress (`core/services/stock_monitoring_service.py:record_dispatch_scans`)**:
      - All clean submitted plates are recorded in `StockDispatchScan` (`all_target_plates`).
-     - Plates not yet on ITMS stock are flagged as `[DISPATCHED_NOT_ON_STOCK]` with provisional `InstallationKit` created for floor tracking, without blocking the shift or requiring physical set-aside.
+     - Plates not yet on ITMS stock are flagged as `[DISPATCHED_NOT_ON_STOCK]` on their `StockDispatchScan` for floor tracking (no provisional `InstallationKit` is created; the earlier provisional-kit code never ran because `InstallationKit` has no `notes` field and was removed on 16 Nov 2026), without blocking the shift or requiring physical set-aside.
      - Background stock enrichment monitors ITMS to auto-resolve them as soon as central depot inbounds them.
   2. **Operator Provenance Overwrite (`record_dispatch_scans`)**:
      - When an operator pastes or scans plates, any existing `StockDispatchScan` marked with `AUTO_ORDER_DISPATCH_NOTE` or operator `"System"` / `"System Auto-Sync"` is strictly **OVERWRITTEN** with the operator's username, user object, timestamp, and verification note. Operator physical handling is the ultimate source of truth.

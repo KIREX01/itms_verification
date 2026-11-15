@@ -129,7 +129,7 @@ class ApiAuthMiddleware:
             if path.startswith("/api/"):
                 error = create_error_detail(
                     code="AUTHENTICATION_REQUIRED",
-                    message="Authentication required. Please sign in to the ITMS Verification Copilot.",
+                    message="Authentication required. Please sign in to the CLOSE Copilot.",
                     field="session",
                 )
                 return format_api_response(

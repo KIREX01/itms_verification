@@ -1,5 +1,5 @@
 """
-Core Services Layer for ITMS Verification Copilot.
+Core Services Layer for CLOSE Copilot.
 
 Organized into discrete domain boundaries:
 

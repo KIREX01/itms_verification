@@ -1,5 +1,5 @@
 """
-Central configuration service for ITMS Verification Copilot.
+Central configuration service for CLOSE Copilot.
 
 Manages system-wide settings persisted in `config.json` located at the project root.
 Ensures zero-configuration portability on other machines (defaults to SQLite),
@@ -24,7 +24,7 @@ CONFIG_FILE_NAME = "config.json"
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "system": {
-        "app_title": "ITMS Verification Copilot",
+        "app_title": "CLOSE Copilot",
         "developer_mode": False,       # When False, developer tests and tools are hidden
         "theme": "dark",
         "show_safety_guarantee": False, # When True, displays safety guarantee card in ITMS Hub based on loaded config
@@ -131,7 +131,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     },
     "maintenance": {
         "enabled": False,                       # When True, Web UI serves maintenance page (HTTP 503)
-        "title": "ITMS Verification Copilot — Maintenance",
+        "title": "CLOSE Copilot — Maintenance",
         "message": "The system is currently undergoing scheduled maintenance or updates. The service will resume shortly.",
         "estimated_duration": "15-30 minutes",
         "contact_support": "operations@kirex.online",
@@ -658,7 +658,7 @@ def get_maintenance_config(base_dir: Optional[Path] = None) -> Dict[str, Any]:
     m = cfg.get("maintenance", {})
     return {
         "enabled": bool(m.get("enabled", False)),
-        "title": str(m.get("title", "ITMS Verification Copilot — Maintenance")),
+        "title": str(m.get("title", "CLOSE Copilot — Maintenance")),
         "message": str(m.get("message", "The system is currently undergoing scheduled maintenance or updates. The service will resume shortly.")),
         "estimated_duration": str(m.get("estimated_duration", "15-30 minutes")),
         "contact_support": str(m.get("contact_support", "operations@kirex.online")),
@@ -668,8 +668,11 @@ def get_maintenance_config(base_dir: Optional[Path] = None) -> Dict[str, Any]:
 
 def get_maintenance_flag_path(base_dir: Optional[Path] = None) -> Path:
     """Returns the path to the secure maintenance flag file."""
-    b_dir = base_dir or _get_project_root()
-    return b_dir / "secure" / "maintenance.flag"
+    if base_dir:
+        return Path(base_dir) / "secure" / "maintenance.flag"
+    # Default: the secure storage dir (<BASE_DIR>/secure, or settings.SECURE_STORAGE_DIR in tests)
+    from core.services.secure_storage import get_secure_dir
+    return get_secure_dir() / "maintenance.flag"
 
 
 def is_maintenance_enabled(base_dir: Optional[Path] = None) -> bool:
@@ -690,8 +693,9 @@ def set_maintenance_mode(
     base_dir: Optional[Path] = None,
 ) -> bool:
     """Toggle maintenance mode, update config, and generate static maintenance HTML."""
-    b_dir = base_dir or _get_project_root()
-    cfg = load_config(b_dir)
+    # Pass base_dir through unchanged so the default config location (incl. the test
+    # override settings.SECURE_STORAGE_DIR) is the same one get_setting() reads.
+    cfg = load_config(base_dir)
     cfg.setdefault("maintenance", {})
     cfg["maintenance"]["enabled"] = bool(enabled)
     if title:
@@ -705,9 +709,9 @@ def set_maintenance_mode(
     if retry_after_seconds:
         cfg["maintenance"]["retry_after_seconds"] = max(5, int(retry_after_seconds))
 
-    saved = save_config(cfg, b_dir)
+    saved = save_config(cfg, base_dir)
 
-    flag_file = get_maintenance_flag_path(b_dir)
+    flag_file = get_maintenance_flag_path(base_dir)
     flag_file.parent.mkdir(parents=True, exist_ok=True)
     if enabled:
         flag_file.write_text("maintenance_active\n", encoding="utf-8")
@@ -719,7 +723,7 @@ def set_maintenance_mode(
                 pass
 
     # Generate standalone maintenance pages
-    generate_maintenance_html(b_dir)
+    generate_maintenance_html(base_dir)
     return saved
 
 
@@ -729,11 +733,11 @@ def generate_maintenance_html(base_dir: Optional[Path] = None) -> str:
     and templates/503.html for Nginx and Django 503 fallback.
     """
     b_dir = base_dir or _get_project_root()
-    m_cfg = get_maintenance_config(b_dir)
+    m_cfg = get_maintenance_config(base_dir)
     from datetime import datetime, timezone as dt_timezone
     now_str = datetime.now(dt_timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
-    title = m_cfg.get("title") or "ITMS Verification Copilot — Maintenance"
+    title = m_cfg.get("title") or "CLOSE Copilot — Maintenance"
     message = m_cfg.get("message") or "The system is currently undergoing scheduled maintenance or updates. The service will resume shortly."
     estimated_duration = m_cfg.get("estimated_duration") or "15-30 minutes"
     contact_support = m_cfg.get("contact_support") or "operations@kirex.online"
@@ -977,7 +981,7 @@ def generate_maintenance_html(base_dir: Optional[Path] = None) -> str:
         </button>
 
         <div class="footer-note">
-            ITMS Verification Copilot &bull; Timestamp: {now_str}
+            CLOSE Copilot &bull; Timestamp: {now_str}
         </div>
     </div>
 

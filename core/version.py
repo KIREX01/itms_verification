@@ -1,5 +1,5 @@
 """
-ITMS Verification Copilot Version & Release Metadata.
+CLOSE Copilot Version & Release Metadata.
 Tracks semantic versioning and GitHub Release repository information.
 """
 from typing import Tuple

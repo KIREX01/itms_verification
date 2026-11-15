@@ -1,5 +1,5 @@
 """
-Device detection and station routing service for ITMS Verification Copilot.
+Device detection and station routing service for CLOSE Copilot.
 
 Differentiates between mobile smartphones (camera/scanner capture stations)
 and desktop/laptop computers (supervisor verification and approval consoles),

@@ -1,5 +1,5 @@
 """
-Pure Python, zero-dependency QR Code generator for ITMS Verification Copilot.
+Pure Python, zero-dependency QR Code generator for CLOSE Copilot.
 Generates scannable Unicode terminal QR codes for the Textual TUI and consoles.
 """
 from typing import List, Tuple

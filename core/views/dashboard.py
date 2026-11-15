@@ -41,7 +41,7 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
     itms_status = auth_service.get_itms_status(user=request.user)
 
     context = {
-        "app_title": "ITMS Verification Copilot",
+        "app_title": "CLOSE Copilot",
         "current_user": request.user,
         "database_display": db_info.get("display", "SQLite"),
         "database_badge": db_info.get("badge", "SQLite"),

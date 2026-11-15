@@ -168,7 +168,7 @@ class SettingsPane(Vertical):
         # Developer settings: Maintenance Mode & Web Availability
         m_cfg = config_service.get_maintenance_config()
         m_enabled = m_cfg.get("enabled", False)
-        m_title = str(m_cfg.get("title", "ITMS Verification Copilot — Maintenance"))
+        m_title = str(m_cfg.get("title", "CLOSE Copilot — Maintenance"))
         m_message = str(m_cfg.get("message", "The system is currently undergoing scheduled maintenance or updates. The service will resume shortly."))
         m_duration = str(m_cfg.get("estimated_duration", "15-30 minutes"))
         m_contact = str(m_cfg.get("contact_support", "operations@kirex.online"))
@@ -540,7 +540,7 @@ class SettingsPane(Vertical):
 
                         with Horizontal(classes="settings-row"):
                             yield Static("[b]Maintenance Page Title[/b]\n[dim]Headline shown on maintenance page[/dim]", classes="settings-label")
-                            yield Input(value=m_title, placeholder="ITMS Verification Copilot — Maintenance", id="input-maintenance-title", classes="settings-input")
+                            yield Input(value=m_title, placeholder="CLOSE Copilot — Maintenance", id="input-maintenance-title", classes="settings-input")
 
                         with Horizontal(classes="settings-row"):
                             yield Static("[b]Maintenance Notice Message[/b]\n[dim]Descriptive explanation shown to operators[/dim]", classes="settings-label")

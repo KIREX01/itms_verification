@@ -1,5 +1,5 @@
 """
-Database and storage lifecycle maintenance service for ITMS Verification Copilot.
+Database and storage lifecycle maintenance service for CLOSE Copilot.
 
 Provides:
 - optimize_database(): SQLite WAL checkpointing (TRUNCATE), table index optimization, and page maintenance.

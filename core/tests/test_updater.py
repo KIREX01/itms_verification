@@ -217,7 +217,9 @@ class UpdateServiceApplyTests(TestCase):
         mock_status = MagicMock(returncode=0, stdout="")
         mock_fetch = MagicMock(returncode=0, stdout="")
         mock_pull = MagicMock(returncode=0, stdout="")
-        mock_run.side_effect = [mock_status, mock_fetch, mock_pull]
+        # status, reset of the 2 generated maintenance pages, fetch, pull
+        mock_checkout = MagicMock(returncode=0, stdout="")
+        mock_run.side_effect = [mock_status, mock_checkout, mock_checkout, mock_fetch, mock_pull]
 
         with patch("pathlib.Path.is_dir", return_value=True):
             res = UpdateService._apply_git_update()
@@ -230,7 +232,8 @@ class UpdateServiceApplyTests(TestCase):
         mock_status = MagicMock(returncode=0, stdout="")
         mock_fetch = MagicMock(returncode=0, stdout="")
         mock_pull = MagicMock(returncode=1, stderr="error: your local changes would be overwritten")
-        mock_run.side_effect = [mock_status, mock_fetch, mock_pull]
+        mock_checkout = MagicMock(returncode=0, stdout="")
+        mock_run.side_effect = [mock_status, mock_checkout, mock_checkout, mock_fetch, mock_pull]
 
         res = UpdateService._apply_git_update()
         self.assertFalse(res["success"])
@@ -250,7 +253,9 @@ class UpdateServiceApplyTests(TestCase):
         self.assertTrue(ok)
         self.assertIn("verified", msg.lower())
         mock_deps.assert_called_once_with(install_missing=True)
-        mock_migrate.assert_called_once_with("migrate", interactive=False)
+        mock_migrate.assert_any_call("migrate", interactive=False)
+        # Updated JS/CSS must be published, or a pulled frontend fix never reaches browsers.
+        mock_migrate.assert_any_call("collectstatic", interactive=False, verbosity=0)
         mock_dirs.assert_called_once()
         mock_weights.assert_called_once_with(download_missing=True)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ITMS Verification Copilot - CLI Launcher for Linux and macOS
+# CLOSE Copilot - CLI Launcher for Linux and macOS
 # Resolves canonical directory path across symlinks (/usr/local/bin/itms -> /opt/itms/itms)
 
 set -e

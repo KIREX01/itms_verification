@@ -1,5 +1,5 @@
 """
-Unit tests for ITMS Verification Copilot lifecycle control & maintenance mode.
+Unit tests for CLOSE Copilot lifecycle control & maintenance mode.
 - Verifies config_service maintenance mode toggling and HTML compilation.
 - Verifies MaintenanceModeMiddleware response behavior (HTML vs JSON vs bypass).
 - Verifies itms_ctl management command subactions (status, maintenance, switch).
@@ -115,7 +115,7 @@ class LifecycleMaintenanceTests(TestCase):
         out = StringIO()
         call_command("itms_ctl", "status", stdout=out)
         output = out.getvalue()
-        self.assertIn("ITMS Verification Copilot — System Status", output)
+        self.assertIn("CLOSE Copilot — System Status", output)
         self.assertIn("Maintenance Mode:", output)
         self.assertIn("ITMS Master Switch:", output)
         self.assertIn("Database Engine:", output)

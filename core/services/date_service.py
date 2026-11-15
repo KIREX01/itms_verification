@@ -1,5 +1,5 @@
 """
-Standardized Date, Shift & Time Service for ITMS Verification Copilot.
+Standardized Date, Shift & Time Service for CLOSE Copilot.
 
 Enforces unified East Africa Time (Africa/Kampala, UTC+3) across the application,
 providing canonical bidirectional conversions between:
@@ -32,6 +32,31 @@ KAMPALA_TZ = ZoneInfo(KAMPALA_TZ_NAME)
 def get_kampala_tz() -> ZoneInfo:
     """Returns the canonical Africa/Kampala ZoneInfo object."""
     return KAMPALA_TZ
+
+
+def kampala_day_bounds(d: date) -> Tuple[datetime, datetime]:
+    """Returns timezone-aware (start, end) datetimes covering calendar day `d` in Kampala."""
+    start = datetime.combine(d, datetime.min.time(), tzinfo=KAMPALA_TZ)
+    end = datetime.combine(d, datetime.max.time(), tzinfo=KAMPALA_TZ)
+    return start, end
+
+
+def batches_on_date_q(d: date, prefix: str = "") -> Q:
+    """
+    Q filter for IngestionBatch rows belonging to Kampala calendar day `d`.
+
+    Matches on created_at (authoritative), plus the date segment of the batch ID
+    ('BATCH-YYYYMMDD-...') for batches whose created_at differs from their ID date.
+    Only the date position is matched: a loose substring match would also hit the
+    HHMMSS / random parts of the ID (e.g. '131126' matching a batch made at 13:11:26).
+
+    `prefix` allows related lookups, e.g. prefix="front_image__batch__".
+    """
+    start, end = kampala_day_bounds(d)
+    return (
+        Q(**{f"{prefix}created_at__range": (start, end)})
+        | Q(**{f"{prefix}batch_id__startswith": f"BATCH-{d.strftime('%Y%m%d')}-"})
+    )
 
 
 def now_kampala() -> datetime:

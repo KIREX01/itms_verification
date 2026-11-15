@@ -48,7 +48,8 @@ def test_submit_confirmation_step3_session_expired(test_order_and_pair):
     mock_resp.status_code = 302
     mock_resp.headers = {"Location": "/site/login"}
 
-    with patch.object(client, "_request_with_retry", return_value=mock_resp):
+    # Simulate a signed-in ITMS session (tests must not depend on real secure/auth cookies).
+    with patch.object(client.session_store.session, "is_cookie_valid", return_value=True),             patch.object(client, "_request_with_retry", return_value=mock_resp):
         res = client.submit_confirmation_step3(order_uuid=order.itms_order_uuid, dry_run=False)
 
     assert not res["success"]
@@ -65,7 +66,8 @@ def test_submit_confirmation_step3_confirmation_rejected(test_order_and_pair):
     mock_resp.status_code = 302
     mock_resp.headers = {"Location": f"/installation-orders/approve?id={order.itms_order_uuid}"}
 
-    with patch.object(client, "_request_with_retry", return_value=mock_resp):
+    # Simulate a signed-in ITMS session (tests must not depend on real secure/auth cookies).
+    with patch.object(client.session_store.session, "is_cookie_valid", return_value=True),             patch.object(client, "_request_with_retry", return_value=mock_resp):
         res = client.submit_confirmation_step3(order_uuid=order.itms_order_uuid, dry_run=False)
 
     assert not res["success"]

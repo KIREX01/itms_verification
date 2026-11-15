@@ -25,10 +25,23 @@ def get_project_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
+def _secure_dir_override() -> Optional[Path]:
+    """Optional settings.SECURE_STORAGE_DIR (used by the test suite to isolate config/auth)."""
+    try:
+        override = getattr(settings, 'SECURE_STORAGE_DIR', None) if settings.configured else None
+    except Exception:
+        override = None
+    return Path(override) if override else None
+
+
 def get_secure_dir(base_dir: Optional[Path] = None) -> Path:
     """Returns and ensures the secure root directory exists with restricted permissions."""
-    root = Path(base_dir) if base_dir else get_project_root()
-    secure_dir = root / SECURE_DIR_NAME
+    override = None if base_dir else _secure_dir_override()
+    if override:
+        secure_dir = override
+    else:
+        root = Path(base_dir) if base_dir else get_project_root()
+        secure_dir = root / SECURE_DIR_NAME
     secure_dir.mkdir(parents=True, exist_ok=True)
     platform_service.safe_chmod(secure_dir, 0o770)
     return secure_dir
@@ -44,6 +57,10 @@ def get_secure_auth_dir(base_dir: Optional[Path] = None) -> Path:
 
 def get_secure_config_path(base_dir: Optional[Path] = None) -> Path:
     """Returns the single source-of-truth configuration path in secure/config.json."""
+    if not base_dir and _secure_dir_override():
+        # Isolated storage: never touch (or migrate) the project's real config.json.
+        return get_secure_dir() / CONFIG_FILE_NAME
+
     root = Path(base_dir) if base_dir else get_project_root()
     secure_path = get_secure_dir(root) / CONFIG_FILE_NAME
     legacy_path = root / CONFIG_FILE_NAME
@@ -89,7 +106,7 @@ def get_secure_auth_path(
         raise ValueError(f"Path traversal attempt in filename: {filename!r}")
 
     root = Path(base_dir) if base_dir else get_project_root()
-    auth_dir = get_secure_auth_dir(root).resolve()
+    auth_dir = get_secure_auth_dir(base_dir).resolve()
     target_path = (auth_dir / clean_filename).resolve()
 
     if not target_path.is_relative_to(auth_dir):

@@ -1,5 +1,5 @@
 """
-ITMS Verification Copilot - GitHub Releases Update Engine.
+CLOSE Copilot - GitHub Releases Update Engine.
 Provides non-destructive update detection and safe distribution management.
 
 Key Guarantees:
@@ -415,6 +415,18 @@ class UpdateService:
                     except Exception as log_exc:
                         logger.debug("Could not move %s before git update: %s", log_f, log_exc)
 
+            # templates/503.html and templates/maintenance.html are tracked but re-generated at
+            # runtime (maintenance on/off, `itms stop`), which would otherwise leave the tree
+            # dirty and make `git pull --rebase` refuse. Discard only those two generated
+            # files here; they are re-rendered in _run_post_update_tasks().
+            for generated in ("templates/503.html", "templates/maintenance.html"):
+                subprocess.run(
+                    ["git", "checkout", "--", generated],
+                    cwd=PROJECT_ROOT,
+                    capture_output=True,
+                    timeout=10,
+                )
+
             # Fetch and rebase
             fetch_proc = subprocess.run(
                 ["git", "fetch", "origin", "main"],
@@ -625,6 +637,20 @@ class UpdateService:
             django.setup()
             from django.core.management import call_command
             call_command("migrate", interactive=False)
+
+            # 2b. Publish updated JS/CSS: the site serves STATIC_ROOT, so without this a
+            #     pulled frontend fix never reaches browsers.
+            try:
+                call_command("collectstatic", interactive=False, verbosity=0)
+            except Exception as static_exc:
+                logger.warning("collectstatic after update failed: %s", static_exc)
+
+            # 2c. Re-render the generated maintenance/503 pages (reset before the pull).
+            try:
+                from core.services import config_service
+                config_service.generate_maintenance_html()
+            except Exception as maint_exc:
+                logger.debug("Maintenance page regeneration notice: %s", maint_exc)
 
             # 3. Verify AI model weights and OCR engine
             bootstrap.ensure_model_weights(download_missing=True)

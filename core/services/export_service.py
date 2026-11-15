@@ -1,5 +1,5 @@
 """
-Export service for ITMS Verification Copilot.
+Export service for CLOSE Copilot.
 
 Generates comprehensive, formatted CSV reports for end-of-shift handover,
 audit compliance, and supervisor sign-off. Uses UTF-8 with BOM (utf-8-sig)

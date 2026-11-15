@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ITMS Verification Copilot - Universal Command Line Interface.
+CLOSE Copilot - Universal Command Line Interface.
 
 Usage:
   itms                Launch Web Operator Console in default browser
@@ -70,7 +70,7 @@ def show_help():
         ver = "v1.1.0"
     print(f"""
 ======================================================================
-  ITMS VERIFICATION COPILOT {ver} — SYSTEM COMMAND INTERFACE
+  CLOSE COPILOT {ver} — SYSTEM COMMAND INTERFACE
 ======================================================================
 
 USAGE:
@@ -490,7 +490,7 @@ def run_clear_data(args=None):
             cleaned_args.append(a)
 
     print("====================================================================")
-    print("  ITMS VERIFICATION COPILOT - EVIDENCE & VAULT DATA CLEANUP")
+    print("  CLOSE COPILOT - EVIDENCE & VAULT DATA CLEANUP")
     print("====================================================================")
     try:
         import django
@@ -535,7 +535,7 @@ def run_bootstrap(extra_args=None):
 def run_update(extra_args=None):
     """Triggers system update directly via Django check_updates command or git pull."""
     print("====================================================================")
-    print("  ITMS VERIFICATION COPILOT - SYSTEM UPDATE MANAGER")
+    print("  CLOSE COPILOT - SYSTEM UPDATE MANAGER")
     print("====================================================================")
     print()
     url = None
@@ -757,9 +757,9 @@ def main():
     if first in ("--version", "-v", "version"):
         try:
             from core.version import __version__
-            print(f"ITMS Verification Copilot v{__version__}")
+            print(f"CLOSE Copilot v{__version__}")
         except (ImportError, AttributeError):
-            print("ITMS Verification Copilot v1.1.0")
+            print("CLOSE Copilot v1.1.0")
         return
 
     if first in ("start", "--daemon", "--bg", "-bg", "bg", "daemon"):

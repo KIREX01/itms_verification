@@ -595,19 +595,8 @@ def record_dispatch_scans(
                         get_kits_matching_plates_q(verified_plates),
                     ).update(status="Dispatched")
 
-                # Auto-create provisional InstallationKit for physical dispatches awaiting ITMS inbound
-                for p in rejected_not_on_stock:
-                    if not InstallationKit.objects.filter(get_kits_matching_plates_q([p])).exists():
-                        try:
-                            InstallationKit.objects.create(
-                                registration_number=p,
-                                kit_code=f"IK-{p}",
-                                warehouse=active_bond.get("name", "AGM SPIRO"),
-                                status="Dispatched",
-                                notes="[DISPATCHED_NOT_ON_STOCK: Awaiting ITMS Stock Inbound]",
-                            )
-                        except Exception as ik_err:
-                            logger.debug("Provisional kit creation notice for %s: %s", p, ik_err)
+                # Not-on-stock plates are tracked via the "[DISPATCHED_NOT_ON_STOCK]" note on
+                # their StockDispatchScan (below); no provisional InstallationKit is created.
 
                 existing_rows = list(
                     StockDispatchScan.objects.filter(
@@ -615,20 +604,22 @@ def record_dispatch_scans(
                         registration_number__in=all_target_plates,
                     )
                 )
-                # Overwrite system auto-generated records with operator ground-truth credentials
+                # Overwrite system auto-generated records with operator ground-truth credentials.
+                # A row is "auto" only when it carries an auto note or a System operator name.
+                # A missing dispatched_by does NOT make it auto: TUI/CLI/service scans are real
+                # physical dispatches without a web user, and re-scanning them must count as a
+                # duplicate, not as a new dispatch.
+                def _is_auto_row(r) -> bool:
+                    return (
+                        (r.notes or "").strip() in (AUTO_INSPECT_STAGED_NOTE, AUTO_ORDER_DISPATCH_NOTE)
+                        or (r.operator_name or "").strip() in ("System", "System Auto-Sync")
+                    )
+
+                confirmed_existing = {r.registration_number for r in existing_rows if not _is_auto_row(r)}
                 staged_rows = [
                     r for r in existing_rows
-                    if (r.notes or "").strip() in (AUTO_INSPECT_STAGED_NOTE, AUTO_ORDER_DISPATCH_NOTE)
-                    or (r.operator_name or "").strip() in ("System", "System Auto-Sync")
-                    or r.dispatched_by is None
+                    if _is_auto_row(r) and r.registration_number not in confirmed_existing
                 ]
-                confirmed_existing = {
-                    r.registration_number
-                    for r in existing_rows
-                    if (r.notes or "").strip() not in (AUTO_INSPECT_STAGED_NOTE, AUTO_ORDER_DISPATCH_NOTE)
-                    and (r.operator_name or "").strip() not in ("System", "System Auto-Sync")
-                    and r.dispatched_by is not None
-                }
                 staged_plates = {r.registration_number for r in staged_rows}
 
                 if staged_rows:
@@ -640,7 +631,7 @@ def record_dispatch_scans(
                         operator_name=operator_name or "Operator",
                         notes=notes or "Verified physical dispatch by operator (Pasted from Excel)",
                     )
-                    promoted_count = len(staged_rows)
+                    promoted_count = len(staged_plates)
 
                 existing_dispatches = confirmed_existing
                 new_scans = []
@@ -2694,7 +2685,7 @@ def _build_docket_formatted_text(
         "--------------------------------------------------",
         "",
         "* Action Taken on Floor: Physical boxes set aside. None issued to fitters.",
-        "* Verified by: ITMS Verification Copilot (Dispatch Stock Guard)",
+        "* Verified by: CLOSE Copilot (Dispatch Stock Guard)",
         "==================================================",
     ])
     return "\n".join(lines)

@@ -1,5 +1,5 @@
 """
-Cross-Platform Runtime & Filesystem Abstraction Service for ITMS Verification Copilot.
+Cross-Platform Runtime & Filesystem Abstraction Service for CLOSE Copilot.
 
 Provides consistent, secure operating system abstraction across Windows and Linux:
 1. Safe filesystem permissions (POSIX safe_chmod without Windows breakage or S2612 issues)

@@ -298,7 +298,8 @@ async function triggerBatchSubmit(requestedScope, shiftDate = null) {
 
     try {
         // Always query for all approved pairs across all shift batches for the active shift date
-        let pairsUrl = `/api/pairs/?batch=ALL&status=APPROVED&limit=500`;
+        // limit=5000 is the API maximum; a lower cap silently dropped approved pairs past it.
+        let pairsUrl = `/api/pairs/?batch=ALL&status=APPROVED&limit=5000`;
         if (currentShiftDate && currentShiftDate !== "ALL") {
             pairsUrl += `&date=${encodeURIComponent(currentShiftDate)}`;
         }
@@ -313,7 +314,9 @@ async function triggerBatchSubmit(requestedScope, shiftDate = null) {
         );
         const totalInScope = (data.counts && data.counts.all !== undefined) ? data.counts.all : allPairs.length;
         const approvedInScope = approvedPairs.length;
-        const unapprovedCount = (data.counts && data.counts.issues !== undefined) ? data.counts.issues : Math.max(0, totalInScope - approvedInScope);
+        // Everything in scope that is not yet approved/submitted: issues AND pairs still awaiting review.
+        const doneInScope = (data.counts && data.counts.done !== undefined) ? data.counts.done : approvedInScope;
+        const unapprovedCount = Math.max(0, totalInScope - doneInScope);
 
         // User-friendly label for the current working target
         const targetLabel = (currentShiftDate && currentShiftDate !== "ALL") 

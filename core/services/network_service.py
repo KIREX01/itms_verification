@@ -1,5 +1,5 @@
 """
-Network discovery and mobile pairing service for ITMS Verification Copilot.
+Network discovery and mobile pairing service for CLOSE Copilot.
 
 Discovers local network interfaces (Wi-Fi, Ethernet, Windows Mobile Hotspot, Phone Hotspot)
 and generates connection endpoints and mobile access URLs with real-time classification,

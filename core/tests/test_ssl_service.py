@@ -74,9 +74,13 @@ class TestSslService:
         assert info["primary_url"].startswith("https://")
         assert ":443/mobile/" in info["primary_url"]
 
+    @pytest.mark.django_db
     def test_api_network_info_endpoint_returns_https(self):
         """Tests that /api/network/info/ returns HTTPS pairing URL by default."""
+        from django.contrib.auth.models import User
         client = Client()
+        # API endpoints require a signed-in Copilot user (ApiAuthMiddleware).
+        client.force_login(User.objects.create_user(username="ssl_op", password="pw12345!"))
         url = reverse("core:api_network_info")
         resp = client.get(url)
         assert resp.status_code == 200

@@ -1,5 +1,5 @@
 """
-SSL/TLS Service for ITMS Verification Copilot.
+SSL/TLS Service for CLOSE Copilot.
 
 Provides zero-dependency, 100% offline self-signed HTTPS certificate generation
 and TLS context management. Enables modern mobile browser Secure Context (isSecureContext)
@@ -63,7 +63,7 @@ def _generate_via_cryptography(
 
         subject = issuer = x509.Name([
             x509.NameAttribute(x509.NameOID.COUNTRY_NAME, "UG"),
-            x509.NameAttribute(x509.NameOID.ORGANIZATION_NAME, "ITMS Verification Copilot"),
+            x509.NameAttribute(x509.NameOID.ORGANIZATION_NAME, "CLOSE Copilot"),
             x509.NameAttribute(x509.NameOID.COMMON_NAME, "ITMS Mobile Local Server"),
         ])
 
@@ -156,7 +156,7 @@ public class PemGen
     }}
     public static void Gen(string certPath, string keyPath, string[] sans) {{
         using (RSA rsa = RSA.Create(2048)) {{
-            var dn = new X500DistinguishedName("CN=ITMS Verification Copilot, O=ITMS Local");
+            var dn = new X500DistinguishedName("CN=CLOSE Copilot, O=CLOSE Local");
             var req = new CertificateRequest(dn, rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
             var sb = new SubjectAlternativeNameBuilder();
             sb.AddDnsName("localhost");

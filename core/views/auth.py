@@ -411,7 +411,7 @@ def signup_verify_view(request: HttpRequest) -> HttpResponse:
                 defaults={"active_facility": facility, "allowed_facilities": [facility]},
             )
 
-        messages.success(request, "Email verified successfully! Welcome to ITMS Verification Copilot.")
+        messages.success(request, "Email verified successfully! Welcome to CLOSE Copilot.")
         resp = _redirect_after_auth(request)
         return device_access_service.attach_device_trust_cookie(resp, dev.device_id, email or user.username)
 

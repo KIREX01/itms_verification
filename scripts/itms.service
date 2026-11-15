@@ -1,5 +1,5 @@
 [Unit]
-Description=ITMS Verification Copilot Service
+Description=CLOSE Copilot Service
 After=network.target
 
 [Service]

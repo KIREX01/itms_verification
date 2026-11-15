@@ -37,6 +37,80 @@ def _clean_media_url(file_path):
 
 
 
+_ACTIVE_BATCH_TOKENS = ("ACTIVE", "ACTIVE_BATCH", "LATEST")
+_SHIFT_BATCH_TOKENS = ("ALL", "ALL_BATCHES", "SHIFT")
+
+
+def _resolve_shift_scope(date_param: str, scope: str) -> dict:
+    """
+    Layer 1 of the queue funnel, shared by api_pairs_list and api_batch_submit so the
+    list the operator sees and what batch-submit sends always use the same scope.
+    """
+    from core.services import date_service
+
+    today = timezone.localdate()
+    date_param = (date_param or "").strip()
+    scope = (scope or "").upper().strip()
+    active_shift = date_service.get_active_shift_info()
+    is_all_dates = (
+        scope == "ALL"
+        or date_param.upper() == "ALL"
+        or (not date_param and active_shift.get("mode") == "all")
+    )
+
+    target_date = today
+    if not is_all_dates:
+        parsed = date_service.parse_date_input(date_param) if date_param else None
+        target_date = parsed or date_service.get_active_shift_date() or today
+
+    if is_all_dates:
+        shift_batches_qs = IngestionBatch.objects.all().order_by("-created_at")
+    else:
+        shift_batches_qs = IngestionBatch.objects.filter(
+            date_service.batches_on_date_q(target_date)
+        ).order_by("-created_at")
+
+    return {
+        "is_all_dates": is_all_dates,
+        "target_date": target_date,
+        "shift_batches_qs": shift_batches_qs,
+        "active_batch": shift_batches_qs.first(),
+    }
+
+
+def _filter_pairs_to_shift(qs, shift: dict):
+    """All pairs of the shift: pairs in any of its batches, plus unbatched pairs created that day."""
+    from core.services import date_service
+
+    if shift["is_all_dates"]:
+        return qs
+    start_dt, end_dt = date_service.kampala_day_bounds(shift["target_date"])
+    shift_batches_qs = shift["shift_batches_qs"]
+    return qs.filter(
+        Q(front_image__batch__in=shift_batches_qs)
+        | Q(rear_image__batch__in=shift_batches_qs)
+        | (
+            Q(front_image__batch__isnull=True)
+            & Q(rear_image__batch__isnull=True)
+            & Q(created_at__range=(start_dt, end_dt))
+        )
+    )
+
+
+def _filter_pairs_to_batch(qs, shift_pairs_qs, shift: dict, batch_param: str, scope: str):
+    """Layer 2 of the queue funnel: a specific batch, the shift's active batch, or all shift batches."""
+    batch_param = (batch_param or "").strip()
+    token = batch_param.upper()
+    if batch_param and token not in _ACTIVE_BATCH_TOKENS + _SHIFT_BATCH_TOKENS:
+        return qs.filter(Q(front_image__batch__batch_id=batch_param) | Q(rear_image__batch__batch_id=batch_param))
+    if token in _ACTIVE_BATCH_TOKENS or (scope or "").upper().strip() == "ACTIVE_BATCH":
+        active_batch = shift["active_batch"]
+        if not active_batch:
+            return qs.none()
+        return qs.filter(Q(front_image__batch=active_batch) | Q(rear_image__batch=active_batch))
+    return shift_pairs_qs
+
+
 @require_GET
 def api_pairs_list(request: HttpRequest) -> JsonResponse:
     """
@@ -49,11 +123,9 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
     if not (request.user and getattr(request.user, "is_authenticated", False)):
         return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
 
-    from datetime import datetime, time as dt_time
     from zoneinfo import ZoneInfo
     from core.services import date_service
 
-    today = timezone.localdate()
     tz_eat = ZoneInfo("Africa/Kampala")
 
     status_filter = request.GET.get("status", "ALL").upper().strip()
@@ -71,40 +143,16 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
     except (ValueError, TypeError):
         limit = 2500
 
-    # Layer 1: Date Filter
-    active_shift = date_service.get_active_shift_info()
-    is_all_dates = (
-        scope == "ALL"
-        or date_param.upper() == "ALL"
-        or (not date_param and active_shift.get("mode") == "all")
-    )
+    # Layer 1: Date Filter (shared with api_batch_submit)
+    shift = _resolve_shift_scope(date_param, scope)
+    is_all_dates = shift["is_all_dates"]
+    target_date = shift["target_date"]
+    shift_batches_qs = shift["shift_batches_qs"]
+    active_batch = shift["active_batch"]
 
-    target_date = None
-    if not is_all_dates:
-        if date_param:
-            target_date = date_service.parse_date_input(date_param)
-        if not target_date:
-            target_date = date_service.get_active_shift_date() or today
-    else:
-        target_date = today
-
-    start_dt = datetime.combine(target_date, dt_time.min, tzinfo=tz_eat)
-    end_dt = datetime.combine(target_date, dt_time.max, tzinfo=tz_eat)
     ymd_str = target_date.strftime("%Y%m%d")
     suffix_str = date_service.format_date_suffix(target_date)
     shift_display = "All Dates" if is_all_dates else f"{date_service.format_readable_date(target_date)} [{suffix_str}]"
-
-    # Batches strictly created on this day (or containing this date token)
-    if is_all_dates:
-        shift_batches_qs = IngestionBatch.objects.all().order_by("-created_at")
-    else:
-        shift_batches_qs = IngestionBatch.objects.filter(
-            Q(created_at__range=(start_dt, end_dt))
-            | Q(batch_id__icontains=ymd_str)
-            | Q(batch_id__icontains=suffix_str)
-        ).order_by("-created_at")
-
-    active_batch = shift_batches_qs.first()
 
     qs = VehicleInstallationPair.objects.filter(is_deleted=False).select_related(
         "order", "front_image", "rear_image", "front_image__batch", "rear_image__batch"
@@ -119,17 +167,7 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
         )
 
     # Base shift pairs across ALL batches for the selected shift date
-    if is_all_dates:
-        shift_all_batches_qs = qs
-    else:
-        if shift_batches_qs.exists():
-            shift_all_batches_qs = qs.filter(
-                Q(front_image__batch__in=shift_batches_qs)
-                | Q(rear_image__batch__in=shift_batches_qs)
-                | (Q(front_image__batch__isnull=True) & Q(rear_image__batch__isnull=True) & Q(created_at__range=(start_dt, end_dt)))
-            )
-        else:
-            shift_all_batches_qs = qs.none()
+    shift_all_batches_qs = _filter_pairs_to_shift(qs, shift)
 
     # Shift-wide approved count across ALL batches ready for submission
     shift_approved_count = shift_all_batches_qs.filter(
@@ -137,19 +175,7 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
     ).count()
 
     # Layer 2: Batch Filter
-    # Normalize batch_filter and scope
-    clean_batch_filter = batch_filter.upper()
-    if batch_filter and clean_batch_filter not in ("ALL", "ALL_BATCHES", "SHIFT", "ACTIVE", "ACTIVE_BATCH", "LATEST"):
-        # Explicit specific batch ID selected (e.g. BATCH-20261025-...)
-        qs = qs.filter(Q(front_image__batch__batch_id=batch_filter) | Q(rear_image__batch__batch_id=batch_filter))
-    elif clean_batch_filter in ("ACTIVE", "ACTIVE_BATCH", "LATEST") or scope == "ACTIVE_BATCH":
-        if active_batch:
-            qs = qs.filter(Q(front_image__batch=active_batch) | Q(rear_image__batch=active_batch))
-        else:
-            qs = qs.none()
-    else:
-        # All batches of the selected shift date
-        qs = shift_all_batches_qs
+    qs = _filter_pairs_to_batch(qs, shift_all_batches_qs, shift, batch_filter, scope)
 
     # Pre-filter counts for Status Badges (within the selected batch/date scope)
     counts_qs = qs
@@ -221,7 +247,7 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
         batch_dt = timezone.localtime(batch_obj.created_at, tz_eat).date() if (batch_obj and batch_obj.created_at) else None
         is_today = bool(
             (batch_dt and batch_dt == target_date)
-            or (batch_obj and (ymd_str in batch_obj.batch_id or suffix_str in batch_obj.batch_id))
+            or (batch_obj and batch_obj.batch_id.startswith(f"BATCH-{ymd_str}-"))
         )
         is_latest = bool(batch_obj and active_batch and batch_obj.id == active_batch.id)
         is_carryover = bool(batch_dt and batch_dt < target_date and not is_today)
@@ -1016,13 +1042,6 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
     if not (request.user and getattr(request.user, "is_authenticated", False)):
         return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
 
-    from datetime import datetime, time as dt_time
-    from zoneinfo import ZoneInfo
-    from core.services import date_service
-
-    today = timezone.localdate()
-    tz_eat = ZoneInfo("Africa/Kampala")
-
     dry_run_param = request.POST.get("dry_run")
     if dry_run_param is not None and str(dry_run_param).strip() != "":
         is_dry_run = str(dry_run_param).strip().lower() in ("true", "1", "yes")
@@ -1035,21 +1054,6 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
         or request.GET.get("date")
         or ""
     ).strip()
-
-    is_all_dates = (date_param.upper() == "ALL" or scope == "ALL")
-    if is_all_dates:
-        target_date = today
-    else:
-        target_date = date_service.parse_date_input(date_param) if date_param else None
-        if not target_date:
-            target_date = date_service.get_active_shift_date() or today
-
-    start_dt = datetime.combine(target_date, dt_time.min, tzinfo=tz_eat)
-    end_dt = datetime.combine(target_date, dt_time.max, tzinfo=tz_eat)
-    ymd_str = target_date.strftime("%Y%m%d")
-    suffix_str = date_service.format_date_suffix(target_date)
-
-    latest_batch = IngestionBatch.objects.order_by("-created_at").first()
 
     qs = VehicleInstallationPair.objects.filter(
         is_deleted=False,
@@ -1064,33 +1068,20 @@ def api_batch_submit(request: HttpRequest) -> JsonResponse:
         order__itms_stage__in=["STAGE_2_APPROVE", "STAGE_3_CONFIRMATION", "ARCHIVED"]
     ).select_related("order", "front_image", "rear_image")
 
-    shift_batches_qs = IngestionBatch.objects.filter(
-        Q(created_at__range=(start_dt, end_dt))
-        | Q(batch_id__icontains=ymd_str)
-        | Q(batch_id__icontains=suffix_str)
-    ).order_by("-created_at")
-    active_b = shift_batches_qs.first()
+    # Same facility scoping as the queue list (api_pairs_list)
+    envelope = getattr(request, "envelope", None)
+    if envelope and envelope.is_valid and envelope.facility_code:
+        qs = qs.filter(
+            Q(facility_code=envelope.facility_code)
+            | Q(facility_code="")
+            | Q(facility_code__isnull=True)
+        )
 
+    # Same date -> batch funnel as the queue list, so submit sends what the operator sees
+    shift = _resolve_shift_scope(date_param, scope)
     batch_param = (request.POST.get("batch") or request.POST.get("batch_id") or "").strip()
-    clean_batch_param = batch_param.upper()
-
-    if batch_param and clean_batch_param not in ("ALL", "ALL_BATCHES", "SHIFT", "ACTIVE", "ACTIVE_BATCH", "LATEST"):
-        # Explicit specific batch ID
-        approved_pairs = list(qs.filter(Q(front_image__batch__batch_id=batch_param) | Q(rear_image__batch__batch_id=batch_param)))
-    elif clean_batch_param in ("ACTIVE", "ACTIVE_BATCH", "LATEST") or scope == "ACTIVE_BATCH":
-        if active_b:
-            approved_pairs = list(qs.filter(Q(front_image__batch=active_b) | Q(rear_image__batch=active_b)))
-        else:
-            approved_pairs = []
-    elif scope in ("TODAY", "SHIFT", "") or clean_batch_param in ("ALL", "ALL_BATCHES", "SHIFT"):
-        if is_all_dates:
-            approved_pairs = list(qs)
-        elif shift_batches_qs.exists():
-            approved_pairs = list(qs.filter(Q(front_image__batch__in=shift_batches_qs) | Q(rear_image__batch__in=shift_batches_qs)))
-        else:
-            approved_pairs = list(qs.filter(created_at__range=(start_dt, end_dt)))
-    else:  # ALL
-        approved_pairs = list(qs)
+    shift_pairs_qs = _filter_pairs_to_shift(qs, shift)
+    approved_pairs = list(_filter_pairs_to_batch(qs, shift_pairs_qs, shift, batch_param, scope))
 
     if not approved_pairs:
         return JsonResponse({

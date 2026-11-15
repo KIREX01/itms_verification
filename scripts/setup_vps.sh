@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# VPS Deployment Script for ITMS Verification Copilot
+# VPS Deployment Script for CLOSE Copilot
 # Domain: close.kirex.online
 # Sets up Gunicorn (Systemd) and Caddy (Reverse Proxy for HTTPS)
 #
@@ -11,7 +11,7 @@ INSTALL_DIR="/opt/itms_verification"
 USER="root"
 
 echo "===================================================================="
-echo "   ITMS VERIFICATION COPILOT - VPS DEPLOYMENT SCRIPT"
+echo "   CLOSE COPILOT - VPS DEPLOYMENT SCRIPT"
 echo "===================================================================="
 echo "[>] Domain: $DOMAIN"
 
@@ -53,7 +53,7 @@ echo "[>] Running database migrations and collectstatic..."
 echo "[>] Configuring Systemd Service (itms-web.service)..."
 cat <<EOF > /etc/systemd/system/itms-web.service
 [Unit]
-Description=ITMS Verification Copilot (Gunicorn)
+Description=CLOSE Copilot (Gunicorn)
 After=network.target
 
 [Service]

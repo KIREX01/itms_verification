@@ -1,4 +1,4 @@
-# ITMS Verification Copilot PowerShell CLI Controller
+# CLOSE Copilot PowerShell CLI Controller
 param(
     [Parameter(Position=0)]
     [string]$Action = "",

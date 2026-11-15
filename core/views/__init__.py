@@ -1,5 +1,5 @@
 """
-Views package for ITMS Verification Copilot.
+Views package for CLOSE Copilot.
 Decomposed from monolithic views.py into domain modules:
 - auth: Authentication & Operator Onboarding
 - dashboard: Operator Web Dashboard, metrics, stats, totals, and audit history

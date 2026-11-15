@@ -121,7 +121,7 @@ class Command(BaseCommand):
         noreload = options.get("noreload", False)
 
         self.stdout.write(self.style.SUCCESS("=" * 68))
-        self.stdout.write(self.style.SUCCESS("  ITMS VERIFICATION COPILOT - WEB & MOBILE OPERATOR CONSOLE"))
+        self.stdout.write(self.style.SUCCESS("  CLOSE COPILOT - WEB & MOBILE OPERATOR CONSOLE"))
         self.stdout.write(self.style.SUCCESS("=" * 68))
 
         # 1. Ensure migrations and initial operator setup

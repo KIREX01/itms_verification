@@ -1,5 +1,5 @@
 """
-Background WSGI Web Server for ITMS Verification Copilot.
+Background WSGI Web Server for CLOSE Copilot.
 Enables Textual TUI to concurrently serve the Mobile Companion PWA over LAN / Hotspot
 without writing HTTP access logs to stdout (preventing TUI terminal screen corruption).
 """

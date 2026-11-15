@@ -381,31 +381,23 @@ class FacilityMultiTenantScopingTestCase(TestCase):
         self.assertEqual(len(kits), 1)
         self.assertEqual(kits[0]["kit_code"], "IK-SPIRO-001")
 
-    def test_operator_batches_private_isolation(self):
-        """Batches created by Operator 1 are not visible in Operator 2's list."""
-        batch1 = IngestionBatch.objects.create(
+    def test_operator_batches_shared_within_facility(self):
+        """Batches are shared per facility: every operator in AGM sees all AGM batches,
+        matching the Review Queue (decision of 16 Nov 2026)."""
+        IngestionBatch.objects.create(
             batch_id="BATCH-OP1-001",
             operator=self.op1,
             facility_code="AGM",
         )
-        batch2 = IngestionBatch.objects.create(
+        IngestionBatch.objects.create(
             batch_id="BATCH-OP2-001",
             operator=self.op2,
             facility_code="AGM",
         )
 
-        # Op1 sees only batch 1
-        self.client.force_login(self.op1)
-        res1 = self.client.get(reverse("core:api_batches_list"), {"scope": "ALL"})
-        batches1 = res1.json().get("batches", [])
-        batch_ids1 = [b["batch_id"] for b in batches1]
-        self.assertIn("BATCH-OP1-001", batch_ids1)
-        self.assertNotIn("BATCH-OP2-001", batch_ids1)
-
-        # Op2 sees only batch 2
-        self.client.force_login(self.op2)
-        res2 = self.client.get(reverse("core:api_batches_list"), {"scope": "ALL"})
-        batches2 = res2.json().get("batches", [])
-        batch_ids2 = [b["batch_id"] for b in batches2]
-        self.assertIn("BATCH-OP2-001", batch_ids2)
-        self.assertNotIn("BATCH-OP1-001", batch_ids2)
+        for op in (self.op1, self.op2):
+            self.client.force_login(op)
+            res = self.client.get(reverse("core:api_batches_list"), {"scope": "ALL"})
+            batch_ids = [b["batch_id"] for b in res.json().get("batches", [])]
+            self.assertIn("BATCH-OP1-001", batch_ids)
+            self.assertIn("BATCH-OP2-001", batch_ids)

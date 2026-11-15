@@ -38,7 +38,7 @@ class Command(BaseCommand):
         download_url = options.get("download_url")
 
         self.stdout.write(self.style.SUCCESS("=" * 65))
-        self.stdout.write(self.style.SUCCESS("  ITMS VERIFICATION COPILOT - SYSTEM UPDATE MANAGER"))
+        self.stdout.write(self.style.SUCCESS("  CLOSE COPILOT - SYSTEM UPDATE MANAGER"))
         self.stdout.write(self.style.SUCCESS("=" * 65))
         self.stdout.write(f"  Current Version: v{__version__}")
 

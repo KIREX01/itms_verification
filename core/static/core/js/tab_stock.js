@@ -11,6 +11,14 @@ let lastReconData = null;
 let cachedShiftDates = null;
 let isSyncingStock = false;
 
+// CSRF token for stock POSTs (same lookup as the global fetch wrapper in base.html).
+function getStockCsrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    if (meta && meta.content) return meta.content;
+    const row = document.cookie.split('; ').find(r => r.startsWith('csrftoken='));
+    return row ? decodeURIComponent(row.split('=')[1]) : '';
+}
+
 function escapeHtml(str) {
     if (str === null || str === undefined) return "";
     return String(str)

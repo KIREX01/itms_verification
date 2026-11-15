@@ -18,6 +18,20 @@ from core.services import config_service
 
 
 class WebUITestCase(TestCase):
+    def _link_itms_session(self):
+        """Order endpoints require a linked ITMS technician session (else HTTP 412)."""
+        from core.models import OperatorITMSSession
+        OperatorITMSSession.objects.update_or_create(
+            user=self.user,
+            defaults={
+                "itms_email": "test_op@itms.test",
+                "is_authenticated": True,
+                "cookies": {"_identity-frontend": "dummy_cookie_val"},
+                "active_bond_code": "AGM",
+                "active_bond_name": "AGM (INSTALLATION) SOLUTIONS UGANDA LIMITED (SPIRO)",
+            },
+        )
+
     def setUp(self):
         self.client = Client()
 
@@ -119,7 +133,7 @@ class WebUITestCase(TestCase):
         self.assertContains(res, "Invalid password")
 
     def test_signup_view_creates_account(self):
-        """POST /signup/ creates new operator user and redirects to dashboard."""
+        """POST /signup/ emails a 2FA code; the account is created once the code is verified."""
         res = self.client.post(reverse("core:signup"), {
             "username": "new_operator",
             "full_name": "New Officer",
@@ -128,6 +142,11 @@ class WebUITestCase(TestCase):
             "password_confirm": "securepassword123",
         })
         self.assertEqual(res.status_code, 302)
+        self.assertEqual(res["Location"], reverse("core:signup_verify"))
+        self.assertFalse(User.objects.filter(username="new_operator").exists())
+
+        code = self.client.session["pending_signup"]["code"]
+        self.client.post(reverse("core:signup_verify"), {"code": code})
         self.assertTrue(User.objects.filter(username="new_operator").exists())
 
     def test_logout_clears_session(self):
@@ -149,11 +168,15 @@ class WebUITestCase(TestCase):
 
     def test_api_itms_connect_missing_credentials(self):
         """POST /api/itms/connect/ without credentials returns 400."""
+        # API endpoints require a signed-in Copilot user (ApiAuthMiddleware).
+        self.client.force_login(self.user)
         res = self.client.post(reverse("core:api_itms_connect"), data={})
         self.assertEqual(res.status_code, 400)
 
     def test_api_itms_disconnect(self):
         """POST /api/itms/disconnect/ returns success."""
+        # API endpoints require a signed-in Copilot user (ApiAuthMiddleware).
+        self.client.force_login(self.user)
         res = self.client.post(reverse("core:api_itms_disconnect"))
         self.assertEqual(res.status_code, 200)
         data = res.json()
@@ -166,7 +189,7 @@ class WebUITestCase(TestCase):
         self.client.login(username="test_op", password="password123")
         res = self.client.get(reverse("core:dashboard"))
         self.assertEqual(res.status_code, 200)
-        self.assertContains(res, "ITMS VERIFICATION COPILOT")
+        self.assertContains(res, "CLOSE Copilot")  # rebranded (FRONTEND REQUEST §8)
         self.assertTemplateUsed(res, "core/dashboard.html")
 
     def test_api_stats(self):
@@ -257,7 +280,7 @@ class WebUITestCase(TestCase):
         self.client.login(username="test_op", password="password123")
         res = self.client.get(reverse("core:api_export_report"))
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res["Content-Type"], "text/csv")
+        self.assertTrue(res["Content-Type"].startswith("text/csv"))
         self.assertIn("attachment; filename=", res["Content-Disposition"])
 
     def test_api_toggle_dry_run(self):
@@ -273,6 +296,9 @@ class WebUITestCase(TestCase):
 
     def test_api_itms_orders_explorer_local_active(self):
         """GET /api/itms/orders/?source=local&tab=active returns active orders."""
+        # API endpoints require a signed-in Copilot user (ApiAuthMiddleware).
+        self.client.force_login(self.user)
+        self._link_itms_session()
         res = self.client.get(reverse("core:api_itms_orders_explorer"), {
             "source": "local",
             "tab": "active",
@@ -287,6 +313,9 @@ class WebUITestCase(TestCase):
 
     def test_api_itms_orders_explorer_local_archive(self):
         """GET /api/itms/orders/?source=local&tab=archive filters archived orders."""
+        # API endpoints require a signed-in Copilot user (ApiAuthMiddleware).
+        self.client.force_login(self.user)
+        self._link_itms_session()
         archived_order = InstallationOrder.objects.create(
             order_number="ORD-ARCHIVE-99",
             registration_number="UMA 999Z",
@@ -307,6 +336,9 @@ class WebUITestCase(TestCase):
 
     def test_api_itms_orders_search(self):
         """GET /api/itms/orders/ filters by plate search."""
+        # API endpoints require a signed-in Copilot user (ApiAuthMiddleware).
+        self.client.force_login(self.user)
+        self._link_itms_session()
         res = self.client.get(reverse("core:api_itms_orders_explorer"), {
             "source": "local",
             "tab": "active",
@@ -320,6 +352,9 @@ class WebUITestCase(TestCase):
 
     def test_api_itms_order_detail(self):
         """GET /api/itms/orders/<order_number>/ returns complete hardware and photo data."""
+        # API endpoints require a signed-in Copilot user (ApiAuthMiddleware).
+        self.client.force_login(self.user)
+        self._link_itms_session()
         self.order.gps_tracker_id = "GPS-998877"
         self.order.front_plate_serial = "SER-FRONT-11"
         self.order.rear_plate_serial = "SER-REAR-22"
@@ -339,22 +374,28 @@ class WebUITestCase(TestCase):
 
     def test_api_itms_order_detail_not_found(self):
         """GET /api/itms/orders/<non_existent>/ returns 404."""
+        # API endpoints require a signed-in Copilot user (ApiAuthMiddleware).
+        self.client.force_login(self.user)
+        self._link_itms_session()
         res = self.client.get(reverse("core:api_itms_order_detail", args=["NON-EXISTENT-ORDER"]))
         self.assertEqual(res.status_code, 404)
         data = res.json()
         self.assertFalse(data["success"])
 
     def test_api_itms_sync_now_unauthenticated(self):
-        """POST /api/itms/orders/sync/now/ returns 401 when not connected to ITMS."""
+        """POST /api/itms/orders/sync/now/ is refused (412) when no ITMS account is linked."""
+        # API endpoints require a signed-in Copilot user (ApiAuthMiddleware).
+        self.client.force_login(self.user)
         res = self.client.post(reverse("core:api_itms_sync_now"), {"tab": "active"})
-        # Since test environment has no live cookies, expect 401
-        self.assertEqual(res.status_code, 401)
+        self.assertEqual(res.status_code, 412)
         data = res.json()
         self.assertFalse(data["success"])
-        self.assertIn("not connected", data["error"])
+        self.assertEqual(data["code"], "ITMS_ACCOUNT_NOT_LINKED")
 
     def test_api_batches_list(self):
         """GET /api/batches/ returns list of ingestion batches."""
+        # API endpoints require a signed-in Copilot user (ApiAuthMiddleware).
+        self.client.force_login(self.user)
         res = self.client.get(reverse("core:api_batches_list"))
         self.assertEqual(res.status_code, 200)
         data = res.json()
@@ -365,6 +406,8 @@ class WebUITestCase(TestCase):
 
     def test_api_batch_detail(self):
         """GET /api/batches/<batch_id>/ returns batch metadata, photos, and pair assignments."""
+        # API endpoints require a signed-in Copilot user (ApiAuthMiddleware).
+        self.client.force_login(self.user)
         res = self.client.get(reverse("core:api_batch_detail", args=[self.batch.batch_id]))
         self.assertEqual(res.status_code, 200)
         data = res.json()
@@ -380,11 +423,15 @@ class WebUITestCase(TestCase):
 
     def test_api_batch_detail_not_found(self):
         """GET /api/batches/<non_existent>/ returns 404."""
+        # API endpoints require a signed-in Copilot user (ApiAuthMiddleware).
+        self.client.force_login(self.user)
         res = self.client.get(reverse("core:api_batch_detail", args=["NON-EXISTENT-BATCH"]))
         self.assertEqual(res.status_code, 404)
 
     def test_api_toggle_dry_run_updates_settings_and_config(self):
         """POST /api/settings/toggle-dry-run/ toggles mode and updates settings.ITMS_WEB_DRY_RUN."""
+        # API endpoints require a signed-in Copilot user (ApiAuthMiddleware).
+        self.client.force_login(self.user)
         from django.conf import settings
         from core.services import config_service
 
@@ -411,6 +458,8 @@ class WebUITestCase(TestCase):
 
     def test_api_pair_action_submit_respects_explicit_dry_run(self):
         """POST /api/pairs/<id>/action/ with action=submit respects explicit dry_run param."""
+        # API endpoints require a signed-in Copilot user (ApiAuthMiddleware).
+        self.client.force_login(self.user)
         from unittest.mock import patch
         from core.services.submission_worker import SubmissionOutcome
 
@@ -432,6 +481,8 @@ class WebUITestCase(TestCase):
 
     def test_api_pair_action_submit_follows_config_dry_run_when_unspecified(self):
         """POST /api/pairs/<id>/action/ with action=submit defaults to config.json setting."""
+        # API endpoints require a signed-in Copilot user (ApiAuthMiddleware).
+        self.client.force_login(self.user)
         from unittest.mock import patch
         from core.services import config_service
         from core.services.submission_worker import SubmissionOutcome
@@ -471,7 +522,7 @@ class WebUITestCase(TestCase):
         self.assertIn("total_photos", shift)
 
     def test_api_pairs_list_scope_filtering(self):
-        """GET /api/pairs/ correctly filters pairs by TODAY, CARRYOVER, and ALL scopes."""
+        """GET /api/pairs/ filters pairs by shift date (today / a prior date) and ALL."""
         from datetime import timedelta
         self.client.force_login(self.user)
 
@@ -507,13 +558,13 @@ class WebUITestCase(TestCase):
         self.assertIn(self.pair.id, today_ids)
         self.assertNotIn(prior_pair.id, today_ids)
 
-        # Test scope=CARRYOVER
-        res_carry = self.client.get(reverse("core:api_pairs_list") + "?scope=CARRYOVER")
-        self.assertEqual(res_carry.status_code, 200)
-        data_carry = res_carry.json()
-        carry_ids = [p["id"] for p in data_carry["pairs"]]
-        self.assertIn(prior_pair.id, carry_ids)
-        self.assertNotIn(self.pair.id, carry_ids)
+        # Prior shift date (3-tier funnel replaced the old CARRYOVER scope with ?date=)
+        prior_date = timezone.localtime(yesterday).date().isoformat()
+        res_prior = self.client.get(reverse("core:api_pairs_list") + f"?date={prior_date}")
+        self.assertEqual(res_prior.status_code, 200)
+        prior_ids = [p["id"] for p in res_prior.json()["pairs"]]
+        self.assertIn(prior_pair.id, prior_ids)
+        self.assertNotIn(self.pair.id, prior_ids)
 
         # Test scope=ALL
         res_all = self.client.get(reverse("core:api_pairs_list") + "?scope=ALL")

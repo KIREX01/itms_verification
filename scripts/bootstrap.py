@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ITMS Verification Copilot - Self-Healing Bootstrap & Resource Manager.
+CLOSE Copilot - Self-Healing Bootstrap & Resource Manager.
 Cross-platform provisioning for Windows, macOS (Intel & Apple Silicon), and Linux.
 
 Tasks Performed:
@@ -104,7 +104,7 @@ def ensure_env_file() -> None:
         content = env_example.read_text(encoding="utf-8")
         content = content.replace("change-me-to-a-random-50-char-string", secret_key)
     else:
-        content = f"""# ITMS Verification Copilot - Auto-generated Client Environment
+        content = f"""# CLOSE Copilot - Auto-generated Client Environment
 DJANGO_SECRET_KEY={secret_key}
 DJANGO_DEBUG=True
 DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost
@@ -528,7 +528,7 @@ def run_diagnostics_table() -> None:
     """Prints a clean, formatted diagnostic table for the user."""
     print()
     print("=" * 65)
-    print("  ITMS VERIFICATION COPILOT - SYSTEM HEALTH DIAGNOSTICS")
+    print("  CLOSE COPILOT - SYSTEM HEALTH DIAGNOSTICS")
     print("=" * 65)
 
     ensure_directories()
@@ -547,13 +547,13 @@ def run_diagnostics_table() -> None:
 
 def main() -> int:
     suppress_windows_error_dialogs()
-    parser = argparse.ArgumentParser(description="ITMS Verification Copilot Bootstrap & Resource Manager")
+    parser = argparse.ArgumentParser(description="CLOSE Copilot Bootstrap & Resource Manager")
     parser.add_argument("--verify-only", action="store_true", help="Run diagnostics without mutating files or downloading")
     args = parser.parse_args()
 
     print()
     print("=" * 65)
-    print("  ITMS VERIFICATION COPILOT - SYSTEM INITIALIZATION")
+    print("  CLOSE COPILOT - SYSTEM INITIALIZATION")
     print("=" * 65)
 
     if args.verify_only:

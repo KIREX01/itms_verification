@@ -1,5 +1,5 @@
 """
-Mobile Web Companion views and REST APIs for ITMS Verification Copilot.
+Mobile Web Companion views and REST APIs for CLOSE Copilot.
 
 Provides:
 - Mobile Web Companion interface (touch-optimized for phone viewports)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ITMS Verification Copilot Unified CLI Controller
+# CLOSE Copilot Unified CLI Controller
 set -e
 
 APP_DIR="/opt/itms"

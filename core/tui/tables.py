@@ -200,7 +200,7 @@ class TableLoaderMixin:
             )
             batch_id_str = pair_batch.batch_id if pair_batch else ""
             if pair_batch:
-                is_batch_today = (pair_batch.created_at.date() == today)
+                is_batch_today = (timezone.localtime(pair_batch.created_at).date() == today)
                 is_latest = (latest_batch_id and pair_batch.batch_id == latest_batch_id)
                 if is_latest:
                     batch_display = f"[bold green]🔥 TODAY (Active)[/bold green] [dim]({batch_id_str[:7]})[/dim]"
@@ -349,10 +349,11 @@ class TableLoaderMixin:
 
         batches = list(batches_qs[:50])
         for b in batches:
-            if b.created_at.date() == today:
-                created_display = f"[bold green]{b.created_at.strftime('%H:%M')} (Today)[/bold green]"
+            b_local = timezone.localtime(b.created_at)
+            if b_local.date() == today:
+                created_display = f"[bold green]{b_local.strftime('%H:%M')} (Today)[/bold green]"
             else:
-                created_display = f"[yellow]{b.created_at.strftime('%Y-%m-%d %H:%M')}[/yellow]"
+                created_display = f"[yellow]{b_local.strftime('%Y-%m-%d %H:%M')}[/yellow]"
 
             table.add_row(
                 escape(b.batch_id),

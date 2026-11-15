@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ITMS Verification Copilot - Dual-Platform Release Packager.
+CLOSE Copilot - Dual-Platform Release Packager.
 
 Automates building distribution packages for:
 1. Windows Desktop Client: dist/itms-v<version>-windows.zip
@@ -189,7 +189,7 @@ def build_linux_package(version: str, output_dir: Path) -> Path:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ITMS Verification Copilot Dual-Platform Release Packager")
+    parser = argparse.ArgumentParser(description="CLOSE Copilot Dual-Platform Release Packager")
     parser.add_argument("--version", default=__version__, help=f"Release version tag (default: {__version__})")
     parser.add_argument("--target", choices=["all", "windows", "win", "linux", "lin"], default="all", help="Target platform to package")
     parser.add_argument("--out", default=str(PROJECT_ROOT / "dist"), help="Output directory for build archives")
@@ -201,7 +201,7 @@ def main():
 
     target = args.target.lower()
     print("=" * 65)
-    print(f"  ITMS VERIFICATION COPILOT - RELEASE PACKAGER v{version}")
+    print(f"  CLOSE COPILOT - RELEASE PACKAGER v{version}")
     print("=" * 65)
 
     if target in ("all", "windows", "win"):

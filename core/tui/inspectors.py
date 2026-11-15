@@ -108,7 +108,7 @@ class InspectorPane(Static):
         latest_batch = IngestionBatch.objects.order_by("-created_at").first()
         if batch:
             is_latest = (latest_batch and batch.batch_id == latest_batch.batch_id)
-            is_today = (batch.created_at.date() == today)
+            is_today = (timezone.localtime(batch.created_at).date() == today)
             if is_latest:
                 tag = "[bold green]🔥 TODAY (Active Batch)[/bold green]"
             elif is_today:

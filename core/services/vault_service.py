@@ -74,7 +74,8 @@ def create_ingestion_batch(
     facility_code: Optional[str] = None,
 ) -> IngestionBatch:
     """Creates a new IngestionBatch with a human-readable identifier and operator attribution."""
-    now = timezone.now()
+    # Local (Kampala) time so the ID's date matches the shift date shown in the UI.
+    now = timezone.localtime(timezone.now())
     batch_prefix = now.strftime("BATCH-%Y%m%d-%H%M%S")
     short_uuid = uuid.uuid4().hex[:6]
     batch_id = f"{batch_prefix}-{short_uuid}"

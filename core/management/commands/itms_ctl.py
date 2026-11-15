@@ -1,5 +1,5 @@
 """
-ITMS Verification Copilot Process & Lifecycle Management Command.
+CLOSE Copilot Process & Lifecycle Management Command.
 
 Unified command-line controller for application lifecycle:
 - start: Launches web server in background and clears maintenance flag.
@@ -55,7 +55,7 @@ def run_cmd(cmd_list: list, timeout: int = 15) -> subprocess.CompletedProcess:
 
 
 class Command(BaseCommand):
-    help = "Controls the ITMS Verification Copilot application lifecycle and maintenance modes."
+    help = "Controls the CLOSE Copilot application lifecycle and maintenance modes."
 
     def print_help(self, prog_name, subcommand):
         self.handle_help()
@@ -196,7 +196,7 @@ class Command(BaseCommand):
         from core.version import __version__
         guide = f"""
 ======================================================================
-  ITMS VERIFICATION COPILOT v{__version__} — SYSTEM COMMAND INTERFACE
+  CLOSE COPILOT v{__version__} — SYSTEM COMMAND INTERFACE
 ======================================================================
 
 USAGE:
@@ -278,10 +278,10 @@ EXAMPLES:
 
     def handle_version(self):
         from core.version import __version__
-        self.stdout.write(f"ITMS Verification Copilot v{__version__}")
+        self.stdout.write(f"CLOSE Copilot v{__version__}")
 
     def handle_update(self, subargs: list):
-        self.stdout.write(self.style.NOTICE("Checking for ITMS Verification Copilot updates..."))
+        self.stdout.write(self.style.NOTICE("Checking for CLOSE Copilot updates..."))
         from core.services.update_service import UpdateService
         from core.version import __version__
 
@@ -300,7 +300,7 @@ EXAMPLES:
             self.stdout.write(self.style.SUCCESS(f"[+] System is running the latest release (v{__version__})."))
 
     def handle_bootstrap(self, subargs: list):
-        self.stdout.write(self.style.NOTICE("Running ITMS Verification Copilot bootstrap & self-healing..."))
+        self.stdout.write(self.style.NOTICE("Running CLOSE Copilot bootstrap & self-healing..."))
         old_argv = sys.argv
         try:
             sys.argv = ["bootstrap.py"] + subargs
@@ -329,7 +329,7 @@ EXAMPLES:
         execute_from_command_line(["manage.py"] + subargs)
 
     def handle_rollback(self, target_version: Optional[str] = None):
-        self.stdout.write(self.style.WARNING("Initiating ITMS Verification Copilot version rollback..."))
+        self.stdout.write(self.style.WARNING("Initiating CLOSE Copilot version rollback..."))
         from core.services.update_service import UpdateService
 
         target = target_version or "v1.0.9"
@@ -344,7 +344,7 @@ EXAMPLES:
             self.stdout.write(self.style.ERROR(f"\n[!] Rollback failed: {res.get('error')}"))
 
     def handle_start(self, host: str, port: int):
-        self.stdout.write(self.style.NOTICE("Initiating ITMS Verification Copilot startup..."))
+        self.stdout.write(self.style.NOTICE("Initiating CLOSE Copilot startup..."))
 
         # Clear maintenance flag if present
         config_service.set_maintenance_mode(False)
@@ -419,19 +419,19 @@ EXAMPLES:
                 break
 
         if bound:
-            self.stdout.write(self.style.SUCCESS(f"\n[OK] ITMS Verification Copilot is ACTIVE on {host}:{port}."))
+            self.stdout.write(self.style.SUCCESS(f"\n[OK] CLOSE Copilot is ACTIVE on {host}:{port}."))
             self.stdout.write(f"Web Entrypoint: https://close.kirex.online/ (or http://{host}:{port}/)")
         else:
             self.stdout.write(self.style.WARNING(f"\nService started, but port {port} has not responded yet."))
 
     def handle_stop(self, port: int):
-        self.stdout.write(self.style.NOTICE("Initiating ITMS Verification Copilot shutdown..."))
+        self.stdout.write(self.style.NOTICE("Initiating CLOSE Copilot shutdown..."))
 
         # 1. Immediately compile maintenance page and set maintenance flag
         # so Nginx serves the maintenance page to operators
         config_service.set_maintenance_mode(
             enabled=True,
-            title="ITMS Verification Copilot — Service Offline",
+            title="CLOSE Copilot — Service Offline",
             message="The Verification Copilot application service is currently stopped or undergoing scheduled maintenance. Please standby.",
         )
         self.stdout.write("Maintenance fallback page compiled and active.")
@@ -482,14 +482,14 @@ EXAMPLES:
         # Confirm socket release
         time.sleep(1.0)
         if not is_port_in_use(port):
-            self.stdout.write(self.style.SUCCESS("\n[OK] ITMS Verification Copilot service STOPPED successfully."))
+            self.stdout.write(self.style.SUCCESS("\n[OK] CLOSE Copilot service STOPPED successfully."))
             self.stdout.write(self.style.NOTICE("Browser Behavior: Displays the customized Maintenance & Offline notice."))
             self.stdout.write("To resume service: itms start (or python manage.py itms_ctl start)")
         else:
             self.stdout.write(self.style.WARNING(f"\nWarning: Port {port} appears to still be listening."))
 
     def handle_restart(self, host: str, port: int):
-        self.stdout.write(self.style.NOTICE("Restarting ITMS Verification Copilot..."))
+        self.stdout.write(self.style.NOTICE("Restarting CLOSE Copilot..."))
         is_linux = platform.system() == "Linux"
         use_systemd = is_linux and has_systemd_service("itms")
 
@@ -509,7 +509,7 @@ EXAMPLES:
 
     def handle_status(self, host: str, port: int):
         self.stdout.write("\n" + "=" * 60)
-        self.stdout.write("  ITMS Verification Copilot — System Status")
+        self.stdout.write("  CLOSE Copilot — System Status")
         self.stdout.write("=" * 60)
 
         # 1. Port status

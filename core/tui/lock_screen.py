@@ -99,7 +99,7 @@ class TUIMasterLockScreen(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         with Center(), Vertical(id="lock-modal-container"):
                 yield Static(
-                    "[bold yellow]🔒 ITMS VERIFICATION COPILOT[/bold yellow]\n"
+                    "[bold yellow]🔒 CLOSE COPILOT[/bold yellow]\n"
                     "[bold white]MASTER CONSOLE SECURITY LOCK[/bold white]",
                     id="lock-banner",
                 )
@@ -294,7 +294,7 @@ class TUIExpiredLockScreen(ModalScreen[bool]):
         with Center(), Vertical(id="expired-modal-container"):
             yield Static(
                 "[bold red]⛔ TIME-BOUND ACCESS EXPIRED[/bold red]\n"
-                "[bold white]ITMS VERIFICATION COPILOT CONSOLE LOCKED[/bold white]",
+                "[bold white]CLOSE COPILOT CONSOLE LOCKED[/bold white]",
                 id="expired-banner",
             )
             yield Static(

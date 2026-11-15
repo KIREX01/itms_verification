@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ITMS Verification Copilot - Event Handlers & Mobile Connection Diagnostics Checker.
+CLOSE Copilot - Event Handlers & Mobile Connection Diagnostics Checker.
 
 Verifies:
 1. All template HTML event handlers (onclick, onchange) map to defined JS functions.
@@ -134,7 +134,7 @@ def check_mobile_network():
 def main():
     print("""
 ======================================================================
-  ITMS VERIFICATION COPILOT - SYSTEM & EVENT HANDLER DIAGNOSTICS
+  CLOSE COPILOT - SYSTEM & EVENT HANDLER DIAGNOSTICS
 ======================================================================
 """)
     h_ok = check_html_js_handlers()

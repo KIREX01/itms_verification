@@ -1,5 +1,5 @@
 """
-Maintenance Mode Middleware for ITMS Verification Copilot.
+Maintenance Mode Middleware for CLOSE Copilot.
 
 When maintenance mode is active (via config_service or secure/maintenance.flag):
 - Intercepts incoming web requests and returns HTTP 503 with the compiled maintenance page.

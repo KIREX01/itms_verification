@@ -42,6 +42,16 @@ class StockMonitoringTests(TestCase):
     def setUp(self):
         from django.contrib.auth.models import User
         from core.models import OperatorITMSSession
+        import shutil
+        import tempfile
+        from core.services import config_service
+
+        # Fresh export directory per test so file caches (.blocked_kits_<suffix>.json)
+        # written by one test never leak into the next.
+        self._export_dir = tempfile.mkdtemp(prefix="itms_test_exports_")
+        self.addCleanup(shutil.rmtree, self._export_dir, ignore_errors=True)
+        config_service.set_setting("sync.default_export_directory", self._export_dir)
+
         self.client = Client()
         self.test_suffix = "290926"
         self.test_date = date(2026, 9, 29)
@@ -976,18 +986,22 @@ class StockMonitoringTests(TestCase):
             require_stock_verification=True,
             check_itms_live=True,
         )
+        # Policy (BACKEND REQUEST §8.2): plates not yet on ITMS stock are still recorded as
+        # physical dispatches, flagged [DISPATCHED_NOT_ON_STOCK], without blocking the shift.
         self.assertTrue(res["success"])
-        self.assertEqual(res["newly_dispatched"], 1)
+        self.assertEqual(res["newly_dispatched"], 2)
         self.assertEqual(res["verified_plates"], ["UMA111AA"])
         self.assertEqual(res["rejected_not_on_stock"], ["UZZ999ZZ"])
         self.assertIn("warning", res)
 
-        self.assertTrue(StockDispatchScan.objects.filter(registration_number="UMA111AA").exists())
-        self.assertFalse(StockDispatchScan.objects.filter(registration_number="UZZ999ZZ").exists())
+        valid_scan = StockDispatchScan.objects.get(registration_number="UMA111AA")
+        self.assertNotIn("DISPATCHED_NOT_ON_STOCK", valid_scan.notes or "")
+        flagged_scan = StockDispatchScan.objects.get(registration_number="UZZ999ZZ")
+        self.assertIn("DISPATCHED_NOT_ON_STOCK", flagged_scan.notes or "")
 
     @patch("core.services.kit_provisioning_service.get_web_client")
-    def test_api_stock_dispatch_returns_400_for_non_stock(self, mock_get_client):
-        """POST /api/stock/dispatch/ returns 400 when all plates are not on stock."""
+    def test_api_stock_dispatch_flags_non_stock_without_blocking(self, mock_get_client):
+        """POST /api/stock/dispatch/ records not-on-stock plates as flagged dispatches (§8.2)."""
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
         mock_client.fetch_installation_kits.return_value = {
@@ -1001,11 +1015,18 @@ class StockMonitoringTests(TestCase):
             data={"plates": "UZZ888ZZ"},
             content_type="application/json",
         )
-        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.status_code, 200)
         data = resp.json()
-        self.assertFalse(data["success"])
+        self.assertTrue(data["success"])
         self.assertEqual(data["rejected_not_on_stock"], ["UZZ888ZZ"])
-        self.assertIn("cannot be taken out", data["error"])
+        scan = StockDispatchScan.objects.get(registration_number="UZZ888ZZ")
+        self.assertIn("DISPATCHED_NOT_ON_STOCK", scan.notes or "")
+        # Tracking lives on the scan note only; no provisional InstallationKit is created.
+        self.assertFalse(
+            InstallationKit.objects.filter(
+                stock_monitoring_service.get_kits_matching_plates_q(["UZZ888ZZ"])
+            ).exists()
+        )
 
     @patch("core.services.kit_provisioning_service.get_web_client")
     def test_record_dispatch_scans_syncs_from_itms_and_marks_dispatched(self, mock_get_client):
@@ -1486,10 +1507,12 @@ class StockMonitoringTests(TestCase):
 
         pane._render_stocktake_table()
         # Verify rows added correspond to scanned physical plates
+        # Row keys are "<plate>#audit_<id>_<idx>" so repeated audits of a plate stay unique.
         added_rows = [call[1].get("key") for call in mock_table.add_row.call_args_list if call[1].get("key")]
-        self.assertIn("UMA101SA", added_rows)
-        self.assertIn("UMA102SA", added_rows)
-        self.assertNotIn("UMA999RM", added_rows)
+        added_plates = {k.split("#", 1)[0] for k in added_rows}
+        self.assertIn("UMA101SA", added_plates)
+        self.assertIn("UMA102SA", added_plates)
+        self.assertNotIn("UMA999RM", added_plates)
 
     def test_api_stock_inspect(self):
         """Test /api/stock/inspect/ returns complete hardware profile and stock status."""
@@ -1707,7 +1730,9 @@ class StockMonitoringTests(TestCase):
         self.assertIn("ITMS STOCK TRANSFER & REGISTRATION REQUEST", docket["formatted_message"])
         self.assertIn("SET ASIDE", docket["formatted_message"])
         self.assertEqual(len(docket["items"]), 2)
-        self.assertEqual(docket["items"][0]["action"], "Set Box Aside")
+        # Category A (NOT_ON_STOCK): request inbound from the depot (BACKEND REQUEST §8.3).
+        self.assertEqual(docket["items"][0]["status"], "NOT_ON_STOCK")
+        self.assertEqual(docket["items"][0]["action"], "Request Inbound / Stock Transfer")
 
     @patch("core.services.kit_provisioning_service.get_web_client")
     def test_dispatch_attaches_transfer_docket_when_plates_blocked(self, mock_get_client):
@@ -1729,7 +1754,8 @@ class StockMonitoringTests(TestCase):
             check_itms_live=True,
         )
         self.assertTrue(res["success"])
-        self.assertEqual(res["newly_dispatched"], 1)
+        # Valid kit + flagged not-on-stock kit are both recorded (§8.2).
+        self.assertEqual(res["newly_dispatched"], 2)
         self.assertIn("UZZ888XX", res["rejected_not_on_stock"])
         self.assertIn("docket", res)
         self.assertEqual(res["docket"]["count"], 1)
@@ -2242,9 +2268,10 @@ class StockMonitoringTests(TestCase):
             check_itms_live=True,
         )
         self.assertTrue(res_batch["success"])
-        self.assertEqual(res_batch["newly_dispatched"], 4)
+        # 4 on-stock kits + 2 flagged not-on-stock kits are all recorded (§8.2).
+        self.assertEqual(res_batch["newly_dispatched"], 6)
         self.assertEqual(sorted(res_batch["rejected_not_on_stock"]), ["UZZ901NS", "UZZ902NS"])
-        self.assertEqual(res_batch["dispatch_summary"]["total"], 5)  # 1 + 4
+        self.assertEqual(res_batch["dispatch_summary"]["total"], 7)  # 1 earlier + 6
         stock_monitoring_service.clear_blocked_plates_for_date(self.test_suffix)
 
     def test_auto_register_dispatched_from_orders_and_blocked_resolution(self):

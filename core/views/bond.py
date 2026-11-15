@@ -793,14 +793,32 @@ def api_stock_blocked_plates(request: HttpRequest) -> JsonResponse:
         if request.method == "GET" and check_itms_live:
             # Resolve local DB instantly (<5ms) and offload live ITMS scrape to background thread
             # preventing modal freeze/delay on client open
+            import sys
             import threading
-            threading.Thread(
-                target=stock_monitoring_service.resolve_transferred_blocked_plates,
-                kwargs={"target_date_suffix": date_suffix, "check_itms_live": True},
-                daemon=True,
-            ).start()
+            from django.conf import settings as dj_settings
+
+            is_testing = getattr(dj_settings, "TESTING", False) or any("test" in arg for arg in sys.argv)
+            if not is_testing:
+                def _bg_resolve_blocked(sfx=date_suffix):
+                    # Own DB connection for the thread, always closed afterwards so each
+                    # modal open does not leak a database connection.
+                    from django.db import connection
+                    connection.close()
+                    try:
+                        stock_monitoring_service.resolve_transferred_blocked_plates(
+                            target_date_suffix=sfx, check_itms_live=True,
+                        )
+                    except Exception as bg_err:
+                        logger.warning("Background blocked-plates ITMS recheck error: %s", bg_err)
+                    finally:
+                        try:
+                            connection.close()
+                        except Exception:
+                            pass
+
+                threading.Thread(target=_bg_resolve_blocked, daemon=True).start()
+                live_sync_in_progress = True
             check_itms_live = False
-            live_sync_in_progress = True
 
         resolve_res = stock_monitoring_service.resolve_transferred_blocked_plates(
             target_date_suffix=date_suffix,

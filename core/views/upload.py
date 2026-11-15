@@ -373,7 +373,6 @@ def api_batches_list(request: HttpRequest) -> JsonResponse:
     if not (request.user and getattr(request.user, "is_authenticated", False)):
         return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
 
-    from datetime import datetime
     from core.services import date_service
     date_param = (
         request.GET.get("date")
@@ -395,9 +394,8 @@ def api_batches_list(request: HttpRequest) -> JsonResponse:
         qs = qs.filter(
             Q(facility_code=envelope.facility_code) | Q(facility_code="") | Q(facility_code__isnull=True)
         )
-    if request.user and getattr(request.user, "is_authenticated", False):
-        if not getattr(request.user, "is_superuser", False):
-            qs = qs.filter(Q(operator=request.user) | Q(operator__isnull=True))
+    # Shared per facility: every operator sees the facility's batches, matching the
+    # Review Queue (api_pairs_list), which is scoped by facility, not by operator.
 
     latest_batch = qs.first()
     total_batches = qs.count()
@@ -408,21 +406,19 @@ def api_batches_list(request: HttpRequest) -> JsonResponse:
         # All batches across history - no date restriction
         pass
     elif target_date:
-        start_dt = timezone.make_aware(datetime.combine(target_date, datetime.min.time()), date_service.KAMPALA_TZ)
-        end_dt = timezone.make_aware(datetime.combine(target_date, datetime.max.time()), date_service.KAMPALA_TZ)
-        date_str = target_date.strftime("%Y%m%d")
-        qs = qs.filter(Q(created_at__range=(start_dt, end_dt)) | Q(batch_id__icontains=date_str))
+        qs = qs.filter(date_service.batches_on_date_q(target_date))
     elif scope in ("TODAY", "SHIFT", "DATE"):
-        live_today = date_service.today_kampala()
-        start_dt = timezone.make_aware(datetime.combine(live_today, datetime.min.time()), date_service.KAMPALA_TZ)
-        end_dt = timezone.make_aware(datetime.combine(live_today, datetime.max.time()), date_service.KAMPALA_TZ)
-        date_str = live_today.strftime("%Y%m%d")
-        qs = qs.filter(Q(created_at__range=(start_dt, end_dt)) | Q(batch_id__icontains=date_str))
+        qs = qs.filter(date_service.batches_on_date_q(date_service.today_kampala()))
     elif scope == "ACTIVE_BATCH" and latest_batch:
         qs = qs.filter(id=latest_batch.id)
     elif scope == "CARRYOVER":
         live_today = date_service.today_kampala()
         qs = qs.exclude(created_at__date=live_today)
+
+    def _local(dt):
+        # Display and compare in Kampala time, not UTC (UTC is 3h behind and shifts
+        # batches made between 00:00 and 03:00 onto the previous day).
+        return timezone.localtime(dt, date_service.KAMPALA_TZ)
 
     batches = [
         {
@@ -430,9 +426,9 @@ def api_batches_list(request: HttpRequest) -> JsonResponse:
             "batch_id": b.batch_id,
             "source_type": b.source_type,
             "source_label": b.source_label,
-            "created_at": b.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-            "created_date": b.created_at.strftime("%Y-%m-%d"),
-            "is_today": bool(b.created_at and b.created_at.date() == today),
+            "created_at": _local(b.created_at).strftime("%Y-%m-%d %H:%M:%S"),
+            "created_date": _local(b.created_at).strftime("%Y-%m-%d"),
+            "is_today": bool(b.created_at and _local(b.created_at).date() == today),
             "is_latest": bool(latest_batch and b.id == latest_batch.id),
             "total_files": b.total_files,
             "ingested_count": b.ingested_count,

@@ -119,7 +119,8 @@ class TUIMasterLockScreen(ModalScreen[bool]):
                     yield Button("UNLOCK [Enter]", variant="success", id="btn-unlock-pin")
                     yield Button("EXIT [Esc]", variant="error", id="btn-quit-pin")
                 yield Static(
-                    "[dim]Default Master PIN: 739104 │ Configurable in Settings & TUI_MASTER_PIN[/dim]",
+                    # Never print the PIN itself: anyone at the terminal could read it.
+                    "[dim]Master PIN is set in Settings or via TUI_MASTER_PIN │ Ask your supervisor if unknown[/dim]",
                     id="lock-footer-info",
                 )
 

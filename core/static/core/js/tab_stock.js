@@ -1683,6 +1683,16 @@ function updateDashboard(recon) {
     setTextSafe('kpi-val-dispatched', (tot.dispatched || 0).toLocaleString());
     setTextSafe('kpi-val-installed', (tot.installed || 0).toLocaleString());
     setTextSafe('kpi-val-closing', (tot.closing_stock || 0).toLocaleString());
+    // A negative book balance means more kits were installed than were ever recorded as received.
+    const closingSub = document.getElementById('kpi-sub-closing');
+    const closingVal = document.getElementById('kpi-val-closing');
+    if ((tot.closing_stock || 0) < 0) {
+        if (closingSub) { closingSub.textContent = '⚠ Shortfall: record missing deliveries'; closingSub.style.color = '#f87171'; }
+        if (closingVal) closingVal.style.color = '#f87171';
+    } else {
+        if (closingSub) { closingSub.textContent = 'Calculated Balance'; closingSub.style.color = 'rgba(255,255,255,0.6)'; }
+        if (closingVal) closingVal.style.color = '#ffffff';
+    }
     setTextSafe('kpi-val-physical', physCount.toLocaleString());
     setTextSafe('kpi-sub-physical', `Variance: ${varText}`);
     setTextSafe('kpi-val-unallocated', unallocCount.toLocaleString());

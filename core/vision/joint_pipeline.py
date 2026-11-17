@@ -445,6 +445,7 @@ class DualStreamVisionEngine:
                 front_img.error_message = f"Invalid plate syntax '{front_img.detected_plate}'"
             else:
                 front_img.error_message = f"OCR confidence {conf_f:.2f} below threshold"
+        front_img.processed_at = timezone.now()
         front_img.save()
 
         if rear_det:
@@ -463,6 +464,7 @@ class DualStreamVisionEngine:
                 rear_img.error_message = f"Invalid plate syntax '{rear_img.detected_plate}'"
             else:
                 rear_img.error_message = f"OCR confidence {conf_r:.2f} below threshold"
+        rear_img.processed_at = timezone.now()
         rear_img.save()
 
         # ── 5. Multi-View Character Consensus & Conflict Resolution ──────

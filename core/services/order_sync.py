@@ -121,6 +121,27 @@ def rematch_unlinked_conflict_pairs() -> int:
     return resolved
 
 
+
+def _record_facility_sync(kind: str) -> None:
+    """Stamps FacilitySyncMetadata after a full (non-search) sync so the facility
+    dedup cache and dashboards reflect background syncs, not only manual ones."""
+    try:
+        from core.models import InstallationKit, InstallationOrder
+        from core.services import bond_service, scoped_order_service
+        code = (bond_service.get_active_bond() or {}).get("code") or "AGM"
+        if kind == "kits":
+            scoped_order_service.record_facility_kits_synced(
+                facility_code=code,
+                total_kits=InstallationKit.objects.filter(facility_code=code).count(),
+            )
+        else:
+            scoped_order_service.record_facility_orders_synced(
+                facility_code=code,
+                total_orders=InstallationOrder.objects.filter(facility_code=code).count(),
+            )
+    except Exception as exc:  # never let bookkeeping break a sync
+        logger.warning("Could not record facility %s sync metadata: %s", kind, exc)
+
 class OrderSyncService:
     """
     Coordinates synchronization between live ITMS installation orders, archive,
@@ -463,6 +484,9 @@ class OrderSyncService:
             except Exception as rematch_err:
                 logger.warning("Error running reactive rematch for CONFLICT pairs: %s", rematch_err)
 
+        if not search_filter:
+            _record_facility_sync("orders")
+
         # Update in-memory cache
         _LAST_SYNC_TIMESTAMP = time.time()
         _LAST_SYNC_RESULT = {
@@ -759,6 +783,8 @@ class OrderSyncService:
 
         sync_res = self.client.sync_kits_to_local_db(all_kits)
         _LAST_KIT_SYNC_TIMESTAMP = time.time()
+        if not plate_or_code:
+            _record_facility_sync("kits")
         duration_ms = int((time.time() - start_time) * 1000)
 
         return {

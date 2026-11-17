@@ -87,6 +87,20 @@ class StockCountingAndQueueTabsTest(TestCase):
         # Day 2 opening stock must equal Day 1 closing stock (250)
         self.assertEqual(tot["opening"], 250)
 
+    def test_negative_closing_carries_forward_as_shortfall(self):
+        """A negative closing (installs exceeded recorded deliveries) must carry into the next
+        day's opening, not silently reset to 0 and hide the missing deliveries."""
+        DailyStockLedger.objects.create(
+            work_date=date(2026, 11, 12),
+            work_date_suffix="121126",
+            closing_stock=-180,
+            closing_balance_psv=-180,
+            closing_balance_pmo=0,
+        )
+        recon = compute_daily_reconciliation("131126")
+        self.assertEqual(recon["total"]["opening"], -180)
+        self.assertEqual(DailyStockLedger.objects.get(work_date=date(2026, 11, 13)).opening_stock, -180)
+
     def test_closing_stock_formula(self):
         """closing stock = opening stock + kits received - kits installed - bond transfer out + bond transfer in."""
         work_d = date(2026, 11, 3)

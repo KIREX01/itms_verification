@@ -1287,8 +1287,10 @@ def compute_daily_reconciliation(target_date_suffix: Optional[str] = None) -> Di
         .first()
     )
     if prev_ledger and not getattr(ledger, "override_opening", False):
-        ledger.opening_balance_psv = max(0, prev_ledger.closing_balance_psv)
-        ledger.opening_balance_pmo = max(0, prev_ledger.closing_balance_pmo)
+        # Carry the previous closing as-is, including a negative shortfall. Clamping to 0
+        # hid unrecorded deliveries: the deficit vanished overnight instead of staying visible.
+        ledger.opening_balance_psv = prev_ledger.closing_balance_psv
+        ledger.opening_balance_pmo = prev_ledger.closing_balance_pmo
         ledger.opening_stock = ledger.opening_balance_psv + ledger.opening_balance_pmo
         ledger.save(update_fields=["opening_balance_psv", "opening_balance_pmo", "opening_stock"])
 

@@ -24,6 +24,11 @@ class TUIAppTests(TransactionTestCase):
         self.user = User.objects.create_user(username="testoperator", password="password123")
         auth_service.save_remembered_session(self.user, remember=True)
 
+        # These tests drive the console behind the master PIN gate; the gate itself is
+        # covered separately. Disable it in the isolated test config.
+        from core.services import config_service
+        config_service.set_setting("security.tui_master_pin_enabled", False)
+
         self.order = InstallationOrder.objects.create(
             order_number="ORD-TUI-01",
             registration_number="UMA145PD",
@@ -505,3 +510,34 @@ class TUIAppTests(TransactionTestCase):
 
 
 
+
+    def test_master_pin_gate_blocks_wrong_pin_and_opens_with_right_pin(self):
+        """`itms --tui` opens behind the master PIN gate: wrong PIN stays locked, right PIN unlocks."""
+        from unittest.mock import patch
+        from core.services import config_service
+        from core.tui.lock_screen import TUIMasterLockScreen
+
+        config_service.set_setting("security.tui_master_pin_enabled", True)
+
+        async def run_pilot():
+            with patch.dict(os.environ, {"TUI_MASTER_PIN": "246810"}):
+                app = ITMSOperatorApp()
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    self.assertIsInstance(app.screen, TUIMasterLockScreen)
+
+                    # Wrong PIN: still locked, tab keys do nothing
+                    await pilot.press(*"111111", "enter")
+                    await pilot.pause()
+                    self.assertIsInstance(app.screen, TUIMasterLockScreen)
+
+                    # Right PIN: console opens on the dashboard and tabs respond
+                    await pilot.press(*"246810", "enter")
+                    await pilot.pause()
+                    self.assertNotIsInstance(app.screen, TUIMasterLockScreen)
+                    tabs = app.query_one("#tabs-content")
+                    self.assertEqual(tabs.active, "tab-dashboard")
+                    await pilot.press("4")
+                    self.assertEqual(tabs.active, "tab-queue")
+
+        asyncio.run(run_pilot())

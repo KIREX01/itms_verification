@@ -975,9 +975,10 @@ def process_single_image_vision(image: EvidenceImage, save_crops: bool = False) 
             else:
                 image.error_message = f"OCR confidence {conf:.2f} below threshold"
 
+        image.processed_at = timezone.now()
         image.save(update_fields=[
             "bbox", "detector_confidence", "detected_plate",
-            "ocr_confidence", "status", "error_message"
+            "ocr_confidence", "status", "error_message", "processed_at"
         ])
 
         return {

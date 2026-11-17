@@ -48,12 +48,35 @@ class OperatorRequestEnvelope:
         return datetime.fromtimestamp(self.timestamp, tz=timezone.utc).isoformat()
 
 
+DEFAULT_TRUSTED_PROXIES = ("127.0.0.1", "::1")
+
+
+def _trusted_proxies() -> set:
+    from django.conf import settings
+    extra = getattr(settings, "TRUSTED_PROXY_IPS", None) or ()
+    return {str(p).strip() for p in (*DEFAULT_TRUSTED_PROXIES, *extra) if str(p).strip()}
+
+
 def extract_client_ip(request: HttpRequest) -> str:
-    """Extracts client IP address respecting reverse proxies."""
-    xff = request.META.get("HTTP_X_FORWARDED_FOR")
-    if xff:
-        return str(xff).split(",")[0].strip()
-    return str(request.META.get("REMOTE_ADDR") or "127.0.0.1")
+    """
+    Returns the real client IP.
+
+    Forwarding headers are only honoured when the TCP peer (REMOTE_ADDR) is a trusted
+    reverse proxy (nginx on the same host by default; extend via settings.TRUSTED_PROXY_IPS).
+    Otherwise any visitor could send a forged X-Forwarded-For and bypass IP blocks and
+    device IP pinning. Behind a trusted proxy we prefer X-Real-IP (nginx sets it to
+    $remote_addr) and fall back to the RIGHTMOST X-Forwarded-For entry, which is the one
+    the proxy appended; the leftmost entries are client-controlled.
+    """
+    remote = str(request.META.get("REMOTE_ADDR") or "").strip() or "127.0.0.1"
+    if remote not in _trusted_proxies():
+        return remote
+    real_ip = str(request.META.get("HTTP_X_REAL_IP") or "").strip()
+    if real_ip:
+        return real_ip
+    xff = str(request.META.get("HTTP_X_FORWARDED_FOR") or "")
+    hops = [h.strip() for h in xff.split(",") if h.strip()]
+    return hops[-1] if hops else remote
 
 
 def build_operator_envelope(request: HttpRequest) -> OperatorRequestEnvelope:

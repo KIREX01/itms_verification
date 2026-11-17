@@ -126,22 +126,16 @@ def resolve_local_host_ip() -> str:
 
 def resolve_client_mac_address(client_ip: str, request: Optional[HttpRequest] = None) -> str:
     """
-    Resolves the client's Layer-2 MAC address automatically:
-    1. Explicit headers/params (`X-Device-MAC`, `device_mac`) if provided by client/companion.
-    2. Local physical NIC MAC if `client_ip` is loopback (`127.0.0.1`, `::1`, `localhost`) or matches local host IP.
-    3. `/proc/net/arp` (Linux), `ip neigh`, or `arp -a` (Windows) for LAN/Hotspot devices (60s cache).
-    """
-    if request is not None:
-        header_mac = (
-            request.headers.get("X-Device-MAC")
-            or request.POST.get("device_mac")
-            or request.GET.get("device_mac")
-            or ""
-        )
-        norm_hdr = normalize_mac_address(header_mac)
-        if norm_hdr:
-            return norm_hdr
+    Resolves the client's Layer-2 MAC address from what the SERVER can observe:
+    1. Local physical NIC MAC if `client_ip` is loopback (`127.0.0.1`, `::1`, `localhost`) or matches local host IP.
+    2. `/proc/net/arp` (Linux), `ip neigh`, or `arp -a` (Windows) for LAN/Hotspot devices (60s cache).
 
+    Client-supplied values (`X-Device-MAC` header, `device_mac` param) are deliberately
+    ignored: they are trivially forged, so trusting them let anyone dodge or impersonate a
+    MAC rule. A MAC is only visible for devices on the same LAN/hotspot as the server, so
+    MAC rules apply to local installs; internet clients resolve to "" (use IP/device rules).
+    The `request` argument is kept for API compatibility.
+    """
     if not client_ip or client_ip in ("127.0.0.1", "::1", "localhost"):
         return resolve_local_host_mac_address()
 
@@ -154,6 +148,19 @@ def resolve_client_mac_address(client_ip: str, request: Optional[HttpRequest] = 
         if cached and (now - cached[1]) < _ARP_CACHE_TTL:
             return cached[0]
 
+    resolved_mac = _lookup_neighbor_mac(client_ip)
+
+    if not resolved_mac and client_ip == resolve_local_host_ip():
+        resolved_mac = resolve_local_host_mac_address()
+
+    with _ARP_CACHE_LOCK:
+        _ARP_MAC_CACHE[client_ip] = (resolved_mac, now)
+
+    return resolved_mac
+
+
+def _lookup_neighbor_mac(client_ip: str) -> str:
+    """Reads the kernel ARP/neighbour table for a LAN client's MAC ("" if unknown)."""
     resolved_mac = ""
     proc_arp = "/proc/net/arp"
     if os.path.exists(proc_arp):
@@ -177,13 +184,6 @@ def resolve_client_mac_address(client_ip: str, request: Optional[HttpRequest] = 
                 resolved_mac = normalize_mac_address(proc.stdout)
         except Exception:
             pass
-
-    if not resolved_mac and client_ip == resolve_local_host_ip():
-        resolved_mac = resolve_local_host_mac_address()
-
-    with _ARP_CACHE_LOCK:
-        _ARP_MAC_CACHE[client_ip] = (resolved_mac, now)
-
     return resolved_mac
 
 
@@ -580,6 +580,44 @@ def _resolve_email_expiry_for_user(user: Optional[User], email: str = "") -> Tup
     return False, req.expires_at, ""
 
 
+def _device_usable_by(dev: AuthorizedDevice, user: Optional[User]) -> bool:
+    """A device row may be reused only by its owner, or claimed if it has no owner.
+    Firewall rule rows are never adopted as a login device."""
+    if dev.device_type == AuthorizedDevice.DeviceType.NETWORK_RULE:
+        return False
+    if dev.user_id is None:
+        return True
+    return user is not None and dev.user_id == user.pk
+
+
+def _find_reusable_device(
+    dev_id: str, mac_address: str, client_ip: str, user: Optional[User]
+) -> Tuple[Optional[AuthorizedDevice], str]:
+    """
+    Looks up the device row for this request, scoped to `user`.
+
+    `device_id` can come from a client header/param, so it must never match another
+    operator's device: that let a signed-in user inherit someone else's approval, skip
+    the device limit and overwrite their IP/MAC. On a collision we fall back to a
+    per-user id so two operators sharing one browser/phone each get their own row.
+    Returns (device_or_None, device_id_to_use).
+    """
+    existing = AuthorizedDevice.objects.filter(device_id=dev_id).first()
+    if existing and not _device_usable_by(existing, user):
+        suffix = f"-U{user.pk}" if user is not None else "-ANON"
+        dev_id = f"{dev_id[:128 - len(suffix)]}{suffix}"
+        existing = AuthorizedDevice.objects.filter(device_id=dev_id).first()
+        if existing and not _device_usable_by(existing, user):
+            existing = None
+    if not existing and mac_address and client_ip not in ("127.0.0.1", "::1", "localhost"):
+        mac_qs = AuthorizedDevice.objects.filter(mac_address__iexact=mac_address).exclude(
+            device_type=AuthorizedDevice.DeviceType.NETWORK_RULE
+        )
+        mac_qs = mac_qs.filter(user=user) if user is not None else mac_qs.filter(user__isnull=True)
+        existing = mac_qs.first()
+    return existing, dev_id
+
+
 def register_or_refresh_authorized_device(
     request: HttpRequest,
     user: Optional[User] = None,
@@ -613,8 +651,10 @@ def register_or_refresh_authorized_device(
 
     # 2. Check time-bound email expiry (unless force_approve is actively renewing it)
     email_expired, email_expires_at, exp_msg = _resolve_email_expiry_for_user(target_user, email)
+    existing, dev_id = _find_reusable_device(dev_id, mac_address, client_ip, target_user)
+
     if email_expired and not force_approve:
-        existing_exp = AuthorizedDevice.objects.filter(device_id=dev_id).first()
+        existing_exp = existing
         if existing_exp:
             return existing_exp, False, exp_msg
         dev_exp = AuthorizedDevice.objects.create(
@@ -643,10 +683,6 @@ def register_or_refresh_authorized_device(
             device_id=dev_id,
             device_name=ident["device_name"],
         )
-
-    existing = AuthorizedDevice.objects.filter(device_id=dev_id).first()
-    if not existing and mac_address and client_ip not in ("127.0.0.1", "::1", "localhost"):
-        existing = AuthorizedDevice.objects.filter(mac_address__iexact=mac_address).first()
 
     now = timezone.now()
     if existing:

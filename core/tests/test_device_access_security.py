@@ -14,8 +14,17 @@ from core.services import device_access_service
 User = get_user_model()
 
 
+# LAN neighbour table seen by the server (MACs are resolved server-side only, never from headers).
+LAN_ARP_TABLE = {'192.168.1.10': 'AA:BB:CC:11:22:33', '192.168.1.25': 'DD:EE:FF:44:55:66', '10.42.0.88': '12:34:56:78:9A:BC', '192.168.77.55': 'DE:AD:BE:EF:00:01', '192.168.10.44': 'AA:22:33:44:55:66', '192.168.50.77': 'AA:11:22:33:44:55'}
+
+
 class DeviceAndEmailAccessControlTests(TestCase):
     def setUp(self):
+        device_access_service._ARP_MAC_CACHE.clear()
+        arp = patch.object(device_access_service, "_lookup_neighbor_mac", side_effect=lambda ip: LAN_ARP_TABLE.get(ip, ""))
+        arp.start()
+        self.addCleanup(arp.stop)
+        self.addCleanup(device_access_service._ARP_MAC_CACHE.clear)
         device_access_service.update_security_access_config({
             "mode": "STANDARD",
             "require_email_approval": False,
@@ -39,12 +48,10 @@ class DeviceAndEmailAccessControlTests(TestCase):
         desktop_client = Client(
             HTTP_USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125.0",
             REMOTE_ADDR="192.168.1.10",
-            HTTP_X_DEVICE_MAC="AA:BB:CC:11:22:33",
         )
         mobile_client = Client(
             HTTP_USER_AGENT="Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile Safari/537.36",
             REMOTE_ADDR="192.168.1.25",
-            HTTP_X_DEVICE_MAC="DD:EE:FF:44:55:66",
         )
 
         resp1 = desktop_client.post(reverse("core:login"), {
@@ -101,7 +108,6 @@ class DeviceAndEmailAccessControlTests(TestCase):
         qr_mobile_client = Client(
             HTTP_USER_AGENT="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile",
             REMOTE_ADDR="10.42.0.88",
-            HTTP_X_DEVICE_MAC="12:34:56:78:9A:BC",
         )
         resp = qr_mobile_client.get(f"{reverse('core:mobile_companion')}?pair_token={pair_token}")
         self.assertEqual(resp.status_code, 200)
@@ -120,8 +126,7 @@ class DeviceAndEmailAccessControlTests(TestCase):
         """
         bad_client = Client(
             HTTP_USER_AGENT="Mozilla/5.0 (X11; Linux x86_64)",
-            REMOTE_ADDR="203.0.113.55",
-            HTTP_X_DEVICE_MAC="DE:AD:BE:EF:00:01",
+            REMOTE_ADDR="192.168.77.55",
         )
         bad_client.force_login(self.user)
 
@@ -149,9 +154,9 @@ class DeviceAndEmailAccessControlTests(TestCase):
         device_access_service.unblock_device_or_target("DE:AD:BE:EF:00:01")
         self.assertEqual(bad_client.get(reverse("core:api_stats")).status_code, 200)
 
-        device_access_service.block_device_or_network_target("203.0.113.55")
+        device_access_service.block_device_or_network_target("192.168.77.55")
         self.assertEqual(bad_client.get(reverse("core:api_stats")).status_code, 403)
-        device_access_service.unblock_device_or_target("203.0.113.55")
+        device_access_service.unblock_device_or_target("192.168.77.55")
         self.assertEqual(bad_client.get(reverse("core:api_stats")).status_code, 200)
 
     @patch("core.services.email_service.send_access_activated_email")
@@ -185,7 +190,6 @@ class DeviceAndEmailAccessControlTests(TestCase):
         op_client = Client(
             HTTP_USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
             REMOTE_ADDR="192.168.10.44",
-            HTTP_X_DEVICE_MAC="AA:22:33:44:55:66",
         )
         op_client.force_login(shift_user)
 
@@ -229,7 +233,6 @@ class DeviceAndEmailAccessControlTests(TestCase):
         new_client = Client(
             HTTP_USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
             REMOTE_ADDR="192.168.50.77",
-            HTTP_X_DEVICE_MAC="AA:11:22:33:44:55",
         )
 
         resp = new_client.post(reverse("core:signup"), {
@@ -297,3 +300,83 @@ class DeviceAndEmailAccessControlTests(TestCase):
         self.assertIsNotNone(pane)
         app = ITMSOperatorApp()
         self.assertTrue(hasattr(app, "action_tab_access"))
+
+
+class SpoofResistanceTests(TestCase):
+    """IP, MAC and device-ID values a client can forge must not defeat access rules."""
+
+    def setUp(self):
+        device_access_service.update_security_access_config({
+            "mode": "STANDARD",
+            "require_email_approval": False,
+            "max_devices_per_account": 4,
+            "default_duration_hours": 24,
+        })
+        device_access_service._ARP_MAC_CACHE.clear()
+        self.addCleanup(device_access_service._ARP_MAC_CACHE.clear)
+        self.alice = User.objects.create_user(username="alice", email="alice@x.test", password="pw-Alice-123!")
+        self.bob = User.objects.create_user(username="bob", email="bob@x.test", password="pw-Bob-123!")
+
+    def _ip(self, **meta):
+        from django.test import RequestFactory
+        from core.services.security_envelope import extract_client_ip
+        return extract_client_ip(RequestFactory().get("/", **meta))
+
+    def test_forwarded_for_ignored_from_untrusted_peer(self):
+        self.assertEqual(self._ip(REMOTE_ADDR="203.0.113.9", HTTP_X_FORWARDED_FOR="10.0.0.1"), "203.0.113.9")
+        self.assertEqual(self._ip(REMOTE_ADDR="203.0.113.9", HTTP_X_REAL_IP="10.0.0.1"), "203.0.113.9")
+
+    def test_behind_local_nginx_uses_real_ip_not_spoofed_first_hop(self):
+        # nginx: X-Real-IP $remote_addr; X-Forwarded-For $proxy_add_x_forwarded_for (appends)
+        self.assertEqual(
+            self._ip(REMOTE_ADDR="127.0.0.1", HTTP_X_REAL_IP="198.51.100.7", HTTP_X_FORWARDED_FOR="1.2.3.4, 198.51.100.7"),
+            "198.51.100.7",
+        )
+        self.assertEqual(self._ip(REMOTE_ADDR="127.0.0.1", HTTP_X_FORWARDED_FOR="1.2.3.4, 198.51.100.7"), "198.51.100.7")
+
+    def test_spoofed_forwarded_for_cannot_bypass_ip_block(self):
+        device_access_service.block_device_or_network_target("198.51.100.7")
+        c = Client(REMOTE_ADDR="127.0.0.1", HTTP_X_REAL_IP="198.51.100.7", HTTP_X_FORWARDED_FOR="8.8.8.8, 198.51.100.7")
+        c.force_login(self.alice)
+        self.assertEqual(c.get(reverse("core:api_stats")).status_code, 403)
+
+    def test_client_supplied_mac_header_is_ignored(self):
+        from django.test import RequestFactory
+        req = RequestFactory().get("/?device_mac=AA:AA:AA:AA:AA:AA", REMOTE_ADDR="203.0.113.9", HTTP_X_DEVICE_MAC="AA:AA:AA:AA:AA:AA")
+        self.assertEqual(device_access_service.resolve_client_mac_address("203.0.113.9", request=req), "")
+
+    def test_spoofed_device_id_cannot_hijack_another_users_device(self):
+        victim = AuthorizedDevice.objects.create(
+            device_id="DSK-VICTIM", user=self.alice, status=AuthorizedDevice.Status.APPROVED,
+            ip_address="198.51.100.20", approved_at=timezone.now(),
+        )
+        c = Client(REMOTE_ADDR="203.0.113.50", HTTP_X_DEVICE_ID="DSK-VICTIM")
+        c.force_login(self.bob)
+        self.assertEqual(c.get(reverse("core:api_stats")).status_code, 200)
+
+        victim.refresh_from_db()
+        self.assertEqual(victim.user, self.alice)
+        self.assertEqual(victim.ip_address, "198.51.100.20")  # not overwritten by bob
+        bob_dev = AuthorizedDevice.objects.get(user=self.bob)
+        self.assertEqual(bob_dev.device_id, f"DSK-VICTIM-U{self.bob.pk}")
+
+    def test_spoofed_device_id_does_not_inherit_approval_past_device_limit(self):
+        device_access_service.update_security_access_config({"require_email_approval": True, "max_devices_per_account": 1})
+        AuthorizedDevice.objects.create(device_id="DSK-ALICE", user=self.alice, status=AuthorizedDevice.Status.APPROVED)
+        AuthorizedDevice.objects.create(device_id="DSK-BOB-1", user=self.bob, status=AuthorizedDevice.Status.APPROVED)
+        c = Client(REMOTE_ADDR="203.0.113.51", HTTP_X_DEVICE_ID="DSK-ALICE")
+        c.force_login(self.bob)
+        self.assertEqual(c.get(reverse("core:api_stats")).status_code, 403)
+        self.assertEqual(
+            AuthorizedDevice.objects.get(device_id=f"DSK-ALICE-U{self.bob.pk}").status,
+            AuthorizedDevice.Status.PENDING,
+        )
+
+    def test_own_device_id_still_reused(self):
+        dev = AuthorizedDevice.objects.create(device_id="MOB-PHONE1", user=self.alice, status=AuthorizedDevice.Status.APPROVED)
+        c = Client(REMOTE_ADDR="203.0.113.52")
+        c.force_login(self.alice)
+        self.assertEqual(c.get(reverse("core:api_stats") + "?device_id=MOB-PHONE1").status_code, 200)
+        self.assertEqual(AuthorizedDevice.objects.filter(user=self.alice).count(), 1)
+        dev.refresh_from_db()
+        self.assertEqual(dev.ip_address, "203.0.113.52")

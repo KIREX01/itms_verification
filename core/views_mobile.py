@@ -30,11 +30,9 @@ logger = logging.getLogger(__name__)
 
 
 def _get_client_ip(request: HttpRequest) -> str:
-    """Helper to extract real client IP address."""
-    x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-    if x_forwarded_for:
-        return x_forwarded_for.split(",")[0].strip()
-    return request.META.get("REMOTE_ADDR", "127.0.0.1")
+    """Helper to extract real client IP address (trusted-proxy aware)."""
+    from core.services.security_envelope import extract_client_ip
+    return extract_client_ip(request)
 
 
 @require_GET

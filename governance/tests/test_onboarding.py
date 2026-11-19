@@ -23,7 +23,7 @@ class OnboardingFlowTests(TestCase):
 
     def _request(self, **over):
         data = dict(full_name="Akena Eric", email="eric.private@gmail.com", requested_role=Role.TEAM_LEADER,
-                    bond_code="AGM", company_email="e.akena@itms-ug.com")
+                    bond_code="AGM", company_email="tl.example@itms-ug.com")
         data.update(over)
         return onboarding.submit_request(**data)
 
@@ -54,7 +54,7 @@ class OnboardingFlowTests(TestCase):
         m = BondMembership.objects.get(user=user)
         self.assertEqual((m.bond_code, m.role, m.status), ("AGM", Role.TEAM_LEADER, "ACTIVE"))
         link = CompanyEmailLink.objects.get(user=user)
-        self.assertEqual((link.email, link.status, link.verified_via), ("e.akena@itms-ug.com", "VERIFIED", "ADMIN_GRANT"))
+        self.assertEqual((link.email, link.status, link.verified_via), ("tl.example@itms-ug.com", "VERIFIED", "ADMIN_GRANT"))
         req.refresh_from_db()
         self.assertEqual(req.status, AccessRequest.Status.USED)
         self.assertEqual(req.created_user, user)
@@ -63,7 +63,7 @@ class OnboardingFlowTests(TestCase):
             onboarding.redeem_invite(token, code, "eric_again", "Strong-pass-9", "Strong-pass-9")
 
     def test_signup_with_company_email_is_code_verified(self, *_):
-        req = self._request(email="e.akena@itms-ug.com")
+        req = self._request(email="tl.example@itms-ug.com")
         _, token, code = onboarding.grant(req, self.admin)
         user = onboarding.redeem_invite(token, code, "eric2", "Strong-pass-9", "Strong-pass-9")
         self.assertEqual(CompanyEmailLink.objects.get(user=user).verified_via, "SIGNUP_CODE")

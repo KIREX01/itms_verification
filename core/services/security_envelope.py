@@ -29,7 +29,7 @@ class OperatorRequestEnvelope:
     username: str
 
     # 2. ITMS Identity & Proof of Authentication
-    itms_email: str             # e.g., "e.akena@itms-ug.com"
+    itms_email: str             # e.g., "tl.example@itms-ug.com"
     itms_user_uuid: str         # Extracted from official ITMS session cookie
     itms_auth_status: str       # "ACTIVE", "EXPIRED", "UNLINKED", "ANONYMOUS"
 

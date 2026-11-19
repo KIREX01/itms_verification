@@ -234,6 +234,29 @@ def _generate_dynamic_fallback(
     return False
 
 
+# SHA-256 of the public keys of TLS key pairs that were once committed to the (now public) repository:
+# cert.key (v1.0.8, Oct 2026) and the old embedded fallback key in this module. Installs still using
+# either are regenerated automatically - their private keys are public knowledge.
+LEAKED_PUBLIC_KEY_SHA256 = frozenset({
+    "c4661ddfa671e008ecad2ea5731129a8d27e5a6c2228b8c6baf8f5c75e09b7a0",
+    "4c16a5c7dfee237006c29ae056209fb2768c3c812f65a65b08147a9f91499be3",
+})
+
+
+def key_is_leaked(key_file: Path) -> bool:
+    """True if the private key at key_file is one of the publicly exposed keys."""
+    try:
+        import hashlib
+        from cryptography.hazmat.primitives import serialization
+
+        key = serialization.load_pem_private_key(Path(key_file).read_bytes(), password=None)
+        pub = key.public_key().public_bytes(serialization.Encoding.DER,
+                                            serialization.PublicFormat.SubjectPublicKeyInfo)
+        return hashlib.sha256(pub).hexdigest() in LEAKED_PUBLIC_KEY_SHA256
+    except Exception:
+        return False
+
+
 def ensure_ssl_certificates(
     cert_path: Optional[Path] = None,
     key_path: Optional[Path] = None,
@@ -253,12 +276,18 @@ def ensure_ssl_certificates(
 
     def _sync_root_files(c: Path, k: Path):
         try:
-            if not ROOT_CERT_FILE.exists() or ROOT_CERT_FILE.stat().st_size < 100:
+            root_leaked = ROOT_KEY_FILE.exists() and key_is_leaked(ROOT_KEY_FILE)
+            if root_leaked or not ROOT_CERT_FILE.exists() or ROOT_CERT_FILE.stat().st_size < 100:
                 shutil.copyfile(c, ROOT_CERT_FILE)
-            if not ROOT_KEY_FILE.exists() or ROOT_KEY_FILE.stat().st_size < 100:
+            if root_leaked or not ROOT_KEY_FILE.exists() or ROOT_KEY_FILE.stat().st_size < 100:
                 shutil.copyfile(k, ROOT_KEY_FILE)
         except Exception as copy_exc:
             logger.debug("[SSL] Could not sync root cert files: %s", copy_exc)
+
+    if key_file.exists() and key_is_leaked(key_file):
+        logger.warning("[SSL] This install uses a TLS key that was published in the repository history; "
+                       "generating a new certificate.")
+        force_regenerate = True
 
     if not force_regenerate and cert_file.exists() and key_file.exists():
         if cert_file.stat().st_size > 100 and key_file.stat().st_size > 100:

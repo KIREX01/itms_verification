@@ -4,7 +4,7 @@ Unit tests for the self-signed SSL/TLS certificate service and HTTPS mobile pair
 import ssl
 from pathlib import Path
 import pytest
-from django.test import Client
+from django.test import Client, TestCase
 from django.urls import reverse
 
 from core.services import network_service, ssl_service
@@ -91,3 +91,31 @@ class TestSslService:
         assert "/mobile/" in data["primary_url"]
         assert "https_primary_url" in data
         assert "http_primary_url" in data
+
+
+class LeakedKeyRotationTests(TestCase):
+    """Keys once committed to the public repository are never reused."""
+
+    def test_leaked_key_is_detected_and_regenerated(self):
+        import hashlib
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from core.services import ssl_service
+
+        tmp = Path(tempfile.mkdtemp())
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        key_file, cert_file = tmp / "key.pem", tmp / "cert.pem"
+        key_file.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL,
+                                               serialization.NoEncryption()))
+        cert_file.write_text("x" * 200)
+        pub = key.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+        leaked = frozenset({hashlib.sha256(pub).hexdigest()})
+        with patch.object(ssl_service, "LEAKED_PUBLIC_KEY_SHA256", leaked), \
+             patch.object(ssl_service, "ROOT_KEY_FILE", tmp / "root.key"), \
+             patch.object(ssl_service, "ROOT_CERT_FILE", tmp / "root.crt"):
+            self.assertTrue(ssl_service.key_is_leaked(key_file))
+            ssl_service.ensure_ssl_certificates(cert_path=cert_file, key_path=key_file)
+            self.assertFalse(ssl_service.key_is_leaked(key_file))

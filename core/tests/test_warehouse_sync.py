@@ -76,7 +76,7 @@ class WarehouseSyncTestCase(TestCase):
         )
         self.session_obj = OperatorITMSSession.objects.create(
             user=self.user,
-            itms_email="e.akena@itms-ug.com",
+            itms_email="tl.example@itms-ug.com",
             is_authenticated=True,
             cookies={"_identity-frontend": "dummy_cookie_val"},
             active_bond_code="AGM",

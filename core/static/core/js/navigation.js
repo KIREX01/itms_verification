@@ -12,7 +12,7 @@
  * 8: History
  */
 
-let activeNavTab = typeof window.activeNavTab !== "undefined" ? window.activeNavTab : 1;
+var activeNavTab = typeof window.activeNavTab !== "undefined" ? window.activeNavTab : 1;
 window.activeNavTab = activeNavTab;
 
 const NAV_TAB_NAMES = {

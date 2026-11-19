@@ -220,12 +220,12 @@ async function disconnectItms() {
     }
 }
 
-let itmsCurrentSubview = "ORDERS";
-let itmsExplorerSource = "live";
-let itmsExplorerOrders = [];
-let itmsExplorerPage = 1;
-let itmsExplorerSearch = "";
-let selectedItmsOrder = null;
+var itmsCurrentSubview = "ORDERS";
+var itmsExplorerSource = "live";
+var itmsExplorerOrders = [];
+var itmsExplorerPage = 1;
+var itmsExplorerSearch = "";
+var selectedItmsOrder = null;
 
 function switchItmsSubview(subview) {
     itmsCurrentSubview = subview;

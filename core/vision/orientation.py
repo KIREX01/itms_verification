@@ -102,7 +102,8 @@ def _detect_central_taillight(hsv: np.ndarray) -> tuple[bool, float]:
     return found, min(0.98, best_conf)
 
 
-def classify_orientation(image: np.ndarray) -> OrientationResult:
+def classify_orientation_heuristic(image: np.ndarray) -> OrientationResult:
+    """Deterministic OpenCV HSV taillight vs. headlight/grille physics heuristic."""
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
     # 1. First check for a motorcycle central taillight cue
@@ -136,3 +137,70 @@ def classify_orientation(image: np.ndarray) -> OrientationResult:
         orientation = "UNKNOWN"
 
     return OrientationResult(orientation, round(confidence, 3), round(front_score, 4), round(rear_score, 4))
+
+
+_ORIENTATION_MODEL_CACHE = None
+_ORIENTATION_MODEL_PROBED = False
+
+
+def _get_orientation_neural_model():
+    """Loads models/orientation_classifier.pt or .onnx if available on disk."""
+    global _ORIENTATION_MODEL_CACHE, _ORIENTATION_MODEL_PROBED
+    if _ORIENTATION_MODEL_PROBED:
+        return _ORIENTATION_MODEL_CACHE
+
+    _ORIENTATION_MODEL_PROBED = True
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent.parent
+    for fname in ("orientation_classifier.pt", "orientation_classifier.onnx"):
+        candidate = root / "models" / fname
+        if candidate.is_file():
+            try:
+                from ultralytics import YOLO
+                _ORIENTATION_MODEL_CACHE = YOLO(str(candidate))
+                return _ORIENTATION_MODEL_CACHE
+            except Exception:
+                pass
+    return None
+
+
+def classify_orientation(image: np.ndarray) -> OrientationResult:
+    """
+    Hybrid Neural + Physics Orientation Classifier.
+    Uses the trained YOLOv11n-cls orientation model when present on disk and confident,
+    blending or falling back to the vehicle-agnostic HSV taillight/headlight heuristic.
+    """
+    hsv_res = classify_orientation_heuristic(image)
+    model = _get_orientation_neural_model()
+    if model is None:
+        return hsv_res
+
+    try:
+        preds = model.predict(image, imgsz=224, verbose=False)
+        if preds and len(preds) > 0 and hasattr(preds[0], "probs") and preds[0].probs is not None:
+            probs = preds[0].probs
+            names = getattr(model, "names", {0: "FRONT", 1: "REAR"})
+            data = probs.data.tolist()
+            front_prob = 0.5
+            rear_prob = 0.5
+            for idx, score in enumerate(data):
+                lbl = str(names.get(idx, "")).upper()
+                if "FRONT" in lbl:
+                    front_prob = float(score)
+                elif "REAR" in lbl:
+                    rear_prob = float(score)
+
+            top_orient = "FRONT" if front_prob >= rear_prob else "REAR"
+            top_conf = max(front_prob, rear_prob)
+            if top_conf >= 0.72:
+                return OrientationResult(
+                    orientation=top_orient,
+                    confidence=round(top_conf, 3),
+                    front_score=round(front_prob, 4),
+                    rear_score=round(rear_prob, 4),
+                )
+    except Exception:
+        pass
+
+    return hsv_res

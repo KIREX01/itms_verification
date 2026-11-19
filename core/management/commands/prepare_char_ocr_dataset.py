@@ -293,8 +293,8 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             "--output-dir",
-            default="training/datasets/dataset_char_ocr",
-            help="Destination directory for the YOLO character OCR dataset (default: training/datasets/dataset_char_ocr).",
+            default="training/char_detector/dataset_char_ocr",
+            help="Destination directory for the YOLO character OCR dataset (default: training/char_detector/dataset_char_ocr).",
         )
         parser.add_argument(
             "--split",

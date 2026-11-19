@@ -22,6 +22,7 @@
             <a href="{% url 'backoffice:devices' %}" class="{% if active == 'devices' %}active{% endif %}">Devices</a>
             <a href="{% url 'backoffice:reports' %}" class="{% if active == 'reports' %}active{% endif %}">Reports</a>
             <a href="{% url 'backoffice:audit' %}" class="{% if active == 'audit' %}active{% endif %}">Audit log</a>
+            <a href="{% url 'backoffice:installs' %}" class="{% if active == 'installs' %}active{% endif %}">Installs</a>
             <a href="{% url 'backoffice:technical' %}" class="{% if active == 'technical' %}active{% endif %}">Technical</a>
         </nav>
         <div class="bo-side-foot">
@@ -29,6 +30,7 @@
         </div>
     </aside>
     <main class="bo-main">
+        {% if managed_edge %}<div class="bo-msg info">🔒 Read-only: this install is managed by {{ enrollment.central_url }}. Make changes there.</div>{% endif %}
         {% for m in messages %}<div class="bo-msg {{ m.tags }}">{{ m }}</div>{% endfor %}
         {% block content %}{% endblock %}
     </main>

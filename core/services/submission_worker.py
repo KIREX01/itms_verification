@@ -9,6 +9,7 @@ the operator from taking over manually.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, List, Optional
 
@@ -18,6 +19,8 @@ from django.utils import timezone
 
 from core.models import EvidenceImage, InstallationOrder, SubmissionAuditLog, VehicleInstallationPair
 from core.services import itms_client, itms_mock
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -148,6 +151,18 @@ def submit_pair(
         pair.verification_status = VehicleInstallationPair.VerificationStatus.FAILED
         pair.save(update_fields=["verification_status"])
         return SubmissionOutcome(pair_id=pair.id, success=False, error=err_msg, backend=backend_mode, dry_run=is_dry_run)
+
+    # Central policy gate: an enrolled install that hasn't reached the central server within the
+    # offline grace period keeps working locally but may not submit to ITMS.
+    try:
+        from governance.services.policy_sync import is_policy_stale
+        if backend_mode != "mock" and is_policy_stale():
+            stale_msg = ("This install hasn't synced with the central server within the offline grace period. "
+                         "Reconnect to the network; submissions resume after the next successful check-in.")
+            _log(pair, SubmissionAuditLog.Action.SUBMIT, SubmissionAuditLog.ResultStatus.INFO, stale_msg, operator=effective_operator)
+            return SubmissionOutcome(pair_id=pair.id, success=False, error=stale_msg, backend=backend_mode, dry_run=is_dry_run)
+    except Exception as exc:
+        logger.debug("Policy staleness check skipped: %s", exc)
 
     # Quality gate: an OPEN Quality Inspector flag on the pair, its order or its kit blocks submission.
     from core.services.quality_flag_service import submission_block_message

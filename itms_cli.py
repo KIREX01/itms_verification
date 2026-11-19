@@ -439,6 +439,14 @@ def run_prune(args=None):
     call_command("prune_vault", days=days)
 
 
+def run_enroll(args=None):
+    """Enrolls this install with the central backoffice: itms enroll <central_url> <code> | --status | --sync-now"""
+    import django
+    django.setup()
+    from django.core.management import call_command
+    call_command("itms_enroll", *(args or []))
+
+
 def run_audit(args=None):
     """Verifies SHA-256 cryptographic hashes of all vaulted photos."""
     print("[*] Running cryptographic SHA-256 vault integrity audit...")
@@ -792,6 +800,10 @@ def main():
 
     if first in ("prune", "prune-vault"):
         run_prune(args[1:])
+        return
+
+    if first in ("enroll",):
+        run_enroll(args[1:])
         return
 
     if first in ("audit", "verify-vault"):

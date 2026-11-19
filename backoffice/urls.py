@@ -1,6 +1,6 @@
 from django.urls import path
 
-from backoffice import views
+from backoffice import sync_api, views
 
 app_name = "backoffice"
 
@@ -16,4 +16,8 @@ urlpatterns = [
     path("reports/", views.reports, name="reports"),
     path("audit/", views.audit_log, name="audit"),
     path("technical/", views.technical, name="technical"),
+    path("installs/", views.installs, name="installs"),
+    # Machine-to-machine policy sync (HMAC-authenticated; central server only)
+    path("api/v1/installs/enroll/", sync_api.install_enroll, name="install_enroll"),
+    path("api/v1/installs/heartbeat/", sync_api.install_heartbeat, name="install_heartbeat"),
 ]

@@ -51,6 +51,7 @@ from textual.widgets import (
     TabPane,
 )
 
+import logging
 import time
 from core.tui.dashboard_pane import DashboardPane
 from core.tui.inspectors import InspectorPane
@@ -66,6 +67,8 @@ from core.tui.auth_screens import LandingAuthScreen
 from core.tui.lock_screen import TUIMasterLockScreen, TUIExpiredLockScreen
 from core.tui.commands import ITMSCommandProvider, ITMSCommandPalette
 from core.services import auth_service
+
+logger = logging.getLogger(__name__)
 
 class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActionsMixin, App):
     TITLE = "ITMS CLOSING SYSTEM"
@@ -287,6 +290,13 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
                 order_daemon.start()
             except Exception as o_err:
                 logger.debug("Could not start ShiftOrderSyncDaemon in TUI: %s", o_err)
+
+        # Central policy check-in (enrolled installs): bans, roles and kill switches arrive here.
+        try:
+            from governance.services.policy_sync import start_policy_sync_daemon
+            start_policy_sync_daemon()
+        except Exception as p_err:
+            logger.debug("Could not start policy sync daemon in TUI: %s", p_err)
 
         # Periodically refresh dashboard and outbox monitor every 15s
         self.set_interval(15.0, self._auto_refresh_dashboard_and_outbox)

@@ -41,8 +41,19 @@ def admin_required(view):
             return render(request, "governance/no_access.html",
                           {"message": "The backoffice is for the administrator only.", "code": "ADMIN_REQUIRED"},
                           status=403)
+        if request.method == "POST" and _is_managed_edge():
+            messages.error(request, "This install is managed by the central server. Make changes in the central "
+                                    "backoffice; they arrive here on the next check-in.")
+            return redirect(request.path)
         return view(request, *args, **kwargs)
     return wrapper
+
+
+def _is_managed_edge() -> bool:
+    if getattr(settings, "DEPLOYMENT_ROLE", "edge") == "central":
+        return False
+    from governance.services.policy_sync import is_enrolled
+    return is_enrolled()
 
 
 def _step_up_ok(request: HttpRequest) -> bool:
@@ -61,7 +72,10 @@ def _ctx(request, active, **extra):
         open_flags = QualityFlag.objects.filter(status=QualityFlag.Status.OPEN).count()
     except Exception:
         open_flags = 0
+    from governance.services.policy_sync import load_enrollment
     base = {
+        "managed_edge": _is_managed_edge(),
+        "enrollment": load_enrollment() if _is_managed_edge() else {},
         "active": active,
         "nav_pending_requests": pending,
         "nav_open_flags": open_flags,
@@ -470,3 +484,52 @@ def technical(request: HttpRequest) -> HttpResponse:
         burned=BurnedIdentity.objects.count(),
         governance_enforced=authz.enforcement_enabled(),
     ))
+
+
+# ---------------------------------------------------------------------------
+# Installs (central policy sync)
+# ---------------------------------------------------------------------------
+@admin_required
+@require_http_methods(["GET", "POST"])
+def installs(request: HttpRequest) -> HttpResponse:
+    from governance.models import InstallRegistration
+    from governance.services import policy_sync
+
+    new_code = None
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "create":
+            inst, code = policy_sync.create_install(request.POST.get("name", ""), request.user, request=request)
+            new_code = {"name": inst.name, "code": code}
+            messages.success(request, f"Install '{inst.name}' created. Enroll it within 24 hours.")
+        else:
+            if not _step_up_ok(request):
+                return redirect("backoffice:installs")
+            inst = get_object_or_404(InstallRegistration, pk=request.POST.get("install_pk"))
+            reason = request.POST.get("reason", "").strip()
+            before = {"status": inst.status, "locked": inst.locked}
+            if action == "lock":
+                inst.locked, inst.lock_reason = True, reason or "Locked by administrator"
+            elif action == "unlock":
+                inst.locked, inst.lock_reason = False, ""
+            elif action == "revoke":
+                inst.status, inst.secret = InstallRegistration.Status.REVOKED, ""
+            inst.save()
+            audit.record(request.user, f"install.{action}", target_type="install", target_id=inst.install_id,
+                         target_label=inst.name, before=before, after={"status": inst.status, "locked": inst.locked},
+                         reason=reason, request=request)
+            messages.success(request, f"{inst.name}: {action} done. It takes effect on the next check-in.")
+        if new_code is None:
+            return redirect("backoffice:installs")
+
+    now = timezone.now()
+    rows = []
+    for inst in InstallRegistration.objects.all():
+        age = (now - inst.last_seen_at).total_seconds() if inst.last_seen_at else None
+        rows.append({"inst": inst, "online": age is not None and age < 180,
+                     "behind": inst.status == "ACTIVE" and inst.policy_version_acked < policy_sync.policy_version()})
+    return render(request, "backoffice/installs.html", _ctx(
+        request, "installs", rows=rows, new_code=new_code, policy_version=policy_sync.policy_version(),
+        central_url=request.build_absolute_uri("/").rstrip("/"),
+    ))
+

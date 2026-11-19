@@ -285,3 +285,49 @@ class AccessRequest(models.Model):
 
     def __str__(self) -> str:
         return f"{self.email} → {self.get_requested_role_display()} @ {self.bond_code} [{self.status}]"
+
+
+class PolicyState(models.Model):
+    """Singleton: monotonically increasing policy version, bumped on every governance change.
+    Installs compare it on each check-in to know when they need a fresh snapshot."""
+
+    version = models.BigIntegerField(default=1)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def current(cls) -> "PolicyState":
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+
+class InstallRegistration(models.Model):
+    """(Central) A laptop / workstation install that pulls policy from this server."""
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Waiting for enrollment"
+        ACTIVE = "ACTIVE", "Active"
+        REVOKED = "REVOKED", "Revoked"
+
+    name = models.CharField(max_length=120)
+    install_id = models.CharField(max_length=64, unique=True)
+    secret = models.CharField(max_length=128, blank=True, default="")
+    enrollment_code_hash = models.CharField(max_length=64, blank=True, default="")
+    enrollment_expires_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING, db_index=True)
+    locked = models.BooleanField(default=False, help_text="Remote lock: install shows maintenance until unlocked.")
+    lock_reason = models.CharField(max_length=255, blank=True, default="")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                   related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    enrolled_at = models.DateTimeField(null=True, blank=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    last_ip = models.CharField(max_length=64, blank=True, default="")
+    app_version = models.CharField(max_length=32, blank=True, default="")
+    policy_version_acked = models.BigIntegerField(default=0)
+    health = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return f"{self.name} [{self.status}]"

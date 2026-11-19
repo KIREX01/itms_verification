@@ -45,6 +45,7 @@ PUBLIC_PREFIXES = (
     "/static/",
     "/favicon.ico",
     "/admin/",
+    "/backoffice/api/v1/installs/",  # install enrollment / check-in (HMAC-authenticated)
 )
 
 # Paths always reachable even when a device/IP/MAC is blocked or pending approval

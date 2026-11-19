@@ -223,6 +223,14 @@ class Command(BaseCommand):
             except Exception as o_err:
                 logger.debug("Could not start ShiftOrderSyncDaemon in Web: %s", o_err)
 
+        # Central policy check-in (enrolled edge installs only; no-op on the central server).
+        if is_reloader_child or is_noreload:
+            try:
+                from governance.services.policy_sync import start_policy_sync_daemon
+                start_policy_sync_daemon()
+            except Exception as p_err:
+                logger.debug("Could not start policy sync daemon: %s", p_err)
+
         # 6. Start Primary WSGI Server (Desktop & Mobile HTTPS)
         def _serve():
             if ssl_context:

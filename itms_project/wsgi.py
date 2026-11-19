@@ -15,3 +15,9 @@ try:
         kit_provisioning_service.MorningKitSyncDaemon.get_instance().start()
 except Exception:
     pass
+
+try:
+    from governance.services.policy_sync import start_policy_sync_daemon
+    start_policy_sync_daemon()
+except Exception:
+    pass

@@ -1,0 +1,48 @@
+{% extends "backoffice/base.html" %}
+{% block title %}Installs{% endblock %}
+{% block content %}
+<div class="bo-head"><div><h1>Installs</h1><p>Laptops and workstations that take their accounts, roles and switches from this server. Policy version {{ policy_version }}.</p></div></div>
+
+{% if new_code %}
+<div class="bo-card" style="border-color:var(--bo-accent);">
+    <h2>Enroll "{{ new_code.name }}"</h2>
+    <p>On that machine, run this once within 24 hours. The code works only once.</p>
+    <pre style="background:#0b1220; padding:12px; border-radius:8px; overflow-x:auto;">itms enroll {{ central_url }} {{ new_code.code }}</pre>
+    <p class="bo-muted" style="margin-bottom:0;">Or: <code>python manage.py itms_enroll {{ central_url }} {{ new_code.code }}</code></p>
+</div>
+{% endif %}
+
+{% if deployment_role == "central" %}
+<div class="bo-card">
+    <form method="post" class="bo-inline">{% csrf_token %}<input type="hidden" name="action" value="create">
+        <div class="bo-field" style="min-width:260px;"><label>New install name</label><input type="text" name="name" required placeholder="e.g. AGM dispatch laptop"></div>
+        <button class="bo-btn primary">Create enrollment code</button>
+    </form>
+</div>
+{% else %}
+<div class="bo-msg info">Installs are managed from the central server (DEPLOYMENT_ROLE=central).</div>
+{% endif %}
+
+<div class="bo-card bo-scroll"><table class="bo-table">
+    <tr><th>Install</th><th>Status</th><th>Last check-in</th><th>Version</th><th>Policy</th><th>Health</th><th></th></tr>
+    {% for r in rows %}
+    <tr>
+        <td><strong>{{ r.inst.name }}</strong><div class="bo-muted">{{ r.inst.last_ip|default:"—" }}</div></td>
+        <td><span class="pill {% if r.inst.status == 'ACTIVE' %}ok{% elif r.inst.status == 'PENDING' %}warn{% else %}danger{% endif %}">{{ r.inst.get_status_display }}</span>
+            {% if r.inst.locked %}<span class="pill danger">Locked</span>{% endif %}</td>
+        <td>{% if r.inst.last_seen_at %}<span class="pill {% if r.online %}ok{% else %}warn{% endif %}">{{ r.online|yesno:"online,offline" }}</span> {{ r.inst.last_seen_at|timesince }} ago{% else %}never{% endif %}</td>
+        <td>{{ r.inst.app_version|default:"—" }}</td>
+        <td>{% if r.behind %}<span class="pill warn">v{{ r.inst.policy_version_acked }} (behind)</span>{% elif r.inst.status == 'ACTIVE' %}<span class="pill ok">current</span>{% else %}—{% endif %}</td>
+        <td class="bo-muted">{% for k, v in r.inst.health.items %}{{ k }}: {{ v }}{% if not forloop.last %} · {% endif %}{% empty %}—{% endfor %}</td>
+        <td>{% if r.inst.status == 'ACTIVE' %}
+            <details class="bo-confirm"><summary>Manage</summary>
+            <form method="post" class="bo-inline" style="margin-top:8px;">{% csrf_token %}<input type="hidden" name="install_pk" value="{{ r.inst.pk }}">
+                {% include "backoffice/_confirm.html" %}
+                {% if r.inst.locked %}<button class="bo-btn ok small" name="action" value="unlock">Unlock</button>
+                {% else %}<button class="bo-btn danger small" name="action" value="lock">Lock now</button>{% endif %}
+                <button class="bo-btn danger small" name="action" value="revoke">Revoke</button>
+            </form></details>{% endif %}</td>
+    </tr>
+    {% empty %}<tr><td colspan="7" class="bo-muted">No installs enrolled yet.</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

@@ -20,6 +20,8 @@ MAINTENANCE_ALLOWED_PREFIXES = (
     "/favicon.ico",
     "/login/",
     "/logout/",
+    # Installs must keep checking in during central maintenance (policy, locks, unlocks).
+    "/backoffice/api/v1/installs/",
 )
 
 

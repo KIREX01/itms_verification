@@ -40,3 +40,23 @@ def _ensure_account_state(sender, instance, created, **kwargs):
     if created:
         from governance.models import AccountState
         AccountState.objects.get_or_create(user=instance)
+
+
+# --- Policy version: any change installs must learn about bumps the version -------------
+def _bump(*args, **kwargs):
+    from governance.services.policy_sync import bump_policy_version
+    bump_policy_version()
+
+
+def _connect_policy_signals():
+    from django.contrib.auth import get_user_model
+    from django.db.models.signals import post_delete
+    from governance import models as gm
+
+    for model in (gm.AccountState, gm.BondMembership, gm.CompanyEmailLink, gm.FeatureFlag,
+                  gm.BurnedIdentity, gm.ItmsWarehouseAccess, get_user_model()):
+        post_save.connect(_bump, sender=model, dispatch_uid=f"policy-bump-save-{model.__name__}")
+        post_delete.connect(_bump, sender=model, dispatch_uid=f"policy-bump-del-{model.__name__}")
+
+
+_connect_policy_signals()

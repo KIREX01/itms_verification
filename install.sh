@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 #
 # 1-Click Shell Installer for ITMS Verification Copilot (macOS / Linux)
-# Usage: curl -fsSL https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/KIREX01/itms_verification/release/linux/install.sh | bash
 #
 
 set -e
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/share/itms-verification}"
 REPO_URL="https://github.com/KIREX01/itms_verification.git"
-ZIP_URL="https://github.com/KIREX01/itms_verification/archive/refs/heads/main.zip"
+# Installs and updates follow the Linux release branch (finished releases only, never main).
+RELEASE_BRANCH="release/linux"
+ZIP_URL="https://github.com/KIREX01/itms_verification/archive/refs/heads/release/linux.zip"
 
 echo "===================================================================="
 echo "   ITMS VERIFICATION COPILOT - 1-CLICK INSTALLER (macOS / Linux)"
@@ -22,10 +24,11 @@ mkdir -p "$INSTALL_DIR"
 if [ -d "$INSTALL_DIR/.git" ]; then
     echo "[*] Existing git repository detected. Updating..."
     cd "$INSTALL_DIR"
-    git pull --rebase origin main || true
+    git fetch origin "$RELEASE_BRANCH" || true
+    git checkout -f -B "$RELEASE_BRANCH" "origin/$RELEASE_BRANCH" || true
 elif command -v git >/dev/null 2>&1; then
     echo "[>] Cloning repository via git..."
-    git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+    git clone --depth 1 --branch "$RELEASE_BRANCH" "$REPO_URL" "$INSTALL_DIR"
 else
     echo "[>] Git not found. Downloading release archive..."
     TEMP_ZIP="/tmp/itms_verification_$$.zip"

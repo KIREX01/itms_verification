@@ -7,7 +7,7 @@
     dependencies (requirements.txt), provisions AI models and database,
     creates Desktop and Start Menu shortcuts, and launches the Web Operator Console.
 .EXAMPLE
-    Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process; irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.ps1 | iex
+    Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process; irm https://raw.githubusercontent.com/KIREX01/itms_verification/release/windows/install.ps1 | iex
 #>
 
 [CmdletBinding()]
@@ -30,7 +30,9 @@ Write-Host "====================================================================
 Write-Host ""
 
 $repoUrl = "https://github.com/KIREX01/itms_verification.git"
-$zipUrl = "https://github.com/KIREX01/itms_verification/archive/refs/heads/main.zip"
+# Installs and updates follow the Windows release branch (finished releases only, never main).
+$releaseBranch = "release/windows"
+$zipUrl = "https://github.com/KIREX01/itms_verification/archive/refs/heads/release/windows.zip"
 
 Write-Host "[>] Target Installation Directory:" -ForegroundColor Gray
 Write-Host "    $InstallDir" -ForegroundColor White
@@ -44,7 +46,9 @@ if (Test-Path "$InstallDir") {
         Write-Host "[*] Existing installation detected. Updating via git pull..." -ForegroundColor Yellow
         Push-Location "$InstallDir"
         try {
-            git pull --rebase origin main
+            git fetch origin $releaseBranch
+            # Move onto the release branch (older installs tracked main). Operator data is untracked and kept.
+            git checkout -f -B $releaseBranch "origin/$releaseBranch"
             Write-Host "[+] Updated codebase to latest version." -ForegroundColor Green
         } catch {
             Write-Warning "Failed to git pull. Continuing with existing files."
@@ -67,7 +71,7 @@ if (-not (Test-Path "$InstallDir\requirements.txt")) {
 
     if ($hasGit) {
         Write-Host "[>] Git detected on system. Cloning official repository..." -ForegroundColor Cyan
-        git clone --depth 1 $repoUrl "$InstallDir"
+        git clone --depth 1 --branch $releaseBranch $repoUrl "$InstallDir"
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "Git clone failed. Falling back to direct ZIP download..."
             $hasGit = $null

@@ -11,7 +11,7 @@ Django/SQLite/PostgreSQL-backed computer vision verification pipeline that inges
 ### Windows (PowerShell)
 Open PowerShell and run:
 ```powershell
-Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process; irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.ps1 | iex
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process; irm https://raw.githubusercontent.com/KIREX01/itms_verification/release/windows/install.ps1 | iex
 ```
 * Installs to `%LOCALAPPDATA%\Programs\ITMS-Verification` (no admin rights needed)
 * Adds global system command `itms` (open Web UI) and `itms --tui` (open Terminal UI)
@@ -22,7 +22,7 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process; irm https://raw.gith
 
 ### macOS / Linux (Terminal)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KIREX01/itms_verification/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/KIREX01/itms_verification/release/linux/install.sh | bash
 ```
 * Installs to `~/.local/share/itms-verification`
 * Registers global `itms` command in `~/.local/bin` and `/usr/local/bin`
@@ -51,13 +51,13 @@ To completely remove ITMS Verification Copilot, its shortcuts, and all data from
 
 ### Windows
 ```powershell
-Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process; irm https://raw.githubusercontent.com/KIREX01/itms_verification/main/uninstall.ps1 | iex
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process; irm https://raw.githubusercontent.com/KIREX01/itms_verification/release/windows/uninstall.ps1 | iex
 ```
 *Or type `itms uninstall` in any terminal.*
 
 ### macOS / Linux
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KIREX01/itms_verification/main/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/KIREX01/itms_verification/release/linux/uninstall.sh | bash
 ```
 *Or type `itms uninstall` in any terminal.*
 

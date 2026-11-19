@@ -95,6 +95,12 @@ def _resolve_platform_asset(assets: list[dict[str, Any]]) -> Optional[str]:
     return generic_asset
 
 
+def release_branch() -> str:
+    """Updates follow the platform release branch, which only ever carries finished releases."""
+    import sys
+    return "release/windows" if sys.platform == "win32" else "release/linux"
+
+
 class UpdateService:
     """Manages update checks and safe system upgrading via GitHub Releases."""
 
@@ -429,7 +435,7 @@ class UpdateService:
 
             # Fetch and rebase
             fetch_proc = subprocess.run(
-                ["git", "fetch", "origin", "main"],
+                ["git", "fetch", "origin", release_branch()],
                 cwd=PROJECT_ROOT,
                 capture_output=True,
                 text=True,
@@ -500,7 +506,7 @@ class UpdateService:
             download_url = check.get("download_url")
 
         if not download_url:
-            download_url = f"https://github.com/{GITHUB_REPO}/archive/refs/heads/main.zip"
+            download_url = f"https://github.com/{GITHUB_REPO}/archive/refs/heads/{release_branch()}.zip"
 
         if not UpdateService.validate_download_url(download_url):
             return {"success": False, "error": f"Untrusted or insecure download URL: {download_url}"}

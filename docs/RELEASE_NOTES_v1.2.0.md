@@ -62,6 +62,21 @@ Helpers don't. Bond access follows ITMS: a Team Leader can only lead bonds their
 - Remote **Lock now** puts the install into maintenance.
 - An install offline for longer than the grace period (default 24 h) keeps working locally but **cannot submit to ITMS**.
 
+### Install control (copies don't run)
+- Every laptop / workstation install must be **activated** with the central backoffice before anyone can
+  use it. Until then it shows a locked page; only the administrator can activate it, with a one-time code.
+  Activation is available from the TUI start screen, `/install/` or `itms enroll`.
+- An install is **bound to its computer** (OS machine ID). A working folder copied to another computer
+  detects the move, locks itself and erases the copied ITMS portal sessions and sign-ins.
+- The install's sync secret is encrypted with a machine-bound key, so a copy can't impersonate it even if
+  its files are edited.
+- If a copy still reaches the central server, it is reported as a **clone**, the install is revoked
+  automatically and the Overview shows an alert.
+- **Laptop web access:** only the laptop's own browser and phones paired through its QR code can open its
+  pages. Other devices on the Wi-Fi or hotspot are refused before the sign-in page.
+  `X-Forwarded-For` spoofing is ignored.
+- **No shared default password:** each install generates its own random local administrator password.
+
 ### Identity
 - ITMS Connect (web and TUI) only accepts the person's own company email. A successful ITMS login attaches and verifies it.
 - Each warehouse sync records which bonds the company email can reach. Removed warehouses suspend the matching roles.
@@ -98,6 +113,9 @@ sudo systemctl restart itms
 - Then assign the real roles in **Backoffice → People & roles**.
 
 **Laptops / workstations:**
+- They lock after the upgrade until activated.
+- Before upgrading a laptop, have an enrollment code ready.
+- Developers on a source checkout can set `CLOSE_REQUIRE_ENROLLMENT=0` and `CLOSE_LOCAL_ACCESS=open`.
 - Pull `release/windows` or `release/linux` and migrate.
 - In the backoffice, open **Installs**, create an install, then run `itms enroll <server> <code>` on that machine.
 

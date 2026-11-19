@@ -325,6 +325,10 @@ class InstallRegistration(models.Model):
     app_version = models.CharField(max_length=32, blank=True, default="")
     policy_version_acked = models.BigIntegerField(default=0)
     health = models.JSONField(default=dict, blank=True)
+    machine_fingerprint = models.CharField(max_length=64, blank=True, default="",
+                                           help_text="Hash of the enrolled computer's OS machine ID.")
+    clone_detected_at = models.DateTimeField(null=True, blank=True)
+    clone_fingerprint = models.CharField(max_length=64, blank=True, default="")
 
     class Meta:
         ordering = ["name"]

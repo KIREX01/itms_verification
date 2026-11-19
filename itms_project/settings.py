@@ -165,12 +165,16 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # Laptop installs: only this computer's browser and QR-paired phones get in.
+    "governance.install_middleware.LocalAccessMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     # After AuthenticationMiddleware so superusers can be recognised during maintenance.
     "core.middleware.maintenance_middleware.MaintenanceModeMiddleware",
+    # Laptop installs must be enrolled with the central server and run on the enrolled computer.
+    "governance.install_middleware.InstallGateMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "core.middleware.envelope_middleware.EnvelopeTracingMiddleware",
@@ -188,6 +192,13 @@ _STRICT_TEST_RUN = (len(sys.argv) > 1 and sys.argv[1] == "test") or "pytest" in 
 GOVERNANCE_ENFORCE = safe_env_bool("GOVERNANCE_ENFORCE", default=not _STRICT_TEST_RUN)
 # "central" = the backoffice server (close.kirex.online); "edge" = laptop / workstation install.
 DEPLOYMENT_ROLE = os.environ.get("DEPLOYMENT_ROLE", "edge").strip().lower() or "edge"
+# Edge installs refuse to run until enrolled with the central server (and lock if copied to another
+# computer). Developers working on a local checkout can set CLOSE_REQUIRE_ENROLLMENT=0 in .env.
+CLOSE_REQUIRE_ENROLLMENT = safe_env_bool("CLOSE_REQUIRE_ENROLLMENT", default=not _STRICT_TEST_RUN)
+CLOSE_CENTRAL_URL = os.environ.get("CLOSE_CENTRAL_URL", "https://close.kirex.online").strip()
+# Who may open a laptop install's web pages: "pc_and_paired" (this computer + QR-paired phones) or "open".
+CLOSE_LOCAL_ACCESS = os.environ.get(
+    "CLOSE_LOCAL_ACCESS", "open" if _STRICT_TEST_RUN else "pc_and_paired").strip().lower()
 
 ROOT_URLCONF = "itms_project.urls"
 

@@ -311,6 +311,16 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
             self.exit()
 
     def _proceed_after_master_unlock(self) -> None:
+        # Install guard: an unactivated, copied or revoked install can't be used until enrolled.
+        try:
+            from governance.services import install_guard
+            if install_guard.is_locked():
+                from core.tui.lock_screen import InstallActivationScreen
+                self.push_screen(InstallActivationScreen(),
+                                 lambda ok: self._proceed_after_master_unlock() if ok else self.exit())
+                return
+        except Exception as exc:
+            logger.error("Install guard check failed: %s", exc)
         saved_user = auth_service.get_remembered_session()
         if saved_user:
             from core.services import device_access_service

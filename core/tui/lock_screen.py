@@ -394,3 +394,78 @@ class TUIExpiredLockScreen(ModalScreen[bool]):
         self.app.current_user = None
         self.dismiss(False)
 
+
+
+class InstallActivationScreen(ModalScreen[bool]):
+    """
+    Shown before sign-in when this install is not activated, was copied from another computer,
+    or was revoked. Only a one-time enrollment code from the backoffice (Installs page) unlocks it.
+    """
+
+    BINDINGS = [Binding("escape", "quit_app", "Quit", show=True)]
+
+    CSS = """
+    InstallActivationScreen { align: center middle; background: rgba(10, 12, 18, 0.97); }
+    #install-box { width: 84; height: auto; border: heavy $warning; background: $surface; padding: 1 2; }
+    #install-title { text-align: center; margin-bottom: 1; }
+    #install-msg { margin-bottom: 1; }
+    #install-error { color: $error; margin-top: 1; }
+    .install-input { margin-bottom: 1; }
+    #install-actions { height: auto; margin-top: 1; }
+    """
+
+    def compose(self) -> ComposeResult:
+        from django.conf import settings
+        from governance.services import install_guard
+
+        state = install_guard.install_state()
+        with Center():
+            with Vertical(id="install-box"):
+                yield Static("[bold yellow]🔒 CLOSE Copilot install is locked[/bold yellow]", id="install-title")
+                yield Static(install_guard.lock_message(state), id="install-msg")
+                yield Static(f"[dim]This computer: {install_guard.short_fingerprint(install_guard.machine_fingerprint())}[/dim]")
+                yield Input(value=getattr(settings, "CLOSE_CENTRAL_URL", "https://close.kirex.online"),
+                            placeholder="Central server (https://...)", id="install-central", classes="install-input")
+                yield Input(placeholder="Enrollment code from Backoffice -> Installs", id="install-code",
+                            classes="install-input")
+                yield Input(placeholder="Name for this computer (optional)", id="install-name", classes="install-input")
+                with Horizontal(id="install-actions"):
+                    yield Button("Activate", variant="primary", id="btn-install-activate")
+                    yield Button("Quit", variant="error", id="btn-install-quit")
+                yield Static("", id="install-error")
+
+    def on_mount(self) -> None:
+        from governance.services import install_guard
+        if install_guard.install_state() == install_guard.MOVED:
+            install_guard.quarantine_moved_copy()
+        self.query_one("#install-code", Input).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-install-quit":
+            self.action_quit_app()
+        elif event.button.id == "btn-install-activate":
+            self._activate()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self._activate()
+
+    def _activate(self) -> None:
+        from governance.services import policy_sync
+
+        central = self.query_one("#install-central", Input).value.strip()
+        code = self.query_one("#install-code", Input).value.strip()
+        name = self.query_one("#install-name", Input).value.strip()
+        err = self.query_one("#install-error", Static)
+        if not central or not code:
+            err.update("Enter the central server address and the enrollment code.")
+            return
+        try:
+            policy_sync.enroll_with_central(central, code, name=name)
+        except Exception as exc:
+            err.update(f"Activation failed: {exc}")
+            return
+        self.app.notify("Install activated. Accounts and roles now come from the central server.")
+        self.dismiss(True)
+
+    def action_quit_app(self) -> None:
+        self.app.exit()

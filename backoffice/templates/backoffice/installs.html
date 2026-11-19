@@ -27,7 +27,9 @@
     <tr><th>Install</th><th>Status</th><th>Last check-in</th><th>Version</th><th>Policy</th><th>Health</th><th></th></tr>
     {% for r in rows %}
     <tr>
-        <td><strong>{{ r.inst.name }}</strong><div class="bo-muted">{{ r.inst.last_ip|default:"—" }}</div></td>
+        <td><strong>{{ r.inst.name }}</strong><div class="bo-muted">{{ r.inst.last_ip|default:"—" }} · machine {{ r.inst.machine_fingerprint|slice:":12"|default:"—" }}</div>
+            {% if r.inst.clone_detected_at %}<div><span class="pill danger">⚠ Copied to another computer {{ r.inst.clone_detected_at|date:"Y-m-d H:i" }}</span>
+            <span class="bo-muted">(machine {{ r.inst.clone_fingerprint|slice:":12" }}) - revoked automatically</span></div>{% endif %}</td>
         <td><span class="pill {% if r.inst.status == 'ACTIVE' %}ok{% elif r.inst.status == 'PENDING' %}warn{% else %}danger{% endif %}">{{ r.inst.get_status_display }}</span>
             {% if r.inst.locked %}<span class="pill danger">Locked</span>{% endif %}</td>
         <td>{% if r.inst.last_seen_at %}<span class="pill {% if r.online %}ok{% else %}warn{% endif %}">{{ r.online|yesno:"online,offline" }}</span> {{ r.inst.last_seen_at|timesince }} ago{% else %}never{% endif %}</td>

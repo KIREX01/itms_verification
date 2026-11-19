@@ -40,3 +40,7 @@ TESTING = False
 # Legacy suites predate role-based access; governance tests enable enforcement explicitly
 # with @override_settings(GOVERNANCE_ENFORCE=True).
 GOVERNANCE_ENFORCE = False
+
+# Install gates are exercised explicitly in governance/tests/test_install_guard.py.
+CLOSE_REQUIRE_ENROLLMENT = False
+CLOSE_LOCAL_ACCESS = "open"

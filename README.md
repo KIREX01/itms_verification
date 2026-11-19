@@ -15,7 +15,7 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process; irm https://raw.gith
 ```
 * Installs to `%LOCALAPPDATA%\Programs\ITMS-Verification` (no admin rights needed)
 * Adds global system command `itms` (open Web UI) and `itms --tui` (open Terminal UI)
-* Defaults to SQLite zero-setup database with pre-configured `admin` / `admin` login
+* Defaults to a zero-setup SQLite database with a random local administrator password (shown once by the installer); activate the install with `itms enroll <server> <code>` before first use
 * Creates Desktop & Start Menu shortcuts
 * Automatically provisions Python, virtual environment, AI plate weights, and SSL certificates
 * Opens `https://127.0.0.1/` in your default browser

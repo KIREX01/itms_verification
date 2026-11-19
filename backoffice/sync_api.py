@@ -33,7 +33,8 @@ def install_enroll(request: HttpRequest) -> JsonResponse:
         return blocked
     try:
         data = json.loads(request.body.decode() or "{}")
-        result = policy_sync.enroll(data.get("code", ""), app_version=str(data.get("app_version", "")), ip=_ip(request))
+        result = policy_sync.enroll(data.get("code", ""), app_version=str(data.get("app_version", "")), ip=_ip(request),
+                                    machine_fingerprint=str(data.get("machine_fingerprint", "")))
     except (ValueError, policy_sync.PolicySyncError) as exc:
         return JsonResponse({"success": False, "error": str(exc)}, status=400)
     return JsonResponse({"success": True, **result})
@@ -51,7 +52,9 @@ def install_heartbeat(request: HttpRequest) -> JsonResponse:
             install_id, request.body, request.headers.get("X-Close-Timestamp", ""),
             request.headers.get("X-Close-Signature", ""), ip=_ip(request),
         )
-    except (ValueError, policy_sync.PolicySyncError) as exc:
+    except policy_sync.PolicySyncError as exc:
+        return JsonResponse({"success": False, "error": str(exc), "code": exc.code}, status=403)
+    except ValueError as exc:
         return JsonResponse({"success": False, "error": str(exc)}, status=403)
     from governance.models import InstallRegistration
     secret = InstallRegistration.objects.filter(install_id=install_id).values_list("secret", flat=True).first()

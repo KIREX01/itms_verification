@@ -224,18 +224,30 @@ itms\\\_verification/
 
 \---
 
-## 8\. Offline \& Air-Gapped Workstations
+## 8\. Activating an Install & Offline Workstations
 
-For inspection stations or remote checkpoints without continuous internet connectivity:
+Since v1.2.0 every laptop / workstation install must be **activated (enrolled)** with the central
+backoffice before anyone can use it, and it only runs on the computer it was activated on.
 
-1. **One-Time Preparation**: Run `run.bat` or `run.command` once on an internet-connected computer to download all models, weights, and dependencies.
-2. **Copying to Offline PC**: Copy the entire `itms\\\_verification` directory (including `.venv`, `models/`, and `.env`) onto a USB drive and paste it onto the offline workstation.
-3. **Offline Resilience**:
+1. **Install from the release package** (`itms-vX.Y.Z-windows.zip` / `-linux.tar.gz`), never by copying
+   another computer's working folder. A copied folder detects that it is on a different computer, locks
+   itself and erases the copied ITMS portal sessions; the central server flags it as a clone and revokes it.
+2. **Get an enrollment code**: Backoffice → *Installs* → *Create enrollment code* (valid 24 h, single use).
+3. **Activate** on the new computer (internet needed once), using any of:
+   * the TUI activation screen shown at start-up,
+   * the browser at `http://127.0.0.1:8000/install/` (administrator sign-in), or
+   * `itms enroll https://close.kirex.online <CODE>`.
+4. **Offline operation**: after activation the install works offline for capture, vision and review.
+   Submissions to ITMS stop if it hasn't checked in with the central server within the offline grace
+   period (Backoffice → *Kill switches & policy*, default 24 h) and resume on the next check-in.
 
-   * The application operates completely offline for image ingestion, YOLO detection, OCR extraction, plate normalization, and pairing.
-   * The update engine detects network offline state and displays a clean status notice without freezing or stalling the UI.
+**Who can open a laptop's web pages:** only that computer's own browser and phones paired by scanning
+its QR code. Other devices on the same Wi-Fi or hotspot are refused before the sign-in page.
 
-\---
+**Developers** working on a source checkout can set `CLOSE_REQUIRE_ENROLLMENT=0` and
+`CLOSE_LOCAL_ACCESS=open` in `.env`.
+
+---
 
 ## 9\. Troubleshooting \& FAQ
 
@@ -249,11 +261,10 @@ http://127.0.0.1:8000/
 
 ### Q2: What are the default operator credentials?
 
-The automatic bootstrap seeds a default administrator account:
-
-* **Username**: `admin`
-* **Password**: `admin123`
-*(You can change this password or create new operators in the Django Admin at `http://127.0.0.1:8000/admin/` or via `python manage.py createsuperuser`).*
+There are none. Each install generates its own random local administrator password, shown once by the
+installer and stored in that computer's `.env` (`DJANGO_SUPERUSER_PASSWORD`). Once the install is
+activated, accounts and roles come from the central backoffice; people get access through
+*Request access* (`/access/request/`).
 
 ### Q3: Tesseract OCR is not detected.
 

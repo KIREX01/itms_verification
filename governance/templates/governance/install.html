@@ -1,0 +1,55 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Install Activation - CLOSE Copilot</title>
+    <link rel="shortcut icon" href="{% static 'core/logos/favicon.ico' %}">
+    <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/auth.css' %}">
+</head>
+<body>
+    <div class="uganda-flag-ribbon"></div>
+    <div class="auth-page-wrapper">
+        <div class="auth-card-box">
+            <div class="auth-card-head">
+                <h1 style="font-size:1.3rem; font-weight:800; color:#ffffff;">CLOSE <span style="color:var(--ug-yellow);">COPILOT</span></h1>
+                <p style="font-size:0.75rem; color:var(--ug-text-muted); margin-top:2px;">Install activation</p>
+            </div>
+            <div class="auth-card-body">
+                {% if error %}<div class="alert-banner error"><span>⚠️ {{ error }}</span></div>{% endif %}
+                {% if locked %}<div class="alert-banner warning"><span>🔒 {{ message }}</span></div>
+                {% elif state == "ENROLLED" %}<div class="alert-banner success"><span>✓ Activated and managed by {{ enrollment.central_url }}.</span></div>
+                {% elif state == "CENTRAL" %}<div class="alert-banner success"><span>✓ This is the central server.</span></div>
+                {% else %}<div class="alert-banner warning"><span>Not enrolled (enrollment not required on this machine).</span></div>{% endif %}
+
+                <dl style="display:grid; grid-template-columns:max-content 1fr; gap:4px 12px; font-size:0.82rem; margin:6px 0 14px;">
+                    <dt style="color:var(--ug-text-muted);">This computer</dt><dd style="margin:0; font-family:var(--font-mono);">{{ fingerprint }}</dd>
+                    {% if enrollment.name %}<dt style="color:var(--ug-text-muted);">Install</dt><dd style="margin:0;">{{ enrollment.name }}</dd>{% endif %}
+                    {% if enrollment.last_sync_ok_at %}<dt style="color:var(--ug-text-muted);">Last sync</dt><dd style="margin:0;">{{ enrollment.last_sync_ok_at|slice:":16" }}</dd>{% endif %}
+                </dl>
+
+                {% if state != "CENTRAL" and state != "ENROLLED" %}
+                    {% if is_admin %}
+                    <form method="POST" action="/install/" style="display:flex; flex-direction:column; gap:12px;">
+                        {% csrf_token %}
+                        <div class="form-field"><label for="central_url">Central server</label>
+                            <input type="url" id="central_url" name="central_url" value="{{ default_central }}" required></div>
+                        <div class="form-field"><label for="code">Enrollment code (Backoffice → Installs)</label>
+                            <input type="text" id="code" name="code" required autocomplete="off" placeholder="XXXX-XXXX-XXXX" style="text-transform:uppercase; letter-spacing:2px;"></div>
+                        <div class="form-field"><label for="name">Name for this computer (optional)</label>
+                            <input type="text" id="name" name="name" placeholder="e.g. AGM dispatch laptop"></div>
+                        <button type="submit" class="btn btn-primary" style="justify-content:center; padding:12px; font-weight:800;">Activate this install</button>
+                    </form>
+                    {% else %}
+                    <p style="font-size:0.85rem;">Only the administrator can activate this install. <a href="{% url 'core:login' %}?next=/install/">Sign in</a></p>
+                    {% endif %}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</body>
+</html>

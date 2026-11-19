@@ -99,10 +99,14 @@ def ensure_env_file() -> None:
 
     log_step("No .env found. Initializing client configuration from .env.example...")
     secret_key = secrets.token_urlsafe(50)
+    # Every install gets its own random local administrator password (never a shared default).
+    admin_password = secrets.token_urlsafe(12)
 
     if env_example.is_file():
         content = env_example.read_text(encoding="utf-8")
         content = content.replace("change-me-to-a-random-50-char-string", secret_key)
+        content = re.sub(r"^DJANGO_SUPERUSER_PASSWORD=.*$", f"DJANGO_SUPERUSER_PASSWORD={admin_password}",
+                         content, flags=re.MULTILINE)
     else:
         content = f"""# CLOSE Copilot - Auto-generated Client Environment
 DJANGO_SECRET_KEY={secret_key}
@@ -111,7 +115,7 @@ DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost
 DB_ENGINE=sqlite
 DJANGO_SUPERUSER_USERNAME=admin
 DJANGO_SUPERUSER_EMAIL=admin@example.com
-DJANGO_SUPERUSER_PASSWORD=admin
+DJANGO_SUPERUSER_PASSWORD={admin_password}
 MEDIA_ROOT=media
 VAULT_SUBDIR=vault
 CROPS_SUBDIR=crops
@@ -511,13 +515,17 @@ def ensure_database_and_operator(verify_only: bool = False) -> bool:
         # Ensure superuser / operator account from env or defaults
         call_command("create_superuser_if_none")
         if not User.objects.exists():
-            User.objects.create_superuser("admin", "admin@example.com", "admin")
-            log_success("Created default operator account: admin / admin")
+            fallback_password = secrets.token_urlsafe(12)
+            User.objects.create_superuser("admin", "admin@example.com", fallback_password)
+            log_success(f"Created local administrator: admin / {fallback_password}  (shown once - store it safely)")
 
         # Ensure operator accounts synced across databases
         config_service.ensure_operator_accounts_synced()
         operator_count = User.objects.count()
-        log_success(f"Operator accounts verified ({operator_count} registered). Default login: admin / admin")
+        log_success(f"Operator accounts verified ({operator_count} registered).")
+        local_pw = os.environ.get("DJANGO_SUPERUSER_PASSWORD", "")
+        if local_pw and local_pw != "admin":
+            log_success(f"Local administrator: admin / {local_pw}  (also in .env; activate this install with: itms enroll <server> <code>)")
         return True
     except Exception as exc:
         log_error(f"Database error: {exc}")

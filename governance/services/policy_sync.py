@@ -36,7 +36,9 @@ HEARTBEAT_SECONDS = 60
 
 
 class PolicySyncError(Exception):
-    pass
+    def __init__(self, message: str = "", code: str = ""):
+        super().__init__(message)
+        self.code = code
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +105,7 @@ def create_install(name: str, actor, request=None) -> Tuple[Any, str]:
 
 
 @transaction.atomic
-def enroll(code: str, app_version: str = "", ip: str = "") -> Dict[str, Any]:
+def enroll(code: str, app_version: str = "", ip: str = "", machine_fingerprint: str = "") -> Dict[str, Any]:
     from governance.models import InstallRegistration
     from governance.services import audit
 
@@ -119,6 +121,7 @@ def enroll(code: str, app_version: str = "", ip: str = "") -> Dict[str, Any]:
     inst.last_seen_at = timezone.now()
     inst.last_ip = ip
     inst.app_version = app_version[:32]
+    inst.machine_fingerprint = (machine_fingerprint or "")[:64]
     inst.save()
     audit.record("system", "install.enrolled", target_type="install", target_id=inst.install_id,
                  target_label=inst.name, after={"ip": ip, "version": app_version}, actor_label=inst.name)
@@ -171,11 +174,29 @@ def handle_heartbeat(install_id: str, body: bytes, ts: str, signature: str, ip: 
     from governance.models import InstallRegistration
 
     inst = InstallRegistration.objects.filter(install_id=install_id).first()
-    if inst is None or inst.status != InstallRegistration.Status.ACTIVE or not inst.secret:
-        raise PolicySyncError("Unknown or revoked install.")
+    if inst is None:
+        raise PolicySyncError("Unknown install.")
+    if inst.status == InstallRegistration.Status.REVOKED:
+        raise PolicySyncError("This install has been revoked.", "INSTALL_REVOKED")
+    if inst.status != InstallRegistration.Status.ACTIVE or not inst.secret:
+        raise PolicySyncError("Unknown install.")
     if not verify(inst.secret, body, ts, signature):
         raise PolicySyncError("Bad signature.")
     payload = json.loads(body.decode() or "{}")
+    reported = str(payload.get("machine_fingerprint") or "")
+    if inst.machine_fingerprint and reported and reported != inst.machine_fingerprint:
+        # Same install identity, different computer: a copied folder. Revoke it and alert.
+        from governance.services import audit
+        inst.clone_detected_at = timezone.now()
+        inst.clone_fingerprint = reported[:64]
+        inst.status = InstallRegistration.Status.REVOKED
+        inst.secret = ""
+        inst.save(update_fields=["clone_detected_at", "clone_fingerprint", "status", "secret"])
+        audit.record("system", "install.clone_detected", target_type="install", target_id=inst.install_id,
+                     target_label=inst.name, after={"ip": ip, "enrolled_machine": inst.machine_fingerprint[:12],
+                                                    "reporting_machine": reported[:12]},
+                     actor_label="policy-sync")
+        raise PolicySyncError("This install identity is being used on a different computer.", "CLONE_DETECTED")
     current = policy_version()
     inst.last_seen_at = timezone.now()
     inst.last_ip = ip
@@ -202,14 +223,25 @@ def _state_path() -> Path:
     return Path(get_secure_dir()) / "central_enrollment.json"
 
 
-def load_enrollment() -> Dict[str, Any]:
+def load_enrollment(decrypt: bool = True) -> Dict[str, Any]:
+    """Enrollment state. With decrypt=True the machine-sealed secret is unsealed into "secret"
+    (it stays None on any other machine, so a copied folder cannot sign check-ins)."""
     try:
-        return json.loads(_state_path().read_text(encoding="utf-8"))
+        data = json.loads(_state_path().read_text(encoding="utf-8"))
     except Exception:
         return {}
+    if decrypt and data.get("secret_sealed") and data.get("install_id"):
+        from governance.services.install_guard import unseal_secret
+        data["secret"] = unseal_secret(data["secret_sealed"], data["install_id"])
+    return data
 
 
-def save_enrollment(data: Dict[str, Any]) -> None:
+def save_enrollment(data: Dict[str, Any], encrypt: bool = True) -> None:
+    data = dict(data)
+    if encrypt and data.get("secret") and data.get("install_id"):
+        from governance.services.install_guard import seal_secret
+        data["secret_sealed"] = seal_secret(data["secret"], data["install_id"])
+    data.pop("secret", None)  # never store the plaintext secret
     path = _state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
@@ -223,8 +255,9 @@ def save_enrollment(data: Dict[str, Any]) -> None:
 
 
 def is_enrolled() -> bool:
-    data = load_enrollment()
-    return bool(data.get("install_id") and data.get("secret") and data.get("central_url"))
+    data = load_enrollment(decrypt=False)
+    return bool(data.get("install_id") and data.get("secret_sealed") and data.get("central_url")
+                and not data.get("revoked"))
 
 
 def is_policy_stale() -> bool:
@@ -233,7 +266,7 @@ def is_policy_stale() -> bool:
         return False
     from governance.services.flags import get_flag
 
-    data = load_enrollment()
+    data = load_enrollment(decrypt=False)
     last = data.get("last_sync_ok_at")
     if not last:
         return True
@@ -256,15 +289,20 @@ def _http_post(url: str, body: bytes, headers: Dict[str, str], timeout: float = 
 def enroll_with_central(central_url: str, code: str, name: str = "") -> Dict[str, Any]:
     from core.version import __version__
 
+    from governance.services.install_guard import machine_fingerprint
+
     central_url = central_url.rstrip("/")
-    body = json.dumps({"code": code, "name": name, "app_version": __version__}).encode()
+    fingerprint = machine_fingerprint()
+    body = json.dumps({"code": code, "name": name, "app_version": __version__,
+                       "machine_fingerprint": fingerprint}).encode()
     status, content, _ = _http_post(f"{central_url}/backoffice/api/v1/installs/enroll/", body,
                                     {"Content-Type": "application/json"})
     data = json.loads(content.decode() or "{}")
     if status != 200 or not data.get("install_id"):
         raise PolicySyncError(data.get("error") or f"Enrollment failed (HTTP {status}).")
     save_enrollment({"central_url": central_url, "install_id": data["install_id"], "secret": data["secret"],
-                     "name": data.get("name", name), "policy_version": 0, "last_sync_ok_at": None})
+                     "name": data.get("name", name), "policy_version": 0, "last_sync_ok_at": None,
+                     "machine_fingerprint": fingerprint})
     heartbeat_once()
     return load_enrollment()
 
@@ -288,11 +326,15 @@ def heartbeat_once() -> Dict[str, Any]:
     """One check-in. Applies a snapshot / lock when the server sends one. Raises on failure."""
     from core.version import __version__
 
+    from governance.services.install_guard import machine_fingerprint
+
     state = load_enrollment()
     if not state.get("install_id"):
         raise PolicySyncError("This install is not enrolled.")
+    if not state.get("secret"):
+        raise PolicySyncError("This install's credentials belong to another computer (moved copy).")
     body = json.dumps({"app_version": __version__, "policy_version": state.get("policy_version", 0),
-                       "health": _health()}).encode()
+                       "machine_fingerprint": machine_fingerprint(), "health": _health()}).encode()
     ts, sig = sign(state["secret"], body)
     status, content, headers = _http_post(
         f"{state['central_url']}/backoffice/api/v1/installs/heartbeat/", body,
@@ -300,7 +342,16 @@ def heartbeat_once() -> Dict[str, Any]:
          "X-Close-Timestamp": ts, "X-Close-Signature": sig},
     )
     if status != 200:
-        raise PolicySyncError(f"Central server refused the check-in (HTTP {status}).")
+        try:
+            code = json.loads(content.decode() or "{}").get("code", "")
+        except ValueError:
+            code = ""
+        if code in ("INSTALL_REVOKED", "CLONE_DETECTED"):
+            # Explicit verdict from the central server: lock this install.
+            state["revoked"] = True
+            state["revoked_reason"] = code
+            save_enrollment(state)
+        raise PolicySyncError(f"Central server refused the check-in (HTTP {status} {code}).".strip())
     if not verify(state["secret"], content, headers.get("x-close-timestamp", ""), headers.get("x-close-signature", "")):
         raise PolicySyncError("Central response signature is invalid; ignoring it.")
     data = json.loads(content.decode() or "{}")

@@ -23,7 +23,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 from governance.capabilities import Role
 from governance.models import (
     AccessRequest, AccountState, AdminAuditLog, BondMembership, BurnedIdentity, CompanyEmailLink,
-    FeatureFlag, ItmsWarehouseAccess,
+    FeatureFlag, InstallRegistration, ItmsWarehouseAccess,
 )
 from governance.services import accounts, audit, authz, flags, identity, memberships, onboarding, switches
 
@@ -127,6 +127,7 @@ def overview(request: HttpRequest) -> HttpResponse:
         ).exclude(company_email__status="VERIFIED").distinct()[:20],
         switches=switches.all_switches(),
         recent=AdminAuditLog.objects.select_related("actor")[:12],
+        clones=InstallRegistration.objects.filter(clone_detected_at__isnull=False).order_by("-clone_detected_at")[:10],
     )
     return render(request, "backoffice/overview.html", ctx)
 

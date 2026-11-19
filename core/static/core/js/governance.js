@@ -261,4 +261,82 @@ async function resolveFlag(flagId, outcome) {
     };
 })();
 
-document.addEventListener("DOMContentLoaded", loadCapabilities);
+/* ------------------------------------------------------------------ */
+/* My account & team (Settings tab)                                      */
+/* ------------------------------------------------------------------ */
+async function loadAccountCard() {
+    const body = document.getElementById("gov-account-body");
+    if (!body) return;
+    try {
+        const res = await fetch("/api/me/profile/", { headers: { Accept: "application/json" } });
+        const p = await res.json();
+        if (!p.success) { body.textContent = ""; return; }
+        const bonds = p.summary.bonds || {};
+        const roleRows = Object.keys(bonds).length
+            ? Object.entries(bonds).map(([b, roles]) =>
+                `<span class="badge badge-muted" style="margin:2px;">${escapeHtml(roles.map(r => ROLE_LABELS[r] || r).join(", "))} @ ${escapeHtml(b)}</span>`).join(" ")
+            : `<span style="color:var(--ug-text-dim);">No active role yet.</span>`;
+        let company;
+        if (p.company_email && p.company_email_status === "VERIFIED") {
+            company = `<span style="color:#86efac;">✓ ${escapeHtml(p.company_email)}</span>`;
+        } else if (p.company_email) {
+            company = `${escapeHtml(p.company_email)} <span style="color:#fcd34d;">(${escapeHtml(p.company_email_status.toLowerCase())})</span>`;
+        } else {
+            const domains = (p.company_domains || []).map(d => "@" + d).join(", ");
+            company = `<span style="color:#fcd34d;">Not attached.</span> Team Leaders: connect ITMS with your ${escapeHtml(domains)} email to attach it. Others: ask the administrator.`;
+            if (p.grace_until) company += ` <strong>Deadline: ${escapeHtml(p.grace_until.slice(0, 10))}</strong>`;
+        }
+        const warnings = (p.warnings || []).map(w => `<div style="color:#fcd34d; margin-top:4px;">⚠️ ${escapeHtml(w)}</div>`).join("");
+        body.innerHTML = `
+            <div style="display:grid; grid-template-columns:max-content 1fr; gap:6px 14px;">
+                <span style="color:var(--ug-text-dim);">Signed in as</span><span>${escapeHtml(p.username)} · ${escapeHtml(p.email || "")}</span>
+                <span style="color:var(--ug-text-dim);">Roles</span><span>${roleRows}</span>
+                <span style="color:var(--ug-text-dim);">Company email</span><span>${company}</span>
+            </div>${warnings}`;
+        if (hasCap("team.invite")) loadTeam();
+    } catch (err) {
+        body.textContent = "";
+    }
+}
+
+async function loadTeam() {
+    const res = await fetch("/api/team/", { headers: { Accept: "application/json" } });
+    const t = await res.json();
+    if (!t.success) return;
+    document.getElementById("gov-team-bond").textContent = t.bond || "—";
+    document.getElementById("gov-team-members").innerHTML = (t.members || []).map(m =>
+        `<span class="badge badge-muted" style="margin:2px;">${escapeHtml(m.name)} · ${escapeHtml(m.role)}</span>`).join(" ") || "Nobody yet.";
+    document.getElementById("gov-team-invites").innerHTML = (t.invites || []).length
+        ? "<div style='font-weight:700;'>Your invites</div>" + t.invites.map(i =>
+            `<div>${escapeHtml(i.name)} (${escapeHtml(i.email)}) · ${escapeHtml(i.role)} · <em>${escapeHtml(i.status)}</em></div>`).join("")
+        : "";
+}
+
+function toggleInviteCompanyEmail() {
+    const role = document.getElementById("gov-invite-role").value;
+    const input = document.getElementById("gov-invite-company");
+    input.style.display = role === "QUALITY_INSPECTOR" ? "" : "none";
+    input.required = role === "QUALITY_INSPECTOR";
+}
+
+async function submitTeamInvite(evt) {
+    evt.preventDefault();
+    const form = evt.target;
+    const payload = Object.fromEntries(new FormData(form).entries());
+    const res = await fetch("/api/team/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    showToast(data.success ? data.message : (data.error || "Invite failed."), data.success ? "success" : "error");
+    if (data.success) { form.reset(); toggleInviteCompanyEmail(); loadTeam(); }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    loadCapabilities().then(() => {
+        loadAccountCard();
+        const inv = document.getElementById("gov-invite-role");
+        if (inv) toggleInviteCompanyEmail();
+    });
+});

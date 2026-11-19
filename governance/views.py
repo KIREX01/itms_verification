@@ -13,3 +13,73 @@ def api_me_capabilities(request: HttpRequest) -> JsonResponse:
     summary = authz.capability_summary(user)
     summary.update({"success": True, "username": user.username})
     return JsonResponse(summary)
+
+
+def _body(request: HttpRequest) -> dict:
+    import json
+    if request.content_type == "application/json" and request.body:
+        try:
+            return json.loads(request.body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return {}
+    return request.POST.dict()
+
+
+def api_me_profile(request: HttpRequest) -> JsonResponse:
+    """The signed-in person's roles, company email status and grace period."""
+    from governance.models import CompanyEmailLink
+    from governance.services import identity, memberships
+
+    user = request.user
+    if not (user and user.is_authenticated):
+        return JsonResponse({"success": False, "error": "Authentication required."}, status=401)
+    link = CompanyEmailLink.objects.filter(user=user).first()
+    grace = getattr(getattr(user, "account_state", None), "company_email_grace_until", None)
+    return JsonResponse({
+        "success": True,
+        "username": user.username,
+        "email": user.email,
+        "summary": authz.capability_summary(user),
+        "company_email": link.email if link else "",
+        "company_email_status": link.status if link else "",
+        "company_domains": identity.allowed_company_domains(),
+        "grace_until": grace.isoformat() if grace else "",
+        "warnings": memberships.membership_warnings(user),
+    })
+
+
+def api_team(request: HttpRequest) -> JsonResponse:
+    """Team Leader: people at my bond and my pending invites (GET); invite a Helper / QI (POST)."""
+    from governance.capabilities import TEAM_INVITE, TL_INVITABLE_ROLES, Role
+    from governance.models import AccessRequest, BondMembership
+    from governance.services import onboarding
+
+    user = request.user
+    bond = authz.active_bond_code(user)
+    if request.method == "POST":
+        data = _body(request)
+        try:
+            req = onboarding.invite_by_team_leader(
+                user, data.get("full_name", ""), data.get("email", ""), data.get("role", ""),
+                company_email=data.get("company_email", ""), phone=data.get("phone", ""),
+                message=data.get("message", ""), bond_code=bond, request=request,
+            )
+        except authz.CapabilityDenied as exc:
+            return JsonResponse({"success": False, "error": str(exc)}, status=403)
+        except onboarding.OnboardingError as exc:
+            return JsonResponse({"success": False, "error": str(exc)}, status=400)
+        return JsonResponse({"success": True, "message": f"Invite for {req.email} sent to the administrator for approval."})
+
+    if not authz.has_capability(user, TEAM_INVITE, bond):
+        return JsonResponse({"success": False, "error": "Team Leaders only."}, status=403)
+    members = BondMembership.objects.filter(bond_code=bond, status="ACTIVE").select_related("user")
+    pending = AccessRequest.objects.filter(bond_code=bond, invited_by=user).exclude(status="USED")[:50]
+    return JsonResponse({
+        "success": True,
+        "bond": bond,
+        "members": [{"name": m.user.get_full_name() or m.user.username, "username": m.user.username,
+                     "role": m.get_role_display()} for m in members],
+        "invites": [{"email": r.email, "name": r.full_name, "role": r.get_requested_role_display(),
+                     "status": r.get_status_display(), "created_at": r.created_at.isoformat()} for r in pending],
+        "invitable_roles": [{"value": r, "label": Role(r).label} for r in sorted(TL_INVITABLE_ROLES)],
+    })

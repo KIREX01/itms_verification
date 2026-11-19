@@ -233,3 +233,37 @@ class DataMigrationTests(TestCase):
         self.assertEqual(CompanyEmailLink.objects.get(user=active).email, "legacy.tl@itms-ug.com")
         self.assertFalse(BondMembership.objects.filter(user=pending).exists())
         self.assertIsNotNone(AccountState.objects.get(user=active).company_email_grace_until)
+
+
+@override_settings(GOVERNANCE_ENFORCE=True)
+class TeamAndProfileApiTests(TestCase):
+    def test_profile_and_team_invite(self):
+        from unittest.mock import patch
+        from governance.models import AccessRequest
+        tl = make_member("tl_team", Role.TEAM_LEADER, company_email="tl.team@itms-ug.com")
+        make_member("helper_team", Role.HELPER)
+        c = Client()
+        c.force_login(tl)
+        prof = c.get("/api/me/profile/").json()
+        self.assertEqual(prof["company_email"], "tl.team@itms-ug.com")
+        team = c.get("/api/team/").json()
+        self.assertEqual(team["bond"], "AGM")
+        self.assertEqual(len(team["members"]), 2)
+        with patch("core.services.email_service.send_access_request_admin_alert", return_value=(True, "")):
+            r = c.post("/api/team/", data={"full_name": "New Helper", "email": "nh@gmail.com", "role": "HELPER"},
+                       content_type="application/json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(AccessRequest.objects.filter(email="nh@gmail.com", source="TEAM_LEADER").exists())
+
+    def test_qi_cannot_use_team_api(self):
+        qi = make_member("qi_team", Role.QUALITY_INSPECTOR, company_email="qi.team@itms-ug.com")
+        c = Client()
+        c.force_login(qi)
+        self.assertEqual(c.get("/api/team/").status_code, 403)
+
+    def test_cannot_switch_to_a_bond_without_a_role(self):
+        tl = make_member("tl_switch", Role.TEAM_LEADER, company_email="tl.switch@itms-ug.com")
+        c = Client()
+        c.force_login(tl)
+        r = c.post("/api/itms/warehouses/", data={"code": "EAGLE"}, content_type="application/json")
+        self.assertEqual(r.status_code, 403)

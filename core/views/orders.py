@@ -215,6 +215,17 @@ def api_itms_warehouses(request: HttpRequest) -> JsonResponse:
         if not code:
             return JsonResponse({"success": False, "error": "Warehouse/Bond code is required."}, status=400)
 
+        # People can only switch to bonds where they hold a role.
+        from governance.services import authz
+        if authz.enforcement_enabled() and not authz.is_platform_admin(request.user):
+            member_bonds = authz.bonds_for(request.user, authz.ANY_MEMBER)
+            if code.strip().upper() not in member_bonds:
+                return JsonResponse({
+                    "success": False,
+                    "error": f"You don't have a role at {code}. Your bonds: {', '.join(sorted(member_bonds)) or 'none'}.",
+                    "code": "PERMISSION_DENIED",
+                }, status=403)
+
         ok = bond_service.set_active_bond(code, name or None)
         if ok:
             from core.models import Warehouse, OperatorITMSSession, FacilitySyncMetadata

@@ -2,6 +2,30 @@
 <div class="tab-pane" id="pane-settings">
     <div class="settings-scroll-container">
 
+        <!-- 0. My account, roles & team (governance) -->
+        <div class="settings-card" id="gov-account-card">
+            <div class="settings-card-header">
+                <div class="settings-card-title"><span>👤 My Account &amp; Roles</span></div>
+            </div>
+            <div id="gov-account-body" style="padding:4px 2px; font-size:0.85rem;">Loading…</div>
+            <div id="gov-team-section" class="gov-hidden" data-cap="team.invite" style="margin-top:14px; border-top:1px solid var(--ug-border); padding-top:12px;">
+                <div style="font-weight:800; margin-bottom:8px;">👥 My team at <span id="gov-team-bond">—</span></div>
+                <div id="gov-team-members" style="font-size:0.82rem; margin-bottom:10px;"></div>
+                <div style="font-weight:700; margin:6px 0;">Invite someone (the administrator approves)</div>
+                <form id="gov-invite-form" onsubmit="submitTeamInvite(event)" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:8px; align-items:end;">
+                    <input class="form-control" name="full_name" placeholder="Full name" required>
+                    <input class="form-control" name="email" type="email" placeholder="Email they'll sign in with" required>
+                    <select class="form-control" name="role" id="gov-invite-role" required onchange="toggleInviteCompanyEmail()">
+                        <option value="HELPER">Helper</option>
+                        <option value="QUALITY_INSPECTOR">Quality Inspector</option>
+                    </select>
+                    <input class="form-control" name="company_email" id="gov-invite-company" type="email" placeholder="Company email (QI)">
+                    <button class="btn btn-primary" type="submit">Send invite</button>
+                </form>
+                <div id="gov-team-invites" style="font-size:0.8rem; margin-top:10px;"></div>
+            </div>
+        </div>
+
         <!-- 1. Facility & Operating Bonded Warehouse -->
         <div class="settings-card">
             <div class="settings-card-header">

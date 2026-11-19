@@ -751,6 +751,12 @@ class ITMSConnectionPane(Vertical):
         )
 
         user = getattr(self.app, "current_user", None)
+        # Same identity rule as the web: connect only with your own attached company email.
+        from core.services.auth_service import _check_itms_identity, _confirm_itms_identity
+        identity_error = _check_itms_identity(user, email)
+        if identity_error:
+            self.app.call_from_thread(self._set_feedback, identity_error, "bold red")
+            return
         client = ITMSWebClient(base_url=url, session_store=self.client.session_store, user=user)
         res = client.login(email, password, remember_me=remember)
 
@@ -769,6 +775,7 @@ class ITMSConnectionPane(Vertical):
             session_data = {}
 
         if success:
+            _confirm_itms_identity(user, email)
             self.client = client
             user_uuid = session_data.get("user_uuid") or client.session_store.session.user_uuid or "Active"
 

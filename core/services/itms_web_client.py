@@ -2049,6 +2049,20 @@ class ITMSWebClient:
         # 6. Update config.json
         config_service.set_setting("bond.available_bonds", facility_list)
 
+        # 6b. Record which bonds this company email can reach in ITMS (governance: bond access
+        # follows ITMS; warehouses no longer returned are marked inactive).
+        try:
+            live = [f for f in facility_list if f.get("source") == "ITMS_LIVE"]
+            itms_email = (getattr(session_data, "user_email", "") or "").strip()
+            if live and itms_email:
+                from governance.services.identity import record_itms_warehouse_access
+                record_itms_warehouse_access(
+                    itms_email, [f["code"] for f in live],
+                    {f["code"]: f.get("warehouse_uuid", "") for f in live},
+                )
+        except Exception as gov_err:
+            logger.warning("Could not record ITMS warehouse access: %s", gov_err)
+
         # 7. Link OperatorITMSSession & OperatorProfile if user is present
         if active_wh_instance:
             if not any(f["code"] == current_active.get("code") for f in facility_list):

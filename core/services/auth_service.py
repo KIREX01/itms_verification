@@ -276,6 +276,60 @@ def get_itms_status(user: Optional[Any] = None, force_ping: bool = False) -> Dic
     }
 
 
+def _check_itms_identity(user: Optional[Any], email: str) -> str:
+    """
+    ITMS Connect only accepts the person's own company email, so every submission traces to them.
+    Returns an error message, or "" when allowed.
+    """
+    try:
+        from governance.models import CompanyEmailLink
+        from governance.services import authz, identity
+    except Exception:
+        return ""
+    if user is None or not getattr(user, "is_authenticated", False) or not authz.enforcement_enabled():
+        return ""
+    if authz.is_platform_admin(user):
+        return ""
+    clean = identity.normalize_email(email)
+    link = CompanyEmailLink.objects.filter(user=user).exclude(status=CompanyEmailLink.Status.REVOKED).first()
+    if link:
+        if clean != link.email:
+            return f"Connect with your own company email ({link.email})."
+        return ""
+    if not identity.is_company_email(clean):
+        return (f"Connect with your company email (@{', @'.join(identity.allowed_company_domains())}). "
+                "Ask the administrator if yours isn't attached yet.")
+    if CompanyEmailLink.objects.filter(email=clean).exclude(user=user).exists():
+        return "That company email belongs to another person."
+    if identity.is_burned_email(clean):
+        return "That email can no longer be used."
+    return ""
+
+
+def _confirm_itms_identity(user: Optional[Any], email: str) -> None:
+    """A successful ITMS login proves ownership: attach the company email if none is attached yet."""
+    try:
+        from governance.models import CompanyEmailLink
+        from governance.services import identity
+        if user is None or not getattr(user, "is_authenticated", False):
+            return
+        clean = identity.normalize_email(email)
+        if not identity.is_company_email(clean):
+            return
+        link = CompanyEmailLink.objects.filter(user=user).first()
+        if link is None or link.status == CompanyEmailLink.Status.PENDING:
+            identity.attach_company_email(user, clean, CompanyEmailLink.VerifiedVia.ITMS_LOGIN, actor=user)
+        else:
+            CompanyEmailLink.objects.filter(pk=link.pk).update(last_itms_seen_at=timezone_now())
+    except Exception as exc:
+        logger.warning("Could not confirm ITMS identity for %s: %s", getattr(user, "username", "?"), exc)
+
+
+def timezone_now():
+    from django.utils import timezone
+    return timezone.now()
+
+
 def connect_itms_account(
     email: str,
     password: str,
@@ -284,6 +338,11 @@ def connect_itms_account(
 ) -> Tuple[bool, str]:
     """Authenticates against the live ITMS WebApp and stores session cookies."""
     from core.services.itms_web_client import get_web_client, normalize_itms_url
+
+    identity_error = _check_itms_identity(user, email)
+    if identity_error:
+        return False, identity_error
+
     norm_url = normalize_itms_url(base_url) if base_url else None
     client = get_web_client(user=user)
     if norm_url:
@@ -291,6 +350,7 @@ def connect_itms_account(
     try:
         ok, msg, sess = client.login(email=email, password=password)
         if ok:
+            _confirm_itms_identity(user, email)
             save_operator_preferences({
                 "itms_email": email,
                 "itms_url": client.base_url,

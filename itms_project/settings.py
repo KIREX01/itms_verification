@@ -159,6 +159,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "django_extensions",
     "core.apps.CoreConfig",
+    "governance.apps.GovernanceConfig",
 ]
 
 MIDDLEWARE = [
@@ -173,7 +174,16 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "core.middleware.envelope_middleware.EnvelopeTracingMiddleware",
     "core.middleware.api_auth_middleware.ApiAuthMiddleware",
+    # Role/capability enforcement (after authentication + device checks).
+    "governance.middleware.GovernanceMiddleware",
 ]
+
+# --- Governance ---------------------------------------------------------------
+# Role/capability enforcement. Keep True in production; the test settings turn it off for
+# legacy suites and governance tests switch it on explicitly.
+GOVERNANCE_ENFORCE = safe_env_bool("GOVERNANCE_ENFORCE", default=True)
+# "central" = the backoffice server (close.kirex.online); "edge" = laptop / workstation install.
+DEPLOYMENT_ROLE = os.environ.get("DEPLOYMENT_ROLE", "edge").strip().lower() or "edge"
 
 ROOT_URLCONF = "itms_project.urls"
 

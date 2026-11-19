@@ -36,3 +36,7 @@ _os.environ.pop("RESEND_API_KEY", None)
 ITMS_FAILURE_INJECTION_RATE = 0.0
 ITMS_SIMULATED_LATENCY_MS = 0
 TESTING = False
+
+# Legacy suites predate role-based access; governance tests enable enforcement explicitly
+# with @override_settings(GOVERNANCE_ENFORCE=True).
+GOVERNANCE_ENFORCE = False

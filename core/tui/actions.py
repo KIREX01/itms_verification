@@ -1,4 +1,5 @@
 import os
+from governance import capabilities as C
 from typing import Any, Dict, List, Optional
 from django.conf import settings
 from django.db.models import Q
@@ -24,6 +25,8 @@ class OperatorActionsMixin:
             pass
 
     def action_tab_itms(self):
+        if not self._require_capability(C.ORDERS_VIEW, "Tab Itms"):
+            return
         tabs = self.query_one("#tabs-content", TabbedContent)
         tabs.active = "tab-itms"
         self._set_activity_visibility(True)
@@ -33,6 +36,8 @@ class OperatorActionsMixin:
             pass
 
     def action_tab_batches(self):
+        if not self._require_capability(C.QUEUE_VIEW, "Tab Batches"):
+            return
         tabs = self.query_one("#tabs-content", TabbedContent)
         tabs.active = "tab-batches"
         self._set_activity_visibility(True)
@@ -42,6 +47,8 @@ class OperatorActionsMixin:
             pass
 
     def action_tab_queue(self):
+        if not self._require_capability(C.QUEUE_VIEW, "Tab Queue"):
+            return
         tabs = self.query_one("#tabs-content", TabbedContent)
         tabs.active = "tab-queue"
         self._set_activity_visibility(True)
@@ -51,6 +58,8 @@ class OperatorActionsMixin:
             pass
 
     def action_tab_history(self):
+        if not self._require_capability(C.HISTORY_VIEW, "Tab History"):
+            return
         tabs = self.query_one("#tabs-content", TabbedContent)
         tabs.active = "tab-history"
         self._set_activity_visibility(True)
@@ -60,6 +69,8 @@ class OperatorActionsMixin:
             pass
 
     def action_tab_stock(self):
+        if not self._require_capability((C.STOCK_VIEW, C.STOCK_SCAN), "Tab Stock"):
+            return
         tabs = self.query_one("#tabs-content", TabbedContent)
         tabs.active = "tab-stock"
         self._set_activity_visibility(False)
@@ -72,6 +83,8 @@ class OperatorActionsMixin:
             pass
 
     def action_tab_reports(self):
+        if not self._require_capability(C.REPORTS_VIEW, "Tab Reports"):
+            return
         tabs = self.query_one("#tabs-content", TabbedContent)
         tabs.active = "tab-reports"
         self._set_activity_visibility(False)
@@ -93,6 +106,8 @@ class OperatorActionsMixin:
             pass
 
     def action_tab_access(self):
+        if not self._require_capability("ADMIN", "Tab Access"):
+            return
         tabs = self.query_one("#tabs-content", TabbedContent)
         tabs.active = "tab-access"
         self._set_activity_visibility(False)
@@ -103,6 +118,23 @@ class OperatorActionsMixin:
             self.set_focus(None)
         except Exception:
             pass
+
+    def _require_capability(self, capability, action_name: str = "This action") -> bool:
+        """Role/capability gate for TUI actions (same rules as the web: governance.services.authz)."""
+        from governance.services import authz
+        user = getattr(self, "current_user", None)
+        if user is None:
+            return True  # pre-login screens handle their own access
+        if capability == "ADMIN":
+            allowed = authz.is_platform_admin(user) or not authz.enforcement_enabled()
+        elif isinstance(capability, tuple):
+            allowed = authz.has_any(user, capability)
+        else:
+            allowed = authz.has_capability(user, capability)
+        if not allowed:
+            bond = authz.active_bond_code(user) or "this bond"
+            self.notify(f"{action_name}: your role at {bond} does not allow this.", severity="error")
+        return allowed
 
     def _assert_active_session_not_expired(self, action_name: str = "This action") -> bool:
         """Guards operator action: blocks execution immediately if time-bound access has expired."""
@@ -122,6 +154,8 @@ class OperatorActionsMixin:
     @work(thread=True)
     def action_drain_outbox(self) -> None:
         """Drains any orders waiting in OFFLINE_OUTBOX status."""
+        if not self._require_capability(C.ITMS_SUBMIT, "Drain Outbox"):
+            return
         if not self._assert_active_session_not_expired("Drain outbox"):
             return
         try:
@@ -203,6 +237,8 @@ class OperatorActionsMixin:
     @work(thread=True)
     def action_dev_seed_orders(self) -> None:
         """Seed fake installation orders for developer stress-testing."""
+        if not self._require_capability("ADMIN", "Dev Seed Orders"):
+            return
         from core.services.config_service import is_developer_mode
         if not is_developer_mode():
             self.call_from_thread(self.notify, "Developer mode is disabled in Settings.", severity="warning")
@@ -219,6 +255,8 @@ class OperatorActionsMixin:
     @work(thread=True)
     def action_dev_benchmark(self) -> None:
         """Runs pipeline detection and OCR benchmarking."""
+        if not self._require_capability("ADMIN", "Dev Benchmark"):
+            return
         from core.services.config_service import is_developer_mode
         if not is_developer_mode():
             self.call_from_thread(self.notify, "Developer mode is disabled in Settings.", severity="warning")
@@ -233,6 +271,8 @@ class OperatorActionsMixin:
 
     def action_dev_toggle_backend(self) -> None:
         """Toggles between mock and live ITMS submission backend."""
+        if not self._require_capability("ADMIN", "Dev Toggle Backend"):
+            return
         from core.services.config_service import is_developer_mode
         if not is_developer_mode():
             self.notify("Developer mode is disabled in Settings.", severity="warning")
@@ -246,6 +286,8 @@ class OperatorActionsMixin:
     @work(thread=True)
     def action_native_ingest(self) -> None:
         """Opens native desktop dialog to pick files or folders, and ingests them into a new batch."""
+        if not self._require_capability(C.CAPTURE_UPLOAD, "Native Ingest"):
+            return
         if not self._assert_active_session_not_expired("Photo ingestion"):
             return
         if getattr(self, "_native_ingest_running", False):
@@ -373,6 +415,8 @@ class OperatorActionsMixin:
             self._native_ingest_running = False
 
     def action_open_upload_ui(self):
+        if not self._require_capability(C.CAPTURE_UPLOAD, "Open Upload Ui"):
+            return
         import socket
         import webbrowser
         url = "http://127.0.0.1:8000/upload/"
@@ -470,6 +514,8 @@ class OperatorActionsMixin:
         self.log_message("Dashboard refreshed from database.", level="INFO")
 
     def action_approve(self):
+        if not self._require_capability(C.QUEUE_APPROVE, "Approve"):
+            return
         if not self._assert_active_session_not_expired("Approve pair"):
             return
         pair = self._get_active_pair()
@@ -546,6 +592,8 @@ class OperatorActionsMixin:
         self.reload_data()
 
     def action_swap(self):
+        if not self._require_capability(C.QUEUE_EDIT, "Swap"):
+            return
         if not self._assert_active_session_not_expired("Swap photo assignment"):
             return
         try:
@@ -603,6 +651,8 @@ class OperatorActionsMixin:
 
     def action_link_pair(self):
         """Opens interactive Closest Photo Picker modal to link front/rear photos."""
+        if not self._require_capability(C.QUEUE_EDIT, "Link Pair"):
+            return
         if not self._assert_active_session_not_expired("Link photo"):
             return
         pair = self._get_active_pair()
@@ -749,6 +799,8 @@ class OperatorActionsMixin:
     @work(thread=True)
     def action_joint_rescan(self) -> None:
         """Runs Dual-Stream Joint Vision on the currently selected pair."""
+        if not self._require_capability(C.PIPELINE_RUN, "Joint Rescan"):
+            return
         if not self._assert_active_session_not_expired("Joint rescan"):
             return
         pair = self._get_active_pair("table-queue") or self._get_active_pair("table-history")
@@ -781,6 +833,8 @@ class OperatorActionsMixin:
     @work(thread=True)
     def action_process_vision(self) -> None:
         """Runs the vision pipeline in a background thread and streams progress to the bottom log."""
+        if not self._require_capability(C.PIPELINE_RUN, "Process Vision"):
+            return
         if not self._assert_active_session_not_expired("Vision pipeline"):
             return
         if getattr(self, "_vision_running", False):
@@ -828,6 +882,8 @@ class OperatorActionsMixin:
     @work(thread=True)
     def action_match_pairs(self) -> None:
         """Runs associate_pairs in background and logs results."""
+        if not self._require_capability(C.PIPELINE_RUN, "Match Pairs"):
+            return
         if not self._assert_active_session_not_expired("Pair matching"):
             return
         if getattr(self, "_matcher_running", False):
@@ -854,6 +910,8 @@ class OperatorActionsMixin:
 
     def action_submit_pair(self) -> None:
         """Opens confirmation modal to review plate and photos, then submits pair to ITMS."""
+        if not self._require_capability(C.ITMS_SUBMIT, "Submit Pair"):
+            return
         if not self._assert_active_session_not_expired("Submit pair"):
             return
         pair = self._get_active_pair()
@@ -970,6 +1028,8 @@ class OperatorActionsMixin:
 
     def action_batch_submit(self) -> None:
         """Opens batch submission modal to review all approved orders (e.g. 200 orders) and submit at once."""
+        if not self._require_capability(C.ITMS_SUBMIT, "Batch Submit"):
+            return
         if not self._assert_active_session_not_expired("Batch submit"):
             return
         from core.services.itms_web_client import get_current_itms_account
@@ -1272,6 +1332,8 @@ class OperatorActionsMixin:
 
     def action_export_shift_report(self) -> None:
         """Exports end-of-shift verification and installation handover report to CSV."""
+        if not self._require_capability(C.REPORTS_EXPORT, "Export Shift Report"):
+            return
         try:
             tabs = self.query_one("#tabs-content", TabbedContent)
             if getattr(tabs, "active", "") == "tab-stock":
@@ -1299,6 +1361,8 @@ class OperatorActionsMixin:
     @work(thread=True)
     def action_clean_storage(self) -> None:
         """Runs crop cleanup, vault lifecycle pruning, and database WAL optimization in background."""
+        if not self._require_capability("ADMIN", "Clean Storage"):
+            return
         if getattr(self, "_clean_running", False):
             self.call_from_thread(self.notify, "Storage cleanup is already running.", severity="warning")
             return
@@ -1332,6 +1396,8 @@ class OperatorActionsMixin:
 
     def action_quick_type_plate(self) -> None:
         """Opens interactive Quick Plate & Order Matcher modal [T] to type plate or link order."""
+        if not self._require_capability(C.QUEUE_EDIT, "Quick Type Plate"):
+            return
         pair = self._get_active_pair()
         if not pair:
             self.notify("Select a pair to enter plate.", severity="warning")
@@ -1374,6 +1440,8 @@ class OperatorActionsMixin:
 
     def action_unlink_order(self) -> None:
         """Unlinks the matched ITMS order from the selected pair in Review Queue or History."""
+        if not self._require_capability(C.QUEUE_EDIT, "Unlink Order"):
+            return
         if not self._assert_active_session_not_expired("Unlink order"):
             return
         pair = self._get_active_pair("table-queue") or self._get_active_pair("table-history")
@@ -1428,6 +1496,8 @@ class OperatorActionsMixin:
 
     def action_retry_failed(self) -> None:
         """Resets all FAILED orders to APPROVED status so they can be resubmitted in batch."""
+        if not self._require_capability(C.ITMS_SUBMIT, "Retry Failed"):
+            return
         from core.services.itms_web_client import get_current_itms_account
         from core.models import InstallationOrder
         active_acc = get_current_itms_account()
@@ -1480,6 +1550,8 @@ class OperatorActionsMixin:
     @work(thread=True)
     def action_sync_itms_orders(self, target_date: Optional[str] = None) -> None:
         """Synchronizes active ITMS orders, shift archive, and installation kits with rate-limit protection."""
+        if not self._require_capability(C.ITMS_CONNECT, "Sync Itms Orders"):
+            return
         if not self._assert_active_session_not_expired("Sync ITMS orders"):
             return
         if getattr(self, "_order_sync_running", False):
@@ -1540,6 +1612,8 @@ class OperatorActionsMixin:
 
     def action_sync_itms_kits(self) -> None:
         """Navigates to Installation Kits and triggers full multi-page crawl."""
+        if not self._require_capability(C.ITMS_CONNECT, "Sync Itms Kits"):
+            return
         self.action_open_itms_kits()
         try:
             pane = self.query_one("#itms-connection-pane")
@@ -1549,4 +1623,6 @@ class OperatorActionsMixin:
 
     def action_open_stock_manager(self) -> None:
         """Navigates directly to the dedicated Stock & Reconciliation Workspace (Tab 6)."""
+        if not self._require_capability(C.STOCK_EDIT, "Open Stock Manager"):
+            return
         self.action_tab_stock()

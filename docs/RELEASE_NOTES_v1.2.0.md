@@ -77,6 +77,18 @@ Helpers don't. Bond access follows ITMS: a Team Leader can only lead bonds their
   `X-Forwarded-For` spoofing is ignored.
 - **No shared default password:** each install generates its own random local administrator password.
 
+### One control centre
+- The backoffice exists **only on the central server** (close.kirex.online). Installed apps return 404
+  for `/backoffice/`.
+- Request access, invite signups and Team Leader invites all happen on the central server.
+
+### Device information
+- Browsers and phones record their OS (including Windows 11 vs 10), browser, phone model and Client
+  Hints. Once per session they also report screen, time zone, languages, CPU cores, memory, GPU, touch
+  and network.
+- Installs report hostname, OS edition and build, CPU, RAM, disk, IP addresses, MAC address and install path.
+- All of it shows in the backoffice under *Devices* and *Installs*.
+
 ### Identity
 - ITMS Connect (web and TUI) only accepts the person's own company email. A successful ITMS login attaches and verifies it.
 - Each warehouse sync records which bonds the company email can reach. Removed warehouses suspend the matching roles.
@@ -85,6 +97,12 @@ Helpers don't. Bond access follows ITMS: a Team Leader can only lead bonds their
 - Tabs, buttons and shortcuts follow the role. Helpers land on the mobile companion.
 - Settings → **My Account & Roles** shows roles, company email status and the grace deadline.
 - The TUI hides tabs the role can't use, and the ACCESS tab and system/developer cards are administrator-only.
+
+## Fixes
+- **Web navigation and the ITMS tab didn't load** (broken in production since 11 Nov). Two scripts
+  re-declared shared globals, a browser syntax error. A regression test now guards against it.
+- **TLS keys exposed in the now-public repository history** (v1.0.8 `cert.key` and an old embedded key)
+  are detected and replaced with freshly generated certificates on start-up.
 
 ## Security fixes (from v1.1.2)
 Admin-only security, settings and update APIs. The emailed approve link needs an admin login and a POST.

@@ -38,6 +38,12 @@ from core.vision.normalizer import is_valid_plate, normalize_plate
 
 logger = logging.getLogger(__name__)
 
+# Default configured weights stem ("models/plate_char_reader.onnx" / ".pt").
+DEFAULT_CHAR_WEIGHTS_STEM = "plate_char_reader"
+# Fine-tuned Ugandan character reader shipped in-repo since v1.1.1
+# (36 classes, 0-9A-Z, 320x320 input).
+SHIPPED_CHAR_WEIGHTS = "models/plate_char_reader_ug.onnx"
+
 
 @dataclass
 class CharacterBox:
@@ -311,6 +317,14 @@ class DirectCharacterRecognizer:
             root = Path(settings.BASE_DIR)
         except Exception:
             root = Path(__file__).resolve().parent.parent.parent
+
+        # Default weights name -> prefer the shipped fine-tuned Ugandan model when present.
+        # Custom (non-default) weight paths are never overridden; if the shipped file is
+        # missing, resolution falls through to the legacy lookup + HF download unchanged.
+        if p.stem == DEFAULT_CHAR_WEIGHTS_STEM:
+            shipped = root / SHIPPED_CHAR_WEIGHTS
+            if shipped.exists():
+                return shipped
 
         local_p = root / target
         if local_p.exists():

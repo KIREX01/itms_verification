@@ -20,6 +20,8 @@ media/*.bak
 *.bak
 *.pt
 *.onnx
+# Shipped fine-tuned Ugandan character reader (v1.1.1+) is tracked so git pull / packages carry it
+!models/plate_char_reader_ug.onnx
 dist/
 .pytest_cache/
 .DS_Store

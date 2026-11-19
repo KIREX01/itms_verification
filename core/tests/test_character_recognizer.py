@@ -290,3 +290,54 @@ class OCREngineFallbackIntegrationTests(SimpleTestCase):
                     self.assertIsNotNone(res)
                     self.assertEqual(res.text, "UMA123AA")
                     self.assertEqual(res.backend, "tesseract")
+
+
+class ShippedUgandanWeightsResolutionTests(SimpleTestCase):
+    """v1.1.1: default weights resolve to the shipped fine-tuned Ugandan model."""
+
+    def _root_with(self, files):
+        import tempfile
+        from pathlib import Path
+        tmp = Path(tempfile.mkdtemp())
+        for rel in files:
+            f = tmp / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_bytes(b"x")
+        return tmp
+
+    def _resolve(self, root, weights_path):
+        rec = DirectCharacterRecognizer(weights_path=weights_path)
+        with self.settings(BASE_DIR=root):
+            return rec.resolve_weights_path()
+
+    def test_default_name_prefers_shipped_model_over_legacy_file(self):
+        root = self._root_with(["models/plate_char_reader.onnx", "models/plate_char_reader_ug.onnx"])
+        resolved = self._resolve(root, "models/plate_char_reader.onnx")
+        self.assertEqual(resolved, root / "models" / "plate_char_reader_ug.onnx")
+
+    def test_default_pt_name_also_prefers_shipped_model(self):
+        root = self._root_with(["models/plate_char_reader.pt", "models/plate_char_reader_ug.onnx"])
+        resolved = self._resolve(root, "models/plate_char_reader.pt")
+        self.assertEqual(resolved, root / "models" / "plate_char_reader_ug.onnx")
+
+    def test_custom_weights_path_is_never_overridden(self):
+        root = self._root_with(["models/my_custom_reader.onnx", "models/plate_char_reader_ug.onnx"])
+        resolved = self._resolve(root, "models/my_custom_reader.onnx")
+        self.assertEqual(resolved, root / "models" / "my_custom_reader.onnx")
+
+    def test_missing_shipped_model_falls_back_to_legacy_file(self):
+        root = self._root_with(["models/plate_char_reader.onnx"])
+        resolved = self._resolve(root, "models/plate_char_reader.onnx")
+        self.assertEqual(resolved, root / "models" / "plate_char_reader.onnx")
+
+    def test_shipped_model_in_repo_loads_with_uganda_vocab(self):
+        from pathlib import Path
+        from django.conf import settings
+        from core.vision.character_recognizer import SHIPPED_CHAR_WEIGHTS
+        shipped = Path(settings.BASE_DIR) / SHIPPED_CHAR_WEIGHTS
+        self.assertTrue(shipped.exists(), "shipped Ugandan char reader must be committed")
+        model = DirectCharacterRecognizer(weights_path=str(shipped)).get_model()
+        self.assertIsNotNone(model)
+        names = getattr(model, "names", None)
+        if names:
+            self.assertEqual("".join(names[i] for i in sorted(names)), "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")

@@ -369,6 +369,8 @@ class DashboardMetricsAndOrderSyncTests(TestCase):
         pane = ITMSConnectionPane()
         mock_app = MagicMock()
         mock_app.call_from_thread = lambda fn, *args, **kwargs: fn(*args, **kwargs)
+        # No signed-in operator: a MagicMock user would be passed into ORM filters and crash.
+        mock_app.current_user = None
         pane.query_one = MagicMock()
         pane._set_feedback = MagicMock()
         pane._log_preview = MagicMock()
@@ -986,7 +988,10 @@ class DryRunSafetyConfigurationAndLiveSubmissionTests(TestCase):
 
         event = Switch.Changed(mock_switch, False)
 
+        # set_maintenance_mode is mocked too: the fake widgets report every switch ON, and a real
+        # call would leave secure/maintenance.flag behind for every later test (manage.py test).
         with patch.object(config_service, "save_config") as mock_save, \
+             patch.object(config_service, "set_maintenance_mode") as mock_maintenance, \
              patch.object(pane, "query_one") as mock_query:
             
             def query_side_effect(selector, *args, **kwargs):
@@ -1004,12 +1009,12 @@ class DryRunSafetyConfigurationAndLiveSubmissionTests(TestCase):
 
             # The pane saves its own settings FIRST; set_maintenance_mode() then performs its own
             # save so maintenance.enabled is never overwritten by a stale copy (v1.1.2 fix).
-            self.assertGreaterEqual(mock_save.call_count, 1)
-            pane_cfg = mock_save.call_args_list[0][0][0]
+            mock_save.assert_called_once()
+            pane_cfg = mock_save.call_args[0][0]
             self.assertFalse(pane_cfg["submission"]["dry_run_mode"])
             self.assertFalse(settings.ITMS_WEB_DRY_RUN)
-            if mock_save.call_count > 1:
-                self.assertTrue(mock_save.call_args_list[-1][0][0]["maintenance"]["enabled"])
+            mock_maintenance.assert_called_once()
+            self.assertTrue(mock_maintenance.call_args.kwargs["enabled"])
 
     def test_batch_submission_modal_buttons_and_footer_visibility(self):
         """Verifies that BatchSubmissionModal mounts buttons inside docked bottom bar with table flex."""

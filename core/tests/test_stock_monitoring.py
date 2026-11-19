@@ -1253,6 +1253,8 @@ class StockMonitoringTests(TestCase):
         Verifies that MorningKitSyncDaemon defaults to 3 hours (10,800s)
         and enforces the 10-minute cooldown window to protect the ITMS API.
         """
+        # Singleton: earlier tests may have created it with another interval.
+        kit_provisioning_service.MorningKitSyncDaemon._instance = None
         daemon = kit_provisioning_service.MorningKitSyncDaemon.get_instance()
         status = daemon.get_status()
         self.assertEqual(status["interval_seconds"], 10800)

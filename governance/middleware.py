@@ -18,6 +18,7 @@ from django.contrib.auth import logout
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 
+from governance import capabilities as C
 from governance import enforcement
 from governance.services import authz
 
@@ -84,6 +85,11 @@ class GovernanceMiddleware:
             spec = enforcement.SPECIAL_RESOLVERS[spec](request)
 
         required = spec if isinstance(spec, tuple) else (spec,)
+        if view_name == "dashboard_view" and authz.has_capability(user, authz.ANY_MEMBER):
+            # Capture-only roles (Helpers) work from the mobile companion.
+            desk_caps = (C.DASHBOARD_VIEW, C.QUEUE_VIEW, C.STOCK_VIEW, C.REPORTS_VIEW, C.ORDERS_VIEW)
+            if not authz.has_any(user, desk_caps) and authz.has_any(user, (C.CAPTURE_UPLOAD, C.STOCK_SCAN)):
+                return redirect("/mobile/")
         if authz.has_any(user, required):
             return None
 

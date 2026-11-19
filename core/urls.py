@@ -56,6 +56,10 @@ urlpatterns = [
     path("api/pipeline/status/", views.api_pipeline_status, name="api_pipeline_status"),
     path("api/stream/events/", views.api_stream_events, name="api_stream_events"),
     path("api/submissions/batch/", views.api_batch_submit, name="api_batch_submit"),
+    # Quality flags (QI raises, TL resolves)
+    path("api/flags/", views.api_flags_list, name="api_flags_list"),
+    path("api/flags/raise/", views.api_flag_raise, name="api_flag_raise"),
+    path("api/flags/<int:flag_id>/resolve/", views.api_flag_resolve, name="api_flag_resolve"),
     path("api/pairs/batch-submit/", views.api_batch_submit, name="api_pairs_batch_submit"),
     path("api/export/report/", views.api_export_report, name="api_export_report"),
     path("api/history/export/", views.api_export_report, name="api_export_history_csv"),

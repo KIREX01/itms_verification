@@ -235,7 +235,16 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
         )
 
     pairs_data = []
-    for p in qs[:limit]:
+    page_pairs = list(qs[:limit])
+    # Open Quality Inspector flags per pair (direct pair flags + flags on the linked order).
+    from collections import Counter
+    from core.models import QualityFlag
+    _pair_ids = [pp.id for pp in page_pairs]
+    _order_ids = [pp.order_id for pp in page_pairs if pp.order_id]
+    _open = QualityFlag.objects.filter(status=QualityFlag.Status.OPEN)
+    _flags_by_pair = Counter(_open.filter(pair_id__in=_pair_ids).values_list("pair_id", flat=True))
+    _flags_by_order = Counter(_open.filter(order_id__in=_order_ids).values_list("order_id", flat=True))
+    for p in page_pairs:
         front_url = _clean_media_url(p.front_image.vault_file) if p.front_image and p.front_image.vault_file else None
         rear_url = _clean_media_url(p.rear_image.vault_file) if p.rear_image and p.rear_image.vault_file else None
         front_thumb_url = _clean_media_url(p.front_image.thumbnail_file or p.front_image.vault_file) if p.front_image and p.front_image.vault_file else None
@@ -304,6 +313,7 @@ def api_pairs_list(request: HttpRequest) -> JsonResponse:
                 "rear_beacon": (p.order.rear_beacon_id if p.order else "") or "—",
             },
             "updated_at": timezone.localtime(p.updated_at, tz_eat).strftime("%H:%M:%S") if p.updated_at else "",
+            "open_flags": _flags_by_pair.get(p.id, 0) + (_flags_by_order.get(p.order_id, 0) if p.order_id else 0),
         })
 
     dropdown_batches_qs = shift_batches_qs[:50]

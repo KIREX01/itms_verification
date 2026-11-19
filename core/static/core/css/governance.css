@@ -1,0 +1,57 @@
+/* Governance UI: role-aware visibility, role badge and quality flags. */
+.gov-hidden { display: none !important; }
+
+.gov-role-badge {
+    display: inline-flex;
+    align-items: center;
+    margin: 0 10px;
+    padding: 3px 10px;
+    border: 1px solid var(--ug-border, #334155);
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--ug-yellow, #facc15);
+    background: rgba(250, 204, 21, 0.06);
+    white-space: nowrap;
+}
+
+.btn-decision.btn-warning {
+    background: rgba(245, 158, 11, 0.15);
+    border-color: rgba(245, 158, 11, 0.6);
+    color: #fbbf24;
+}
+
+.gov-flags-panel:empty { display: none; }
+.gov-flags-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 10px 0;
+}
+.gov-flags-title {
+    font-size: 0.78rem;
+    font-weight: 800;
+    color: #fca5a5;
+}
+.gov-flag {
+    border: 1px solid var(--ug-border, #334155);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    font-size: 0.8rem;
+}
+.gov-flag.is-open {
+    border-color: rgba(239, 68, 68, 0.55);
+    background: rgba(239, 68, 68, 0.08);
+}
+.gov-flag-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-weight: 700;
+    color: #f1f5f9;
+}
+.gov-flag-suggest { margin-top: 4px; color: #fde68a; }
+.gov-flag-note { margin-top: 4px; color: var(--ug-text-dim, #94a3b8); white-space: pre-wrap; }
+.gov-flag-meta, .gov-flag-closed { margin-top: 4px; font-size: 0.72rem; color: var(--ug-text-muted, #64748b); }
+.gov-flag-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }

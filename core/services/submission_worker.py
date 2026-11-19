@@ -149,6 +149,18 @@ def submit_pair(
         pair.save(update_fields=["verification_status"])
         return SubmissionOutcome(pair_id=pair.id, success=False, error=err_msg, backend=backend_mode, dry_run=is_dry_run)
 
+    # Quality gate: an OPEN Quality Inspector flag on the pair, its order or its kit blocks submission.
+    from core.services.quality_flag_service import submission_block_message
+    flag_block = submission_block_message(pair)
+    if flag_block:
+        _log(pair, SubmissionAuditLog.Action.SUBMIT, SubmissionAuditLog.ResultStatus.INFO, flag_block, operator=effective_operator)
+        if log_callback:
+            try:
+                log_callback(f"[bold yellow][FLAGGED][/bold yellow] {pair.registration_number_detected}: {flag_block}")
+            except Exception:
+                pass
+        return SubmissionOutcome(pair_id=pair.id, success=False, error=flag_block, backend=backend_mode, dry_run=is_dry_run)
+
     # Check ITMS Master Service Switch
     if backend_mode != "mock" and not config_service.is_itms_enabled():
         err_msg = "ITMS Master Switch is PAUSED. Local vehicle pair held in current state; remote submission suspended."

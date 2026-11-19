@@ -1305,3 +1305,37 @@
         <span style="color:#06b6d4; font-weight:700;">Open &rarr;</span>
     </div>
 </button>
+
+<!-- Quality flag (Quality Inspector / Team Leader) -->
+<div class="modal-overlay" id="modal-raise-flag">
+    <div class="modal-box" style="max-width:480px; border-top:4px solid #f59e0b;">
+        <div class="modal-header">
+            <span class="modal-title" style="display:flex; align-items:center; gap:8px;">
+                <span>🚩</span><span>Raise a Quality Flag</span>
+            </span>
+            <button type="button" class="modal-close" onclick="closeModal('modal-raise-flag')" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body" style="display:flex; flex-direction:column; gap:12px; padding:20px;">
+            <div style="font-size:0.82rem; color:var(--ug-text-dim);">
+                Flagging <strong id="flag-target-label" style="color:#fff;">---</strong>.
+                Submission to ITMS is blocked until the Team Leader resolves the flag.
+            </div>
+            <div class="form-field">
+                <label for="flag-reason">What is wrong?</label>
+                <select id="flag-reason" class="form-select"></select>
+            </div>
+            <div class="form-field" id="flag-plate-row">
+                <label for="flag-suggested-plate">Correct plate number (optional)</label>
+                <input type="text" id="flag-suggested-plate" class="form-input" placeholder="e.g. UBB 456C" autocomplete="off" style="text-transform:uppercase;">
+            </div>
+            <div class="form-field">
+                <label for="flag-note">Details</label>
+                <textarea id="flag-note" class="form-input" rows="3" placeholder="What did you see? (required for 'Other')"></textarea>
+            </div>
+        </div>
+        <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:8px; padding:12px 20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-raise-flag')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="submitFlag()">🚩 Raise Flag</button>
+        </div>
+    </div>
+</div>

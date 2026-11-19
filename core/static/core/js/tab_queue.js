@@ -281,7 +281,7 @@ function renderQueueCards() {
             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
                 <div style="display:flex; align-items:center; gap:6px;">
                     <span class="item-plate-text">${plate}</span>
-                    
+                    ${p.open_flags ? `<span class="badge badge-red" style="font-size:0.58rem; padding:1px 5px;" title="Open quality flags block submission">🚩 ${p.open_flags}</span>` : ""}
                 </div>
                 <span class="badge ${badgeCls}" style="font-size:0.65rem;">${displayStatus}</span>
             </div>

@@ -113,7 +113,7 @@
                     <span style="font-size:0.72rem; color:var(--ug-text-muted);" id="queue-approved-count-text">
                         0 ready to submit
                     </span>
-                    <button class="btn btn-primary queue-submit-btn-sm" id="btn-queue-batch-submit" onclick="triggerBatchSubmit('ALL')" title="Submit all approved pairs across all shift batches to ITMS (Hotkey: B)">
+                    <button class="btn btn-primary queue-submit-btn-sm" id="btn-queue-batch-submit" data-cap="itms.submit" onclick="triggerBatchSubmit('ALL')" title="Submit all approved pairs across all shift batches to ITMS (Hotkey: B)">
                         🚀 Submit Approved (0) <span class="hotkey">B</span>
                     </button>
                 </div>
@@ -324,21 +324,27 @@
                     </div>
                 </div>
 
+                <!-- Quality flags on this pair / its order (QI raises, TL resolves) -->
+                <div id="queue-flags-panel" class="gov-flags-panel"></div>
+
                 <!-- Operator Decision Bar (TUI Bindings) -->
                 <div class="operator-decision-bar" id="mobile-decision-grid">
-                    <button class="btn-decision btn-success" id="btn-action-approve" onclick="executePairAction('approve')" title="Approve pair and advance to next item (Hotkey: A)">
+                    <button class="btn-decision btn-success" id="btn-action-approve" data-cap="queue.approve" onclick="executePairAction('approve')" title="Approve pair and advance to next item (Hotkey: A)">
                         ✓ Approve <span class="hotkey hide-mobile">A</span>
                     </button>
-                    <button class="btn-decision btn-gold" onclick="executePairAction('swap')" title="Swap front and rear photos (Hotkey: S)">
+                    <button class="btn-decision btn-gold" data-cap="queue.edit" onclick="executePairAction('swap')" title="Swap front and rear photos (Hotkey: S)">
                         ⇄ Swap <span class="hotkey hide-mobile">S</span>
                     </button>
-                    <button class="btn-decision btn-secondary" onclick="openEditPlateModal()" title="Edit plate, change verification status, or link ITMS order (Hotkeys: E or L)">
+                    <button class="btn-decision btn-secondary" data-cap="queue.edit" onclick="openEditPlateModal()" title="Edit plate, change verification status, or link ITMS order (Hotkeys: E or L)">
                         ✏️ Edit Plate <span class="hotkey hide-mobile">E / L</span>
                     </button>
-                    <button class="btn-decision btn-danger" id="btn-action-delete" onclick="openDeletePairModal()" title="Delete pair and purge evidence files">
+                    <button class="btn-decision btn-danger" id="btn-action-delete" data-cap="pair.delete" onclick="openDeletePairModal()" title="Delete pair and purge evidence files">
                         🗑️ Delete Pair
                     </button>
-                    <button class="btn-decision btn-primary" id="btn-submit-action" onclick="executePairAction('submit')" title="Submit verified motorcycle pair to ITMS (Hotkey: Enter)">
+                    <button class="btn-decision btn-warning" id="btn-action-flag" data-cap="flag.raise" onclick="openFlagForSelectedPair()" title="Flag a problem with this pair, its order or kit (blocks submission until the Team Leader resolves it)">
+                        🚩 Flag
+                    </button>
+                    <button class="btn-decision btn-primary" id="btn-submit-action" data-cap="itms.submit" onclick="executePairAction('submit')" title="Submit verified motorcycle pair to ITMS (Hotkey: Enter)">
                         🚀 Submit <span class="hotkey hide-mobile">Enter</span>
                     </button>
                 </div>

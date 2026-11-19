@@ -566,6 +566,9 @@ class SubmissionAuditLog(models.Model):
         IMAGE_REPLACED = "IMAGE_REPLACED", "Evidence Image Replaced"
         STOCK_LEDGER_UPDATED = "STOCK_LEDGER_UPDATED", "Stock Ledger Updated"
         STOCK_REPORT_EMAILED = "STOCK_REPORT_EMAILED", "Stock Report Emailed"
+        FLAG_RAISED = "FLAG_RAISED", "Quality Flag Raised"
+        FLAG_APPLIED = "FLAG_APPLIED", "Quality Flag Suggestion Applied"
+        FLAG_RESOLVED = "FLAG_RESOLVED", "Quality Flag Resolved / Rejected"
 
     class ResultStatus(models.TextChoices):
         SUCCESS = "SUCCESS", "Success"
@@ -1507,4 +1510,56 @@ class EmailAccessRequest(models.Model):
         return self.client_ip
 
 
+class QualityFlag(models.Model):
+    """
+    A Quality Inspector's flag on a pair, an installation order or an installation kit.
+    While OPEN, the flagged item (and any pair tied to that order/kit) cannot be submitted to ITMS.
+    The Team Leader resolves it: apply the suggested plate, reject, or mark resolved.
+    """
+
+    class TargetType(models.TextChoices):
+        PAIR = "PAIR", "Vehicle pair"
+        ORDER = "ORDER", "Installation order"
+        KIT = "KIT", "Installation kit"
+
+    class Reason(models.TextChoices):
+        WRONG_PLATE = "WRONG_PLATE", "Plate number is wrong"
+        PLATE_ORDER_MISMATCH = "PLATE_ORDER_MISMATCH", "Plate doesn't match the order"
+        BAD_PHOTO = "BAD_PHOTO", "Photo unclear / wrong vehicle"
+        WRONG_KIT = "WRONG_KIT", "Wrong installation kit"
+        ORDER_DATA_ERROR = "ORDER_DATA_ERROR", "Order details are wrong"
+        DUPLICATE = "DUPLICATE", "Duplicate"
+        OTHER = "OTHER", "Other"
+
+    class Status(models.TextChoices):
+        OPEN = "OPEN", "Open"
+        APPLIED = "APPLIED", "Suggestion applied"
+        REJECTED = "REJECTED", "Rejected"
+        RESOLVED = "RESOLVED", "Resolved"
+
+    target_type = models.CharField(max_length=8, choices=TargetType.choices, db_index=True)
+    pair = models.ForeignKey("VehicleInstallationPair", null=True, blank=True, on_delete=models.CASCADE,
+                             related_name="quality_flags")
+    order = models.ForeignKey("InstallationOrder", null=True, blank=True, on_delete=models.CASCADE,
+                              related_name="quality_flags")
+    kit = models.ForeignKey("InstallationKit", null=True, blank=True, on_delete=models.CASCADE,
+                            related_name="quality_flags")
+    bond_code = models.CharField(max_length=32, blank=True, default="", db_index=True)
+    reason_code = models.CharField(max_length=24, choices=Reason.choices, default=Reason.OTHER)
+    note = models.TextField(blank=True, default="")
+    suggested_plate = models.CharField(max_length=32, blank=True, default="")
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.OPEN, db_index=True)
+    raised_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+")
+    raised_at = models.DateTimeField(auto_now_add=True)
+    resolved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                    related_name="+")
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolution_note = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["-raised_at"]
+        indexes = [models.Index(fields=["status", "bond_code"])]
+
+    def __str__(self) -> str:
+        return f"Flag #{self.pk} {self.target_type} {self.get_reason_code_display()} [{self.status}]"
 

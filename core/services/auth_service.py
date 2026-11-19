@@ -104,6 +104,12 @@ def create_operator_account(
 
     if User.objects.filter(username=username).exists():
         return None, f"Username '{username}' is already taken. Please choose another."
+    try:
+        from governance.services.identity import is_burned_email
+        if email and is_burned_email(email):
+            return None, "This email can no longer be used to register."
+    except Exception:
+        pass
 
     first_name = full_name
     last_name = ""
@@ -128,9 +134,17 @@ def create_operator_account(
 
 
 def _compute_session_token(user: User) -> str:
-    """Computes a cryptographically-bound HMAC token for the user's active password hash."""
+    """
+    HMAC bound to the user's password hash AND governance security stamp, so a password change,
+    suspension or burn invalidates the remembered TUI session.
+    """
     secret = getattr(settings, "SECRET_KEY", "itms-local-fallback-secret-key").encode()
-    return hmac.new(secret, user.password.encode(), hashlib.sha256).hexdigest()
+    try:
+        from governance.services.accounts import security_stamp
+        stamp = security_stamp(user)
+    except Exception:
+        stamp = ""
+    return hmac.new(secret, f"{user.password}|{stamp}".encode(), hashlib.sha256).hexdigest()
 
 
 def save_remembered_session(user: User, remember: bool = True) -> None:
@@ -190,6 +204,12 @@ def get_remembered_session() -> Optional[User]:
         user = User.objects.filter(username=username).first()
         if not user or not user.is_active:
             return None
+        try:
+            from governance.services.authz import account_ok
+            if not account_ok(user):
+                return None
+        except Exception:
+            pass
 
         expected_token = _compute_session_token(user)
         if hmac.compare_digest(token, expected_token):

@@ -267,21 +267,24 @@ def verify_device_trust_token(token: str) -> Optional[Dict[str, str]]:
     }
 
 
+def _qr_security_stamp(user) -> str:
+    try:
+        from governance.services.accounts import security_stamp
+        return security_stamp(user)
+    except Exception:
+        return ""
+
+
 def generate_qr_pairing_token(user: Optional[Any] = None, **_kwargs: Any) -> str:
     """
     Generates a cryptographically signed QR pairing token (`pair_token`) for mobile companions.
     """
-    uid = ""
-    if user and getattr(user, "is_authenticated", False):
-        uid = str(user.pk)
-    else:
-        first_op = User.objects.filter(is_active=True).order_by("-is_superuser", "id").first()
-        if first_op:
-            uid = str(first_op.pk)
-    if not uid:
+    # Always bound to a specific signed-in user (no fallback to "the first superuser").
+    if not (user and getattr(user, "is_authenticated", False)):
         return ""
+    uid = str(user.pk)
     ts = str(int(time.time()))
-    payload = f"QRPAIR:{uid}:{ts}"
+    payload = f"QRPAIR:{uid}:{ts}:{_qr_security_stamp(user)}"
     sig = hmac.new(_get_hmac_secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()[:32]
     return f"{uid}.{ts}.{sig}"
 
@@ -299,11 +302,21 @@ def verify_qr_pairing_token(token: str) -> Optional[User]:
     ts = int(ts_str)
     if abs(int(time.time()) - ts) > QR_PAIR_TOKEN_TTL_SECONDS:
         return None
-    payload = f"QRPAIR:{uid_str}:{ts_str}"
+    user = User.objects.filter(pk=int(uid_str), is_active=True).first()
+    if user is None:
+        return None
+    # The security stamp rotates on suspend/burn, killing every outstanding QR token.
+    payload = f"QRPAIR:{uid_str}:{ts_str}:{_qr_security_stamp(user)}"
     expected_sig = hmac.new(_get_hmac_secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()[:32]
     if not hmac.compare_digest(sig, expected_sig):
         return None
-    return User.objects.filter(pk=int(uid_str), is_active=True).first()
+    try:
+        from governance.services.authz import account_ok
+        if not account_ok(user):
+            return None
+    except Exception:
+        return None
+    return user
 
 
 def extract_device_identity(request: HttpRequest) -> Dict[str, str]:
@@ -860,8 +873,18 @@ def check_operator_session_access(
     if not user:
         return False, "No active operator session found.", None
 
-    if not getattr(user, "is_active", True):
+    # The TUI holds a User object from login time; re-read it so deactivation, suspension and
+    # burns made elsewhere (backoffice / central sync) lock the terminal on the next tick.
+    fresh = User.objects.filter(pk=getattr(user, "pk", None)).first() if getattr(user, "pk", None) else user
+    if fresh is None or not getattr(fresh, "is_active", True):
         return False, f"Operator account '{user.username}' is deactivated.", None
+    try:
+        from governance.services.authz import account_status
+        status = account_status(fresh)
+        if status != "ACTIVE":
+            return False, f"Operator account '{user.username}' is {status.lower()}.", None
+    except Exception as exc:
+        logger.debug("Governance account status check skipped: %s", exc)
 
     # Superusers are exempt from time-based session expiration, but remain subject to IP/MAC firewall
     is_super = getattr(user, "is_superuser", False)
@@ -1148,6 +1171,24 @@ def preapprove_operator_email(
     hours = parse_duration_hours(duration_hours, default_hours=sec_cfg["default_duration_hours"])
     now = timezone.now()
     exp_dt = now + timedelta(hours=hours)
+
+    try:
+        from governance.services.identity import is_burned_email
+        burned = is_burned_email(clean_email)
+    except Exception:
+        burned = False
+    if burned:
+        # Burned identities can never be invited again: keep (or create) a BLOCKED record only.
+        logger.warning("Refused invite for burned email %s", clean_email)
+        req, _ = EmailAccessRequest.objects.get_or_create(
+            email=clean_email,
+            defaults={"status": EmailAccessRequest.Status.BLOCKED,
+                      "activation_token": secrets.token_urlsafe(32)},
+        )
+        if req.status != EmailAccessRequest.Status.BLOCKED:
+            req.status = EmailAccessRequest.Status.BLOCKED
+            req.save(update_fields=["status", "updated_at"])
+        return req
 
     req = EmailAccessRequest.objects.filter(email__iexact=clean_email).first()
     if req:

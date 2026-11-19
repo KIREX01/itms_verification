@@ -15,6 +15,15 @@ User = get_user_model()
 
 
 class DeviceAndEmailAccessControlTests(TestCase):
+    def _security_admin(self):
+        admin, _ = User.objects.get_or_create(
+            username="security_admin", defaults={"email": "security_admin@example.com"}
+        )
+        admin.is_superuser = True
+        admin.is_staff = True
+        admin.save()
+        return admin
+
     def setUp(self):
         device_access_service.update_security_access_config({
             "mode": "STANDARD",
@@ -164,7 +173,7 @@ class DeviceAndEmailAccessControlTests(TestCase):
 
         # 1. Invite email via Web UI / API for 12 hours
         admin_client = Client()
-        admin_client.force_login(self.user)
+        admin_client.force_login(self._security_admin())  # security APIs are superuser-only (v1.1.2)
         invite_resp = admin_client.post(
             reverse("core:api_security_action"),
             data='{"action": "preapprove_email", "email": "shift_op@info.kirex.online", "duration_hours": 12}',
@@ -255,7 +264,7 @@ class DeviceAndEmailAccessControlTests(TestCase):
         self.assertEqual(access_req.status, EmailAccessRequest.Status.PENDING)
 
         admin_client = Client()
-        admin_client.force_login(self.user)
+        admin_client.force_login(self._security_admin())  # security APIs are superuser-only (v1.1.2)
         action_resp = admin_client.post(
             reverse("core:api_security_action"),
             data='{"action": "approve_request", "request_id": %d, "duration_hours": 24}' % access_req.id,

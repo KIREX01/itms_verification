@@ -8,6 +8,7 @@ from typing import Optional
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login as auth_login
+from django.contrib.auth.hashers import make_password
 from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.models import User
 from django.db.models import Q
@@ -17,7 +18,7 @@ from django.templatetags.static import static
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from core.models import AuthorizedDevice, EmailAccessRequest
 from core.services import auth_service, device_access_service, device_service, email_service
@@ -149,7 +150,8 @@ def signup_view(request: HttpRequest) -> HttpResponse:
                 "username": username,
                 "full_name": full_name,
                 "email": email,
-                "password": password,
+                # Never keep the plaintext password in the session; only its hash.
+                "password_hash": make_password(password),
                 "code": code,
                 "expires_at": time.time() + 600,
                 "last_sent_at": time.time(),
@@ -157,7 +159,8 @@ def signup_view(request: HttpRequest) -> HttpResponse:
             request.session.modified = True
 
             logo_url = request.build_absolute_uri(static("core/logos/android-chrome-192x192.png"))
-            verify_url = request.build_absolute_uri(reverse("core:signup_verify")) + f"?code={code}"
+            # The code is typed by the user; never put it in a URL (history / logs / referrers).
+            verify_url = request.build_absolute_uri(reverse("core:signup_verify"))
             ok, msg = email_service.send_2fa_verification_code(
                 email, code, username=username, verify_url=verify_url, logo_url=logo_url
             )
@@ -232,7 +235,7 @@ def signup_view(request: HttpRequest) -> HttpResponse:
         auth_login(request, user)
         auth_service.save_remembered_session(user, remember=True)
 
-        facility = (pending.get("facility_code") or req_approved.facility_code or "").strip().upper()
+        facility = (req_approved.facility_code or "").strip().upper()
         if facility:
             from core.models import OperatorProfile
             OperatorProfile.objects.update_or_create(
@@ -265,7 +268,7 @@ def _process_signup_resend(request: HttpRequest, pending: dict, email: str, user
     request.session.modified = True
 
     logo_url = request.build_absolute_uri(static("core/logos/android-chrome-192x192.png"))
-    verify_url = request.build_absolute_uri(reverse("core:signup_verify")) + f"?code={new_code}"
+    verify_url = request.build_absolute_uri(reverse("core:signup_verify"))
     ok, msg = email_service.send_2fa_verification_code(
         email, new_code, username=username, verify_url=verify_url, logo_url=logo_url
     )
@@ -318,7 +321,7 @@ def signup_verify_view(request: HttpRequest) -> HttpResponse:
         is_preapproved = device_access_service.is_email_preapproved_or_active(email)
         user, err = auth_service.create_operator_account(
             username=pending["username"],
-            password=pending["password"],
+            password_hash=pending.get("password_hash", ""),
             full_name=pending.get("full_name", ""),
             email=pending.get("email", ""),
         )
@@ -415,10 +418,8 @@ def signup_verify_view(request: HttpRequest) -> HttpResponse:
         resp = _redirect_after_auth(request)
         return device_access_service.attach_device_trust_cookie(resp, dev.device_id, email or user.username)
 
-    initial_code = request.GET.get("code", "").strip()
     return render(request, SIGNUP_VERIFY_TEMPLATE, {
         "email": email,
-        "initial_code": initial_code,
     })
 
 
@@ -518,38 +519,56 @@ def access_activate_view(request: HttpRequest) -> HttpResponse:
     return device_access_service.attach_device_trust_cookie(resp, dev.device_id, email)
 
 
-@require_GET
+@require_http_methods(["GET", "POST"])
 def access_review_token_view(request: HttpRequest, token: str) -> HttpResponse:
-    """One-click email approval endpoint for administrators."""
-    action = (request.GET.get("action") or "approve").strip().lower()
-    hours = request.GET.get("hours")
+    """
+    Administrator review of an access request reached from the alert email link.
+
+    Requires a signed-in superuser. GET shows a confirmation page; the decision is a
+    CSRF-protected POST. (Previously a bare GET approved or blocked with no login.)
+    """
+    user = getattr(request, "user", None)
+    if not (user and user.is_authenticated):
+        return redirect(f"{reverse('core:login')}?next={request.path}")
+    if not user.is_superuser:
+        return HttpResponse("Administrator privileges required.", status=403, content_type="text/plain")
+
     req_obj = EmailAccessRequest.objects.filter(activation_token=token).first()
     if not req_obj:
         return HttpResponse("Invalid or expired access review token.", status=404, content_type="text/plain")
 
-    admin_user = request.user if (getattr(request, "user", None) and request.user.is_authenticated) else None
+    if request.method != "POST":
+        return render(request, "core/access_review.html", {
+            "req": req_obj,
+            "default_hours": req_obj.duration_hours or 24,
+        })
+
+    action = (request.POST.get("action") or "").strip().lower()
+    hours = request.POST.get("hours")
     if action == "block":
         req_obj.status = EmailAccessRequest.Status.BLOCKED
-        req_obj.save(update_fields=["status", "updated_at"])
+        req_obj.reviewed_by = user
+        req_obj.reviewed_at = timezone.now()
+        req_obj.save(update_fields=["status", "reviewed_by", "reviewed_at", "updated_at"])
         if req_obj.device_id or req_obj.client_ip:
             device_access_service.block_device_or_network_target(
                 req_obj.device_id or req_obj.client_ip,
                 reason=f"Blocked during access review ({req_obj.email})",
-                admin_user=admin_user,
+                admin_user=user,
             )
         messages.warning(request, f"Blocked access request and device for {req_obj.email}.")
-    else:
+    elif action == "approve":
         ok, msg, _ = device_access_service.approve_access_request(
-            token, admin_user=admin_user, duration_hours=hours
+            token, admin_user=user, duration_hours=hours
         )
         if ok:
             messages.success(request, msg)
         else:
             messages.error(request, msg)
+    else:
+        return HttpResponse("Unknown review action.", status=400, content_type="text/plain")
 
-    if admin_user:
-        return redirect("core:dashboard")
-    return redirect("core:login")
+    return redirect("core:dashboard")
 
 
 @require_GET
@@ -557,6 +576,8 @@ def api_security_overview(request: HttpRequest) -> JsonResponse:
     """Returns auto-synced device registry, time-bound email grants, and security configuration."""
     if not (getattr(request, "user", None) and request.user.is_authenticated):
         return JsonResponse({"success": False, "error": "Authentication required."}, status=401)
+    if not request.user.is_superuser:
+        return JsonResponse({"success": False, "error": "Administrator privileges required."}, status=403)
 
     device_access_service.sync_existing_active_accounts_and_devices()
     sec_cfg = device_access_service.get_security_access_config()
@@ -643,6 +664,8 @@ def api_security_action(request: HttpRequest) -> JsonResponse:
     user = getattr(request, "user", None)
     if not (user and user.is_authenticated):
         return JsonResponse({"success": False, "error": "Authentication required."}, status=401)
+    if not user.is_superuser:
+        return JsonResponse({"success": False, "error": "Administrator privileges required."}, status=403)
 
     body: dict = {}
     if request.content_type == "application/json" and request.body:

@@ -73,13 +73,22 @@ def authenticate_operator(username: str, password: str) -> Tuple[Optional[User],
 
 def create_operator_account(
     username: str,
-    password: str,
+    password: str = "",
     full_name: str = "",
     email: str = "",
+    password_hash: str = "",
 ) -> Tuple[Optional[User], str]:
-    """Creates a new operator account in the local Django database."""
+    """
+    Creates a new (non-privileged) operator account in the local Django database.
+
+    Pass either a raw `password` or a pre-computed `password_hash` (from make_password) so
+    multi-step signup flows never have to hold the plaintext password. Accounts created here
+    are never staff/superuser: the administrator account comes from the installer
+    (create_superuser_if_none), not from "whoever registers first".
+    """
     username = (username or "").strip()
     password = (password or "").strip()
+    password_hash = (password_hash or "").strip()
     full_name = (full_name or "").strip()
     email = (email or "").strip()
 
@@ -87,10 +96,11 @@ def create_operator_account(
         return None, "Username cannot be empty."
     if len(username) < 3:
         return None, "Username must be at least 3 characters long."
-    if not password:
-        return None, "Password cannot be empty."
-    if len(password) < 6:
-        return None, "Password must be at least 6 characters long."
+    if not password_hash:
+        if not password:
+            return None, "Password cannot be empty."
+        if len(password) < 6:
+            return None, "Password must be at least 6 characters long."
 
     if User.objects.filter(username=username).exists():
         return None, f"Username '{username}' is already taken. Please choose another."
@@ -101,19 +111,17 @@ def create_operator_account(
         parts = full_name.split(" ", 1)
         first_name, last_name = parts[0], parts[1]
 
-    # If this is the very first user in the system, grant staff privileges
-    is_first_user = User.objects.count() == 0
-
     try:
         user = User.objects.create_user(
             username=username,
-            password=password,
+            password=None if password_hash else password,
             email=email,
             first_name=first_name,
             last_name=last_name,
-            is_staff=is_first_user,
-            is_superuser=is_first_user,
         )
+        if password_hash:
+            user.password = password_hash
+            user.save(update_fields=["password"])
         return user, ""
     except Exception as exc:
         return None, f"Failed to create account: {exc}"

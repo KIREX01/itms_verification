@@ -81,13 +81,36 @@ class LifecycleMaintenanceTests(TestCase):
         self.assertTrue(data.get("maintenance"))
         self.assertIn("scheduled maintenance", data.get("error").lower())
 
-    def test_maintenance_middleware_bypass(self):
+    def test_maintenance_query_param_bypass_removed(self):
         config_service.set_maintenance_mode(enabled=True)
 
-        # Bypass via query parameter
+        # The unauthenticated ?bypass_maintenance=1 escape hatch no longer exists.
         resp = self.http_client.get("/?bypass_maintenance=1")
-        # Should not be 503; either 200 or 302 redirect to login/dashboard
-        self.assertNotEqual(resp.status_code, 503)
+        self.assertEqual(resp.status_code, 503)
+        resp2 = self.http_client.get("/")
+        self.assertEqual(resp2.status_code, 503)
+
+    def test_maintenance_superuser_bypass_and_login_reachable(self):
+        from django.contrib.auth.models import User
+        config_service.set_maintenance_mode(enabled=True)
+
+        # Login page stays reachable so an administrator can sign in.
+        self.assertNotEqual(self.http_client.get("/login/").status_code, 503)
+
+        admin = User.objects.create_superuser("maint_admin", "maint@example.com", "pw-Strong-123")
+        self.http_client.force_login(admin)
+        self.assertNotEqual(self.http_client.get("/").status_code, 503)
+
+        operator = User.objects.create_user("maint_op", "op@example.com", "pw-Strong-123")
+        self.http_client.force_login(operator)
+        self.assertEqual(self.http_client.get("/").status_code, 503)
+
+    def test_maintenance_request_does_not_rewrite_template_files(self):
+        from unittest.mock import patch
+        config_service.set_maintenance_mode(enabled=True)
+        with patch("pathlib.Path.write_text") as mock_write:
+            self.http_client.get("/")
+        mock_write.assert_not_called()
 
     def test_itms_ctl_maintenance_subaction(self):
         out = StringIO()

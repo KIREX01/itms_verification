@@ -365,7 +365,7 @@ class TUIExpiredLockScreen(ModalScreen[bool]):
             activation_code=code,
         )
 
-        if ok and dev:
+        if ok:
             err_label.update(f"[bold green]✓ {msg} Access restored![/bold green]")
             self.app.notify(f"Access renewed: {msg}", severity="information")
             self.dismiss(True)

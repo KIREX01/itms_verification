@@ -1,0 +1,51 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Review Access Request - CLOSE Copilot</title>
+    <link rel="shortcut icon" href="{% static 'core/logos/favicon.ico' %}">
+    <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/auth.css' %}">
+</head>
+<body>
+    <div class="uganda-flag-ribbon"></div>
+    <div class="auth-page-wrapper">
+        <div class="auth-card-box">
+            <div class="auth-card-head">
+                <h1 style="font-size:1.25rem; font-weight:800; color:#ffffff;">
+                    Review <span style="color:var(--ug-yellow);">Access Request</span>
+                </h1>
+                <p style="font-size:0.75rem; color:var(--ug-text-muted); margin-top:2px;">
+                    Confirm before granting or blocking access.
+                </p>
+            </div>
+            <div class="auth-card-body">
+                <dl style="display:grid; grid-template-columns:max-content 1fr; gap:6px 14px; font-size:0.85rem; margin:0 0 16px;">
+                    <dt style="color:var(--ug-text-muted);">Email</dt><dd style="margin:0;">{{ req.email }}</dd>
+                    <dt style="color:var(--ug-text-muted);">Name</dt><dd style="margin:0;">{{ req.full_name|default:"—" }}</dd>
+                    <dt style="color:var(--ug-text-muted);">Username</dt><dd style="margin:0;">{{ req.username|default:"—" }}</dd>
+                    <dt style="color:var(--ug-text-muted);">Status</dt><dd style="margin:0;">{{ req.get_status_display }}</dd>
+                    <dt style="color:var(--ug-text-muted);">IP / Device</dt><dd style="margin:0;">{{ req.client_ip|default:"—" }} · {{ req.device_name|default:"—" }}</dd>
+                    <dt style="color:var(--ug-text-muted);">Requested</dt><dd style="margin:0;">{{ req.created_at|date:"Y-m-d H:i" }}</dd>
+                </dl>
+
+                <form method="POST" style="display:flex; flex-direction:column; gap:12px;">
+                    {% csrf_token %}
+                    <div class="form-field">
+                        <label for="hours">Access duration (hours)</label>
+                        <input type="number" id="hours" name="hours" min="1" max="8760" value="{{ default_hours }}">
+                    </div>
+                    <div style="display:flex; gap:10px;">
+                        <button type="submit" name="action" value="approve" class="btn btn-primary" style="flex:1; justify-content:center; padding:11px;">Approve</button>
+                        <button type="submit" name="action" value="block" class="btn" style="flex:1; justify-content:center; padding:11px;">Block</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

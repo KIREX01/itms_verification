@@ -727,10 +727,11 @@ def set_maintenance_mode(
     return saved
 
 
-def generate_maintenance_html(base_dir: Optional[Path] = None) -> str:
+def generate_maintenance_html(base_dir: Optional[Path] = None, write_files: bool = True) -> str:
     """
-    Renders and writes standalone HTML error pages to templates/maintenance.html
-    and templates/503.html for Nginx and Django 503 fallback.
+    Renders the standalone maintenance HTML page. When write_files is True (on toggle),
+    also writes templates/maintenance.html and templates/503.html for Nginx/Django fallback.
+    Per-request rendering passes write_files=False to avoid disk writes on every blocked hit.
     """
     b_dir = base_dir or _get_project_root()
     m_cfg = get_maintenance_config(base_dir)
@@ -1005,6 +1006,9 @@ def generate_maintenance_html(base_dir: Optional[Path] = None) -> str:
 </body>
 </html>
 """
+    if not write_files:
+        return html_content
+
     tpl_dir = b_dir / "templates"
     tpl_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -1631,8 +1635,8 @@ class ConfigService:
         )
 
     @staticmethod
-    def generate_maintenance_html(base_dir: Optional[Path] = None) -> str:
-        return generate_maintenance_html(base_dir)
+    def generate_maintenance_html(base_dir: Optional[Path] = None, write_files: bool = True) -> str:
+        return generate_maintenance_html(base_dir, write_files=write_files)
 
     @staticmethod
     def get_database_config(base_dir: Optional[Path] = None) -> Dict[str, Any]:

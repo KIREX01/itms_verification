@@ -1002,10 +1002,14 @@ class DryRunSafetyConfigurationAndLiveSubmissionTests(TestCase):
             mock_query.side_effect = query_side_effect
             pane.on_switch_changed(event)
 
-            mock_save.assert_called_once()
-            saved_cfg = mock_save.call_args[0][0]
-            self.assertFalse(saved_cfg["submission"]["dry_run_mode"])
+            # The pane saves its own settings FIRST; set_maintenance_mode() then performs its own
+            # save so maintenance.enabled is never overwritten by a stale copy (v1.1.2 fix).
+            self.assertGreaterEqual(mock_save.call_count, 1)
+            pane_cfg = mock_save.call_args_list[0][0][0]
+            self.assertFalse(pane_cfg["submission"]["dry_run_mode"])
             self.assertFalse(settings.ITMS_WEB_DRY_RUN)
+            if mock_save.call_count > 1:
+                self.assertTrue(mock_save.call_args_list[-1][0][0]["maintenance"]["enabled"])
 
     def test_batch_submission_modal_buttons_and_footer_visibility(self):
         """Verifies that BatchSubmissionModal mounts buttons inside docked bottom bar with table flex."""

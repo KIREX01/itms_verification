@@ -286,7 +286,7 @@ class UpdateEndpointsAndCommandTests(TestCase):
 
     def setUp(self):
         self.client = Client()
-        self.user = User.objects.create_user(username="update_tester", password="password123")
+        self.user = User.objects.create_superuser(username="update_tester", email="update_tester@example.com", password="password123")  # applying updates is admin-only (v1.1.2)
         self.client.login(username="update_tester", password="password123")
 
     @patch("core.services.update_service.UpdateService.check_for_updates")
@@ -366,3 +366,14 @@ class UpdateEndpointsAndCommandTests(TestCase):
         data = response.json()
         self.assertFalse(data["success"])
         self.assertIn("Untrusted", data["error"])
+
+
+class UpdateApplyRequiresAdminTests(TestCase):
+    """v1.1.2: only superusers may apply updates over HTTP."""
+
+    def test_operator_apply_update_forbidden(self):
+        User.objects.create_user(username="plain_operator", password="password123")
+        client = Client()
+        client.login(username="plain_operator", password="password123")
+        res = client.post("/api/updates/apply/")
+        self.assertEqual(res.status_code, 403)

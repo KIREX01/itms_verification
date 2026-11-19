@@ -1104,6 +1104,31 @@ def create_or_update_access_request(
     )
 
 
+_NON_EXTENDABLE_DEVICE_STATUSES = (
+    AuthorizedDevice.Status.BLOCKED,
+    AuthorizedDevice.Status.REVOKED,
+)
+
+
+def _activate_if_pending_signup(user: User) -> bool:
+    """
+    Activates an account only while it is still pending its first approval (never signed in).
+    The app deactivates accounts itself only during signup; any other inactive account was
+    deactivated by an administrator and must not be re-enabled by an approval, invite or code.
+    """
+    if user.is_active:
+        return True
+    if user.last_login is None:
+        user.is_active = True
+        user.save(update_fields=["is_active"])
+        return True
+    logger.warning(
+        "Account %s was deactivated by an administrator and stays inactive; reactivate it explicitly.",
+        user.username,
+    )
+    return False
+
+
 def preapprove_operator_email(
     email: str,
     facility_code: str = "AGM",
@@ -1152,9 +1177,11 @@ def preapprove_operator_email(
             reviewed_at=now,
         )
 
-    User.objects.filter(email__iexact=clean_email, is_active=False).update(is_active=True)
+    # Only activate accounts still pending first approval (never signed in). An account an
+    # administrator deactivated is NOT silently re-enabled by a re-invite.
+    User.objects.filter(email__iexact=clean_email, is_active=False, last_login__isnull=True).update(is_active=True)
     AuthorizedDevice.objects.filter(authorized_email__iexact=clean_email).exclude(
-        status=AuthorizedDevice.Status.BLOCKED
+        status__in=_NON_EXTENDABLE_DEVICE_STATUSES
     ).update(status=AuthorizedDevice.Status.APPROVED, expires_at=exp_dt)
 
     if send_invite_email:
@@ -1223,8 +1250,7 @@ def approve_access_request(
         Q(email__iexact=req_obj.email) | (Q(username__iexact=req_obj.username) if req_obj.username else Q(pk__in=[]))
     ).first()
     if user and not user.is_active:
-        user.is_active = True
-        user.save(update_fields=["is_active"])
+        _activate_if_pending_signup(user)
 
     dev_q = Q(authorized_email__iexact=req_obj.email)
     if req_obj.device_id:
@@ -1295,6 +1321,9 @@ def extend_or_set_expiry(
             else EmailAccessRequest.objects.filter(email__iexact=raw)
         )
         for req in req_qs:
+            if req.status == EmailAccessRequest.Status.BLOCKED:
+                # Extending time never lifts a block; use the explicit unblock action.
+                continue
             req.status = EmailAccessRequest.Status.APPROVED
             req.duration_hours = hours
             req.expires_at = exp_dt
@@ -1302,7 +1331,7 @@ def extend_or_set_expiry(
             req.reviewed_at = now
             req.save()
             AuthorizedDevice.objects.filter(authorized_email__iexact=req.email).exclude(
-                status=AuthorizedDevice.Status.BLOCKED
+                status__in=_NON_EXTENDABLE_DEVICE_STATUSES
             ).update(status=AuthorizedDevice.Status.APPROVED, expires_at=exp_dt)
             updated += 1
 
@@ -1310,9 +1339,12 @@ def extend_or_set_expiry(
     norm_mac = normalize_mac_address(raw)
     if norm_mac:
         dev_q |= Q(mac_address__iexact=norm_mac)
-    dev_cnt = AuthorizedDevice.objects.filter(dev_q).update(
+    # Blocked / revoked devices are never re-approved by an extension (prevents a Master PIN
+    # "extend" from silently undoing an administrator block).
+    dev_cnt = AuthorizedDevice.objects.filter(dev_q).exclude(
+        status__in=_NON_EXTENDABLE_DEVICE_STATUSES
+    ).update(
         status=AuthorizedDevice.Status.APPROVED,
-        block_reason="",
         expires_at=exp_dt,
     )
     updated += dev_cnt
@@ -1360,18 +1392,36 @@ def expire_immediately(
     return True, f"Immediately expired access for '{raw}'."
 
 
+ACTIVATION_CODE_MAX_FAILURES = 5
+ACTIVATION_CODE_LOCKOUT_SECONDS = 15 * 60
+
+
+def _activation_throttle_key(email: str) -> str:
+    return f"close:activation_code_failures:{email}"
+
+
 def activate_with_code(
-    request: HttpRequest,
+    request: Optional[HttpRequest],
     email: str,
     activation_code: str,
 ) -> Tuple[bool, str, Optional[AuthorizedDevice]]:
     """
     Unlocks a device using an email and 6-digit activation code, enforcing time-bound expiry.
+
+    `request` is None when called from the TUI (local host identity is used instead).
+    Failed attempts are throttled per email to prevent brute-forcing the 6-digit code.
     """
+    from django.core.cache import cache
+
     clean_email = (email or "").strip().lower()
     clean_code = (activation_code or "").strip()
     if not clean_email or not clean_code:
         return False, "Email and 6-digit code are required.", None
+
+    throttle_key = _activation_throttle_key(clean_email)
+    failures = int(cache.get(throttle_key, 0) or 0)
+    if failures >= ACTIVATION_CODE_MAX_FAILURES:
+        return False, "Too many incorrect codes. Please wait 15 minutes and try again.", None
 
     req_obj = EmailAccessRequest.objects.filter(
         email__iexact=clean_email,
@@ -1381,7 +1431,9 @@ def activate_with_code(
     ).first()
 
     if not req_obj:
+        cache.set(throttle_key, failures + 1, ACTIVATION_CODE_LOCKOUT_SECONDS)
         return False, "Invalid email or activation code.", None
+    cache.delete(throttle_key)
 
     now = timezone.now()
     if req_obj.status == EmailAccessRequest.Status.EXPIRED or (req_obj.expires_at and now >= req_obj.expires_at):
@@ -1395,7 +1447,14 @@ def activate_with_code(
         hours = req_obj.duration_hours or sec_cfg["default_duration_hours"]
         req_obj.expires_at = now + timedelta(hours=hours)
 
-    ident = extract_device_identity(request)
+    if request is not None:
+        ident = extract_device_identity(request)
+    else:
+        ident = {
+            "device_id": "",
+            "client_ip": resolve_local_host_ip(),
+            "mac_address": resolve_local_host_mac_address(),
+        }
     req_obj.status = EmailAccessRequest.Status.APPROVED
     req_obj.email_verified = True
     if ident["mac_address"]:
@@ -1407,9 +1466,17 @@ def activate_with_code(
     req_obj.save()
 
     user = User.objects.filter(email__iexact=clean_email).first()
-    if user and not user.is_active:
-        user.is_active = True
-        user.save(update_fields=["is_active"])
+    if user and not user.is_active and not _activate_if_pending_signup(user):
+        return False, "This account has been deactivated by an administrator.", None
+
+    if request is None:
+        # TUI renewal: refresh this account's existing (non-blocked) devices in place.
+        dev_q = Q(authorized_email__iexact=clean_email)
+        if user:
+            dev_q |= Q(user=user)
+        devices = AuthorizedDevice.objects.filter(dev_q).exclude(status__in=_NON_EXTENDABLE_DEVICE_STATUSES)
+        devices.update(status=AuthorizedDevice.Status.APPROVED, expires_at=req_obj.expires_at)
+        return True, f"Access renewed for {clean_email} ({format_expiry_countdown(req_obj.expires_at)}).", devices.first()
 
     dev, _, _ = register_or_refresh_authorized_device(
         request,

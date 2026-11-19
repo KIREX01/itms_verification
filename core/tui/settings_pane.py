@@ -1215,6 +1215,15 @@ class SettingsPane(Vertical):
             except Exception:
                 pass
 
+            # Persist this pane's settings FIRST. set_maintenance_mode() loads and saves its own
+            # fresh copy of the config; saving the stale `cfg` after it used to overwrite
+            # maintenance.enabled and leave maintenance mode stuck on.
+            cfg.pop("maintenance", None)
+            current = config_service.load_config()
+            if "maintenance" in current:
+                cfg["maintenance"] = current["maintenance"]
+            config_service.save_config(cfg)
+
             # Developer Mode: Maintenance Mode & Web Availability
             try:
                 m_enabled = self.query_one("#switch-maintenance-mode", Switch).value
@@ -1233,8 +1242,6 @@ class SettingsPane(Vertical):
                 )
             except Exception:
                 pass
-
-            config_service.save_config(cfg)
 
             # Update live django settings
             setattr(settings, "DEVELOPER_MODE", dev_mode)

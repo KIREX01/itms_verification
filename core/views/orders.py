@@ -172,8 +172,17 @@ def api_seed_orders(request: HttpRequest) -> JsonResponse:
 @require_GET
 def api_itms_status(request: HttpRequest) -> JsonResponse:
     """Returns current ITMS WebApp connection status, active user identity, and operating bond."""
-    force = request.GET.get("force", "").lower() in ("1", "true", "yes")
-    status = auth_service.get_itms_status(user=request.user, force_ping=force)
+    is_authed = bool(getattr(request, "user", None) and request.user.is_authenticated)
+    # Anonymous probes may not force live outbound pings to the ITMS portal.
+    force = is_authed and request.GET.get("force", "").lower() in ("1", "true", "yes")
+    status = auth_service.get_itms_status(user=request.user if is_authed else None, force_ping=force)
+    if not is_authed:
+        # Public heartbeat: reachability only - never operator identity or bond details.
+        public_keys = ("online", "authenticated", "cached", "cache_age_seconds", "latency_ms")
+        return JsonResponse({
+            "success": True,
+            "status": {k: status.get(k) for k in public_keys if k in status},
+        })
     return JsonResponse({
         "success": True,
         "status": status,

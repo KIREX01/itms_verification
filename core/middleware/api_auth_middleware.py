@@ -83,7 +83,23 @@ class ApiAuthMiddleware:
                 from core.services import device_access_service
                 verdict = device_access_service.evaluate_request_access(request)
             except Exception as exc:
-                logger.debug("Device access guard evaluation notice: %s", exc)
+                # Fail CLOSED: an access-guard crash must never silently grant access.
+                # Public auth/static routes stay reachable so operators can still sign in.
+                logger.error("Device access guard evaluation failed for %s: %s", path, exc, exc_info=True)
+                is_public = path in PUBLIC_EXACT_PATHS or any(path.startswith(p) for p in PUBLIC_PREFIXES)
+                if not is_public:
+                    if path.startswith("/api/"):
+                        error = create_error_detail(
+                            code="ACCESS_CHECK_UNAVAILABLE",
+                            message="Access verification is temporarily unavailable. Please retry shortly.",
+                            field="device",
+                        )
+                        return format_api_response(errors=[error], status_code=503, request=request)
+                    return HttpResponse(
+                        "Access verification is temporarily unavailable. Please retry shortly.",
+                        status=503,
+                        content_type="text/plain",
+                    )
 
             if verdict and not verdict.get("allowed", True):
                 err_code = verdict.get("code", "DEVICE_ACCESS_DENIED")

@@ -459,6 +459,30 @@ def api_export_report(request: HttpRequest) -> HttpResponse:
     return response
 
 
+# Settings an authenticated (non-admin) operator may change from the web Settings tab.
+# Everything not listed here (itms.*, maintenance.*, security*, submission.* except dry-run,
+# outbox.*, bond.strict_bond_scoping, crawl/database/network/vision/storage/...) is admin-only.
+_ADMIN_ONLY_SETTING_PREFIXES = (
+    "crawl.", "database.", "network.", "vision.", "matcher.", "storage.", "simulation.",
+    "system.developer_mode", "itms.", "maintenance.", "security.", "security_access.", "outbox.",
+    "submission.",
+)
+_ADMIN_ONLY_SETTING_KEYS = {"bond.strict_bond_scoping"}
+# Explicit operator exceptions inside admin-only prefixes.
+_OPERATOR_SETTING_EXCEPTIONS = {"submission.dry_run_mode"}
+
+
+def _is_operator_setting_key(key: str) -> bool:
+    key = (key or "").strip()
+    if not key or key in _ADMIN_ONLY_SETTING_KEYS:
+        return False
+    if key in _OPERATOR_SETTING_EXCEPTIONS:
+        return key in config_service.USER_SETTINGS_SCHEMA
+    if any(key.startswith(p) for p in _ADMIN_ONLY_SETTING_PREFIXES):
+        return False
+    return key in config_service.USER_SETTINGS_SCHEMA
+
+
 def api_settings(request: HttpRequest) -> JsonResponse:
     """
     GET: Returns current system configuration, user settings, developer settings, and active engine.
@@ -493,15 +517,18 @@ def api_settings(request: HttpRequest) -> JsonResponse:
                 if k not in ("csrfmiddlewaretoken",):
                     items_to_set.append((str(k).strip(), v))
 
-        # Restrict developer and infrastructure settings to superusers
-        DEV_PREFIXES = ("crawl.", "database.", "network.", "vision.", "matcher.", "storage.", "simulation.", "system.developer_mode")
-        for k, v in items_to_set:
-            if any(k.startswith(p) for p in DEV_PREFIXES) and not is_admin:
-                return JsonResponse({
-                    "success": False,
-                    "error": f"Setting '{k}' requires administrative access. Configure via the TUI console.",
-                }, status=403)
+        # Non-admins may only change operator-level keys; everything else (policy, kill switches,
+        # security, infrastructure) is administrator-only. Validate ALL keys before writing any.
+        if not is_admin:
+            for k, _v in items_to_set:
+                if not _is_operator_setting_key(k):
+                    return JsonResponse({
+                        "success": False,
+                        "error": f"Setting '{k}' requires administrator privileges.",
+                        "code": "ADMIN_REQUIRED",
+                    }, status=403)
 
+        for k, v in items_to_set:
             config_service.set_setting(k, v)
             if "yolo_weights" in k:
                 try:
@@ -584,6 +611,8 @@ def api_apply_update(request: HttpRequest) -> JsonResponse:
     """Safely applies pending update from GitHub Releases."""
     if not request.user.is_authenticated:
         return JsonResponse({"success": False, "error": "Authentication required."}, status=401)
+    if not request.user.is_superuser:
+        return JsonResponse({"success": False, "error": "Administrator privileges required."}, status=403)
 
     download_url = None
     if request.content_type == "application/json" and request.body:

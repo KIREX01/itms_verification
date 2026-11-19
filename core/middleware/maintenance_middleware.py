@@ -2,14 +2,30 @@
 Maintenance Mode Middleware for CLOSE Copilot.
 
 When maintenance mode is active (via config_service or secure/maintenance.flag):
-- Intercepts incoming web requests and returns HTTP 503 with the compiled maintenance page.
+- Intercepts incoming web requests and returns HTTP 503 with the maintenance page.
 - Returns JSON error payloads with status 503 for API endpoints.
-- Supports bypass for administrative tasks via ?bypass_maintenance=1 or session override.
-- Allows static asset delivery so assets render cleanly.
+- Lets authenticated superusers through (to verify the system before reopening it).
+- Keeps static assets and the login/logout pages reachable so an administrator can sign in.
+
+Must be registered AFTER django.contrib.auth.middleware.AuthenticationMiddleware so that
+request.user is available. There is intentionally no query-string bypass.
 """
 from typing import Callable
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from core.services import config_service
+
+# Paths that stay reachable during maintenance (assets + admin sign-in).
+MAINTENANCE_ALLOWED_PREFIXES = (
+    "/static/",
+    "/favicon.ico",
+    "/login/",
+    "/logout/",
+)
+
+
+def _is_maintenance_admin(request: HttpRequest) -> bool:
+    user = getattr(request, "user", None)
+    return bool(user and getattr(user, "is_authenticated", False) and getattr(user, "is_superuser", False))
 
 
 class MaintenanceModeMiddleware:
@@ -25,27 +41,16 @@ class MaintenanceModeMiddleware:
         if not config_service.is_maintenance_enabled():
             return self.get_response(request)
 
-        # 2. Allow static files and internal media
+        # 2. Allow static files and admin sign-in pages
         path = request.path or "/"
-        if path.startswith("/static/") or path.startswith("/favicon.ico"):
+        if any(path.startswith(p) for p in MAINTENANCE_ALLOWED_PREFIXES):
             return self.get_response(request)
 
-        # 3. Allow administrative bypass via query parameter or session
-        if request.GET.get("bypass_maintenance") in ("1", "true", "yes"):
-            if hasattr(request, "session"):
-                request.session["bypass_maintenance"] = True
+        # 3. Authenticated superusers may use the whole system during maintenance
+        if _is_maintenance_admin(request):
             return self.get_response(request)
 
-        if getattr(request, "session", None) and request.session.get("bypass_maintenance"):
-            return self.get_response(request)
-
-        # 4. Allow Django admin if user is superuser
-        if path.startswith("/admin/"):
-            user = getattr(request, "user", None)
-            if user and user.is_authenticated and user.is_staff:
-                return self.get_response(request)
-
-        # 5. Format response based on request type
+        # 4. Format response based on request type
         accept_header = request.headers.get("Accept", "")
         is_api = (
             path.startswith("/api/")
@@ -68,7 +73,8 @@ class MaintenanceModeMiddleware:
                 status=503,
             )
 
-        html = config_service.generate_maintenance_html()
+        # Render only; the static fallback files are written when maintenance is toggled.
+        html = config_service.generate_maintenance_html(write_files=False)
         response = HttpResponse(html, status=503, content_type="text/html")
         response["Retry-After"] = str(m_cfg.get("retry_after_seconds", 30))
         return response

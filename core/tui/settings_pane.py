@@ -261,7 +261,7 @@ class SettingsPane(Vertical):
                         yield Switch(value=show_safety, id="switch-show-safety")
 
                 # Card 1B: Evidence Vault Storage Location
-                with Vertical(classes="settings-card"):
+                with Vertical(classes="settings-card", id="card-vault"):
                     yield Static("[bold green]📦 Evidence Vault Storage Location[/bold green]", classes="settings-card-title")
 
                     with Horizontal(classes="settings-row"):
@@ -278,7 +278,7 @@ class SettingsPane(Vertical):
                         yield Switch(value=vault_prompt_startup, id="switch-vault-prompt-startup")
 
                 # Card 1D: Master Terminal Security Lock & Master PIN
-                with Vertical(classes="settings-card"):
+                with Vertical(classes="settings-card", id="card-security"):
                     yield Static("[bold yellow]🔒 Master Terminal Security Lock & Access Control[/bold yellow]", classes="settings-card-title")
 
                     with Horizontal(classes="settings-row"):
@@ -303,7 +303,7 @@ class SettingsPane(Vertical):
                         yield Button("🛡️ Open Access & Firewall [9]", id="btn-open-access-manager", variant="primary", classes="settings-btn")
 
                 # Card 1C: Permissions & Developer Mode Switch
-                with Vertical(classes="settings-card"):
+                with Vertical(classes="settings-card", id="card-permissions"):
                     yield Static("[bold red]🛡️ Permissions & System Mode[/bold red]", classes="settings-card-title")
 
                     with Horizontal(classes="settings-row"):
@@ -595,6 +595,24 @@ class SettingsPane(Vertical):
                 yield Button("↺ Reset to Defaults", variant="warning", id="btn-reset-settings")
                 yield Button("🧹 Clean Storage Now", variant="primary", id="btn-clean-settings")
                 yield Button("📦 Backup SQLite DB", variant="default", id="btn-backup-settings")
+
+    ADMIN_ONLY_CARDS = ("#card-vault", "#card-security", "#card-permissions", "#developer-settings-container")
+
+    def apply_role_visibility(self, user) -> None:
+        """Operators see only operator settings; system/developer cards are for the administrator."""
+        try:
+            from governance.services import authz
+            is_admin = authz.is_platform_admin(user) or not authz.enforcement_enabled()
+        except Exception:
+            is_admin = True
+        self._operator_only = not is_admin
+        if is_admin:
+            return  # leave the administrator's view (incl. developer-mode toggling) untouched
+        for selector in self.ADMIN_ONLY_CARDS:
+            try:
+                self.query_one(selector).display = False
+            except Exception:
+                pass
 
     def on_switch_changed(self, event: Switch.Changed) -> None:
         sw_id = event.switch.id

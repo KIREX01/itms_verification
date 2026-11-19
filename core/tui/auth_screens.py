@@ -91,40 +91,52 @@ class LandingAuthScreen(Screen[Optional[User]]):
                             yield Static("", id="login-error-msg", classes="error-label")
                             yield Button("Sign In to Verification Copilot", variant="primary", id="btn-login-submit")
 
-                        # Tab 2: First-Time Setup / Create Account
-                        with TabPane("👤 Create Account", id="tab-register"):
-                            first_time = User.objects.count() == 0
-                            msg = (
-                                "[bold yellow]★ First-Time Launch: Create Master Operator & Link Warehouse[/bold yellow]"
-                                if first_time
-                                else "[dim]Create an operator account and link your verified ITMS warehouse facility.[/dim]"
-                            )
-                            yield Static(msg, classes="auth-hint")
-                            yield Input(placeholder="Operator Username (min 3 chars)", id="input-reg-username")
-                            yield Input(placeholder="Full Name (optional)", id="input-reg-fullname")
-                            yield Input(placeholder="Password (min 6 chars)", password=True, id="input-reg-password")
-                            yield Input(placeholder="Confirm Password", password=True, id="input-reg-confirm")
+                        # Tab 2: First-time setup only. Everyone else requests access (the administrator
+                        # grants it in the backoffice and an invite creates their account).
+                        first_time = User.objects.count() == 0
+                        with TabPane("👤 Create Administrator" if first_time else "🔑 Request Access", id="tab-register"):
+                            if not first_time:
+                                yield Static(
+                                    "[bold]New to CLOSE Copilot?[/bold]\n\n"
+                                    "Accounts are no longer created here. Ask for access on the web:\n"
+                                    f"  [bold cyan]{self._request_access_url()}[/bold cyan]\n\n"
+                                    "[dim]The administrator reviews your request. If approved you'll get an email with a "
+                                    "6-digit code and a link to create your account. Team Leaders can also invite "
+                                    "Helpers and Quality Inspectors from Settings → My Team.[/dim]",
+                                    classes="auth-hint",
+                                )
+                            else:
+                                msg = (
+                                    "[bold yellow]★ First-Time Launch: Create Master Operator & Link Warehouse[/bold yellow]"
+                                    if first_time
+                                    else "[dim]Create an operator account and link your verified ITMS warehouse facility.[/dim]"
+                                )
+                                yield Static(msg, classes="auth-hint")
+                                yield Input(placeholder="Operator Username (min 3 chars)", id="input-reg-username")
+                                yield Input(placeholder="Full Name (optional)", id="input-reg-fullname")
+                                yield Input(placeholder="Password (min 6 chars)", password=True, id="input-reg-password")
+                                yield Input(placeholder="Confirm Password", password=True, id="input-reg-confirm")
 
-                            yield Static(
-                                "[bold cyan]🏢 ITMS Portal Account (Checks & Links Operating Warehouse)[/bold cyan]",
-                                id="reg-itms-title",
-                            )
-                            yield Static(
-                                "[dim]System queries ITMS to identify your linked bonded warehouse facility before granting access.[/dim]",
-                                id="reg-itms-hint",
-                                classes="auth-hint",
-                            )
-                            yield Input(placeholder="ITMS Username / Email (e.g. operator@cfao.ug)", id="input-reg-itms-email")
-                            yield Input(placeholder="ITMS Password", password=True, id="input-reg-itms-password")
-                            yield Select(
-                                self._get_warehouse_options(),
-                                prompt="Select Facility (Auto-Discovered from ITMS)",
-                                id="sel-reg-warehouse",
-                            )
-                            with Horizontal(id="reg-itms-btn-row"):
-                                yield Button("🔍 Check ITMS & Discover Warehouse", variant="primary", id="btn-reg-check-itms")
-                            yield Static("", id="reg-error-msg", classes="error-label")
-                            yield Button("Create Operator Account & Proceed", variant="success", id="btn-reg-submit")
+                                yield Static(
+                                    "[bold cyan]🏢 ITMS Portal Account (Checks & Links Operating Warehouse)[/bold cyan]",
+                                    id="reg-itms-title",
+                                )
+                                yield Static(
+                                    "[dim]System queries ITMS to identify your linked bonded warehouse facility before granting access.[/dim]",
+                                    id="reg-itms-hint",
+                                    classes="auth-hint",
+                                )
+                                yield Input(placeholder="ITMS Username / Email (e.g. operator@cfao.ug)", id="input-reg-itms-email")
+                                yield Input(placeholder="ITMS Password", password=True, id="input-reg-itms-password")
+                                yield Select(
+                                    self._get_warehouse_options(),
+                                    prompt="Select Facility (Auto-Discovered from ITMS)",
+                                    id="sel-reg-warehouse",
+                                )
+                                with Horizontal(id="reg-itms-btn-row"):
+                                    yield Button("🔍 Check ITMS & Discover Warehouse", variant="primary", id="btn-reg-check-itms")
+                                yield Static("", id="reg-error-msg", classes="error-label")
+                                yield Button("Create Operator Account & Proceed", variant="success", id="btn-reg-submit")
 
         yield Footer()
 
@@ -217,6 +229,16 @@ class LandingAuthScreen(Screen[Optional[User]]):
             self._handle_login()
         elif input_id in ("input-reg-username", "input-reg-password", "input-reg-confirm"):
             self._handle_register()
+
+    def _request_access_url(self) -> str:
+        """Web address of the request-access page on this server (mobile URL minus the /mobile/ path)."""
+        try:
+            from core.services import network_service
+            primary = network_service.get_mobile_connection_info().get("primary_url", "") or ""
+            base = primary.split("/mobile", 1)[0].rstrip("/")
+        except Exception:
+            base = ""
+        return (base or "https://<this server>") + "/access/request/"
 
     def _get_warehouse_options(self) -> list[tuple[str, str]]:
         from core.services import bond_service
@@ -313,6 +335,9 @@ class LandingAuthScreen(Screen[Optional[User]]):
 
     @work(thread=True)
     def _handle_register(self) -> None:
+        if User.objects.exists():
+            # Self-registration is closed: accounts come from access requests granted in the backoffice.
+            return
         username = self.query_one("#input-reg-username", Input).value.strip()
         full_name = self.query_one("#input-reg-fullname", Input).value.strip() or username
         password = self.query_one("#input-reg-password", Input).value
@@ -392,6 +417,10 @@ class LandingAuthScreen(Screen[Optional[User]]):
         if not user:
             self.app.call_from_thread(self._update_reg_error, f"[bold red]✗ {err}[/bold red]")
             return
+        # First-time bootstrap: the very first local account is this install's administrator.
+        user.is_staff = True
+        user.is_superuser = True
+        user.save(update_fields=["is_staff", "is_superuser"])
 
         # Link OperatorProfile & OperatorITMSSession
         from core.models import OperatorProfile, OperatorITMSSession, Warehouse

@@ -320,6 +320,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
                 return
 
             self.current_user = saved_user
+            self._apply_role_ui(saved_user)
             self._session_expired = False
             self.log_message(
                 f"[bold green]ITMS Closing System initialized.[/bold green] Operator: [bold cyan]{saved_user.get_full_name() or saved_user.username}[/bold cyan] (Session Restored)",
@@ -464,6 +465,49 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
         else:
             self.log_message(f"Active Evidence Vault: [cyan]{vault_service.get_vault_root()}[/cyan]", level="INFO")
 
+    # Tab id -> capabilities that make the tab visible (any of).
+    ROLE_TABS = {
+        "tab-itms": ("orders.view",),
+        "tab-history": ("history.view",),
+        "tab-stock": ("stock.view", "stock.scan"),
+        "tab-reports": ("reports.view",),
+    }
+
+    def _apply_role_ui(self, user) -> None:
+        """Operator-only TUI: hide tabs and admin controls the signed-in role can't use."""
+        try:
+            from governance.services import authz
+        except Exception:
+            return
+        enforced = authz.enforcement_enabled()
+        is_admin = authz.is_platform_admin(user)
+        try:
+            tabs = self.query_one(TabbedContent)
+        except Exception:
+            tabs = None
+        if tabs is not None:
+            for pane in tabs.query(TabPane):
+                pane_id = pane.id or ""
+                if pane_id == "tab-access":
+                    allowed = is_admin or not enforced
+                elif pane_id in self.ROLE_TABS:
+                    allowed = authz.has_any(user, self.ROLE_TABS[pane_id])
+                elif pane_id in ("tab-queue", "tab-batches"):
+                    allowed = authz.has_any(user, ("queue.view", "capture.upload"))
+                else:
+                    allowed = True
+                try:
+                    if allowed:
+                        tabs.show_tab(pane_id)
+                    else:
+                        tabs.hide_tab(pane_id)
+                except Exception:
+                    pass
+        try:
+            self.query_one(SettingsPane).apply_role_visibility(user)
+        except Exception:
+            pass
+
     def _on_auth_completed(self, user):
         if not user:
             self.exit()
@@ -476,6 +520,7 @@ class ITMSOperatorApp(TableLoaderMixin, NavigationHandlersMixin, OperatorActions
 
         self.current_user = user
         self._session_expired = False
+        self._apply_role_ui(user)
         self.log_message(
             f"Welcome, [bold green]{user.get_full_name() or user.username}[/bold green]! Terminal session active.",
             level="SUCCESS",

@@ -593,7 +593,18 @@ def _resolve_email_expiry_for_user(user: Optional[User], email: str = "") -> Tup
     return False, req.expires_at, ""
 
 
-def register_or_refresh_authorized_device(
+def register_or_refresh_authorized_device(request, *args, **kwargs):
+    """Registers / refreshes the requesting device, then records its OS / browser / model."""
+    result = _register_or_refresh_authorized_device_impl(request, *args, **kwargs)
+    try:
+        from core.services.device_info_service import enrich_device
+        enrich_device(result[0] if result else None, request)
+    except Exception as exc:
+        logger.debug("Device enrichment skipped: %s", exc)
+    return result
+
+
+def _register_or_refresh_authorized_device_impl(
     request: HttpRequest,
     user: Optional[User] = None,
     linked_via: str = AuthorizedDevice.LinkedVia.DIRECT_LOGIN,

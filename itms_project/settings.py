@@ -167,6 +167,8 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     # Laptop installs: only this computer's browser and QR-paired phones get in.
     "governance.install_middleware.LocalAccessMiddleware",
+    # Ask browsers for detailed device client hints (OS version, phone model, CPU architecture).
+    "core.middleware.client_hints_middleware.ClientHintsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",

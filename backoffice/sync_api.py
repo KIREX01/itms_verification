@@ -34,7 +34,8 @@ def install_enroll(request: HttpRequest) -> JsonResponse:
     try:
         data = json.loads(request.body.decode() or "{}")
         result = policy_sync.enroll(data.get("code", ""), app_version=str(data.get("app_version", "")), ip=_ip(request),
-                                    machine_fingerprint=str(data.get("machine_fingerprint", "")))
+                                    machine_fingerprint=str(data.get("machine_fingerprint", "")),
+                                    device_info=data.get("device_info") if isinstance(data.get("device_info"), dict) else None)
     except (ValueError, policy_sync.PolicySyncError) as exc:
         return JsonResponse({"success": False, "error": str(exc)}, status=400)
     return JsonResponse({"success": True, **result})

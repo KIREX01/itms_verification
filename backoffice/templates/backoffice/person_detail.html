@@ -96,8 +96,9 @@
 
 <div class="bo-two">
 <div class="bo-card"><h2>Devices</h2><div class="bo-scroll"><table class="bo-table">
-    <tr><th>Device</th><th>Type</th><th>IP</th><th>Status</th><th>Last seen</th></tr>
-    {% for d in devices %}<tr><td>{{ d.device_name|default:d.device_id|truncatechars:28 }}</td><td>{{ d.device_type }}</td><td>{{ d.ip_address }}</td>
+    <tr><th>Device</th><th>OS / browser</th><th>IP</th><th>Status</th><th>Last seen</th></tr>
+    {% for d in devices %}<tr><td>{{ d.device_name|default:d.device_id|truncatechars:28 }}{% if d.device_model %}<div class="bo-muted">{{ d.device_model }}</div>{% endif %}</td>
+        <td>{{ d.os_name|default:"—" }} {{ d.os_version }}<div class="bo-muted">{{ d.browser }} {{ d.browser_version }}</div></td><td>{{ d.ip_address }}</td>
         <td><span class="pill {% if d.status == 'APPROVED' %}ok{% elif d.status == 'PENDING' %}warn{% else %}danger{% endif %}">{{ d.status }}</span></td>
         <td>{{ d.last_seen_at|date:"Y-m-d H:i" }}</td></tr>
     {% empty %}<tr><td colspan="5" class="bo-muted">No devices.</td></tr>{% endfor %}

@@ -1403,6 +1403,14 @@ class AuthorizedDevice(models.Model):
     )
     fingerprint_hash = models.CharField(max_length=128, blank=True, default="")
     user_agent = models.TextField(blank=True, default="")
+    # Device description (core/services/device_info_service.py)
+    os_name = models.CharField(max_length=40, blank=True, default="")
+    os_version = models.CharField(max_length=40, blank=True, default="")
+    browser = models.CharField(max_length=40, blank=True, default="")
+    browser_version = models.CharField(max_length=40, blank=True, default="")
+    device_model = models.CharField(max_length=80, blank=True, default="")
+    device_info = models.JSONField(default=dict, blank=True,
+                                   help_text="Client hints + browser report (screen, time zone, CPU, GPU, ...).")
     status = models.CharField(
         max_length=16,
         choices=Status.choices,

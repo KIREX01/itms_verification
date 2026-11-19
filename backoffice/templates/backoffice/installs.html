@@ -33,7 +33,9 @@
         <td><span class="pill {% if r.inst.status == 'ACTIVE' %}ok{% elif r.inst.status == 'PENDING' %}warn{% else %}danger{% endif %}">{{ r.inst.get_status_display }}</span>
             {% if r.inst.locked %}<span class="pill danger">Locked</span>{% endif %}</td>
         <td>{% if r.inst.last_seen_at %}<span class="pill {% if r.online %}ok{% else %}warn{% endif %}">{{ r.online|yesno:"online,offline" }}</span> {{ r.inst.last_seen_at|timesince }} ago{% else %}never{% endif %}</td>
-        <td>{{ r.inst.app_version|default:"—" }}</td>
+        <td>{{ r.inst.app_version|default:"—" }}
+            {% if r.inst.device_info %}<details class="bo-confirm"><summary class="bo-muted">{{ r.inst.device_info.hostname|default:"host" }} · {{ r.inst.device_info.os_name }}</summary>
+            <dl class="bo-kv" style="font-size:12px;">{% for k, v in r.inst.device_info.items %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl></details>{% endif %}</td>
         <td>{% if r.behind %}<span class="pill warn">v{{ r.inst.policy_version_acked }} (behind)</span>{% elif r.inst.status == 'ACTIVE' %}<span class="pill ok">current</span>{% else %}—{% endif %}</td>
         <td class="bo-muted">{% for k, v in r.inst.health.items %}{{ k }}: {{ v }}{% if not forloop.last %} · {% endif %}{% empty %}—{% endfor %}</td>
         <td>{% if r.inst.status == 'ACTIVE' %}

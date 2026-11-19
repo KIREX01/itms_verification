@@ -83,3 +83,29 @@ def api_team(request: HttpRequest) -> JsonResponse:
                      "status": r.get_status_display(), "created_at": r.created_at.isoformat()} for r in pending],
         "invitable_roles": [{"value": r, "label": Role(r).label} for r in sorted(TL_INVITABLE_ROLES)],
     })
+
+
+def api_me_device_info(request: HttpRequest) -> JsonResponse:
+    """Browser-side device report (screen, time zone, CPU, GPU, ...) for the device making the request."""
+    import json
+    from core.models import AuthorizedDevice
+    from core.services import device_access_service, device_info_service
+
+    if request.method != "POST":
+        return JsonResponse({"success": False, "error": "POST required."}, status=405)
+    user = request.user
+    if not (user and user.is_authenticated):
+        return JsonResponse({"success": False, "error": "Authentication required."}, status=401)
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except (ValueError, UnicodeDecodeError):
+        return JsonResponse({"success": False, "error": "Invalid JSON."}, status=400)
+    if not isinstance(payload, dict):
+        return JsonResponse({"success": False, "error": "Invalid payload."}, status=400)
+    ident = device_access_service.extract_device_identity(request)
+    device = AuthorizedDevice.objects.filter(device_id=ident["device_id"]).first()
+    if device is None:
+        return JsonResponse({"success": False, "error": "Unknown device."}, status=404)
+    clean = device_info_service.record_client_report(device, payload)
+    return JsonResponse({"success": True, "recorded": sorted(clean)})
+

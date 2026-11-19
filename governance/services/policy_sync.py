@@ -105,7 +105,8 @@ def create_install(name: str, actor, request=None) -> Tuple[Any, str]:
 
 
 @transaction.atomic
-def enroll(code: str, app_version: str = "", ip: str = "", machine_fingerprint: str = "") -> Dict[str, Any]:
+def enroll(code: str, app_version: str = "", ip: str = "", machine_fingerprint: str = "",
+           device_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     from governance.models import InstallRegistration
     from governance.services import audit
 
@@ -122,10 +123,32 @@ def enroll(code: str, app_version: str = "", ip: str = "", machine_fingerprint: 
     inst.last_ip = ip
     inst.app_version = app_version[:32]
     inst.machine_fingerprint = (machine_fingerprint or "")[:64]
+    inst.device_info = _clean_host_info(device_info)
     inst.save()
     audit.record("system", "install.enrolled", target_type="install", target_id=inst.install_id,
                  target_label=inst.name, after={"ip": ip, "version": app_version}, actor_label=inst.name)
     return {"install_id": inst.install_id, "secret": inst.secret, "name": inst.name}
+
+
+HOST_INFO_KEYS = ("hostname", "os_name", "os_release", "os_version", "os_edition", "arch", "cpu", "cpu_cores",
+                  "ram_gb", "disk_total_gb", "disk_free_gb", "python", "app_version", "timezone", "local_ips",
+                  "mac", "install_path", "collected_at")
+
+
+def _clean_host_info(info: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Only known keys, bounded sizes: an install's report is untrusted input."""
+    out: Dict[str, Any] = {}
+    for key in HOST_INFO_KEYS:
+        value = (info or {}).get(key)
+        if value in (None, ""):
+            continue
+        if isinstance(value, list):
+            out[key] = [str(v)[:64] for v in value[:8]]
+        elif isinstance(value, (int, float)):
+            out[key] = value
+        else:
+            out[key] = str(value)[:200]
+    return out
 
 
 def build_snapshot() -> Dict[str, Any]:
@@ -203,7 +226,10 @@ def handle_heartbeat(install_id: str, body: bytes, ts: str, signature: str, ip: 
     inst.app_version = str(payload.get("app_version", ""))[:32]
     inst.policy_version_acked = int(payload.get("policy_version") or 0)
     inst.health = payload.get("health") or {}
-    inst.save(update_fields=["last_seen_at", "last_ip", "app_version", "policy_version_acked", "health"])
+    if payload.get("device_info"):
+        inst.device_info = _clean_host_info(payload["device_info"])
+    inst.save(update_fields=["last_seen_at", "last_ip", "app_version", "policy_version_acked", "health",
+                             "device_info"])
     response: Dict[str, Any] = {
         "policy_version": current,
         "lock": {"locked": inst.locked, "reason": inst.lock_reason},
@@ -293,8 +319,10 @@ def enroll_with_central(central_url: str, code: str, name: str = "") -> Dict[str
 
     central_url = central_url.rstrip("/")
     fingerprint = machine_fingerprint()
+    from core.services.device_info_service import host_info
+
     body = json.dumps({"code": code, "name": name, "app_version": __version__,
-                       "machine_fingerprint": fingerprint}).encode()
+                       "machine_fingerprint": fingerprint, "device_info": host_info()}).encode()
     status, content, _ = _http_post(f"{central_url}/backoffice/api/v1/installs/enroll/", body,
                                     {"Content-Type": "application/json"})
     data = json.loads(content.decode() or "{}")
@@ -333,8 +361,11 @@ def heartbeat_once() -> Dict[str, Any]:
         raise PolicySyncError("This install is not enrolled.")
     if not state.get("secret"):
         raise PolicySyncError("This install's credentials belong to another computer (moved copy).")
+    from core.services.device_info_service import host_info
+
     body = json.dumps({"app_version": __version__, "policy_version": state.get("policy_version", 0),
-                       "machine_fingerprint": machine_fingerprint(), "health": _health()}).encode()
+                       "machine_fingerprint": machine_fingerprint(), "health": _health(),
+                       "device_info": host_info()}).encode()
     ts, sig = sign(state["secret"], body)
     status, content, headers = _http_post(
         f"{state['central_url']}/backoffice/api/v1/installs/heartbeat/", body,

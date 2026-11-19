@@ -329,6 +329,8 @@ class InstallRegistration(models.Model):
                                            help_text="Hash of the enrolled computer's OS machine ID.")
     clone_detected_at = models.DateTimeField(null=True, blank=True)
     clone_fingerprint = models.CharField(max_length=64, blank=True, default="")
+    device_info = models.JSONField(default=dict, blank=True,
+                                   help_text="Host report: hostname, OS, CPU, RAM, disk, IPs, MAC, install path.")
 
     class Meta:
         ordering = ["name"]

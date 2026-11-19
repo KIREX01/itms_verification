@@ -15,7 +15,7 @@ PAGES = ["/backoffice/", "/backoffice/access/", "/backoffice/people/", "/backoff
          "/backoffice/technical/"]
 
 
-@override_settings(GOVERNANCE_ENFORCE=True)
+@override_settings(GOVERNANCE_ENFORCE=True, DEPLOYMENT_ROLE="central")
 @patch("core.services.email_service.send_2fa_verification_code", return_value=(True, "sent"))
 @patch("core.services.email_service.send_access_request_admin_alert", return_value=(True, "sent"))
 class BackofficeTests(TestCase):
@@ -96,3 +96,22 @@ class BackofficeTests(TestCase):
         self.c.post("/backoffice/controls/", {"action": "policy", "key": "identity.company_domains",
                                               "value": "itms-ug.com, @close.ug", "confirm_password": "Owner-pass-1"})
         self.assertEqual(allowed_company_domains(), ["itms-ug.com", "close.ug"])
+
+
+
+@override_settings(DEPLOYMENT_ROLE="edge")
+class EdgeHasNoBackofficeTests(TestCase):
+    def test_backoffice_is_not_found_on_installed_apps(self):
+        admin = User.objects.create_superuser("edge_owner", "eo@example.com", "Owner-pass-1")
+        c = Client()
+        c.force_login(admin)
+        for url in PAGES:
+            self.assertEqual(c.get(url).status_code, 404, url)
+
+    def test_onboarding_redirects_to_central(self):
+        r = Client().get("/access/request/")
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(r["Location"].endswith("/access/request/"))
+        self.assertTrue(r["Location"].startswith("http"))
+        r = Client().get("/signup/?invite=abc")
+        self.assertTrue(r["Location"].endswith("/signup/?invite=abc"))

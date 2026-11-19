@@ -84,8 +84,13 @@ class ApiGlobalAuthenticationTestCase(TestCase):
         res_login = self.anonymous_client.get(reverse("core:login"))
         self.assertEqual(res_login.status_code, 200)
 
-        res_request = self.anonymous_client.get(reverse("core:access_request"))
-        self.assertEqual(res_request.status_code, 200)
+        # The request-access form lives on the central server; installed apps redirect there.
+        from django.test import override_settings
+        with override_settings(DEPLOYMENT_ROLE="central"):
+            res_request = self.anonymous_client.get(reverse("core:access_request"))
+            self.assertEqual(res_request.status_code, 200)
+        res_edge = self.anonymous_client.get(reverse("core:access_request"))
+        self.assertEqual(res_edge.status_code, 302)
         # Signup without an invite sends people to "request access".
         res_signup = self.anonymous_client.get(reverse("core:signup"))
         self.assertEqual(res_signup.status_code, 302)

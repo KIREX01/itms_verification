@@ -43,8 +43,21 @@ def _form_context(form_data=None, error=""):
     }
 
 
+def _central_url(path: str) -> str:
+    from django.conf import settings
+    return getattr(settings, "CLOSE_CENTRAL_URL", "https://close.kirex.online").rstrip("/") + path
+
+
+def _is_edge() -> bool:
+    from django.conf import settings
+    return getattr(settings, "DEPLOYMENT_ROLE", "edge") != "central"
+
+
 @require_http_methods(["GET", "POST"])
 def request_access_view(request: HttpRequest) -> HttpResponse:
+    if _is_edge():
+        # Access requests are reviewed on the central server, so they must be made there.
+        return redirect(_central_url("/access/request/"))
     if request.user.is_authenticated:
         return redirect("/")
     if request.method == "POST":
@@ -72,6 +85,9 @@ def request_access_view(request: HttpRequest) -> HttpResponse:
 
 @require_http_methods(["GET", "POST"])
 def complete_signup_view(request: HttpRequest) -> HttpResponse:
+    if _is_edge():
+        query = request.META.get("QUERY_STRING", "")
+        return redirect(_central_url("/signup/") + (f"?{query}" if query else ""))
     if request.user.is_authenticated:
         return redirect("/")
     token = (request.GET.get("invite") or request.POST.get("invite") or "").strip()

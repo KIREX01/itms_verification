@@ -13,7 +13,7 @@ from governance.services import onboarding
 from governance.services.authz import CapabilityDenied
 
 
-@override_settings(GOVERNANCE_ENFORCE=True)
+@override_settings(GOVERNANCE_ENFORCE=True, DEPLOYMENT_ROLE="central")
 @patch("core.services.email_service.send_2fa_verification_code", return_value=(True, "sent"))
 @patch("core.services.email_service.send_access_request_admin_alert", return_value=(True, "sent"))
 class OnboardingFlowTests(TestCase):

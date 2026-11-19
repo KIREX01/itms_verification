@@ -57,6 +57,11 @@ def api_team(request: HttpRequest) -> JsonResponse:
     user = request.user
     bond = authz.active_bond_code(user)
     if request.method == "POST":
+        from django.conf import settings
+        if getattr(settings, "DEPLOYMENT_ROLE", "edge") != "central":
+            central = getattr(settings, "CLOSE_CENTRAL_URL", "https://close.kirex.online").rstrip("/")
+            return JsonResponse({"success": False, "code": "USE_CENTRAL",
+                                 "error": f"Send invites from the central server: {central}"}, status=409)
         data = _body(request)
         try:
             req = onboarding.invite_by_team_leader(

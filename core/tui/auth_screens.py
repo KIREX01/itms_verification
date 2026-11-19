@@ -231,14 +231,9 @@ class LandingAuthScreen(Screen[Optional[User]]):
             self._handle_register()
 
     def _request_access_url(self) -> str:
-        """Web address of the request-access page on this server (mobile URL minus the /mobile/ path)."""
-        try:
-            from core.services import network_service
-            primary = network_service.get_mobile_connection_info().get("primary_url", "") or ""
-            base = primary.split("/mobile", 1)[0].rstrip("/")
-        except Exception:
-            base = ""
-        return (base or "https://<this server>") + "/access/request/"
+        """Access is requested on the central server (the only control centre)."""
+        from django.conf import settings
+        return getattr(settings, "CLOSE_CENTRAL_URL", "https://close.kirex.online").rstrip("/") + "/access/request/"
 
     def _get_warehouse_options(self) -> list[tuple[str, str]]:
         from core.services import bond_service

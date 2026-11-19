@@ -15,7 +15,7 @@ from django.contrib import messages
 from django.contrib.auth.models import User
 from django.core.paginator import Paginator
 from django.db.models import Count, Q
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
@@ -34,6 +34,9 @@ from governance.services import accounts, audit, authz, flags, identity, members
 def admin_required(view):
     @functools.wraps(view)
     def wrapper(request: HttpRequest, *args, **kwargs):
+        # The central server is the only control centre: installed apps have no backoffice.
+        if getattr(settings, "DEPLOYMENT_ROLE", "edge") != "central":
+            raise Http404("The backoffice is only available on the central server.")
         user = getattr(request, "user", None)
         if not (user and user.is_authenticated):
             return redirect(f"/login/?next={request.path}")

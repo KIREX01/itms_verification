@@ -249,7 +249,8 @@ class TeamAndProfileApiTests(TestCase):
         team = c.get("/api/team/").json()
         self.assertEqual(team["bond"], "AGM")
         self.assertEqual(len(team["members"]), 2)
-        with patch("core.services.email_service.send_access_request_admin_alert", return_value=(True, "")):
+        with patch("core.services.email_service.send_access_request_admin_alert", return_value=(True, "")), \
+                override_settings(DEPLOYMENT_ROLE="central"):
             r = c.post("/api/team/", data={"full_name": "New Helper", "email": "nh@gmail.com", "role": "HELPER"},
                        content_type="application/json")
         self.assertEqual(r.status_code, 200, r.content)

@@ -30,13 +30,15 @@ echo "=== [6/6] Configuring systemd Service for Automatic Startup ==="
 mkdir -p /opt/itms/media
 cat << 'EOF' > /etc/systemd/system/itms.service
 [Unit]
-Description=ITMS Verification Copilot Service
+Description=CLOSE Copilot Service (central backoffice)
 After=network.target
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/opt/itms
+# This EC2 server is the central backoffice: installs enroll and pull policy from it.
+Environment=DEPLOYMENT_ROLE=central
 ExecStart=/opt/itms/.venv/bin/python manage.py run_web --no-ssl --port 80 --noreload
 Restart=always
 RestartSec=5

@@ -180,9 +180,12 @@ MIDDLEWARE = [
 ]
 
 # --- Governance ---------------------------------------------------------------
-# Role/capability enforcement. Keep True in production; the test settings turn it off for
-# legacy suites and governance tests switch it on explicitly.
-GOVERNANCE_ENFORCE = safe_env_bool("GOVERNANCE_ENFORCE", default=True)
+# Role/capability enforcement. Always on in production; off by default only inside test runs
+# (legacy suites predate roles) - governance tests switch it on explicitly.
+# Strict test detection (not the loose IS_TESTING substring match, which a server installed
+# under a path containing "test" would trip and silently disable enforcement).
+_STRICT_TEST_RUN = (len(sys.argv) > 1 and sys.argv[1] == "test") or "pytest" in sys.modules
+GOVERNANCE_ENFORCE = safe_env_bool("GOVERNANCE_ENFORCE", default=not _STRICT_TEST_RUN)
 # "central" = the backoffice server (close.kirex.online); "edge" = laptop / workstation install.
 DEPLOYMENT_ROLE = os.environ.get("DEPLOYMENT_ROLE", "edge").strip().lower() or "edge"
 

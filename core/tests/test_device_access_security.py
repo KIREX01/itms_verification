@@ -152,7 +152,7 @@ class DeviceAndEmailAccessControlTests(TestCase):
         self.assertEqual(web_resp.status_code, 403)
         self.assertContains(web_resp, "VERIFICATION", status_code=403)
 
-        req_page = bad_client.get(reverse("core:access_request"))
+        req_page = bad_client.get(reverse("core:device_access_request"))
         self.assertEqual(req_page.status_code, 200)
 
         device_access_service.unblock_device_or_target("DE:AD:BE:EF:00:01")
@@ -220,72 +220,6 @@ class DeviceAndEmailAccessControlTests(TestCase):
         self.assertTrue(ok_exp)
         self.assertEqual(op_client.get(reverse("core:api_stats")).status_code, 403)
 
-    @patch("core.services.email_service.send_2fa_verification_code")
-    @patch("core.services.email_service.send_access_request_admin_alert")
-    @patch("core.services.email_service.send_access_activated_email")
-    def test_strict_email_approval_and_activation_code_unlock(
-        self, mock_activated_email, mock_admin_alert, mock_2fa_email
-    ):
-        mock_2fa_email.return_value = (True, "Sent")
-        mock_admin_alert.return_value = (True, "Sent")
-        mock_activated_email.return_value = (True, "Sent")
-
-        device_access_service.update_security_access_config({
-            "mode": "STRICT",
-            "require_email_approval": True,
-        })
-
-        new_client = Client(
-            HTTP_USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            REMOTE_ADDR="192.168.50.77",
-            HTTP_X_DEVICE_MAC="AA:11:22:33:44:55",
-        )
-
-        resp = new_client.post(reverse("core:signup"), {
-            "username": "new_fitter",
-            "full_name": "Grace Auma",
-            "email": "grace@info.kirex.online",
-            "password": "Password123!",
-            "password_confirm": "Password123!",
-        })
-        self.assertEqual(resp.status_code, 302)
-        pending = new_client.session["pending_signup"]
-
-        verify_resp = new_client.post(reverse("core:signup_verify"), {
-            "action": "verify",
-            "code": pending["code"],
-        })
-        self.assertIn(verify_resp.status_code, (200, 302))
-
-        created_user = User.objects.get(username="new_fitter")
-        self.assertFalse(created_user.is_active)
-
-        access_req = EmailAccessRequest.objects.get(email="grace@info.kirex.online")
-        self.assertEqual(access_req.status, EmailAccessRequest.Status.PENDING)
-
-        admin_client = Client()
-        admin_client.force_login(self._security_admin())  # security APIs are superuser-only (v1.1.2)
-        action_resp = admin_client.post(
-            reverse("core:api_security_action"),
-            data='{"action": "approve_request", "request_id": %d, "duration_hours": 24}' % access_req.id,
-            content_type="application/json",
-        )
-        self.assertEqual(action_resp.status_code, 200)
-        self.assertTrue(action_resp.json()["success"])
-
-        access_req.refresh_from_db()
-        created_user.refresh_from_db()
-        self.assertTrue(created_user.is_active)
-        self.assertEqual(access_req.status, EmailAccessRequest.Status.APPROVED)
-        self.assertIsNotNone(access_req.expires_at)
-
-        unlock_resp = new_client.post(reverse("core:access_activate"), {
-            "email": "grace@info.kirex.online",
-            "activation_code": access_req.activation_code,
-        })
-        self.assertEqual(unlock_resp.status_code, 302)
-        self.assertEqual(unlock_resp["Location"], reverse("core:dashboard"))
-        self.assertIn("itms_device_trust", unlock_resp.cookies)
 
     def test_web_settings_minimal_and_tui_access_pane_instantiates(self):
         """

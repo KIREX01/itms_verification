@@ -264,39 +264,4 @@ class SignupHygieneTests(TestCase):
         self.assertIsNotNone(user, err)
         self.assertTrue(user.check_password("Hashed-pass-1"))
 
-    @patch("core.services.email_service.send_2fa_verification_code", return_value=(True, "sent"))
-    def test_pending_signup_never_stores_plaintext_password_or_code_url(self, mock_send):
-        client = Client()
-        res = client.post("/signup/", {
-            "username": "brand_new",
-            "full_name": "Brand New",
-            "email": "brand@example.com",
-            "password": "Pla1ntext-Secret!",
-            "password_confirm": "Pla1ntext-Secret!",
-        })
-        self.assertEqual(res.status_code, 302)
-        pending = client.session.get("pending_signup", {})
-        self.assertNotIn("password", pending)
-        self.assertNotIn("Pla1ntext-Secret!", str(pending))
-        self.assertTrue(pending.get("password_hash"))
-        verify_url = mock_send.call_args.kwargs.get("verify_url", "")
-        self.assertNotIn("code=", verify_url)
 
-        # Completing verification creates the account with the chosen password.
-        res2 = client.post("/signup/verify/", {"code": pending["code"]})
-        self.assertIn(res2.status_code, (200, 302))
-        user = User.objects.get(username="brand_new")
-        self.assertTrue(user.check_password("Pla1ntext-Secret!"))
-
-    @override_settings(SIGNUP_2FA_ENABLED=False)
-    def test_non_2fa_signup_path_does_not_crash(self):
-        device_access_service.preapprove_operator_email("direct@example.com", send_invite_email=False)
-        res = Client().post("/signup/", {
-            "username": "direct_user",
-            "full_name": "Direct User",
-            "email": "direct@example.com",
-            "password": "Dir3ct-pass!",
-            "password_confirm": "Dir3ct-pass!",
-        })
-        self.assertIn(res.status_code, (200, 302))
-        self.assertTrue(User.objects.filter(username="direct_user").exists())

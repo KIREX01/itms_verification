@@ -94,7 +94,7 @@
                         📩 Request Time-Bound Access
                     </div>
 
-                    <form method="POST" action="{% url 'core:access_request' %}" style="display:flex; flex-direction:column; gap:10px;">
+                    <form method="POST" action="{% url 'core:device_access_request' %}" style="display:flex; flex-direction:column; gap:10px;">
                         {% csrf_token %}
                         <div class="form-field" style="margin:0;">
                             <label for="req_email" style="font-size:0.72rem;">Work Email *</label>
@@ -121,7 +121,7 @@
 
             <div class="auth-card-footer" style="display:flex; justify-content:space-between; font-size:0.76rem; padding-top:10px;">
                 <a href="{% url 'core:login' %}">Sign In</a>
-                <a href="{% url 'core:signup' %}">Create Account</a>
+                <a href="{% url 'core:access_request' %}">Request access</a>
             </div>
         </div>
     </div>

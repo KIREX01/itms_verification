@@ -90,10 +90,10 @@
 
             <div class="auth-card-footer" style="display:flex; flex-direction:column; gap:6px;">
                 <div>
-                    New operator on this terminal? <a href="{% url 'core:signup' %}">Create Account</a>
+                    New here? <a href="{% url 'core:access_request' %}">Request access</a>
                 </div>
                 <div style="font-size:0.74rem;">
-                    Device restricted or need email activation? <a href="{% url 'core:access_request' %}" style="color:var(--ug-yellow);">Request Access / Enter Code</a>
+                    Device blocked or have an unlock code? <a href="{% url 'core:device_access_request' %}" style="color:var(--ug-yellow);">Unlock this device</a>
                 </div>
             </div>
         </div>

@@ -84,8 +84,11 @@ class ApiGlobalAuthenticationTestCase(TestCase):
         res_login = self.anonymous_client.get(reverse("core:login"))
         self.assertEqual(res_login.status_code, 200)
 
+        res_request = self.anonymous_client.get(reverse("core:access_request"))
+        self.assertEqual(res_request.status_code, 200)
+        # Signup without an invite sends people to "request access".
         res_signup = self.anonymous_client.get(reverse("core:signup"))
-        self.assertEqual(res_signup.status_code, 200)
+        self.assertEqual(res_signup.status_code, 302)
 
         res_status = self.anonymous_client.get(reverse("core:api_itms_status"))
         self.assertEqual(res_status.status_code, 200)

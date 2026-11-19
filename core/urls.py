@@ -2,6 +2,7 @@ from django.urls import path
 from django.views.generic.base import RedirectView
 
 from core import views, views_mobile
+from governance import onboarding_views
 
 app_name = "core"
 
@@ -13,10 +14,13 @@ urlpatterns = [
 
     # Authentication & Operator Onboarding
     path("login/", views.login_view, name="login"),
-    path("signup/", views.signup_view, name="signup"),
-    path("signup/verify/", views.signup_verify_view, name="signup_verify"),
+    # Onboarding: request access -> administrator grant -> signup with a single-use invite.
+    path("signup/", onboarding_views.complete_signup_view, name="signup"),
+    path("signup/verify/", onboarding_views.legacy_signup_verify_redirect, name="signup_verify"),
     path("logout/", views.logout_view, name="logout"),
-    path("access/request/", views.access_request_view, name="access_request"),
+    path("access/request/", onboarding_views.request_access_view, name="access_request"),
+    # Legacy device unlock / device access request (blocked-device screen).
+    path("access/device-request/", views.access_request_view, name="device_access_request"),
     path("access/activate/", views.access_activate_view, name="access_activate"),
     path("access/review/<str:token>/", views.access_review_token_view, name="access_review_token"),
     path("api/security/overview/", views.api_security_overview, name="api_security_overview"),

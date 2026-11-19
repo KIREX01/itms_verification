@@ -1,0 +1,120 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Request Access - CLOSE Copilot</title>
+    <link rel="shortcut icon" href="{% static 'core/logos/favicon.ico' %}">
+    <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/auth.css' %}">
+    <style>
+        .hp-field { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+        .field-hint { font-size: 0.7rem; color: var(--ug-text-muted); margin-top: 3px; display: block; }
+    </style>
+</head>
+<body>
+    <div class="uganda-flag-ribbon"></div>
+    <div class="auth-page-wrapper">
+        <div class="auth-card-box">
+            <div class="auth-card-head">
+                <h1 style="font-size:1.35rem; font-weight:800; color:#ffffff;">
+                    CLOSE <span style="color:var(--ug-yellow);">COPILOT</span>
+                </h1>
+                <p style="font-size:0.75rem; color:var(--ug-text-muted); margin-top:2px;">Request access</p>
+            </div>
+
+            <div class="auth-card-body">
+            {% if submitted %}
+                <div class="alert-banner success"><span>✓ Request received.</span></div>
+                <p style="font-size:0.85rem; line-height:1.5;">
+                    The administrator will review it. If it is approved you'll get an email with a
+                    6-digit code and a link to create your account. The invite is valid for a limited time.
+                </p>
+                <a class="btn btn-secondary" href="{% url 'core:login' %}" style="justify-content:center; padding:11px;">Back to sign in</a>
+            {% else %}
+                {% if error %}<div class="alert-banner error"><span>⚠️ {{ error }}</span></div>{% endif %}
+                <form method="POST" action="/access/request/" style="display:flex; flex-direction:column; gap:12px;">
+                    {% csrf_token %}
+                    <div class="hp-field" aria-hidden="true">
+                        <label for="website">Website</label>
+                        <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
+                    </div>
+
+                    <div class="form-field">
+                        <label for="full_name">Full name *</label>
+                        <input type="text" id="full_name" name="full_name" value="{{ form_data.full_name|default:'' }}" required autocomplete="name" placeholder="e.g. Okello Samuel">
+                    </div>
+
+                    <div class="form-field">
+                        <label for="email">Email you'll sign in with *</label>
+                        <input type="email" id="email" name="email" value="{{ form_data.email|default:'' }}" required autocomplete="email" placeholder="any email you use">
+                        <span class="field-hint">Your invite code will be sent here.</span>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-field">
+                            <label for="requested_role">Role *</label>
+                            <select id="requested_role" name="requested_role" class="form-select" required onchange="toggleCompanyEmail()">
+                                <option value="">Choose…</option>
+                                {% for value, label in roles %}
+                                    <option value="{{ value }}" {% if form_data.requested_role == value %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label for="bond_code">Bond / warehouse *</label>
+                            <select id="bond_code" name="bond_code" class="form-select" required>
+                                <option value="">Choose…</option>
+                                {% for code, name in bonds %}
+                                    <option value="{{ code }}" {% if form_data.bond_code == code %}selected{% endif %}>{{ name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-field" id="company-email-row">
+                        <label for="company_email">Company email (@{{ company_domains|join:", @" }})</label>
+                        <input type="email" id="company_email" name="company_email" value="{{ form_data.company_email|default:'' }}" autocomplete="off" placeholder="name@{{ company_domains.0 }}">
+                        <span class="field-hint">Required for Team Leader, Quality Inspector and Supervisor.</span>
+                    </div>
+
+                    <div class="form-field">
+                        <label for="phone">Phone (optional)</label>
+                        <input type="tel" id="phone" name="phone" value="{{ form_data.phone|default:'' }}" autocomplete="tel">
+                    </div>
+
+                    <div class="form-field">
+                        <label for="message">Anything the administrator should know? (optional)</label>
+                        <textarea id="message" name="message" rows="2">{{ form_data.message|default:'' }}</textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; padding:12px; font-weight:800;">
+                        Send request
+                    </button>
+                </form>
+            {% endif %}
+            </div>
+
+            <div class="auth-card-footer">
+                Already have an account? <a href="{% url 'core:login' %}">Sign in</a>
+            </div>
+        </div>
+    </div>
+    {% if not submitted %}
+    <script>
+        const COMPANY_ROLES = {{ company_roles|safe }};
+        function toggleCompanyEmail() {
+            const role = document.getElementById("requested_role").value;
+            const row = document.getElementById("company-email-row");
+            const input = document.getElementById("company_email");
+            const needed = COMPANY_ROLES.includes(role);
+            row.style.display = (role && !needed) ? "none" : "";
+            input.required = needed;
+        }
+        toggleCompanyEmail();
+    </script>
+    {% endif %}
+</body>
+</html>

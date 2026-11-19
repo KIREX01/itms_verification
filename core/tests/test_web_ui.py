@@ -132,22 +132,6 @@ class WebUITestCase(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertContains(res, "Invalid password")
 
-    def test_signup_view_creates_account(self):
-        """POST /signup/ emails a 2FA code; the account is created once the code is verified."""
-        res = self.client.post(reverse("core:signup"), {
-            "username": "new_operator",
-            "full_name": "New Officer",
-            "email": "officer@example.com",
-            "password": "securepassword123",
-            "password_confirm": "securepassword123",
-        })
-        self.assertEqual(res.status_code, 302)
-        self.assertEqual(res["Location"], reverse("core:signup_verify"))
-        self.assertFalse(User.objects.filter(username="new_operator").exists())
-
-        code = self.client.session["pending_signup"]["code"]
-        self.client.post(reverse("core:signup_verify"), {"code": code})
-        self.assertTrue(User.objects.filter(username="new_operator").exists())
 
     def test_logout_clears_session(self):
         """GET /logout/ clears authentication and redirects to login."""

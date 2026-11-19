@@ -221,3 +221,67 @@ class BurnedIdentity(models.Model):
     def save(self, *args, **kwargs):
         self.email = (self.email or "").strip().lower()
         super().save(*args, **kwargs)
+
+
+class AccessRequest(models.Model):
+    """
+    Onboarding: a person asks for access (no account exists yet) -> the administrator grants or
+    rejects -> a single-use invite (6-digit code + link) lets them create their account, which is
+    born ACTIVE with the granted role, bond and company email.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending review"
+        GRANTED = "GRANTED", "Granted (invite sent)"
+        REJECTED = "REJECTED", "Rejected"
+        USED = "USED", "Account created"
+        EXPIRED = "EXPIRED", "Expired / locked"
+
+    class Source(models.TextChoices):
+        SELF = "SELF", "Requested by the person"
+        TEAM_LEADER = "TEAM_LEADER", "Invited by a Team Leader"
+        ADMIN = "ADMIN", "Invited by the administrator"
+
+    full_name = models.CharField(max_length=150)
+    email = models.CharField(max_length=254, db_index=True)
+    phone = models.CharField(max_length=32, blank=True, default="")
+    requested_role = models.CharField(max_length=24, choices=Role.choices)
+    bond_code = models.CharField(max_length=32, db_index=True)
+    company_email = models.CharField(max_length=254, blank=True, default="")
+    message = models.TextField(blank=True, default="")
+    source = models.CharField(max_length=16, choices=Source.choices, default=Source.SELF)
+    invited_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                   related_name="+")
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING, db_index=True)
+
+    granted_role = models.CharField(max_length=24, choices=Role.choices, blank=True, default="")
+    granted_bond = models.CharField(max_length=32, blank=True, default="")
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                    related_name="+")
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_note = models.TextField(blank=True, default="")
+
+    invite_token_hash = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    invite_code_hash = models.CharField(max_length=64, blank=True, default="")
+    invite_expires_at = models.DateTimeField(null=True, blank=True)
+    invite_attempts = models.PositiveSmallIntegerField(default=0)
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                     related_name="+")
+
+    client_ip = models.CharField(max_length=64, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def save(self, *args, **kwargs):
+        self.email = (self.email or "").strip().lower()
+        self.company_email = (self.company_email or "").strip().lower()
+        self.bond_code = (self.bond_code or "").strip().upper()
+        self.granted_bond = (self.granted_bond or "").strip().upper()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"{self.email} → {self.get_requested_role_display()} @ {self.bond_code} [{self.status}]"

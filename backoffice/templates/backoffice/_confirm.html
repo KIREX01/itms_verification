@@ -1,0 +1,8 @@
+<div class="bo-field" style="min-width:200px;">
+    <label>Reason{% if reason_required %} *{% endif %}</label>
+    <input type="text" name="reason" {% if reason_required %}required{% endif %} placeholder="Why? (kept in the audit log)">
+</div>
+<div class="bo-field" style="min-width:180px;">
+    <label>Your password *</label>
+    <input type="password" name="confirm_password" required autocomplete="current-password">
+</div>

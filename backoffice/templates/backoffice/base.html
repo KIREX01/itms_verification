@@ -1,0 +1,37 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>{% block title %}Backoffice{% endblock %} - CLOSE Copilot</title>
+    <link rel="shortcut icon" href="{% static 'core/logos/favicon.ico' %}">
+    <link rel="stylesheet" href="{% static 'backoffice/backoffice.css' %}?v=1">
+</head>
+<body class="bo">
+<div class="bo-shell">
+    <aside class="bo-side">
+        <div class="bo-brand">CLOSE <span>BACKOFFICE</span></div>
+        <div class="bo-sub">{{ request.user.username }} · {{ deployment_role|upper }}</div>
+        <nav class="bo-nav">
+            <a href="{% url 'backoffice:overview' %}" class="{% if active == 'overview' %}active{% endif %}">Overview</a>
+            <a href="{% url 'backoffice:access_list' %}" class="{% if active == 'access' %}active{% endif %}">Access requests {% if nav_pending_requests %}<span class="bo-count">{{ nav_pending_requests }}</span>{% endif %}</a>
+            <a href="{% url 'backoffice:people_list' %}" class="{% if active == 'people' %}active{% endif %}">People &amp; roles</a>
+            <a href="{% url 'backoffice:bonds' %}" class="{% if active == 'bonds' %}active{% endif %}">Bonds {% if nav_open_flags %}<span class="bo-count" title="Open quality flags">{{ nav_open_flags }}</span>{% endif %}</a>
+            <a href="{% url 'backoffice:controls' %}" class="{% if active == 'controls' %}active{% endif %}">Kill switches &amp; policy</a>
+            <a href="{% url 'backoffice:devices' %}" class="{% if active == 'devices' %}active{% endif %}">Devices</a>
+            <a href="{% url 'backoffice:reports' %}" class="{% if active == 'reports' %}active{% endif %}">Reports</a>
+            <a href="{% url 'backoffice:audit' %}" class="{% if active == 'audit' %}active{% endif %}">Audit log</a>
+            <a href="{% url 'backoffice:technical' %}" class="{% if active == 'technical' %}active{% endif %}">Technical</a>
+        </nav>
+        <div class="bo-side-foot">
+            <a href="/logout/">Sign out</a>
+        </div>
+    </aside>
+    <main class="bo-main">
+        {% for m in messages %}<div class="bo-msg {{ m.tags }}">{{ m }}</div>{% endfor %}
+        {% block content %}{% endblock %}
+    </main>
+</div>
+</body>
+</html>

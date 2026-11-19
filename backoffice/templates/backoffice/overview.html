@@ -1,0 +1,45 @@
+{% extends "backoffice/base.html" %}
+{% block title %}Overview{% endblock %}
+{% block content %}
+<div class="bo-head"><div><h1>Overview</h1><p>What needs your attention across every bond.</p></div></div>
+
+<div class="bo-grid">
+    <a class="bo-stat {% if stats.pending_requests %}warn{% endif %}" href="{% url 'backoffice:access_list' %}"><div class="n">{{ stats.pending_requests }}</div><div class="l">Access requests waiting</div></a>
+    <a class="bo-stat {% if stats.open_flags %}warn{% endif %}" href="{% url 'backoffice:bonds' %}"><div class="n">{{ stats.open_flags }}</div><div class="l">Open quality flags</div></a>
+    <div class="bo-stat"><div class="n">{{ stats.submitted_24h }}</div><div class="l">Submitted (24h)</div></div>
+    <div class="bo-stat {% if stats.failed_24h %}danger{% endif %}"><div class="n">{{ stats.failed_24h }}</div><div class="l">Failed (24h)</div></div>
+    <a class="bo-stat" href="{% url 'backoffice:people_list' %}"><div class="n">{{ stats.people }}</div><div class="l">People</div></a>
+    <a class="bo-stat {% if stats.suspended %}warn{% endif %}" href="{% url 'backoffice:people_list' %}?status=SUSPENDED"><div class="n">{{ stats.suspended }}</div><div class="l">Suspended</div></a>
+    <a class="bo-stat" href="{% url 'backoffice:people_list' %}?status=BURNED"><div class="n">{{ stats.burned }}</div><div class="l">Burned</div></a>
+</div>
+
+<div class="bo-two">
+    <div class="bo-card">
+        <h2>Kill switches</h2>
+        {% for s in switches %}
+            <div class="bo-switch"><div><strong>{{ s.label }}</strong></div>
+                <span class="pill {% if s.danger %}danger{% elif s.value %}ok{% else %}muted{% endif %}">{{ s.value|yesno:"ON,OFF" }}</span></div>
+        {% endfor %}
+        <p style="margin:10px 0 0;"><a href="{% url 'backoffice:controls' %}">Change switches →</a></p>
+    </div>
+    <div class="bo-card">
+        <h2>Company email still missing</h2>
+        {% if grace_users %}
+            <p class="bo-muted" style="margin-top:0;">These people hold a company role but have no verified company email. Their roles stop working when the grace period ends.</p>
+            <table class="bo-table">{% for u in grace_users %}
+                <tr><td><a href="{% url 'backoffice:person_detail' u.pk %}">{{ u.username }}</a></td><td class="bo-muted">{{ u.email }}</td>
+                    <td>{{ u.account_state.company_email_grace_until|date:"Y-m-d" }}</td></tr>{% endfor %}</table>
+        {% else %}<p class="bo-muted">Everyone in a company role has a verified company email.</p>{% endif %}
+    </div>
+</div>
+
+<div class="bo-card">
+    <h2>Recent administrative activity</h2>
+    <div class="bo-scroll"><table class="bo-table">
+        <tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Reason</th></tr>
+        {% for e in recent %}<tr><td>{{ e.created_at|date:"Y-m-d H:i" }}</td><td>{{ e.actor_label }}</td><td>{{ e.action }}</td>
+            <td>{{ e.target_label }}{% if e.bond_code %} @ {{ e.bond_code }}{% endif %}</td><td class="bo-muted">{{ e.reason|truncatechars:60 }}</td></tr>
+        {% empty %}<tr><td colspan="5" class="bo-muted">Nothing yet.</td></tr>{% endfor %}
+    </table></div>
+</div>
+{% endblock %}

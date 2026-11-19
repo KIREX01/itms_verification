@@ -1,0 +1,22 @@
+{% extends "backoffice/base.html" %}
+{% block title %}Bonds{% endblock %}
+{% block content %}
+<div class="bo-head"><div><h1>Bonds</h1><p>Each warehouse: who works there, what is waiting, and which company emails ITMS lets in.</p></div></div>
+{% for b in rows %}
+<div class="bo-card">
+    <h2>{{ b.name }} <span class="bo-muted">({{ b.code }})</span>
+        {% if b.open_flags %}<span class="pill warn">🚩 {{ b.open_flags }} open flag(s)</span>{% endif %}
+        {% if b.pending_review %}<span class="pill">{{ b.pending_review }} awaiting review</span>{% endif %}</h2>
+    <div class="bo-two">
+        <div>
+            {% for role, people in b.by_role.items %}
+                <div style="margin-bottom:6px;"><strong>{{ role }}:</strong>
+                {% for u in people %}<a href="{% url 'backoffice:person_detail' u.pk %}">{{ u.get_full_name|default:u.username }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</div>
+            {% empty %}<p class="bo-muted">Nobody is assigned to this bond.</p>{% endfor %}
+        </div>
+        <div><strong>ITMS access:</strong>
+            {% for e in b.itms_emails %}<span class="pill ok">{{ e }}</span>{% empty %}<span class="bo-muted">not synced yet</span>{% endfor %}</div>
+    </div>
+</div>
+{% empty %}<div class="bo-card bo-muted">No bonds yet. Sync warehouses from ITMS, or assign someone to a bond.</div>{% endfor %}
+{% endblock %}

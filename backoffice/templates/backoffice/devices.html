@@ -1,0 +1,27 @@
+{% extends "backoffice/base.html" %}
+{% block title %}Devices{% endblock %}
+{% block content %}
+<div class="bo-head"><div><h1>Devices</h1><p>Laptops, phones and terminals that have signed in. Block a device, MAC address, IP or subnet.</p></div></div>
+<div class="bo-card">
+    <form method="post" class="bo-inline">{% csrf_token %}
+        <div class="bo-field" style="min-width:260px;"><label>Device ID, MAC, IP or CIDR</label><input type="text" name="target" required placeholder="e.g. AA:BB:CC:DD:EE:FF or 10.0.0.0/24"></div>
+        <div class="bo-field"><label>Reason</label><input type="text" name="reason"></div>
+        <button class="bo-btn danger" name="action" value="block">Block</button>
+        <button class="bo-btn" name="action" value="unblock">Unblock</button>
+    </form>
+</div>
+<div class="bo-filters">{% for s in statuses %}<a class="{% if s == status %}on{% endif %}" href="?status={{ s }}">{{ s|default:"All"|title }}</a>{% endfor %}</div>
+<div class="bo-card bo-scroll"><table class="bo-table">
+    <tr><th>Device</th><th>Person</th><th>Type</th><th>IP / MAC</th><th>Status</th><th>Expires</th><th>Last seen</th></tr>
+    {% for d in page %}
+    <tr><td>{{ d.device_name|default:"—"|truncatechars:30 }}<div class="bo-muted">{{ d.device_id|truncatechars:24 }}</div></td>
+        <td>{% if d.user %}<a href="{% url 'backoffice:person_detail' d.user.pk %}">{{ d.user.username }}</a>{% else %}{{ d.authorized_email|default:"—" }}{% endif %}</td>
+        <td>{{ d.device_type }}</td><td>{{ d.ip_address|default:"—" }}<div class="bo-muted">{{ d.mac_address }}</div></td>
+        <td><span class="pill {% if d.status == 'APPROVED' %}ok{% elif d.status == 'PENDING' %}warn{% else %}danger{% endif %}">{{ d.status }}</span>
+            {% if d.block_reason %}<div class="bo-muted">{{ d.block_reason|truncatechars:40 }}</div>{% endif %}</td>
+        <td>{{ d.expires_at|date:"Y-m-d H:i"|default:"—" }}</td><td>{{ d.last_seen_at|date:"Y-m-d H:i" }}</td></tr>
+    {% empty %}<tr><td colspan="7" class="bo-muted">No devices.</td></tr>{% endfor %}
+</table>
+<div class="bo-pager">{% if page.has_previous %}<a href="?status={{ status }}&page={{ page.previous_page_number }}">← Previous</a>{% endif %} Page {{ page.number }} of {{ page.paginator.num_pages }} {% if page.has_next %}<a href="?status={{ status }}&page={{ page.next_page_number }}">Next →</a>{% endif %}</div>
+</div>
+{% endblock %}

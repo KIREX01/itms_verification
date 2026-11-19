@@ -1,0 +1,21 @@
+{% extends "backoffice/base.html" %}
+{% block title %}Access requests{% endblock %}
+{% block content %}
+<div class="bo-head"><div><h1>Access requests</h1><p>No account exists until you grant a request.</p></div></div>
+<div class="bo-filters">{% for s in statuses %}<a class="{% if s == status %}on{% endif %}" href="?status={{ s }}">{{ s|title }}</a>{% endfor %}</div>
+<div class="bo-card bo-scroll"><table class="bo-table">
+    <tr><th>Requested</th><th>Person</th><th>Role @ bond</th><th>Company email</th><th>Source</th><th>Status</th></tr>
+    {% for r in page %}
+    <tr>
+        <td>{{ r.created_at|date:"Y-m-d H:i" }}</td>
+        <td><a href="{% url 'backoffice:access_detail' r.pk %}">{{ r.full_name }}</a><div class="bo-muted">{{ r.email }}</div></td>
+        <td>{{ r.get_requested_role_display }} @ {{ r.bond_code }}</td>
+        <td>{{ r.company_email|default:"—" }}</td>
+        <td>{{ r.get_source_display }}{% if r.invited_by %}<div class="bo-muted">{{ r.invited_by.username }}</div>{% endif %}</td>
+        <td><span class="pill {% if r.status == 'PENDING' %}warn{% elif r.status == 'USED' or r.status == 'GRANTED' %}ok{% else %}muted{% endif %}">{{ r.get_status_display }}</span></td>
+    </tr>
+    {% empty %}<tr><td colspan="6" class="bo-muted">No requests.</td></tr>{% endfor %}
+</table>
+<div class="bo-pager">{% if page.has_previous %}<a href="?status={{ status }}&page={{ page.previous_page_number }}">← Newer</a>{% endif %} Page {{ page.number }} of {{ page.paginator.num_pages }} {% if page.has_next %}<a href="?status={{ status }}&page={{ page.next_page_number }}">Older →</a>{% endif %}</div>
+</div>
+{% endblock %}

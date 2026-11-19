@@ -1,0 +1,15 @@
+{% extends "backoffice/base.html" %}
+{% block title %}Reports{% endblock %}
+{% block content %}
+<div class="bo-head"><div><h1>Reports</h1><p>Vehicle pairs by bond and status, updated in the last {{ days }} day{{ days|pluralize }}.</p></div>
+    <div class="bo-filters">
+        <a class="{% if days == 1 %}on{% endif %}" href="?days=1">24 hours</a>
+        <a class="{% if days == 7 %}on{% endif %}" href="?days=7">7 days</a>
+        <a class="{% if days == 30 %}on{% endif %}" href="?days=30">30 days</a></div></div>
+<div class="bo-card bo-scroll"><table class="bo-table">
+    <tr><th>Bond</th>{% for s in statuses %}<th>{{ s|title }}</th>{% endfor %}<th>Flags raised</th></tr>
+    {% for r in rows %}<tr><td><strong>{{ r.bond }}</strong></td>{% for n in r.counts %}<td>{{ n }}</td>{% endfor %}<td>{{ r.flags }}</td></tr>
+    {% empty %}<tr><td colspan="7" class="bo-muted">No activity in this period.</td></tr>{% endfor %}
+</table></div>
+<p class="bo-muted">Detailed shift reports, CSV exports and stock reports stay in the operator app for Team Leaders and Supervisors.</p>
+{% endblock %}

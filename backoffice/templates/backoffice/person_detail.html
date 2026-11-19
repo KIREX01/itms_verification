@@ -1,0 +1,110 @@
+{% extends "backoffice/base.html" %}
+{% block title %}{{ person.username }}{% endblock %}
+{% block content %}
+<div class="bo-head">
+    <div><h1>{{ person.get_full_name|default:person.username }}</h1>
+        <p>{{ person.username }} · {{ person.email }} ·
+            <span class="pill {% if state.status == 'ACTIVE' %}ok{% elif state.status == 'SUSPENDED' %}warn{% else %}danger{% endif %}">{{ state.get_status_display }}</span>
+            {% if person.is_superuser %}<span class="pill warn">Administrator</span>{% endif %}</p></div>
+    <a class="bo-btn" href="{% url 'backoffice:people_list' %}">← People</a>
+</div>
+
+{% if state.status != 'ACTIVE' and state.reason %}<div class="bo-msg {% if state.status == 'BURNED' %}error{% else %}warning{% endif %}">{{ state.get_status_display }}: {{ state.reason }} ({{ state.changed_at|date:"Y-m-d H:i" }})</div>{% endif %}
+{% for w in warnings %}<div class="bo-msg warning">⚠️ {{ w }}</div>{% endfor %}
+
+<div class="bo-two">
+<div class="bo-card">
+    <h2>Roles</h2>
+    <div class="bo-scroll"><table class="bo-table">
+        <tr><th>Bond</th><th>Role</th><th>Status</th><th></th></tr>
+        {% for m in memberships %}
+        <tr><td>{{ m.bond_code }}</td><td>{{ m.get_role_display }}</td>
+            <td><span class="pill {% if m.status == 'ACTIVE' %}ok{% else %}muted{% endif %}">{{ m.get_status_display }}</span>
+                {% if m.status_reason %}<div class="bo-muted">{{ m.status_reason }}</div>{% endif %}</td>
+            <td>{% if m.status == 'ACTIVE' and state.status != 'BURNED' %}
+                <details class="bo-confirm"><summary>Remove</summary>
+                <form method="post" class="bo-inline" style="margin-top:8px;">{% csrf_token %}
+                    <input type="hidden" name="action" value="remove_role"><input type="hidden" name="membership_id" value="{{ m.pk }}">
+                    {% include "backoffice/_confirm.html" %}<button class="bo-btn danger small">Remove role</button></form></details>{% endif %}</td></tr>
+        {% empty %}<tr><td colspan="4" class="bo-muted">No roles yet.</td></tr>{% endfor %}
+    </table></div>
+    {% if state.status != 'BURNED' %}
+    <h2 style="margin-top:16px;">Add a role</h2>
+    <form method="post" class="bo-inline">{% csrf_token %}<input type="hidden" name="action" value="assign_role">
+        <div class="bo-field"><label>Bond</label><select name="bond_code" required>{% for code, name in bonds %}<option value="{{ code }}">{{ name }} ({{ code }})</option>{% endfor %}</select></div>
+        <div class="bo-field"><label>Role</label><select name="role" required>{% for v, l in roles %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
+        {% include "backoffice/_confirm.html" %}<button class="bo-btn primary">Assign</button>
+    </form>
+    {% endif %}
+    <p class="bo-muted" style="margin-bottom:0;">Effective now at {{ effective.active_bond|default:"—" }}: {{ effective.capabilities|join:", "|default:"nothing" }}</p>
+</div>
+
+<div class="bo-card">
+    <h2>Company email</h2>
+    {% if company %}
+        <dl class="bo-kv"><dt>Email</dt><dd>{{ company.email }}</dd>
+            <dt>Status</dt><dd><span class="pill {% if company.status == 'VERIFIED' %}ok{% else %}danger{% endif %}">{{ company.get_status_display }}</span> via {{ company.get_verified_via_display|default:"—" }}</dd>
+            <dt>Last seen in ITMS</dt><dd>{{ company.last_itms_seen_at|date:"Y-m-d H:i"|default:"never" }}</dd>
+            <dt>ITMS bonds</dt><dd>{% for a in itms_access %}<span class="pill {% if a.active %}ok{% else %}muted{% endif %}">{{ a.bond_code }}</span>{% empty %}<span class="bo-muted">not synced yet</span>{% endfor %}</dd></dl>
+    {% else %}<p class="bo-muted">No company email attached.</p>{% endif %}
+    {% if state.status != 'BURNED' %}
+    <form method="post" class="bo-inline" style="margin-top:12px;">{% csrf_token %}<input type="hidden" name="action" value="attach_company_email">
+        <div class="bo-field"><label>{% if company %}Replace with{% else %}Attach{% endif %}</label><input type="email" name="company_email" required placeholder="name@itms-ug.com"></div>
+        {% include "backoffice/_confirm.html" %}<button class="bo-btn">Save</button></form>
+    {% if company and company.status == 'VERIFIED' %}
+    <details class="bo-confirm" style="margin-top:10px;"><summary>Revoke company email</summary>
+        <form method="post" class="bo-inline" style="margin-top:8px;">{% csrf_token %}<input type="hidden" name="action" value="revoke_company_email">
+            {% include "backoffice/_confirm.html" %}<button class="bo-btn danger small">Revoke</button></form></details>
+    {% endif %}{% endif %}
+</div>
+</div>
+
+{% if not person.is_superuser or person.pk != request.user.pk %}
+<div class="bo-card danger">
+    <h2>Account standing</h2>
+    {% if state.status == 'BURNED' %}
+        <p>This account is burned. It can never be reinstated, and its emails can never be used again.</p>
+    {% else %}
+    <div class="bo-two">
+        <div>
+            {% if state.status == 'ACTIVE' %}
+            <form method="post" class="bo-inline">{% csrf_token %}<input type="hidden" name="action" value="suspend">
+                {% with reason_required=1 %}{% include "backoffice/_confirm.html" %}{% endwith %}
+                <button class="bo-btn danger">Suspend now</button></form>
+            <p class="bo-muted">Signs them out everywhere immediately. Reversible.</p>
+            <form method="post" class="bo-inline" style="margin-top:10px;">{% csrf_token %}<input type="hidden" name="action" value="force_logout">
+                {% include "backoffice/_confirm.html" %}<button class="bo-btn">Sign out all sessions</button></form>
+            {% else %}
+            <form method="post" class="bo-inline">{% csrf_token %}<input type="hidden" name="action" value="reinstate">
+                {% include "backoffice/_confirm.html" %}<button class="bo-btn ok">Reinstate</button></form>
+            {% endif %}
+        </div>
+        <div>
+            <details class="bo-confirm"><summary><strong style="color:#fca5a5;">Burn this account (permanent)</strong></summary>
+            <p>Burning kills every session, revokes every device and ITMS session, removes all roles and bans
+               <strong>{{ person.email|default:"(no email)" }}</strong>{% if company %} and <strong>{{ company.email }}</strong>{% endif %} forever. This cannot be undone.</p>
+            <form method="post" class="bo-inline">{% csrf_token %}<input type="hidden" name="action" value="burn">
+                <div class="bo-field"><label>Type the username "{{ person.username }}"</label><input type="text" name="confirm_username" required autocomplete="off"></div>
+                {% with reason_required=1 %}{% include "backoffice/_confirm.html" %}{% endwith %}
+                <button class="bo-btn danger">Burn permanently</button></form>
+            </details>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<div class="bo-two">
+<div class="bo-card"><h2>Devices</h2><div class="bo-scroll"><table class="bo-table">
+    <tr><th>Device</th><th>Type</th><th>IP</th><th>Status</th><th>Last seen</th></tr>
+    {% for d in devices %}<tr><td>{{ d.device_name|default:d.device_id|truncatechars:28 }}</td><td>{{ d.device_type }}</td><td>{{ d.ip_address }}</td>
+        <td><span class="pill {% if d.status == 'APPROVED' %}ok{% elif d.status == 'PENDING' %}warn{% else %}danger{% endif %}">{{ d.status }}</span></td>
+        <td>{{ d.last_seen_at|date:"Y-m-d H:i" }}</td></tr>
+    {% empty %}<tr><td colspan="5" class="bo-muted">No devices.</td></tr>{% endfor %}
+</table></div></div>
+<div class="bo-card"><h2>History</h2><div class="bo-scroll"><table class="bo-table">
+    {% for e in history %}<tr><td>{{ e.created_at|date:"Y-m-d H:i" }}</td><td>{{ e.action }}</td><td>{{ e.actor_label }}</td><td class="bo-muted">{{ e.reason|truncatechars:50 }}</td></tr>
+    {% empty %}<tr><td class="bo-muted">No administrative changes yet.</td></tr>{% endfor %}
+</table></div></div>
+</div>
+{% endblock %}

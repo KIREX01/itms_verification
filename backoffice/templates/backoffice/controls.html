@@ -1,0 +1,49 @@
+{% extends "backoffice/base.html" %}
+{% block title %}Kill switches & policy{% endblock %}
+{% block content %}
+<div class="bo-head"><div><h1>Kill switches &amp; policy</h1><p>Changes apply immediately here and reach enrolled installs on their next check-in.</p></div></div>
+
+<div class="bo-card">
+    <h2>Kill switches</h2>
+    {% for s in switches %}
+    <div class="bo-switch">
+        <div><strong>{{ s.label }}</strong> <span class="pill {% if s.danger %}danger{% elif s.value %}ok{% else %}muted{% endif %}">{{ s.value|yesno:"ON,OFF" }}</span>
+            <div class="bo-muted">{{ s.help }}</div></div>
+        <details class="bo-confirm"><summary class="bo-btn small">Turn {{ s.value|yesno:"OFF,ON" }}</summary>
+            <form method="post" class="bo-inline" style="margin-top:8px;">{% csrf_token %}
+                <input type="hidden" name="action" value="switch"><input type="hidden" name="key" value="{{ s.key }}">
+                <input type="hidden" name="value" value="{{ s.value|yesno:'off,on' }}">
+                {% if s.key == "maintenance.enabled" and not s.value %}
+                <div class="bo-field"><label>Title</label><input type="text" name="maintenance_title" value="{{ maintenance.title }}"></div>
+                <div class="bo-field"><label>Message</label><input type="text" name="maintenance_message" value="{{ maintenance.message }}"></div>
+                {% endif %}
+                {% with reason_required=1 %}{% include "backoffice/_confirm.html" %}{% endwith %}
+                <button class="bo-btn {% if s.value %}danger{% else %}ok{% endif %}">Confirm</button>
+            </form></details>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="bo-card">
+    <h2>Identity &amp; onboarding policy</h2>
+    {% for p in policy %}
+    <form method="post" class="bo-inline" style="padding:10px 0; border-bottom:1px solid #172033;">{% csrf_token %}
+        <input type="hidden" name="action" value="policy"><input type="hidden" name="key" value="{{ p.key }}">
+        <div class="bo-field" style="min-width:260px;"><label>{{ p.key }}</label>
+            <input type="text" name="value" value="{% if p.is_list %}{{ p.value|join:', ' }}{% else %}{{ p.value }}{% endif %}">
+            <span class="bo-muted" style="font-size:12px;">{{ p.help }}</span></div>
+        {% include "backoffice/_confirm.html" %}<button class="bo-btn">Save</button>
+    </form>
+    {% endfor %}
+</div>
+
+<div class="bo-card">
+    <h2>Stored policy values</h2>
+    <div class="bo-scroll"><table class="bo-table">
+        <tr><th>Key</th><th>Scope</th><th>Value</th><th>Changed by</th><th>When</th></tr>
+        {% for f in flag_rows %}<tr><td>{{ f.key }}</td><td>{{ f.bond_code|default:"global" }}</td><td>{{ f.value }}</td>
+            <td>{{ f.updated_by.username|default:"—" }}</td><td>{{ f.updated_at|date:"Y-m-d H:i" }}</td></tr>
+        {% empty %}<tr><td colspan="5" class="bo-muted">Defaults in use; nothing changed yet.</td></tr>{% endfor %}
+    </table></div>
+</div>
+{% endblock %}

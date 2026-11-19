@@ -160,6 +160,7 @@ INSTALLED_APPS = [
     "django_extensions",
     "core.apps.CoreConfig",
     "governance.apps.GovernanceConfig",
+    "backoffice.apps.BackofficeConfig",
 ]
 
 MIDDLEWARE = [

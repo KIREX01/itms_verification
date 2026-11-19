@@ -1,0 +1,23 @@
+{% extends "backoffice/base.html" %}
+{% block title %}Audit log{% endblock %}
+{% block content %}
+<div class="bo-head"><div><h1>Audit log</h1><p>Every administrative change. Entries can't be edited or deleted.</p></div></div>
+<div class="bo-card">
+    <form method="get" class="bo-inline">
+        <div class="bo-field"><label>Action</label><select name="action"><option value="">Any</option>{% for a in actions %}<option value="{{ a }}" {% if a == action %}selected{% endif %}>{{ a }}</option>{% endfor %}</select></div>
+        <div class="bo-field"><label>Person (actor or target)</label><input type="search" name="who" value="{{ who }}"></div>
+        <button class="bo-btn">Filter</button>
+    </form>
+</div>
+<div class="bo-card bo-scroll"><table class="bo-table">
+    <tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Change</th><th>Reason</th><th>IP</th></tr>
+    {% for e in page %}
+    <tr><td style="white-space:nowrap;">{{ e.created_at|date:"Y-m-d H:i:s" }}</td><td>{{ e.actor_label }}</td><td>{{ e.action }}</td>
+        <td>{{ e.target_label }}{% if e.bond_code %} @ {{ e.bond_code }}{% endif %}</td>
+        <td class="bo-muted" style="max-width:320px;">{% if e.before %}{{ e.before }} → {% endif %}{{ e.after }}</td>
+        <td>{{ e.reason }}</td><td class="bo-muted">{{ e.ip_address }}</td></tr>
+    {% empty %}<tr><td colspan="7" class="bo-muted">Nothing recorded.</td></tr>{% endfor %}
+</table>
+<div class="bo-pager">{% if page.has_previous %}<a href="?action={{ action }}&who={{ who }}&page={{ page.previous_page_number }}">← Newer</a>{% endif %} Page {{ page.number }} of {{ page.paginator.num_pages }} {% if page.has_next %}<a href="?action={{ action }}&who={{ who }}&page={{ page.next_page_number }}">Older →</a>{% endif %}</div>
+</div>
+{% endblock %}

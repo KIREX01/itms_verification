@@ -1,0 +1,57 @@
+{% extends "backoffice/base.html" %}
+{% block title %}Access request{% endblock %}
+{% block content %}
+<div class="bo-head"><div><h1>{{ req.full_name }}</h1><p>{{ req.email }} · <span class="pill">{{ req.get_status_display }}</span></p></div>
+    <a class="bo-btn" href="{% url 'backoffice:access_list' %}">← All requests</a></div>
+
+{% if burned %}<div class="bo-msg error">This email is burned. It can never be granted access.</div>{% endif %}
+{% if existing_user %}<div class="bo-msg warning">An account already uses this email: <a href="{% url 'backoffice:person_detail' existing_user.pk %}">{{ existing_user.username }}</a>. Assign roles there instead.</div>{% endif %}
+
+<div class="bo-two">
+<div class="bo-card">
+    <h2>Request</h2>
+    <dl class="bo-kv">
+        <dt>Asked for</dt><dd>{{ req.get_requested_role_display }} @ {{ req.bond_code }}</dd>
+        <dt>Company email</dt><dd>{{ req.company_email|default:"—" }}</dd>
+        <dt>Phone</dt><dd>{{ req.phone|default:"—" }}</dd>
+        <dt>Source</dt><dd>{{ req.get_source_display }}{% if req.invited_by %} ({{ req.invited_by.username }}){% endif %}</dd>
+        <dt>Message</dt><dd>{{ req.message|default:"—"|linebreaksbr }}</dd>
+        <dt>From IP</dt><dd>{{ req.client_ip|default:"—" }}</dd>
+        <dt>Requested</dt><dd>{{ req.created_at|date:"Y-m-d H:i" }}</dd>
+        {% if req.reviewed_by %}<dt>Reviewed</dt><dd>{{ req.reviewed_by.username }} · {{ req.reviewed_at|date:"Y-m-d H:i" }}{% if req.review_note %} · {{ req.review_note }}{% endif %}</dd>{% endif %}
+        {% if req.invite_expires_at and req.status == 'GRANTED' %}<dt>Invite expires</dt><dd>{{ req.invite_expires_at|date:"Y-m-d H:i" }} ({{ req.invite_attempts }} wrong code attempt(s))</dd>{% endif %}
+        {% if req.created_user %}<dt>Account</dt><dd><a href="{% url 'backoffice:person_detail' req.created_user.pk %}">{{ req.created_user.username }}</a></dd>{% endif %}
+    </dl>
+</div>
+
+<div class="bo-card">
+{% if req.status == 'PENDING' %}
+    <h2>Decide</h2>
+    <form method="post" style="display:flex; flex-direction:column; gap:10px;">{% csrf_token %}
+        <div class="bo-field"><label>Role</label><select name="role">{% for v, l in roles %}<option value="{{ v }}" {% if v == req.requested_role %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+        <div class="bo-field"><label>Bond</label><select name="bond_code">
+            {% for code, name in bonds %}<option value="{{ code }}" {% if code == req.bond_code %}selected{% endif %}>{{ name }} ({{ code }})</option>{% endfor %}
+            <option value="{{ req.bond_code }}" {% if not bonds %}selected{% endif %}>{{ req.bond_code }} (as requested)</option>
+        </select></div>
+        <div class="bo-field"><label>Company email (required for TL / QI / Supervisor)</label><input type="email" name="company_email" value="{{ req.company_email }}"></div>
+        <div class="bo-field"><label>Note</label><input type="text" name="note" placeholder="optional"></div>
+        <div style="display:flex; gap:8px;">
+            <button class="bo-btn ok" name="action" value="grant">Grant &amp; send invite</button>
+            <button class="bo-btn danger" name="action" value="reject" formnovalidate>Reject</button>
+        </div>
+    </form>
+{% elif req.status == 'GRANTED' or req.status == 'EXPIRED' %}
+    <h2>Invite</h2>
+    {% if req.granted_role %}
+    <p>Granted as <strong>{{ req.get_granted_role_display }} @ {{ req.granted_bond }}</strong>. The person creates their account with the code and link we emailed.</p>
+    <form method="post" style="display:flex; gap:8px;">{% csrf_token %}
+        <button class="bo-btn" name="action" value="reissue">Re-send invite (new code)</button>
+        <button class="bo-btn danger" name="action" value="reject">Withdraw</button>
+    </form>
+    {% else %}<p class="bo-muted">This request expired before it was granted.</p>{% endif %}
+{% else %}
+    <h2>Closed</h2><p class="bo-muted">This request is {{ req.get_status_display|lower }}.</p>
+{% endif %}
+</div>
+</div>
+{% endblock %}

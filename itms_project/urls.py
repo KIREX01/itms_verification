@@ -9,6 +9,7 @@ urlpatterns = [
     path("apple-touch-icon.png", RedirectView.as_view(url="/static/core/logos/apple-touch-icon.png", permanent=True)),
     path("site.webmanifest", RedirectView.as_view(url="/static/core/logos/site.webmanifest", permanent=True)),
     path("admin/", admin.site.urls),
+    path("backoffice/", include("backoffice.urls")),
     path("", include("governance.urls")),
     path("", include("core.urls")),
 ]

@@ -1,0 +1,24 @@
+{% extends "backoffice/base.html" %}
+{% block title %}Technical{% endblock %}
+{% block content %}
+<div class="bo-head"><div><h1>Technical</h1><p>Version, database and housekeeping for this server.</p></div></div>
+<div class="bo-two">
+    <div class="bo-card"><h2>System</h2>
+        <dl class="bo-kv">
+            <dt>Version</dt><dd>{{ version.version_tag }}</dd>
+            <dt>Deployment</dt><dd>{{ deployment_role|title }}</dd>
+            <dt>Database</dt><dd>{{ db.display|default:db.vendor }}</dd>
+            <dt>Role enforcement</dt><dd><span class="pill {% if governance_enforced %}ok{% else %}danger{% endif %}">{{ governance_enforced|yesno:"On,OFF (legacy)" }}</span></dd>
+            <dt>Burned identities</dt><dd>{{ burned }}</dd>
+        </dl>
+    </div>
+    <div class="bo-card"><h2>Housekeeping</h2>
+        <form method="post" style="display:flex; flex-wrap:wrap; gap:8px;">{% csrf_token %}
+            <button class="bo-btn" name="action" value="check_updates">Check for updates</button>
+            <button class="bo-btn" name="action" value="optimize_db">Optimise database</button>
+            <button class="bo-btn" name="action" value="clean_storage">Clean old crops &amp; exports</button>
+        </form>
+        <p class="bo-muted">Applying updates and rollbacks stays on the server command line (<code>itms update</code>, <code>itms rollback</code>) so a broken update can always be recovered.</p>
+    </div>
+</div>
+{% endblock %}

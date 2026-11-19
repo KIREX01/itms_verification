@@ -1,0 +1,25 @@
+{
+  "epochs_configured": 25,
+  "imgsz": 320,
+  "device": "cpu",
+  "baseline_metrics": {
+    "mAP50": 0.3063,
+    "mAP50_95": 0.2327,
+    "precision": 0.4879,
+    "recall": 0.2915
+  },
+  "finetuned_metrics": {
+    "mAP50": 0.7454,
+    "mAP50_95": 0.6211,
+    "precision": 0.7524,
+    "recall": 0.7241
+  },
+  "improvement_delta": {
+    "mAP50": 0.4391,
+    "mAP50_95": 0.3884,
+    "precision": 0.2645,
+    "recall": 0.4326
+  },
+  "exported_pytorch_weights": "/content/drive/MyDrive/colab_char_ocr_bundle/trained_models/plate_char_reader_uganda.pt",
+  "exported_onnx_weights": "/content/drive/MyDrive/colab_char_ocr_bundle/trained_models/plate_char_reader_uganda.onnx"
+}

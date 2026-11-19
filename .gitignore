@@ -49,3 +49,9 @@ cert.crt
 *.pem
 secure/ssl/
 
+# Training datasets and Ultralytics runs (scripts, notebooks & metrics JSON remain tracked)
+training/datasets/
+training/runs/
+runs/
+
+

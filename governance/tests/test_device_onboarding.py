@@ -265,3 +265,45 @@ class RolesAndItmsBondsTests(TestCase):
         with mock.patch("core.services.auth_service.connect_itms_account", return_value=(False, "bad password")):
             r = tl.post("/api/itms/connect/", {"email": "worker@itms-ug.com", "password": "x"})
         self.assertNotEqual(r.status_code, 403)  # allowed through governance; ITMS itself said no
+
+
+@override_settings(DEPLOYMENT_ROLE="central", CLOSE_DEVICE_ADMISSION=True)
+class RealBrowserCsrfTests(TestCase):
+    """Like a real browser: CSRF checks on, starting from the site address."""
+
+    def test_device_form_posts_from_the_front_page(self):
+        cache.clear()
+        c = Client(enforce_csrf_checks=True)
+        page = c.get("/")
+        self.assertEqual(page.status_code, 403)
+        self.assertIn("csrftoken", page.cookies)
+        token = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', page.content.decode()).group(1)
+        with mock.patch("core.services.email_service.send_device_code_email", return_value=(True, "")) as send:
+            r = c.post("/device/", {"action": "send", "email": "browser@gmail.com", "csrfmiddlewaretoken": token})
+        self.assertRedirects(r, "/device/?step=code", fetch_redirect_response=False)
+        send.assert_called_once()
+        page = c.get("/device/?step=code")
+        token = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', page.content.decode()).group(1)
+        r = c.post("/device/", {"action": "verify", "code": send.call_args.kwargs["code"], "csrfmiddlewaretoken": token})
+        self.assertRedirects(r, "/signup/", fetch_redirect_response=False)
+        page = c.get("/signup/")
+        token = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', page.content.decode()).group(1)
+        r = c.post("/signup/", {"first_name": "Real", "last_name": "Browser", "username": "real.browser",
+                                "password": "Kampala-Kits-2026", "password_confirm": "Kampala-Kits-2026",
+                                "csrfmiddlewaretoken": token})
+        self.assertRedirects(r, "/", fetch_redirect_response=False)
+
+    def test_existing_user_unlocks_then_signs_in(self):
+        cache.clear()
+        User.objects.create_user("existing", "existing@gmail.com", "Str0ng-pass!x")
+        c = Client(enforce_csrf_checks=True)
+        token = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', c.get("/").content.decode()).group(1)
+        with mock.patch("core.services.email_service.send_device_code_email", return_value=(True, "")) as send:
+            c.post("/device/", {"action": "send", "email": "existing@gmail.com", "csrfmiddlewaretoken": token})
+        token = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', c.get("/device/?step=code").content.decode()).group(1)
+        c.post("/device/", {"action": "verify", "code": send.call_args.kwargs["code"], "csrfmiddlewaretoken": token})
+        login = c.get("/login/")
+        self.assertEqual(login.status_code, 200)
+        token = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', login.content.decode()).group(1)
+        r = c.post("/login/", {"username": "existing@gmail.com", "password": "Str0ng-pass!x", "csrfmiddlewaretoken": token})
+        self.assertEqual(r.status_code, 302)

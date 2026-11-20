@@ -113,7 +113,7 @@ def _blocked(request: HttpRequest, error: str = "", waiting: bool = False, devic
             or "application/json" in request.headers.get("Accept", ""):
         return JsonResponse({"success": False, "code": "DEVICE_NOT_APPROVED", "error": message,
                              "device_status": status or "UNKNOWN"}, status=403)
-    return render(request, "governance/device_access.html", {
+    response = render(request, "governance/device_access.html", {
         "message": message,
         "error": error,
         "device": device,
@@ -126,3 +126,18 @@ def _blocked(request: HttpRequest, error: str = "", waiting: bool = False, devic
                          "email": email},
         "code": device_admission.device_code(device.device_id) if device else "",
     }, status=403)
+    return _with_csrf_cookie(request, response)
+
+
+def _with_csrf_cookie(request: HttpRequest, response: HttpResponse) -> HttpResponse:
+    """
+    This page is rendered by a middleware that runs BEFORE Django's CsrfViewMiddleware, so that middleware never
+    sees the response and never sets the CSRF cookie the page's form needs ("CSRF verification failed").
+    Let it add the cookie here. Harmless when the response later passes through it again.
+    """
+    from django.middleware.csrf import CsrfViewMiddleware
+    try:
+        CsrfViewMiddleware(lambda r: response).process_response(request, response)
+    except Exception:
+        pass
+    return response

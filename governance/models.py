@@ -70,6 +70,29 @@ class BondMembership(models.Model):
     class Meta:
         unique_together = ("user", "bond_code", "role")
         ordering = ["bond_code", "role"]
+        # Capabilities as Django permissions (granted to role groups; see governance.capabilities).
+        permissions = [
+            ("capture_upload", "Capture photos & upload batches"),
+            ("stock_scan", "Scan kits (dispatch, return, audit)"),
+            ("dashboard_view", "See the dashboard"),
+            ("queue_view", "See the review queue"),
+            ("orders_view", "See ITMS orders & kits"),
+            ("stock_view", "See stock & ledger"),
+            ("reports_view", "See reports"),
+            ("reports_export", "Export reports (CSV, MVR docket, email)"),
+            ("history_view", "See history & audit trail"),
+            ("queue_edit", "Edit pairs (plate, swap, photos, link orders)"),
+            ("queue_approve", "Approve pairs"),
+            ("itms_submit", "Submit to ITMS"),
+            ("pair_delete", "Delete pairs"),
+            ("pipeline_run", "Run the vision pipeline"),
+            ("flag_raise", "Raise quality flags"),
+            ("flag_resolve", "Resolve quality flags"),
+            ("itms_connect", "Connect / sync the ITMS account"),
+            ("stock_edit", "Edit stock & ledger"),
+            ("team_invite", "Invite team members"),
+            ("settings_operator", "Change own operator settings"),
+        ]
 
     def save(self, *args, **kwargs):
         self.bond_code = (self.bond_code or "").strip().upper()
@@ -333,6 +356,8 @@ class InstallRegistration(models.Model):
     clone_fingerprint = models.CharField(max_length=64, blank=True, default="")
     device_info = models.JSONField(default=dict, blank=True,
                                    help_text="Host report: hostname, OS, CPU, RAM, disk, IPs, MAC, install path.")
+    services = models.JSONField(default=dict, blank=True,
+                                help_text="Last reported status of the install's background services.")
 
     class Meta:
         ordering = ["name"]
@@ -372,4 +397,46 @@ class AdminTOTP(models.Model):
     recovery_hashes = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     confirmed_at = models.DateTimeField(null=True, blank=True)
+
+
+class ServiceRun(models.Model):
+    """One on-demand run of a background service or housekeeping action (server or install)."""
+
+    service = models.CharField(max_length=40, db_index=True)
+    action = models.CharField(max_length=24, default="run_now")
+    install = models.ForeignKey("InstallRegistration", null=True, blank=True, on_delete=models.CASCADE,
+                                related_name="service_runs")
+    triggered_by = models.CharField(max_length=150, blank=True, default="")
+    started_at = models.DateTimeField(default=timezone.now, db_index=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    ok = models.BooleanField(null=True)
+    summary = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["-started_at"]
+
+
+class InstallCommand(models.Model):
+    """(Central) A signed command queued for a laptop install; delivered on its next check-in."""
+
+    class Status(models.TextChoices):
+        QUEUED = "QUEUED", "Queued"
+        SENT = "SENT", "Sent to install"
+        DONE = "DONE", "Done"
+        FAILED = "FAILED", "Failed"
+        EXPIRED = "EXPIRED", "Expired"
+
+    install = models.ForeignKey("InstallRegistration", on_delete=models.CASCADE, related_name="commands")
+    command = models.CharField(max_length=40)
+    args = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=8, choices=Status.choices, default=Status.QUEUED, db_index=True)
+    result = models.TextField(blank=True, default="")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                   related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
 

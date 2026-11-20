@@ -289,6 +289,50 @@ def _apply_device_decisions(decisions: list) -> None:
                 pass
 
 
+COMMAND_TTL = timedelta(hours=24)
+
+
+def queue_command(inst, command: str, actor, args: Optional[dict] = None, request=None):
+    """(Central) Queue a whitelisted service action for a laptop; it runs on the laptop's next check-in."""
+    from governance.models import InstallCommand
+    from governance.services import audit
+    from governance.services.service_control import ACTIONS
+
+    if command not in ACTIONS:
+        raise PolicySyncError("Unknown command.")
+    cmd = InstallCommand.objects.create(install=inst, command=command, args=args or {}, created_by=actor)
+    audit.record(actor, "install.command_queued", target_type="install", target_id=inst.install_id,
+                 target_label=inst.name, after={"command": command, "id": cmd.pk}, request=request)
+    return cmd
+
+
+def _pending_commands(inst) -> list:
+    from governance.models import InstallCommand
+
+    now = timezone.now()
+    InstallCommand.objects.filter(install=inst, status__in=["QUEUED", "SENT"], created_at__lt=now - COMMAND_TTL) \
+        .update(status="EXPIRED", finished_at=now)
+    out = []
+    for cmd in InstallCommand.objects.filter(install=inst, status__in=["QUEUED", "SENT"]).order_by("created_at")[:10]:
+        out.append({"id": cmd.pk, "command": cmd.command, "args": cmd.args})
+        if cmd.status == "QUEUED":
+            InstallCommand.objects.filter(pk=cmd.pk).update(status="SENT", sent_at=now)
+    return out
+
+
+def _ingest_command_results(inst, results: list) -> None:
+    from governance.models import InstallCommand
+
+    for r in results[:50]:
+        try:
+            cmd_id = int(r.get("id"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        InstallCommand.objects.filter(pk=cmd_id, install=inst, status__in=["QUEUED", "SENT"]).update(
+            status="DONE" if r.get("ok") else "FAILED", result=str(r.get("summary", ""))[:2000],
+            finished_at=timezone.now())
+
+
 def handle_heartbeat(install_id: str, body: bytes, ts: str, signature: str, ip: str = "") -> Dict[str, Any]:
     from governance.models import InstallRegistration
 
@@ -324,14 +368,18 @@ def handle_heartbeat(install_id: str, body: bytes, ts: str, signature: str, ip: 
     inst.health = payload.get("health") or {}
     if payload.get("device_info"):
         inst.device_info = _clean_host_info(payload["device_info"])
+    if isinstance(payload.get("services"), dict):
+        inst.services = payload["services"]
     inst.save(update_fields=["last_seen_at", "last_ip", "app_version", "policy_version_acked", "health",
-                             "device_info"])
+                             "device_info", "services"])
     _ingest_device_requests(inst, payload.get("device_requests") or [])
+    _ingest_command_results(inst, payload.get("command_results") or [])
     response: Dict[str, Any] = {
         "policy_version": current,
         "lock": {"locked": inst.locked, "reason": inst.lock_reason},
         "server_time": timezone.now().isoformat(),
         "devices": _device_decisions(inst),
+        "commands": _pending_commands(inst),
     }
     if inst.policy_version_acked != current:
         response["snapshot"] = build_snapshot()
@@ -448,6 +496,44 @@ def _health() -> Dict[str, Any]:
     return health
 
 
+def _local_services() -> Dict[str, Any]:
+    try:
+        from governance.services.service_control import status_all
+        return status_all()
+    except Exception as exc:
+        return {"error": str(exc)[:200]}
+
+
+def _local_command_results() -> list:
+    """Finished runs of central commands from the last day (central ignores ones it already closed)."""
+    from governance.models import ServiceRun
+
+    since = timezone.now() - COMMAND_TTL
+    out = []
+    for run in ServiceRun.objects.filter(triggered_by__startswith="central:", finished_at__isnull=False,
+                                         started_at__gte=since)[:50]:
+        out.append({"id": run.triggered_by.split(":", 1)[1], "ok": bool(run.ok), "summary": run.summary[:500]})
+    return out
+
+
+def _run_commands(commands: list) -> None:
+    """Runs whitelisted commands from the (signature-verified) central response, once each."""
+    from governance.models import ServiceRun
+    from governance.services.service_control import ACTIONS, run_action
+
+    for cmd in commands[:10]:
+        name, cmd_id = str(cmd.get("command", "")), str(cmd.get("id", ""))
+        if name not in ACTIONS or not cmd_id.isdigit():
+            logger.warning("Ignoring unknown central command %r", name)
+            continue
+        if ServiceRun.objects.filter(triggered_by=f"central:{cmd_id}").exists():
+            continue
+        try:
+            run_action(name, triggered_by=f"central:{cmd_id}", args=cmd.get("args") or {})
+        except Exception as exc:
+            logger.warning("Central command %s failed to start: %s", name, exc)
+
+
 def heartbeat_once() -> Dict[str, Any]:
     """One check-in. Applies a snapshot / lock when the server sends one. Raises on failure."""
     from core.version import __version__
@@ -463,7 +549,8 @@ def heartbeat_once() -> Dict[str, Any]:
 
     body = json.dumps({"app_version": __version__, "policy_version": state.get("policy_version", 0),
                        "machine_fingerprint": machine_fingerprint(), "health": _health(),
-                       "device_info": host_info(), "device_requests": _local_device_requests()}).encode()
+                       "device_info": host_info(), "device_requests": _local_device_requests(),
+                       "services": _local_services(), "command_results": _local_command_results()}).encode()
     ts, sig = sign(state["secret"], body)
     status, content, headers = _http_post(
         f"{state['central_url']}/backoffice/api/v1/installs/heartbeat/", body,
@@ -489,6 +576,7 @@ def heartbeat_once() -> Dict[str, Any]:
         state["policy_version"] = data["snapshot"].get("policy_version", data.get("policy_version", 0))
     _apply_lock(data.get("lock") or {}, state)
     _apply_device_decisions(data.get("devices") or [])
+    _run_commands(data.get("commands") or [])
     state["last_sync_ok_at"] = timezone.now().isoformat()
     save_enrollment(state)
     return data
@@ -571,6 +659,8 @@ def apply_snapshot(snapshot: Dict[str, Any]) -> Dict[str, int]:
     for f in snapshot.get("flags", []):
         FeatureFlag.objects.update_or_create(key=f["key"], bond_code=f.get("bond_code", ""),
                                              defaults={"value": f["value"]})
+        if f["key"].startswith("setting.") and not f.get("bond_code"):
+            _apply_central_setting(f["key"][len("setting."):], f["value"])
         if f["key"].startswith("switch.") and not f.get("bond_code"):
             key = f["key"][len("switch."):]
             if key in switches.SWITCHES:
@@ -579,6 +669,21 @@ def apply_snapshot(snapshot: Dict[str, Any]) -> Dict[str, int]:
                 except Exception as exc:
                     logger.warning("Could not apply central switch %s: %s", key, exc)
     return counts
+
+
+def _apply_central_setting(key: str, value: Any) -> None:
+    from core.services import config_service
+    from governance.services.service_control import CENTRAL_SETTINGS, apply_setting_locally, parse_setting
+
+    if key not in CENTRAL_SETTINGS:
+        return
+    try:
+        value = parse_setting(key, value)
+    except (ValueError, TypeError) as exc:
+        logger.warning("Ignoring central setting %s: %s", key, exc)
+        return
+    if config_service.get_setting(key) != value:
+        apply_setting_locally(key, value)
 
 
 class PolicySyncDaemon(threading.Thread):

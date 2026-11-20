@@ -2,6 +2,7 @@
 {% block title %}Overview{% endblock %}
 {% block content %}
 <div class="bo-head"><div><h1>Overview</h1><p>What needs your attention across every bond.</p></div></div>
+{% for f in failing_services %}<div class="bo-msg error">⚠ {{ f.machine }}: {{ f.services|join:", " }} failing. <a href="{% url 'backoffice:services' %}">Services →</a></div>{% endfor %}
 {% for c in clones %}<div class="bo-msg error">⚠ Install "{{ c.name }}" was copied to another computer (detected {{ c.clone_detected_at|date:"Y-m-d H:i" }} from {{ c.last_ip|default:"unknown IP" }}). It was revoked automatically. <a href="{% url 'backoffice:installs' %}">Installs →</a></div>{% endfor %}
 
 <div class="bo-grid">

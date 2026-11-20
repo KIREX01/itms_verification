@@ -26,7 +26,8 @@ def admin_client_with_2fa(admin):
 
 PAGES = ["/backoffice/", "/backoffice/access/", "/backoffice/people/", "/backoffice/bonds/",
          "/backoffice/controls/", "/backoffice/devices/", "/backoffice/reports/", "/backoffice/audit/",
-         "/backoffice/technical/", "/backoffice/roles/", "/backoffice/signins/", "/backoffice/installs/"]
+         "/backoffice/technical/", "/backoffice/roles/", "/backoffice/signins/", "/backoffice/installs/",
+         "/backoffice/services/"]
 
 
 @override_settings(GOVERNANCE_ENFORCE=True, DEPLOYMENT_ROLE="central")

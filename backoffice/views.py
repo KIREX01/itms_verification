@@ -117,6 +117,15 @@ def _bond_names():
 # ---------------------------------------------------------------------------
 # Overview
 # ---------------------------------------------------------------------------
+def _failing_services() -> list:
+    from governance.services.service_control import failing, status_all
+
+    out = [{"machine": "Central server", "services": failing(status_all())}]
+    for inst in InstallRegistration.objects.filter(status="ACTIVE"):
+        out.append({"machine": inst.name, "services": failing(inst.services or {})})
+    return [o for o in out if o["services"]]
+
+
 @admin_required
 def overview(request: HttpRequest) -> HttpResponse:
     from core.models import QualityFlag, VehicleInstallationPair
@@ -147,6 +156,7 @@ def overview(request: HttpRequest) -> HttpResponse:
         switches=switches.all_switches(),
         recent=AdminAuditLog.objects.select_related("actor")[:12],
         clones=InstallRegistration.objects.filter(clone_detected_at__isnull=False).order_by("-clone_detected_at")[:10],
+        failing_services=_failing_services(),
     )
     return render(request, "backoffice/overview.html", ctx)
 
@@ -670,5 +680,77 @@ def roles(request: HttpRequest) -> HttpResponse:
               for n in (PLATFORM_ADMIN_GROUP, SUSPENDED_GROUP)]
     return render(request, "backoffice/roles.html", _ctx(
         request, "roles", columns=columns, rows=rows, others=others,
+    ))
+
+
+# ---------------------------------------------------------------------------
+# Services (sync daemons, vision, outbox, housekeeping) on the server and every install
+# ---------------------------------------------------------------------------
+@admin_required
+@require_http_methods(["GET", "POST"])
+def services(request: HttpRequest) -> HttpResponse:
+    from governance.models import InstallCommand, InstallRegistration, ServiceRun
+    from governance.services import policy_sync, service_control as sc
+
+    if request.method == "POST":
+        if not _step_up_ok(request):
+            return redirect("backoffice:services")
+        kind = request.POST.get("kind")
+        try:
+            if kind == "setting":
+                key = request.POST.get("key", "")
+                spec = sc.CENTRAL_SETTINGS.get(key, {})
+                raw = request.POST.get("value") if spec.get("type") != "bool" else request.POST.get("value") == "on"
+                value = sc.set_central_setting(key, raw, request.user, request=request)
+                messages.success(request, f"{spec.get('label', key)} set to {value} on the server; "
+                                          "laptops apply it on their next check-in.")
+            else:
+                action = request.POST.get("action", "")
+                if action not in sc.ACTIONS:
+                    raise ValueError("Unknown action.")
+                target = request.POST.get("target", "server")
+                label = sc.ACTIONS[action]["label"]
+                if target == "server":
+                    sc.run_action(action, triggered_by=request.user.username)
+                    audit.record(request.user, "service.action", target_type="service", target_label=action,
+                                 after={"target": "server"}, request=request)
+                    messages.success(request, f"{label}: started on the server.")
+                else:
+                    targets = (InstallRegistration.objects.filter(status="ACTIVE") if target == "all"
+                               else InstallRegistration.objects.filter(pk=target, status="ACTIVE"))
+                    n = 0
+                    for inst in targets:
+                        policy_sync.queue_command(inst, action, request.user, request=request)
+                        n += 1
+                    if not n:
+                        raise ValueError("No active install to send that to.")
+                    messages.success(request, f"{label}: sent to {n} install{'s' if n != 1 else ''}; "
+                                              "it runs on the next check-in (about a minute).")
+        except (ValueError, policy_sync.PolicySyncError) as exc:
+            messages.error(request, str(exc))
+        return redirect("backoffice:services")
+
+    now = timezone.now()
+    machines = [{"name": "Central server", "target": "server", "online": True, "status": sc.status_all()}]
+    for inst in InstallRegistration.objects.filter(status="ACTIVE").order_by("name"):
+        age = (now - inst.last_seen_at).total_seconds() if inst.last_seen_at else None
+        machines.append({"name": inst.name, "target": str(inst.pk), "online": age is not None and age < 180,
+                         "last_seen": inst.last_seen_at, "status": inst.services or {}})
+    for m in machines:
+        m["failing"] = sc.failing(m["status"])
+        m["rows"] = []
+        for k, lbl in sc.SERVICE_LABELS.items():
+            st = m["status"].get(k) or {}
+            st = {"error": "", "running": False, "enabled": None, "queued": 0, "failed": 0, "role": "", "stale": False,
+                  "detector": "", "char_reader": "", "char_reader_on": False, "interval_seconds": None,
+                  "last_result": "", **(st if isinstance(st, dict) else {})}
+            m["rows"].append({"key": k, "label": lbl, "st": st,
+                              "when": st.get("last_run") or st.get("last_sync") or "—"})
+    actions = [{"key": k, "label": v["label"], "service": v["service"]} for k, v in sc.ACTIONS.items()]
+    return render(request, "backoffice/services.html", _ctx(
+        request, "services", machines=machines, actions=actions,
+        settings_rows=sc.central_setting_values(), model_choices=sc.model_choices(),
+        runs=ServiceRun.objects.select_related("install")[:30],
+        commands=InstallCommand.objects.select_related("install", "created_by")[:30],
     ))
 

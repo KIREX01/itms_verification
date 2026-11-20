@@ -43,6 +43,28 @@ Sign-ins are recorded and password guessing is locked out, and the backoffice re
 - **Bond scoping is unchanged:** the group says *what* a role may do; the person's role membership says
   *where* (which bond). Unrelated Django permissions on these groups are ignored.
 
+### Services: sync, vision, outbox & housekeeping from the backoffice
+- **Backoffice → Services** shows the background services on the central server **and every laptop**: ITMS order
+  sync, ITMS kit sync, the vision pipeline and models, the offline outbox and the central check-in. For each it shows
+  running / paused, last run, last result and errors. Laptops report this on every check-in.
+- **Actions:** sync orders now, sync kits now, pause / resume automatic sync, run the vision pipeline, reload vision
+  models, drain the outbox, clean old crops and exports, optimise the database, and update to the latest release.
+  - **On the server** they run immediately.
+  - **On a laptop, or all laptops**, they are sent as **signed commands**. The laptop runs them on its next check-in
+    (about a minute) and reports the result back.
+  - Only these named actions exist; anything else is refused on both sides. Each needs your password and is audited.
+- **Central settings:** set these once and they apply on the server and every laptop:
+  - sync on/off and intervals
+  - outbox retry interval
+  - character reader on/off
+  - confidence thresholds
+  - PaddleOCR and ensemble toggles
+  - which shipped detector and character model to use
+
+  Vision models reload automatically after a change.
+- **Alerts:** the Overview warns when a service is failing on any machine.
+- **Command line:** `itms services status`, `itms services actions`, `itms services run <ACTION>`.
+
 ### Administrator 2-step sign-in
 - **Setup.** The first backoffice visit asks you to scan a QR code with an authenticator app. You confirm
   with a code and get 8 single-use recovery codes.

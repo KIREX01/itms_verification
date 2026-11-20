@@ -1,0 +1,93 @@
+{% extends "backoffice/base.html" %}
+{% block title %}Services{% endblock %}
+{% block content %}
+<div class="bo-head"><div><h1>Services</h1>
+    <p>Background services on the central server and every laptop install: ITMS sync, vision, offline outbox and housekeeping.
+       Laptops report on each check-in (about every minute) and run the actions you send them on their next check-in.</p></div></div>
+
+{% for m in machines %}
+<div class="bo-card">
+    <h2>{{ m.name }}
+        {% if m.target == "server" %}<span class="pill">this server</span>
+        {% elif m.online %}<span class="pill ok">online</span>{% else %}<span class="pill warn">offline{% if m.last_seen %} · seen {{ m.last_seen|timesince }} ago{% endif %}</span>{% endif %}
+        {% if m.failing %}<span class="pill danger">{{ m.failing|join:", " }} failing</span>{% endif %}</h2>
+    {% if not m.status %}<p class="bo-muted">No report yet. It appears after this install's next check-in.</p>{% else %}
+    <div class="bo-scroll"><table class="bo-table">
+        <tr><th>Service</th><th>State</th><th>Last run</th><th>Last result</th></tr>
+        {% for r in m.rows %}
+        <tr><td>{{ r.label }}</td>
+            <td>{% if r.st.error %}<span class="pill danger">error</span>
+                {% elif r.st.running %}<span class="pill ok">running</span>
+                {% elif r.st.enabled is False %}<span class="pill warn">paused</span>
+                {% elif r.key == "outbox" %}{{ r.st.queued }} queued · {{ r.st.failed }} failed
+                {% elif r.key == "policy_sync" %}{% if r.st.role == "central" %}control centre{% elif r.st.stale %}<span class="pill warn">stale</span>{% else %}in sync{% endif %}
+                {% elif r.key == "vision" %}idle{% else %}<span class="bo-muted">stopped</span>{% endif %}
+                {% if r.key == "vision" and r.st.detector %}<div class="bo-muted">{{ r.st.detector }}{% if r.st.char_reader_on %} · {{ r.st.char_reader }}{% endif %}</div>{% endif %}
+                {% if r.st.interval_seconds %}<div class="bo-muted">every {{ r.st.interval_seconds }}s</div>{% endif %}</td>
+            <td class="bo-muted">{{ r.when }}</td>
+            <td>{% if r.st.error %}{{ r.st.error }}{% else %}{{ r.st.last_result|default:"—" }}{% endif %}</td></tr>
+        {% endfor %}
+    </table></div>{% endif %}
+    <form method="post" class="bo-inline" style="margin-top:10px;">{% csrf_token %}
+        <input type="hidden" name="kind" value="action"><input type="hidden" name="target" value="{{ m.target }}">
+        <select name="action">{% for a in actions %}<option value="{{ a.key }}">{{ a.label }}</option>{% endfor %}</select>
+        {% include "backoffice/_confirm.html" %}
+        <button class="bo-btn primary">{% if m.target == "server" %}Run on server{% else %}Send to {{ m.name }}{% endif %}</button>
+    </form>
+</div>
+{% endfor %}
+
+{% if machines|length > 1 %}
+<div class="bo-card">
+    <h2>Send to every laptop</h2>
+    <form method="post" class="bo-inline">{% csrf_token %}
+        <input type="hidden" name="kind" value="action"><input type="hidden" name="target" value="all">
+        <select name="action">{% for a in actions %}<option value="{{ a.key }}">{{ a.label }}</option>{% endfor %}</select>
+        {% include "backoffice/_confirm.html" %}
+        <button class="bo-btn">Send to all installs</button>
+    </form>
+</div>
+{% endif %}
+
+<div class="bo-card">
+    <h2>Central settings</h2>
+    <p class="bo-muted">Set once here and applied on the server and every laptop. Vision models are chosen from the model files shipped with the release.</p>
+    <div class="bo-scroll"><table class="bo-table">
+    {% for s in settings_rows %}
+    <tr><td>{{ s.label }}<div class="bo-muted"><code>{{ s.key }}</code>{% if s.central %} · set centrally{% endif %}</div></td>
+        <td><form method="post" class="bo-inline">{% csrf_token %}
+            <input type="hidden" name="kind" value="setting"><input type="hidden" name="key" value="{{ s.key }}">
+            {% if s.type == "bool" %}<label><input type="checkbox" name="value" {% if s.value %}checked{% endif %}> on</label>
+            {% elif s.type == "choice" %}<select name="value">{% for c in model_choices %}<option value="{{ c }}" {% if c == s.value %}selected{% endif %}>{{ c }}</option>{% endfor %}</select>
+            {% else %}<input name="value" value="{{ s.value|default_if_none:'' }}" style="width:110px;" inputmode="decimal">{% endif %}
+            {% include "backoffice/_confirm.html" %}
+            <button class="bo-btn small">Save</button></form></td></tr>
+    {% endfor %}
+    </table></div>
+</div>
+
+<div class="bo-two">
+<div class="bo-card">
+    <h2>Commands sent to laptops</h2>
+    <div class="bo-scroll"><table class="bo-table">
+        <tr><th>When</th><th>Install</th><th>Command</th><th>Status</th><th>Result</th></tr>
+        {% for c in commands %}
+        <tr><td class="bo-muted">{{ c.created_at|date:"m-d H:i" }}</td><td>{{ c.install.name }}</td><td>{{ c.command }}</td>
+            <td><span class="pill {% if c.status == 'DONE' %}ok{% elif c.status == 'FAILED' or c.status == 'EXPIRED' %}danger{% else %}warn{% endif %}">{{ c.get_status_display }}</span></td>
+            <td>{{ c.result|truncatechars:120 }}</td></tr>
+        {% empty %}<tr><td colspan="5" class="bo-muted">None yet.</td></tr>{% endfor %}
+    </table></div>
+</div>
+<div class="bo-card">
+    <h2>Runs on this server</h2>
+    <div class="bo-scroll"><table class="bo-table">
+        <tr><th>When</th><th>Action</th><th>By</th><th>Result</th></tr>
+        {% for r in runs %}
+        <tr><td class="bo-muted">{{ r.started_at|date:"m-d H:i" }}</td><td>{{ r.action }}</td><td>{{ r.triggered_by }}</td>
+            <td>{% if r.ok is None %}<span class="pill warn">running</span>{% elif r.ok %}<span class="pill ok">ok</span>{% else %}<span class="pill danger">failed</span>{% endif %}
+                {{ r.summary|truncatechars:120 }}</td></tr>
+        {% empty %}<tr><td colspan="4" class="bo-muted">None yet.</td></tr>{% endfor %}
+    </table></div>
+</div>
+</div>
+{% endblock %}

@@ -17,6 +17,7 @@ urlpatterns = [
     path("audit/", views.audit_log, name="audit"),
     path("technical/", views.technical, name="technical"),
     path("installs/", views.installs, name="installs"),
+    path("services/", views.services, name="services"),
     path("signins/", views.signins, name="signins"),
     path("roles/", views.roles, name="roles"),
     path("2fa/", twofa_views.twofa_verify, name="twofa_verify"),

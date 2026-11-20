@@ -455,6 +455,14 @@ def run_device(args=None):
     call_command("itms_device", *(args or []))
 
 
+def run_services(args=None):
+    """Background services: itms services status | actions | run <ACTION>"""
+    import django
+    django.setup()
+    from django.core.management import call_command
+    call_command("itms_services", *(args or []))
+
+
 def run_admin_2fa(args=None):
     """Administrator 2-step sign-in: itms admin-2fa status|reset <username>"""
     import django
@@ -828,6 +836,10 @@ def main():
 
     if first in ("admin-2fa", "admin_2fa"):
         run_admin_2fa(args[1:])
+        return
+
+    if first in ("services", "service"):
+        run_services(args[1:])
         return
 
     if first in ("audit", "verify-vault"):

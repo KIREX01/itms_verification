@@ -68,3 +68,53 @@ def _connect_policy_signals():
 
 
 _connect_policy_signals()
+
+
+# --- Django groups follow roles, account state and the administrator flag ------------------------
+def _sync_groups_for(user_id):
+    from django.contrib.auth import get_user_model
+    from governance.services.groups import sync_user_groups
+    user = get_user_model().objects.filter(pk=user_id).first()
+    if user is not None:
+        try:
+            sync_user_groups(user)
+        except Exception:
+            pass
+
+
+def _on_membership_change(sender, instance, **kwargs):
+    _sync_groups_for(instance.user_id)
+
+
+def _on_state_change(sender, instance, **kwargs):
+    _sync_groups_for(instance.user_id)
+
+
+def _on_user_save(sender, instance, created, **kwargs):
+    if not kwargs.get("raw"):
+        _sync_groups_for(instance.pk)
+
+
+def _on_group_permissions_change(sender, instance, action, **kwargs):
+    if action in ("post_add", "post_remove", "post_clear"):
+        from governance.services.groups import invalidate
+        invalidate()
+        _bump()
+
+
+def _connect_group_signals():
+    from django.contrib.auth import get_user_model
+    from django.contrib.auth.models import Group
+    from django.db.models.signals import m2m_changed, post_delete
+    from governance import models as gm
+
+    post_save.connect(_on_membership_change, sender=gm.BondMembership, dispatch_uid="groups-membership-save")
+    post_delete.connect(_on_membership_change, sender=gm.BondMembership, dispatch_uid="groups-membership-del")
+    post_save.connect(_on_state_change, sender=gm.AccountState, dispatch_uid="groups-state-save")
+    post_save.connect(_on_user_save, sender=get_user_model(), dispatch_uid="groups-user-save")
+    m2m_changed.connect(_on_group_permissions_change, sender=Group.permissions.through,
+                        dispatch_uid="groups-permissions-changed")
+
+
+_connect_group_signals()
+

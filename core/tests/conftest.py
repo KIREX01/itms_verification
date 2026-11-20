@@ -15,6 +15,15 @@ from django.conf import settings
 
 
 @pytest.fixture(autouse=True)
+def _clear_cache():
+    """Process caches (e.g. role capabilities) must not leak between tests that roll back the DB."""
+    from django.core.cache import cache
+    cache.clear()
+    yield
+    cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def _reset_isolated_config():
     secure_dir = getattr(settings, "SECURE_STORAGE_DIR", None)
     if not secure_dir:

@@ -31,6 +31,18 @@ Sign-ins are recorded and password guessing is locked out, and the backoffice re
 - **Sign-in history:** every attempt (who, result, IP, device, channel, browser) appears in **Backoffice → Sign-ins**.
 - **Sessions:** each person's page lists their active sessions and lets you end one.
 
+### Roles are Django Groups & Permissions
+- Each capability is a Django **permission** (`governance.queue_approve`, `governance.itms_submit`, ...)
+  and each role is a Django **group** holding them: *Helper, Quality Inspector, Team Leader, Supervisor*.
+  There are also *Platform Administrator* and *Suspended* groups.
+- **Backoffice → Roles & permissions** shows the permissions-by-role grid. Tick what a role may do, with
+  password confirmation and an audit entry. *Reset to default* restores the original matrix. Changes reach
+  laptop installs on their next check-in.
+- **Automatic membership:** people join and leave groups automatically when roles are granted or removed,
+  or when they are suspended, reinstated or burned. Superusers are in *Platform Administrator*.
+- **Bond scoping is unchanged:** the group says *what* a role may do; the person's role membership says
+  *where* (which bond). Unrelated Django permissions on these groups are ignored.
+
 ### Administrator 2-step sign-in
 - **Setup.** The first backoffice visit asks you to scan a QR code with an authenticator app. You confirm
   with a code and get 8 single-use recovery codes.

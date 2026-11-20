@@ -22,7 +22,7 @@ from typing import Dict, FrozenSet, Iterable, List, Optional, Set
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
 
-from governance.capabilities import ALL_CAPABILITIES, ROLE_CAPABILITIES
+from governance.capabilities import ALL_CAPABILITIES
 
 ANY_MEMBER = "__any_member__"  # pseudo-capability: holds at least one effective role anywhere
 
@@ -88,22 +88,26 @@ def roles_by_bond(user) -> Dict[str, Set[str]]:
 def capabilities_at(user, bond_code: str) -> FrozenSet[str]:
     if is_platform_admin(user):
         return ALL_CAPABILITIES
+    from governance.services.groups import role_capabilities
+    role_caps = role_capabilities()
     roles = roles_by_bond(user).get((bond_code or "").upper(), set())
     caps: Set[str] = set()
     for role in roles:
-        caps |= ROLE_CAPABILITIES.get(role, frozenset())
+        caps |= role_caps.get(role, frozenset())
     return frozenset(caps)
 
 
 def bonds_for(user, capability: str) -> Set[str]:
     """All bonds where the user holds `capability` (or any role, for ANY_MEMBER)."""
+    from governance.services.groups import role_capabilities
+    role_caps = role_capabilities()
     out: Set[str] = set()
     for bond, roles in roles_by_bond(user).items():
         if capability == ANY_MEMBER:
             out.add(bond)
             continue
         for role in roles:
-            if capability in ROLE_CAPABILITIES.get(role, frozenset()):
+            if capability in role_caps.get(role, frozenset()):
                 out.add(bond)
                 break
     return out

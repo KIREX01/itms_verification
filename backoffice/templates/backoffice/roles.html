@@ -1,0 +1,46 @@
+{% extends "backoffice/base.html" %}
+{% block title %}Roles & permissions{% endblock %}
+{% block content %}
+<div class="bo-head"><div><h1>Roles &amp; permissions</h1>
+    <p>Each role is a group. Tick what a role may do; everyone in that role gets it at the bonds where they hold the role.
+       People join and leave groups automatically when roles are granted, removed, suspended or burned.</p></div></div>
+
+<div class="bo-card bo-scroll">
+<table class="bo-table">
+    <tr><th>Permission</th>
+        {% for col in columns %}<th style="text-align:center;">{{ col.name }}<div class="bo-muted" style="font-weight:400;">{{ col.members }} member{{ col.members|pluralize }}</div>
+            {% if col.differs %}<span class="pill warn">customised</span>{% endif %}</th>{% endfor %}</tr>
+    {% for row in rows %}
+    <tr><td>{{ row.label }}<div class="bo-muted"><code>{{ row.cap }}</code></div></td>
+        {% for has in row.cells %}<td style="text-align:center;">{% if has %}<span class="pill ok">✓</span>{% else %}<span class="bo-muted">—</span>{% endif %}</td>{% endfor %}</tr>
+    {% endfor %}
+</table>
+</div>
+
+<div class="bo-grid" style="grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));">
+{% for col in columns %}
+<div class="bo-card">
+    <h2>Edit {{ col.name }}</h2>
+    <form method="post">{% csrf_token %}
+        <input type="hidden" name="role" value="{{ col.role }}">
+        {% for row in rows %}
+        <label style="display:flex; gap:8px; align-items:flex-start; padding:3px 0; font-size:13px;">
+            <input type="checkbox" name="cap:{{ row.cap }}" {% for c in col.caps %}{% if c == row.cap %}checked{% endif %}{% endfor %}>
+            <span>{{ row.label }}</span></label>
+        {% endfor %}
+        <div class="bo-inline" style="margin-top:10px;">
+            {% include "backoffice/_confirm.html" %}
+            <button class="bo-btn primary" name="action" value="save">Save</button>
+            <button class="bo-btn small" name="action" value="reset_defaults" formnovalidate>Reset to default</button>
+        </div>
+    </form>
+</div>
+{% endfor %}
+</div>
+
+<div class="bo-card">
+    <h2>Other groups</h2>
+    {% for g in others %}<span class="pill">{{ g.name }} · {{ g.members }}</span>{% endfor %}
+    <p class="bo-muted" style="margin-bottom:0;">Platform Administrator = backoffice owners. Suspended = suspended or burned accounts (no permissions).</p>
+</div>
+{% endblock %}

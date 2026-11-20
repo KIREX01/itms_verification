@@ -18,6 +18,7 @@ urlpatterns = [
     path("technical/", views.technical, name="technical"),
     path("installs/", views.installs, name="installs"),
     path("signins/", views.signins, name="signins"),
+    path("roles/", views.roles, name="roles"),
     path("2fa/", twofa_views.twofa_verify, name="twofa_verify"),
     path("2fa/setup/", twofa_views.twofa_setup, name="twofa_setup"),
     # Machine-to-machine policy sync (HMAC-authenticated; central server only)

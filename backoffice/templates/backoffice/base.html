@@ -16,7 +16,8 @@
         <nav class="bo-nav">
             <a href="{% url 'backoffice:overview' %}" class="{% if active == 'overview' %}active{% endif %}">Overview</a>
             <a href="{% url 'backoffice:access_list' %}" class="{% if active == 'access' %}active{% endif %}">Access requests {% if nav_pending_requests %}<span class="bo-count">{{ nav_pending_requests }}</span>{% endif %}</a>
-            <a href="{% url 'backoffice:people_list' %}" class="{% if active == 'people' %}active{% endif %}">People &amp; roles</a>
+            <a href="{% url 'backoffice:people_list' %}" class="{% if active == 'people' %}active{% endif %}">People</a>
+            <a href="{% url 'backoffice:roles' %}" class="{% if active == 'roles' %}active{% endif %}">Roles &amp; permissions</a>
             <a href="{% url 'backoffice:bonds' %}" class="{% if active == 'bonds' %}active{% endif %}">Bonds {% if nav_open_flags %}<span class="bo-count" title="Open quality flags">{{ nav_open_flags }}</span>{% endif %}</a>
             <a href="{% url 'backoffice:controls' %}" class="{% if active == 'controls' %}active{% endif %}">Kill switches &amp; policy</a>
             <a href="{% url 'backoffice:devices' %}" class="{% if active == 'devices' %}active{% endif %}">Devices {% if nav_pending_devices %}<span class="bo-count" title="Device requests waiting">{{ nav_pending_devices }}</span>{% endif %}</a>

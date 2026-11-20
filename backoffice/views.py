@@ -627,3 +627,48 @@ def signins(request: HttpRequest) -> HttpResponse:
         request, "signins", page=page, show=show, who=who, locked=hot,
     ))
 
+
+# ---------------------------------------------------------------------------
+# Roles & permissions (Django groups)
+# ---------------------------------------------------------------------------
+@admin_required
+@require_http_methods(["GET", "POST"])
+def roles(request: HttpRequest) -> HttpResponse:
+    from django.contrib.auth.models import Group
+    from governance.capabilities import (
+        ALL_CAPABILITIES, CAPABILITY_LABELS, PLATFORM_ADMIN_GROUP, ROLE_CAPABILITIES, ROLE_GROUP_NAMES,
+        SUSPENDED_GROUP,
+    )
+    from governance.services import groups as group_service
+
+    if request.method == "POST":
+        if not _step_up_ok(request):
+            return redirect("backoffice:roles")
+        role = request.POST.get("role", "")
+        try:
+            if request.POST.get("action") == "reset_defaults":
+                caps = ROLE_CAPABILITIES.get(role, frozenset())
+            else:
+                caps = [c for c in ALL_CAPABILITIES if request.POST.get(f"cap:{c}") == "on"]
+            group_service.set_role_capabilities(role, caps, request.user, request=request)
+            messages.success(request, f"{ROLE_GROUP_NAMES.get(role, role)} permissions saved. "
+                                      "Installs receive the change on their next check-in.")
+        except (ValueError, authz.CapabilityDenied) as exc:
+            messages.error(request, str(exc))
+        return redirect("backoffice:roles")
+
+    group_service.ensure_groups()
+    current = group_service.role_capabilities()
+    ordered_caps = sorted(ALL_CAPABILITIES, key=lambda c: list(CAPABILITY_LABELS).index(c))
+    columns = [{"role": r, "name": n, "caps": current.get(r, frozenset()),
+                "members": Group.objects.get(name=n).user_set.count(),
+                "differs": current.get(r, frozenset()) != ROLE_CAPABILITIES.get(r, frozenset())}
+               for r, n in ROLE_GROUP_NAMES.items()]
+    rows = [{"cap": c, "label": CAPABILITY_LABELS[c], "cells": [c in col["caps"] for col in columns]}
+            for c in ordered_caps]
+    others = [{"name": n, "members": Group.objects.get(name=n).user_set.count()}
+              for n in (PLATFORM_ADMIN_GROUP, SUSPENDED_GROUP)]
+    return render(request, "backoffice/roles.html", _ctx(
+        request, "roles", columns=columns, rows=rows, others=others,
+    ))
+

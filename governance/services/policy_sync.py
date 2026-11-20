@@ -171,9 +171,11 @@ def build_snapshot() -> Dict[str, Any]:
             "reason": st.reason if st else "",
             "grace_until": st.company_email_grace_until.isoformat() if st and st.company_email_grace_until else None,
         })
+    from governance.services.groups import role_capabilities
     return {
         "policy_version": policy_version(),
         "generated_at": timezone.now().isoformat(),
+        "role_capabilities": {role: sorted(caps) for role, caps in role_capabilities().items()},
         "users": users,
         "memberships": [
             {"username": m.user.username, "bond_code": m.bond_code, "role": m.role, "status": m.status,
@@ -558,6 +560,12 @@ def apply_snapshot(snapshot: Dict[str, Any]) -> Dict[str, int]:
     for a in snapshot.get("itms_access", []):
         ItmsWarehouseAccess.objects.update_or_create(
             company_email=a["email"], bond_code=a["bond_code"], defaults={"active": a["active"]})
+    if snapshot.get("role_capabilities"):
+        from governance.services.groups import apply_role_capabilities
+        apply_role_capabilities(snapshot["role_capabilities"])
+    from governance.services.groups import sync_user_groups
+    for user in by_username.values():
+        sync_user_groups(user)
     for email in snapshot.get("burned", []):
         BurnedIdentity.objects.get_or_create(email=email)
     for f in snapshot.get("flags", []):

@@ -100,3 +100,51 @@ def capabilities_for_roles(roles) -> FrozenSet[str]:
     for role in roles:
         caps |= ROLE_CAPABILITIES.get(role, frozenset())
     return frozenset(caps)
+
+
+# ---------------------------------------------------------------------------
+# Django Groups & Permissions
+# ---------------------------------------------------------------------------
+# Each capability is a Django Permission on governance.BondMembership (codename = dots -> underscores),
+# each role is a Django Group holding its permissions. The groups' permissions are editable in the
+# backoffice; ROLE_CAPABILITIES above is only the starting point (and the fallback).
+CAPABILITY_LABELS = {
+    CAPTURE_UPLOAD: "Capture photos & upload batches",
+    STOCK_SCAN: "Scan kits (dispatch, return, audit)",
+    DASHBOARD_VIEW: "See the dashboard",
+    QUEUE_VIEW: "See the review queue",
+    ORDERS_VIEW: "See ITMS orders & kits",
+    STOCK_VIEW: "See stock & ledger",
+    REPORTS_VIEW: "See reports",
+    REPORTS_EXPORT: "Export reports (CSV, MVR docket, email)",
+    HISTORY_VIEW: "See history & audit trail",
+    QUEUE_EDIT: "Edit pairs (plate, swap, photos, link orders)",
+    QUEUE_APPROVE: "Approve pairs",
+    ITMS_SUBMIT: "Submit to ITMS",
+    PAIR_DELETE: "Delete pairs",
+    PIPELINE_RUN: "Run the vision pipeline",
+    FLAG_RAISE: "Raise quality flags",
+    FLAG_RESOLVE: "Resolve quality flags",
+    ITMS_CONNECT: "Connect / sync the ITMS account",
+    STOCK_EDIT: "Edit stock & ledger",
+    TEAM_INVITE: "Invite team members",
+    SETTINGS_OPERATOR: "Change own operator settings",
+}
+
+PLATFORM_ADMIN_GROUP = "Platform Administrator"
+SUSPENDED_GROUP = "Suspended"
+ROLE_GROUP_NAMES = {
+    Role.HELPER: "Helper",
+    Role.QUALITY_INSPECTOR: "Quality Inspector",
+    Role.TEAM_LEADER: "Team Leader",
+    Role.SUPERVISOR: "Supervisor",
+}
+MANAGED_GROUP_NAMES = frozenset(ROLE_GROUP_NAMES.values()) | {PLATFORM_ADMIN_GROUP, SUSPENDED_GROUP}
+
+
+def capability_codename(capability: str) -> str:
+    return capability.replace(".", "_")
+
+
+CODENAME_TO_CAPABILITY = {capability_codename(c): c for c in ALL_CAPABILITIES}
+

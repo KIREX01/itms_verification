@@ -5,7 +5,8 @@
     <div><h1>{{ person.get_full_name|default:person.username }}</h1>
         <p>{{ person.username }} · {{ person.email }} ·
             <span class="pill {% if state.status == 'ACTIVE' %}ok{% elif state.status == 'SUSPENDED' %}warn{% else %}danger{% endif %}">{{ state.get_status_display }}</span>
-            {% if person.is_superuser %}<span class="pill warn">Administrator</span>{% endif %}</p></div>
+            {% if person.is_superuser %}<span class="pill warn">Administrator</span>{% endif %}
+            {% for g in person.groups.all %}<a class="pill" href="{% url 'backoffice:roles' %}">{{ g.name }}</a>{% endfor %}</p></div>
     <a class="bo-btn" href="{% url 'backoffice:people_list' %}">← People</a>
 </div>
 

@@ -316,8 +316,11 @@ class HttpsCsrfTests(TestCase):
 
     def test_no_auth_page_sets_no_referrer(self):
         import glob
-        for f in glob.glob(str(settings.BASE_DIR / "governance" / "templates" / "governance" / "*.html")) + \
-                glob.glob(str(settings.BASE_DIR / "core" / "templates" / "core" / "*.html")):
+        base = settings.BASE_DIR
+        files = glob.glob(str(base / "*" / "templates" / "**" / "*.html"), recursive=True) + \
+            glob.glob(str(base / "templates" / "**" / "*.html"), recursive=True)
+        self.assertGreater(len(files), 30)  # every template in the project, backoffice included
+        for f in files:
             self.assertNotIn('content="no-referrer"', open(f, encoding="utf-8").read(), f)
 
     def test_signup_post_over_https_with_same_origin_referer(self):

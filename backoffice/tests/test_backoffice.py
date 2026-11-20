@@ -129,3 +129,28 @@ class EdgeHasNoBackofficeTests(TestCase):
         self.assertTrue(r["Location"].startswith("http"))
         r = Client().get("/signup/?invite=abc")
         self.assertTrue(r["Location"].endswith("/signup/?invite=abc"))
+
+
+@override_settings(DEPLOYMENT_ROLE="central", CSRF_TRUSTED_ORIGINS=["https://testserver"])
+class TwoFactorSetupOverHttpsTests(TestCase):
+    """Like a real browser on close.kirex.online: HTTPS, CSRF checks on, Origin/Referer from the page."""
+
+    def test_setup_then_verify(self):
+        import re as _re
+        from governance.models import AdminTOTP
+        from governance.services import totp
+        admin = User.objects.create_superuser("owner2", "o2@example.com", "Owner-pass-1")
+        c = Client(enforce_csrf_checks=True)
+        c.force_login(admin)
+        page = c.get("/backoffice/2fa/setup/", secure=True)
+        self.assertEqual(page.status_code, 200)
+        body = page.content.decode()
+        self.assertNotIn("no-referrer", body)
+        self.assertNotIn("Google Authenticator", body)  # trimmed wording
+        token = _re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', body).group(1)
+        secret = totp._unseal(AdminTOTP.objects.get(user=admin).secret_sealed)
+        r = c.post("/backoffice/2fa/setup/", {"code": totp.current_code(secret), "csrfmiddlewaretoken": token},
+                   secure=True, HTTP_ORIGIN="https://testserver", HTTP_REFERER="https://testserver/backoffice/2fa/setup/")
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "2-step sign-in is on")
+        self.assertTrue(totp.is_enrolled(admin))

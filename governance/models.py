@@ -37,6 +37,8 @@ class AccountState(models.Model):
     changed_at = models.DateTimeField(default=timezone.now)
     # Migration grace period for existing users who still need to attach a company email.
     company_email_grace_until = models.DateTimeField(null=True, blank=True)
+    assigned_roles = models.JSONField(default=list, blank=True,
+                                      help_text="Roles the administrator assigned; bonds come from ITMS access.")
 
     class Meta:
         verbose_name = "Account state"
@@ -61,6 +63,8 @@ class BondMembership(models.Model):
     role = models.CharField(max_length=24, choices=Role.choices)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE, db_index=True)
     status_reason = models.CharField(max_length=255, blank=True, default="")
+    source = models.CharField(max_length=8, default="MANUAL", db_index=True,
+                              help_text="MANUAL (added by the administrator / invite) or ITMS (from ITMS warehouse access).")
     granted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )

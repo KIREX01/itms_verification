@@ -117,6 +117,13 @@ def _bond_names():
 # ---------------------------------------------------------------------------
 # Overview
 # ---------------------------------------------------------------------------
+def _needs_role(qs=None):
+    """Active, non-administrator accounts without any assigned role (new sign-ups)."""
+    qs = qs if qs is not None else User.objects.all()
+    qs = qs.filter(is_superuser=False, is_active=True).exclude(account_state__status__in=["SUSPENDED", "BURNED"])
+    return qs.filter(Q(account_state__isnull=True) | Q(account_state__assigned_roles=[]))         .exclude(bond_memberships__status="ACTIVE")
+
+
 def _failing_services() -> list:
     from governance.services.service_control import failing, status_all
 
@@ -141,6 +148,7 @@ def overview(request: HttpRequest) -> HttpResponse:
             "suspended": states.get("SUSPENDED", 0),
             "burned": states.get("BURNED", 0),
             "pending_requests": AccessRequest.objects.filter(status="PENDING").count(),
+            "needs_role": _needs_role().distinct().count(),
             "open_flags": QualityFlag.objects.filter(status="OPEN").count(),
             "submitted_24h": VehicleInstallationPair.objects.filter(
                 verification_status="SUBMITTED", updated_at__gte=since).count(),
@@ -231,6 +239,8 @@ def people_list(request: HttpRequest) -> HttpResponse:
         users = users.filter(bond_memberships__bond_code=bond, bond_memberships__status="ACTIVE")
     if role:
         users = users.filter(bond_memberships__role=role, bond_memberships__status="ACTIVE")
+    if request.GET.get("needs_role"):
+        users = _needs_role(users)
     users = users.distinct().order_by("username")
     page = Paginator(users, 50).get_page(request.GET.get("page"))
     company = dict(CompanyEmailLink.objects.values_list("user_id", "email"))
@@ -245,6 +255,39 @@ def people_list(request: HttpRequest) -> HttpResponse:
     ))
 
 
+def _role_panel(person) -> dict:
+    """Person-level role switches + where they apply (ITMS bonds and manually added bonds)."""
+    names = _bond_names()
+    assigned = set(memberships.assigned_roles(person))
+    active = BondMembership.objects.filter(user=person, status=BondMembership.Status.ACTIVE)
+    by_bond = {}
+    for m in active:
+        row = by_bond.setdefault(m.bond_code, {"bond": m.bond_code, "name": names.get(m.bond_code, m.bond_code),
+                                                "roles": [], "manual": False, "itms": False})
+        row["roles"].append(m.get_role_display())
+        row["manual"] |= m.source == "MANUAL"
+        row["itms"] |= m.source == "ITMS"
+    return {
+        "roles": [{"value": r.value, "label": r.label, "on": r.value in assigned} for r in Role],
+        "has_roles": bool(assigned),
+        "bonds": sorted(by_bond.values(), key=lambda r: r["bond"]),
+        "itms_bonds": memberships.itms_bonds(person),
+    }
+
+
+def _role_rows(person) -> list:
+    """One row per bond the person has (or had) a role at, with the four roles as switches."""
+    names = _bond_names()
+    active = {}
+    for m in BondMembership.objects.filter(user=person):
+        active.setdefault(m.bond_code, set())
+        if m.status == BondMembership.Status.ACTIVE:
+            active[m.bond_code].add(m.role)
+    return [{"bond": b, "name": names.get(b, b),
+             "roles": [{"value": r.value, "label": r.label, "on": r.value in active[b]} for r in Role]}
+            for b in sorted(active)]
+
+
 @admin_required
 @require_http_methods(["GET", "POST"])
 def person_detail(request: HttpRequest, pk: int) -> HttpResponse:
@@ -253,7 +296,8 @@ def person_detail(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method == "POST":
         action = request.POST.get("action", "")
         reason = request.POST.get("reason", "").strip()
-        dangerous = {"suspend", "burn", "assign_role", "remove_role", "reinstate", "attach_company_email",
+        dangerous = {"suspend", "burn", "assign_role", "remove_role", "set_roles", "set_person_roles", "add_manual_bond",
+                     "remove_manual_bond", "reinstate", "attach_company_email",
                      "revoke_company_email", "force_logout", "end_session", "reset_2fa"}
         if action in dangerous and not _step_up_ok(request):
             return redirect("backoffice:person_detail", pk=pk)
@@ -299,6 +343,29 @@ def person_detail(request: HttpRequest, pk: int) -> HttpResponse:
                 memberships.assign_role(person, request.POST.get("bond_code", ""), request.POST.get("role", ""),
                                         actor=request.user, reason=reason, request=request)
                 messages.success(request, "Role assigned.")
+            elif action == "set_person_roles":
+                roles = memberships.set_person_roles(person, request.POST.getlist("roles"), actor=request.user,
+                                                     reason=reason, request=request)
+                labels = dict(Role.choices)
+                bonds = memberships.itms_bonds(person)
+                messages.success(request, (f"Roles: {', '.join(labels[r] for r in roles)}." if roles else "All roles removed.")
+                                 + (f" Bonds from ITMS: {', '.join(bonds)}." if roles and bonds else
+                                    " Bonds arrive when they connect ITMS." if roles else ""))
+            elif action == "add_manual_bond":
+                memberships.add_manual_bond(person, request.POST.get("bond_code", ""), actor=request.user, request=request)
+                messages.success(request, f"Added {request.POST.get('bond_code', '').upper()}.")
+            elif action == "remove_manual_bond":
+                memberships.remove_manual_bond(person, request.POST.get("bond_code", ""), actor=request.user, request=request)
+                messages.success(request, f"Removed {request.POST.get('bond_code', '').upper()}.")
+            elif action == "set_roles":
+                added, removed = memberships.set_roles(
+                    person, request.POST.get("bond_code", ""), request.POST.getlist("roles"),
+                    actor=request.user, reason=reason, request=request)
+                labels = dict(Role.choices)
+                parts = ([f"added {', '.join(labels[r] for r in added)}"] if added else []) + \
+                        ([f"removed {', '.join(labels[r] for r in removed)}"] if removed else [])
+                messages.success(request, f"{request.POST.get('bond_code', '').upper()}: "
+                                          f"{'; '.join(parts) if parts else 'no change'}.")
             elif action == "remove_role":
                 m = get_object_or_404(BondMembership, pk=request.POST.get("membership_id"), user=person)
                 memberships.remove_role(m, actor=request.user, reason=reason, request=request)
@@ -329,7 +396,7 @@ def person_detail(request: HttpRequest, pk: int) -> HttpResponse:
     company = CompanyEmailLink.objects.filter(user=person).first()
     return render(request, "backoffice/person_detail.html", _ctx(
         request, "people",
-        person=person, state=state, company=company,
+        person=person, state=state, company=company, role_rows=_role_rows(person), role_panel=_role_panel(person),
         memberships=BondMembership.objects.filter(user=person).order_by("status", "bond_code"),
         warnings=memberships.membership_warnings(person),
         itms_access=ItmsWarehouseAccess.objects.filter(company_email=company.email) if company else [],

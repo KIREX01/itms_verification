@@ -133,6 +133,12 @@ def record_itms_warehouse_access(company_email: str, bond_codes: Iterable[str], 
             link.verified_at = now
         link.last_itms_seen_at = now
         link.save()
+    if link and link.status == CompanyEmailLink.Status.VERIFIED:
+        try:
+            from governance.services.memberships import sync_itms_memberships
+            sync_itms_memberships(link.user)
+        except Exception:
+            pass
 
 
 def attach_company_email(user, email: str, verified_via: str, actor=None, request=None):

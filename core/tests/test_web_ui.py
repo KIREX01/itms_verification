@@ -107,7 +107,7 @@ class WebUITestCase(TestCase):
         res = self.client.get(reverse("core:login"))
         self.assertEqual(res.status_code, 200)
         self.assertTemplateUsed(res, "core/login.html")
-        self.assertContains(res, "Operator Sign In")
+        self.assertContains(res, "Sign in")
 
     def test_login_successful(self):
         """POST /login/ with valid credentials signs in operator and redirects to dashboard."""

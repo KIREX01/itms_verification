@@ -31,7 +31,7 @@ class DeviceAdmissionTests(TestCase):
         c = Client()
         r = c.get("/login/")
         self.assertEqual(r.status_code, 403)
-        self.assertContains(r, "not authorized", status_code=403)
+        self.assertContains(r, "authorised to use CLOSE Copilot", status_code=403)
         self.assertNotContains(r, 'name="password"', status_code=403)
         r = c.get("/api/pairs/", HTTP_ACCEPT="application/json")
         self.assertEqual(r.status_code, 403)
@@ -40,7 +40,7 @@ class DeviceAdmissionTests(TestCase):
 
     def test_request_then_admin_approval_then_sign_in(self):
         c = Client(HTTP_USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0")
-        r = c.post("/device/", {"name": "Akena Eric", "email": "eric@gmail.com", "note": "new TL laptop",
+        r = c.post("/device/", {"first_name": "Akena", "last_name": "Eric", "email": "eric@gmail.com",
                                 "client_report": '{"screen": "1920x1080", "timezone": "Africa/Kampala"}'})
         self.assertEqual(r.status_code, 302)
         dev = AuthorizedDevice.objects.get(request_email="eric@gmail.com")
@@ -63,7 +63,7 @@ class DeviceAdmissionTests(TestCase):
 
     def test_blocked_device_is_refused_and_sessions_end(self):
         c = Client()
-        c.post("/device/", {"name": "Someone"})
+        c.post("/device/", {"first_name": "Test", "last_name": "Person", "email": "someone@example.com"})
         dev = AuthorizedDevice.objects.latest("id")
         device_admission.approve(dev, self.admin, user=self.user)
         c.post("/login/", {"username": "op", "password": "Str0ng-pass!"})
@@ -82,7 +82,7 @@ class DeviceAdmissionTests(TestCase):
         self.assertIn("QR", dev.request_note)
 
     def test_cli_approve_by_code(self):
-        Client().post("/device/", {"name": "Owner laptop"})
+        Client().post("/device/", {"first_name": "Test", "last_name": "Person", "email": "owner-laptop@example.com"})
         dev = AuthorizedDevice.objects.latest("id")
         call_command("itms_device", "approve", device_admission.device_code(dev.device_id), "--user", "owner")
         dev.refresh_from_db()
@@ -90,8 +90,8 @@ class DeviceAdmissionTests(TestCase):
 
     def test_request_rate_limit_per_network(self):
         for _ in range(device_admission.REQUEST_RATE_PER_IP_PER_HOUR):
-            Client().post("/device/", {"name": "spam"})
-        r = Client().post("/device/", {"name": "spam"})
+            Client().post("/device/", {"first_name": "Test", "last_name": "Person", "email": "spam@example.com"})
+        r = Client().post("/device/", {"first_name": "Test", "last_name": "Person", "email": "spam@example.com"})
         self.assertContains(r, "Too many", status_code=403)
 
     @override_settings(DEPLOYMENT_ROLE="edge", CLOSE_REQUIRE_ENROLLMENT=False)

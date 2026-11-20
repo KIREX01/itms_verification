@@ -182,7 +182,7 @@ class MiddlewareEnforcementTests(TestCase):
         user = User.objects.create_user("norole", "norole@example.com", "Str0ng-pass!")
         r = self._client(user).get("/")
         self.assertEqual(r.status_code, 403)
-        self.assertContains(r, "no active role", status_code=403)
+        self.assertContains(r, "will assign your role", status_code=403)
 
     def test_suspended_account_is_signed_out_on_next_request(self):
         tl = make_member("tl_kick", Role.TEAM_LEADER, company_email="tl.kick@itms-ug.com")

@@ -31,7 +31,22 @@ EXEMPT_PREFIXES = ("/login/", "/logout/", "/signup/", "/access/", "/static/", "/
 def _deny(request: HttpRequest, message: str, code: str = "PERMISSION_DENIED", status: int = 403) -> HttpResponse:
     if request.path.startswith("/api/") or request.path.startswith("/media/"):
         return JsonResponse({"success": False, "error": message, "code": code}, status=status)
-    return render(request, "governance/no_access.html", {"message": message, "code": code}, status=status)
+    ctx = {"message": message, "code": code}
+    user = getattr(request, "user", None)
+    if code == "NO_ROLE" and user is not None and user.is_authenticated:
+        from governance.services import identity, memberships
+        roles = memberships.assigned_roles(user)
+        ctx.update({
+            "has_role": bool(roles),
+            # Team Leaders, QIs and Supervisors get their bonds by connecting ITMS.
+            "needs_itms": any(r in COMPANY_ROLES for r in roles),
+            "company_email": identity.verified_company_email(user) or (user.email if identity.is_company_email(user.email or "") else ""),
+        })
+    return render(request, "governance/no_access.html", ctx, status=status)
+
+
+COMPANY_ROLES = ("TEAM_LEADER", "QUALITY_INSPECTOR", "SUPERVISOR")
+ITMS_BOOTSTRAP_VIEWS = {"api_itms_connect", "api_sync_bonds"}
 
 
 class GovernanceMiddleware:
@@ -85,6 +100,11 @@ class GovernanceMiddleware:
             spec = enforcement.SPECIAL_RESOLVERS[spec](request)
 
         required = spec if isinstance(spec, tuple) else (spec,)
+        if view_name in ITMS_BOOTSTRAP_VIEWS and not authz.roles_by_bond(user):
+            # A role without bonds yet: connecting ITMS is how the bonds arrive.
+            from governance.services import memberships
+            if any(r in COMPANY_ROLES for r in memberships.assigned_roles(user)):
+                return None
         if view_name == "dashboard_view" and authz.has_capability(user, authz.ANY_MEMBER):
             # Capture-only roles (Helpers) work from the mobile companion.
             desk_caps = (C.DASHBOARD_VIEW, C.QUEUE_VIEW, C.STOCK_VIEW, C.REPORTS_VIEW, C.ORDERS_VIEW)

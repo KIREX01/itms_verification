@@ -4,25 +4,57 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>No Access - CLOSE Copilot</title>
+    <meta name="robots" content="noindex, nofollow">
+    <title>CLOSE Copilot</title>
     <link rel="shortcut icon" href="{% static 'core/logos/favicon.ico' %}">
     <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}">
     <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}">
     <link rel="stylesheet" href="{% static 'core/css/auth.css' %}">
+    <style>.lead { font-size: 0.95rem; line-height: 1.5; text-align: center; margin: 0 0 14px; }
+           .small { font-size: 0.78rem; color: var(--ug-text-muted); text-align: center; }</style>
 </head>
 <body>
     <div class="uganda-flag-ribbon"></div>
     <div class="auth-page-wrapper">
         <div class="auth-card-box">
-            <div class="auth-card-head">
-                <h1 style="font-size:1.25rem; font-weight:800; color:#ffffff;">
-                    CLOSE <span style="color:var(--ug-yellow);">COPILOT</span>
-                </h1>
-            </div>
+            {% include "governance/_auth_brand.html" with subtitle=user.get_full_name %}
             <div class="auth-card-body">
-                <div class="alert-banner warning"><span>{{ message }}</span></div>
-                <p style="font-size:0.8rem; color:var(--ug-text-muted);">Reference: {{ code }}</p>
-                <a class="btn btn-primary" href="/logout/" style="justify-content:center; padding:11px;">Sign out</a>
+            {% if code == "NO_ROLE" and needs_itms %}
+                <p class="lead">Connect your ITMS account to load your bonds.</p>
+                <form id="itms-connect" style="display:flex; flex-direction:column; gap:12px;">
+                    {% csrf_token %}
+                    <div class="form-field"><label for="itms_email">ITMS email</label>
+                        <input type="email" id="itms_email" name="email" value="{{ company_email }}" required autocomplete="username"></div>
+                    <div class="form-field"><label for="itms_password">ITMS password</label>
+                        <input type="password" id="itms_password" name="password" required autocomplete="current-password"></div>
+                    <div class="alert-banner error" id="itms-error" style="display:none;"><span></span></div>
+                    <button type="submit" class="btn btn-primary" style="justify-content:center; padding:12px; font-weight:800;">Connect ITMS</button>
+                </form>
+                <script>
+                document.getElementById("itms-connect").addEventListener("submit", function (e) {
+                    e.preventDefault();
+                    var f = e.target, btn = f.querySelector("button"), err = document.getElementById("itms-error");
+                    btn.disabled = true; btn.textContent = "Connecting…"; err.style.display = "none";
+                    fetch("/api/itms/connect/", {method: "POST", body: new FormData(f), credentials: "same-origin",
+                        headers: {"X-CSRFToken": f.querySelector("[name=csrfmiddlewaretoken]").value}})
+                      .then(function (r) { return r.json(); })
+                      .then(function (d) {
+                          if (d.success) { window.location.href = "/"; return; }
+                          err.querySelector("span").textContent = d.error || "Could not connect to ITMS.";
+                          err.style.display = "block"; btn.disabled = false; btn.textContent = "Connect ITMS";
+                      })
+                      .catch(function () { err.querySelector("span").textContent = "Network error. Try again."; err.style.display = "block"; btn.disabled = false; btn.textContent = "Connect ITMS"; });
+                });
+                </script>
+            {% elif code == "NO_ROLE" and has_role %}
+                <p class="lead">Your administrator will add you to a bond.</p>
+            {% elif code == "NO_ROLE" %}
+                <p class="lead">Your account is ready.<br>Your administrator will assign your role.</p>
+            {% else %}
+                <p class="lead">{{ message }}</p>
+            {% endif %}
+                {% if code == "NO_ROLE" %}<a class="btn btn-secondary" href="/" style="justify-content:center; padding:11px;">Check again</a>{% endif %}
+                <p class="small" style="margin-top:12px;"><a href="/logout/" style="color:var(--ug-yellow);">Sign out</a></p>
             </div>
         </div>
     </div>

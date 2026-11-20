@@ -924,3 +924,87 @@ def send_access_activated_email(
     except Exception as exc:
         logger.warning("Failed sending activation/invitation email: %s", exc)
         return False, str(exc)
+
+
+def _simple_email(to_email: str, subject: str, heading: str, lines_html: str, text: str,
+                  code: str = "", button_url: str = "", button_label: str = "Open CLOSE Copilot") -> Tuple[bool, str]:
+    """A short branded email (logo, heading, a few lines, optional code box and button)."""
+    from html import escape
+
+    if not to_email or "@" not in to_email:
+        return False, "Valid recipient email required."
+    api_key = get_resend_api_key()
+    if not api_key:
+        logger.info("[EMAIL DEV FALLBACK] %s -> %s%s", _sanitize_log_str(subject), _sanitize_log_str(to_email),
+                    f" (code {code})" if code else "")
+        return True, "Simulated email logged."
+    logo_src = getattr(settings, "EMAIL_LOGO_URL", "") or DEFAULT_EMAIL_LOGO_URL
+    code_html = (f'<div style="margin:18px 0; padding:16px; background:#f8fafc; border:2px solid #0f172a; '
+                 f'border-radius:8px; text-align:center; font-family:Consolas,monospace; font-size:32px; '
+                 f'font-weight:900; letter-spacing:8px; color:#0f172a;">{escape(code)}</div>') if code else ""
+    button_html = (f'<p style="text-align:center; margin:18px 0 6px;"><a href="{escape(button_url)}" '
+                   f'style="display:inline-block; background:#0f172a; color:#ffffff; font-weight:700; font-size:14px; '
+                   f'text-decoration:none; padding:12px 26px; border-radius:6px;">{escape(button_label)}</a></p>'
+                   ) if button_url else ""
+    html_content = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head>
+<body style="margin:0; padding:24px 10px; background:#ffffff; font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#0f172a;">
+<table role="presentation" width="100%"><tr><td align="center">
+<table role="presentation" width="100%" style="max-width:460px; border:1px solid #e2e8f0; border-radius:10px;"><tr><td style="padding:24px 22px;">
+<p style="text-align:center; margin:0 0 10px;"><img src="{logo_src}" width="52" height="52" alt="CLOSE Copilot" style="border-radius:10px;"></p>
+<h1 style="text-align:center; font-size:19px; margin:0 0 14px;">{escape(heading)}</h1>
+{lines_html}{code_html}{button_html}
+<p style="font-size:11px; color:#94a3b8; text-align:center; margin:18px 0 0;">CLOSE Copilot · If you didn't ask for this, ignore this email.</p>
+</td></tr></table></td></tr></table></body></html>"""
+    try:
+        resp = requests.post(
+            "https://api.resend.com/emails",
+            json={"from": get_resend_from_email(), "to": [to_email], "subject": subject,
+                  "html": html_content, "text": text},
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            timeout=10,
+        )
+        return resp.status_code in (200, 201), "Email sent."
+    except Exception as exc:
+        logger.warning("Email to %s failed: %s", _sanitize_log_str(to_email), exc)
+        return False, str(exc)
+
+
+def send_device_code_email(to_email: str, code: str, name: str = "", device_label: str = "",
+                           minutes: int = 15) -> Tuple[bool, str]:
+    from html import escape
+
+    device_line = f" on <strong>{escape(device_label)}</strong>" if device_label else ""
+    lines = (f'<p style="font-size:14px; line-height:1.5; margin:0;">Hi {escape(name or "there")},</p>'
+             f'<p style="font-size:14px; line-height:1.5;">Enter this code{device_line} to unlock CLOSE Copilot. '
+             f'It works for {minutes} minutes.</p>')
+    text = (f"Hi {name or 'there'},\n\nYour CLOSE Copilot device code: {code}\n"
+            f"Enter it on the device to unlock it. It works for {minutes} minutes.\n")
+    return _simple_email(to_email, f"CLOSE Copilot device code: {code}", "Your device code", lines, text, code=code)
+
+
+def send_device_approved_email(to_email: str, name: str = "", device_label: str = "") -> Tuple[bool, str]:
+    from html import escape
+
+    url = (getattr(settings, "CLOSE_CENTRAL_URL", "") or "https://close.kirex.online").rstrip("/") + "/login/"
+    device_line = f" ({escape(device_label)})" if device_label else ""
+    lines = (f'<p style="font-size:14px; line-height:1.5; margin:0;">Hi {escape(name or "there")},</p>'
+             f'<p style="font-size:14px; line-height:1.5;">Your device{device_line} is approved. '
+             f'Open CLOSE Copilot on it and sign in.</p>')
+    text = f"Hi {name or 'there'},\n\nYour device is approved for CLOSE Copilot. Sign in: {url}\n"
+    return _simple_email(to_email, "CLOSE Copilot: your device is approved", "Device approved", lines, text,
+                         button_url=url, button_label="Sign in")
+
+
+def send_new_signup_alert(to_email: str, user) -> Tuple[bool, str]:
+    from html import escape
+
+    base = (getattr(settings, "CLOSE_CENTRAL_URL", "") or "https://close.kirex.online").rstrip("/")
+    url = f"{base}/backoffice/people/{user.pk}/"
+    name = user.get_full_name() or user.username
+    lines = (f'<p style="font-size:14px; line-height:1.5; margin:0;"><strong>{escape(name)}</strong> '
+             f'({escape(user.email)}) created an account.</p>'
+             f'<p style="font-size:14px; line-height:1.5;">Assign a role so they can start working.</p>')
+    text = f"{name} ({user.email}) created a CLOSE Copilot account. Assign a role: {url}\n"
+    return _simple_email(to_email, f"New sign-up: {name}", "New sign-up", lines, text,
+                         button_url=url, button_label="Assign role")
+

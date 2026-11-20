@@ -122,7 +122,7 @@ class OnboardingFlowTests(TestCase):
         r = c.post("/access/request/", {
             "full_name": "Web Person", "email": "web@gmail.com", "requested_role": Role.HELPER,
             "bond_code": "AGM"})
-        self.assertContains(r, "Request received")
+        self.assertContains(r, "Request sent")
         req = AccessRequest.objects.get(email="web@gmail.com")
         _, token, code = onboarding.grant(req, self.admin)
         self.assertContains(c.get(f"/signup/?invite={token}"), "web@gmail.com")
@@ -136,5 +136,5 @@ class OnboardingFlowTests(TestCase):
         r = Client().post("/access/request/", {"full_name": "Bot", "email": "bot@spam.com",
                                                "requested_role": Role.HELPER, "bond_code": "AGM",
                                                "website": "http://spam"})
-        self.assertContains(r, "Request received")
+        self.assertContains(r, "Request sent")
         self.assertFalse(AccessRequest.objects.exists())

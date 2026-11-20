@@ -17,7 +17,9 @@ from django.shortcuts import render
 from governance.services import device_admission
 
 EXEMPT_PREFIXES = ("/static/", "/favicon.ico", "/device/", "/backoffice/api/v1/installs/",
-                   "/apple-touch-icon.png", "/site.webmanifest")
+                   "/apple-touch-icon.png", "/site.webmanifest",
+                   # New people: request access, and finish sign-up from the invite link (which approves the device).
+                   "/access/request/", "/signup/")
 
 
 def set_device_cookie(response: HttpResponse, request: HttpRequest, cookie_value: str) -> None:
@@ -86,10 +88,27 @@ def _local_install_id() -> str:
         return ""
 
 
-def _blocked(request: HttpRequest, error: str = "", waiting: bool = False, device=None) -> HttpResponse:
+def _mask_email(email: str) -> str:
+    if "@" not in (email or ""):
+        return email or ""
+    local, domain = email.split("@", 1)
+    return (local[:2] + "•" * max(1, len(local) - 2)) + "@" + domain
+
+
+def _blocked(request: HttpRequest, error: str = "", waiting: bool = False, device=None, step: str = "",
+             form: dict = None) -> HttpResponse:
     device = device if device is not None else device_admission.current_device(request)
     status = getattr(device, "status", "")
-    message = "This device is not authorized to use CLOSE Copilot."
+    message = "This device isn't authorised to use CLOSE Copilot."
+    email = getattr(device, "request_email", "") or ""
+    if status in ("BLOCKED", "REVOKED"):
+        step = "blocked"
+    elif waiting or (step == "waiting" and status == "PENDING"):
+        step = "waiting"            # e.g. phone paired by QR, or no email sending: the administrator approves
+    elif step != "email" and status == "PENDING" and email:
+        step = "code"               # email entered: enter the code (or wait for the administrator)
+    else:
+        step = "email"
     if request.path.startswith("/api/") or request.path.startswith("/media/") \
             or "application/json" in request.headers.get("Accept", ""):
         return JsonResponse({"success": False, "code": "DEVICE_NOT_APPROVED", "error": message,
@@ -99,6 +118,11 @@ def _blocked(request: HttpRequest, error: str = "", waiting: bool = False, devic
         "error": error,
         "device": device,
         "status": status,
-        "waiting": waiting or status == "PENDING",
+        "waiting": waiting,
+        "step": step,
+        "masked_email": _mask_email(email),
+        "form": form or {"first_name": (getattr(device, "request_name", "") or "").partition(" ")[0],
+                         "last_name": (getattr(device, "request_name", "") or "").partition(" ")[2],
+                         "email": email},
         "code": device_admission.device_code(device.device_id) if device else "",
     }, status=403)

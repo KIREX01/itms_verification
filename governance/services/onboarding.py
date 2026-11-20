@@ -266,8 +266,23 @@ def find_live_invite(token: str) -> Optional[AccessRequest]:
     return req
 
 
+def suggest_username(full_name: str, email: str = "") -> str:
+    """e.g. "Okello Samuel" -> "okello.samuel" (or okello.samuel2 if taken)."""
+    import re
+    from django.contrib.auth.models import User
+
+    base = ".".join(re.sub(r"[^a-z0-9]+", " ", (full_name or "").lower()).split()[:2])
+    if len(base) < 3:
+        base = re.sub(r"[^a-z0-9._-]", "", (email or "").split("@")[0].lower())
+    base = (base or "user")[:26].strip("._-") or "user"
+    candidate, n = base, 2
+    while User.objects.filter(username__iexact=candidate).exists():
+        candidate, n = f"{base}{n}", n + 1
+    return candidate
+
+
 def redeem_invite(token: str, code: str, username: str, password: str, password_confirm: str,
-                  request=None):
+                  request=None, full_name: str = ""):
     """Creates the account. Returns the new User; raises OnboardingError with a user-facing message.
     (Not one big transaction: failed code attempts must persist even though we raise.)"""
     from django.contrib.auth.models import User
@@ -297,21 +312,45 @@ def redeem_invite(token: str, code: str, username: str, password: str, password_
     if User.objects.filter(email__iexact=req.email).exists():
         raise OnboardingError("An account with this email already exists. Sign in instead.")
 
+    full_name = " ".join((full_name or "").split())
+    if full_name and len(full_name) < 3:
+        raise OnboardingError("Enter your full name.")
     with transaction.atomic():
-        return _create_account_from_invite(req, username, password, request)
+        return _create_account_from_invite(req, username, password, request, full_name=full_name[:150])
 
 
-def _create_account_from_invite(req: AccessRequest, username: str, password: str, request=None):
+def _link_devices(user, req: AccessRequest) -> int:
+    """Devices that asked for access or were unlocked with this email now belong to the new account, by name."""
+    from django.db.models import Q
+    from core.models import AuthorizedDevice
+
+    emails = {e.lower() for e in (req.email, req.company_email) if e}
+    q = Q()
+    for e in emails:
+        q |= Q(authorized_email__iexact=e) | Q(request_email__iexact=e) | Q(access_code_email__iexact=e)
+    return AuthorizedDevice.objects.filter(q, user__isnull=True).update(
+        user=user, request_name=(user.get_full_name() or user.username)[:150], authorized_email=user.email)
+
+
+def _create_account_from_invite(req: AccessRequest, username: str, password: str, request=None,
+                                full_name: str = ""):
     from core.services import auth_service
 
     req = AccessRequest.objects.select_for_update().get(pk=req.pk)
     if req.status != AccessRequest.Status.GRANTED:
         raise OnboardingError("This invite was already used.")
+    if full_name:
+        req.full_name = full_name  # corrected at sign-up; saved with the request below
     user, err = auth_service.create_operator_account(
         username=username, password=password, full_name=req.full_name, email=req.email,
     )
     if user is None:
         raise OnboardingError(err)
+    _link_devices(user, req)
+    from governance.models import AccountState
+    state, _ = AccountState.objects.get_or_create(user=user)
+    state.assigned_roles = [req.granted_role]
+    state.save(update_fields=["assigned_roles"])
 
     BondMembership.objects.update_or_create(
         user=user, bond_code=req.granted_bond, role=req.granted_role,
@@ -340,3 +379,120 @@ def _create_account_from_invite(req: AccessRequest, username: str, password: str
                  bond_code=req.granted_bond, after={"role": req.granted_role, "access_request": req.pk},
                  request=request)
     return user
+
+
+# ---------------------------------------------------------------------------
+# Sign-up after the device code proved the email (no invite needed). The account starts with no role:
+# the administrator assigns the role; bonds come from the person's ITMS access.
+# ---------------------------------------------------------------------------
+SIGNUP_SESSION_KEY = "close_verified_signup"
+SIGNUP_SESSION_MINUTES = 30
+
+
+def start_verified_signup(request, email: str, first_name: str, last_name: str, device_id: str) -> None:
+    request.session[SIGNUP_SESSION_KEY] = {
+        "email": email.lower(), "first_name": first_name, "last_name": last_name,
+        "device_id": device_id, "at": timezone.now().isoformat(),
+    }
+
+
+def verified_signup(request) -> Optional[dict]:
+    from django.utils.dateparse import parse_datetime
+
+    data = request.session.get(SIGNUP_SESSION_KEY)
+    if not isinstance(data, dict):
+        return None
+    at = parse_datetime(str(data.get("at") or ""))
+    if not at or (timezone.now() - at).total_seconds() > SIGNUP_SESSION_MINUTES * 60:
+        request.session.pop(SIGNUP_SESSION_KEY, None)
+        return None
+    return data
+
+
+def validate_new_password(password: str, password_confirm: str, username: str = "", email: str = "",
+                          first_name: str = "", last_name: str = "") -> None:
+    from django.contrib.auth.models import User
+    from django.contrib.auth.password_validation import validate_password
+    from django.core.exceptions import ValidationError
+
+    if password != password_confirm:
+        raise OnboardingError("The passwords don't match.")
+    probe = User(username=username, email=email, first_name=first_name, last_name=last_name)
+    try:
+        validate_password(password, user=probe)
+    except ValidationError as exc:
+        raise OnboardingError(" ".join(exc.messages))
+
+
+def clean_name(value: str, label: str) -> str:
+    import re
+    value = " ".join((value or "").split())
+    if len(value) < 2 or len(value) > 60 or not re.fullmatch(r"[^\W\d_][\w' .-]*", value):
+        raise OnboardingError(f"Enter your {label}.")
+    return value[:1].upper() + value[1:]
+
+
+def self_signup(request, username: str, password: str, password_confirm: str,
+                first_name: str, last_name: str):
+    """Creates the account for the email proven by the device code. Returns the new User."""
+    from django.contrib.auth.models import User
+    from core.services import auth_service
+    from governance.models import AccountState
+
+    data = verified_signup(request)
+    if data is None:
+        raise OnboardingError("Your email check has expired. Start again on the device page.")
+    email = data["email"]
+    first_name = clean_name(first_name or data.get("first_name", ""), "first name")
+    last_name = clean_name(last_name or data.get("last_name", ""), "last name")
+    if identity.is_burned_email(email):
+        raise OnboardingError("This email can no longer be used.")
+    if User.objects.filter(email__iexact=email).exists():
+        raise OnboardingError("An account with this email already exists. Sign in instead.")
+    validate_new_password(password, password_confirm, username, email, first_name, last_name)
+
+    invite = (AccessRequest.objects.filter(email__iexact=email, status=AccessRequest.Status.GRANTED)
+              .order_by("-reviewed_at").first())
+    with transaction.atomic():
+        user, err = auth_service.create_operator_account(
+            username=username, password=password, full_name=f"{first_name} {last_name}", email=email)
+        if user is None:
+            raise OnboardingError(err)
+        user.first_name, user.last_name = first_name, last_name
+        user.save(update_fields=["first_name", "last_name"])
+        state, _ = AccountState.objects.get_or_create(user=user)
+        if identity.is_company_email(email):
+            # The device code proved this company email.
+            identity.attach_company_email(user, email, CompanyEmailLink.VerifiedVia.SIGNUP_CODE, actor=user,
+                                          request=request)
+        if invite is not None and invite.granted_role:
+            # An approved access request for this email: apply its role and bond.
+            BondMembership.objects.update_or_create(
+                user=user, bond_code=invite.granted_bond, role=invite.granted_role,
+                defaults={"status": BondMembership.Status.ACTIVE, "granted_by": invite.reviewed_by,
+                          "status_reason": f"Granted via access request #{invite.pk}"})
+            state.assigned_roles = [invite.granted_role]
+            state.save(update_fields=["assigned_roles"])
+            invite.status, invite.used_at, invite.created_user = AccessRequest.Status.USED, timezone.now(), user
+            invite.invite_token_hash = invite.invite_code_hash = ""
+            invite.save()
+        fake_req = AccessRequest(email=email, company_email="")
+        _link_devices(user, fake_req)
+    request.session.pop(SIGNUP_SESSION_KEY, None)
+    audit.record(user, "onboarding.self_signup", target_type="user", target_id=user.pk, target_label=user.username,
+                 after={"email": email, "role_from_invite": getattr(invite, "granted_role", "")}, request=request)
+    _alert_admins_new_signup(user)
+    return user
+
+
+def _alert_admins_new_signup(user) -> None:
+    try:
+        from django.contrib.auth.models import User
+        from core.services import email_service
+        admins = list(User.objects.filter(is_superuser=True, is_active=True).exclude(email="")
+                      .values_list("email", flat=True))
+        for to in admins:
+            email_service.send_new_signup_alert(to, user)
+    except Exception as exc:
+        logger.warning("New sign-up alert not sent: %s", exc)
+

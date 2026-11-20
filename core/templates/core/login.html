@@ -38,29 +38,15 @@
 
     <div class="auth-page-wrapper">
         <div class="auth-card-box">
-            <div class="auth-card-head">
-                <div style="display:flex; justify-content:center; margin-bottom:14px;">
-                    <img src="{% static 'core/logos/android-chrome-192x192.png' %}" alt="ITMS Logo" style="width:64px; height:64px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,0.5); border:1px solid var(--ug-border); object-fit:contain; background:#0c0f17;">
-                </div>
-                <h1 style="font-size:1.35rem; font-weight:800; color:#ffffff; letter-spacing:0.5px;">
-                    CLOSE <span style="color:var(--ug-yellow);">COPILOT</span>
-                </h1>
-                <p style="font-size:0.75rem; color:var(--ug-text-muted); margin-top:2px;">
-                    Focus on plate audit, inspection, and inventory &bull; Operator Sign In
-                </p>
-            </div>
+            {% include "governance/_auth_brand.html" with subtitle="Sign in" %}
 
             <div class="auth-card-body">
                 {% if error %}
-                    <div class="alert-banner error">
-                        <span>⚠️ {{ error }}</span>
-                    </div>
+                    <div class="alert-banner error"><span>{{ error }}</span></div>
                 {% endif %}
 
                 {% if info %}
-                    <div class="alert-banner warning">
-                        <span>ℹ️ {{ info }}</span>
-                    </div>
+                    <div class="alert-banner success"><span>{{ info }}</span></div>
                 {% endif %}
 
                 <form method="POST" action="{% url 'core:login' %}" style="display:flex; flex-direction:column; gap:14px;">
@@ -68,33 +54,28 @@
                     <input type="hidden" name="next" value="{{ next_url }}">
 
                     <div class="form-field">
-                        <label for="username">Operator Username</label>
-                        <input type="text" id="username" name="username" value="{{ last_username }}" required autofocus placeholder="e.g. admin or operator_john">
+                        <label for="username">Username or email</label>
+                        <input type="text" id="username" name="username" value="{{ last_username }}" required autofocus autocomplete="username" autocapitalize="none">
                     </div>
 
                     <div class="form-field">
                         <label for="password">Password</label>
-                        <input type="password" id="password" name="password" required placeholder="Enter password">
+                        <input type="password" id="password" name="password" required autocomplete="current-password">
                     </div>
 
                     <div style="display:flex; align-items:center; gap:8px;">
                         <input type="checkbox" id="remember" name="remember" value="1" checked style="accent-color:var(--ug-yellow);">
-                        <label for="remember" style="font-size:0.8rem; color:var(--ug-text-muted); cursor:pointer;">Remember on this terminal</label>
+                        <label for="remember" style="font-size:0.8rem; color:var(--ug-text-muted); cursor:pointer;">Keep me signed in</label>
                     </div>
 
                     <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; padding:11px; margin-top:4px;">
-                        Sign In to Console
+                        Sign in
                     </button>
                 </form>
             </div>
 
-            <div class="auth-card-footer" style="display:flex; flex-direction:column; gap:6px;">
-                <div>
-                    New here? <a href="{% url 'core:access_request' %}">Request access</a>
-                </div>
-                <div style="font-size:0.74rem;">
-                    Device blocked or have an unlock code? <a href="{% url 'core:device_access_request' %}" style="color:var(--ug-yellow);">Unlock this device</a>
-                </div>
+            <div class="auth-card-footer">
+                New here? <a href="{% url 'core:access_request' %}">Request access</a>
             </div>
         </div>
     </div>

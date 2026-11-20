@@ -100,12 +100,19 @@ def login_view(request: HttpRequest) -> HttpResponse:
     if User.objects.count() == 0:
         return redirect("core:signup")
 
-    prefs = auth_service.get_operator_preferences()
-    last_username = prefs.get("last_username", "")
+    # On the shared central server never pre-fill someone else's username.
+    last_username = ""
+    if getattr(settings, "DEPLOYMENT_ROLE", "edge") != "central":
+        last_username = auth_service.get_operator_preferences().get("last_username", "")
+    info = {
+        "1": "Device unlocked. Sign in to continue.",
+        "invite": "Device unlocked. Open the link in your invite email to create your account.",
+    }.get(request.GET.get("unlocked", ""), "")
 
     return render(request, "core/login.html", {
         "next_url": next_url,
         "last_username": last_username,
+        "info": info,
     })
 
 

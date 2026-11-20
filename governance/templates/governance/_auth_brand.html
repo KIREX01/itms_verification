@@ -1,0 +1,6 @@
+{% load static %}<div class="auth-card-head" style="text-align:center;">
+    <img src="{% static 'core/logos/android-chrome-192x192.png' %}" alt="CLOSE Copilot" width="64" height="64"
+         style="width:64px; height:64px; border-radius:14px; display:block; margin:0 auto 12px; background:#0c0f17; border:1px solid var(--ug-border); object-fit:contain;">
+    <h1 style="font-size:1.3rem; font-weight:800; color:#ffffff; margin:0;">CLOSE <span style="color:var(--ug-yellow);">COPILOT</span></h1>
+    {% if subtitle %}<p style="font-size:0.85rem; color:var(--ug-text-muted); margin:6px 0 0;">{{ subtitle }}</p>{% endif %}
+</div>

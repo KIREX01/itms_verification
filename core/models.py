@@ -1419,6 +1419,11 @@ class AuthorizedDevice(models.Model):
     request_email = models.CharField(max_length=254, blank=True, default="")
     request_note = models.CharField(max_length=300, blank=True, default="")
     requested_at = models.DateTimeField(null=True, blank=True)
+    access_code_hash = models.CharField(max_length=64, blank=True, default="",
+                                        help_text="Hash of the emailed 6-digit device code (self-activation).")
+    access_code_email = models.CharField(max_length=254, blank=True, default="")
+    access_code_expires_at = models.DateTimeField(null=True, blank=True)
+    access_code_attempts = models.PositiveSmallIntegerField(default=0)
     install_id = models.CharField(max_length=64, blank=True, default="", db_index=True,
                                   help_text="Laptop install the device connects through (empty = central server).")
     status = models.CharField(

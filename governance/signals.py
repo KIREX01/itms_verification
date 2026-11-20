@@ -118,3 +118,22 @@ def _connect_group_signals():
 
 _connect_group_signals()
 
+
+# --- Bonds follow ITMS: a company email change re-syncs that person's ITMS bonds -----------------
+def _on_company_email_change(sender, instance, **kwargs):
+    if kwargs.get("raw"):
+        return
+    try:
+        from governance.services.memberships import sync_itms_memberships
+        sync_itms_memberships(instance.user)
+    except Exception:
+        pass
+
+
+def _connect_itms_signals():
+    from governance import models as gm
+    post_save.connect(_on_company_email_change, sender=gm.CompanyEmailLink, dispatch_uid="itms-bonds-company-email")
+
+
+_connect_itms_signals()
+

@@ -5,47 +5,79 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
-    <title>Device Not Authorized - CLOSE Copilot</title>
+    <title>Device not authorised - CLOSE Copilot</title>
     <link rel="shortcut icon" href="{% static 'core/logos/favicon.ico' %}">
+    <link rel="apple-touch-icon" href="{% static 'core/logos/apple-touch-icon.png' %}">
     <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}">
     <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}">
     <link rel="stylesheet" href="{% static 'core/css/auth.css' %}">
     <style>
-        .device-code { font-family: var(--font-mono, monospace); font-size: 1.6rem; font-weight: 800;
-                       letter-spacing: 3px; color: var(--ug-yellow); text-align: center; margin: 8px 0 4px; }
         .hp-field { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+        .lead { font-size: 0.95rem; line-height: 1.5; margin: 0 0 14px; text-align: center; }
+        .small { font-size: 0.78rem; color: var(--ug-text-muted); text-align: center; margin: 10px 0 0; line-height: 1.5; }
+        .small a { color: var(--ug-yellow); }
+        .otp { font-size: 1.6rem; letter-spacing: 10px; text-align: center; font-weight: 800; }
+        .devcode { font-family: var(--font-mono, monospace); letter-spacing: 2px; color: var(--ug-text-muted); }
     </style>
 </head>
 <body>
     <div class="uganda-flag-ribbon"></div>
     <div class="auth-page-wrapper">
         <div class="auth-card-box">
-            <div class="auth-card-head">
-                <h1 style="font-size:1.3rem; font-weight:800; color:#ffffff;">CLOSE <span style="color:var(--ug-yellow);">COPILOT</span></h1>
-            </div>
+            {% include "governance/_auth_brand.html" with subtitle="Device not authorised" %}
             <div class="auth-card-body">
-                {% if error %}<div class="alert-banner error"><span>⚠️ {{ error }}</span></div>{% endif %}
-                {% if status == "BLOCKED" or status == "REVOKED" %}
-                    <div class="alert-banner error"><span>⛔ This device has been blocked by the administrator.</span></div>
-                {% elif waiting %}
-                    <div class="alert-banner warning"><span>⏳ Request sent. This device is waiting for the administrator's approval.</span></div>
-                    <p style="font-size:0.85rem; margin:6px 0 0;">Give the administrator this device code:</p>
-                    <div class="device-code">{{ code }}</div>
-                    <p style="font-size:0.78rem; color:var(--ug-text-muted);">Once it is approved, reload this page.</p>
-                    <a class="btn btn-secondary" href="/device/" style="justify-content:center; padding:10px;">Check again</a>
-                {% else %}
-                    <div class="alert-banner error"><span>🔒 {{ message }}</span></div>
-                    <p style="font-size:0.84rem; line-height:1.5;">Every phone and computer must be approved by the administrator before it can be used. Send a request from this device:</p>
-                    <form method="POST" action="/device/" id="device-request-form" style="display:flex; flex-direction:column; gap:12px;">
+                {% if error %}<div class="alert-banner error"><span>{{ error }}</span></div>{% endif %}
+
+                {% if step == "blocked" %}
+                    <p class="lead">This device has been blocked.<br>Contact your administrator.</p>
+
+                {% elif step == "waiting" %}
+                    <p class="lead">Waiting for your administrator to approve this device.</p>
+                    <a class="btn btn-secondary" href="/device/" style="justify-content:center; padding:11px;">Check again</a>
+
+                {% elif step == "code" %}
+                    <p class="lead">We sent a 6-digit access code to <strong>{{ masked_email }}</strong>.</p>
+                    <form method="POST" action="/device/" style="display:flex; flex-direction:column; gap:12px;">
                         {% csrf_token %}
+                        <input type="hidden" name="action" value="verify">
+                        <input type="text" name="code" class="otp" maxlength="6" inputmode="numeric" pattern="[0-9]{6}"
+                               autocomplete="one-time-code" required autofocus placeholder="••••••" aria-label="6-digit code">
+                        <button type="submit" class="btn btn-primary" style="justify-content:center; padding:12px; font-weight:800;">Continue</button>
+                    </form>
+                    <p class="small">No email? Check spam, or <a href="/device/?step=email">change your details</a>.</p>
+
+                {% else %}
+                    <p class="lead">This device isn't authorised to use CLOSE Copilot.<br>Enter your details to get an access code.</p>
+                    <form method="POST" action="/device/" style="display:flex; flex-direction:column; gap:12px;" novalidate>
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="send">
                         <div class="hp-field" aria-hidden="true"><label for="website">Website</label><input type="text" id="website" name="website" tabindex="-1" autocomplete="off"></div>
                         <input type="hidden" name="client_report" id="client_report" value="{}">
-                        <div class="form-field"><label for="name">Your name *</label><input type="text" id="name" name="name" required autocomplete="name"></div>
-                        <div class="form-field"><label for="email">Your email</label><input type="email" id="email" name="email" autocomplete="email"></div>
-                        <div class="form-field"><label for="note">Why do you need access? (optional)</label><input type="text" id="note" name="note" placeholder="e.g. AGM bond, new Team Leader laptop"></div>
-                        <button type="submit" class="btn btn-primary" style="justify-content:center; padding:12px; font-weight:800;">Request device access</button>
+                        <div class="form-row">
+                            <div class="form-field"><label for="first_name">First name</label>
+                                <input type="text" id="first_name" name="first_name" required autocomplete="given-name" value="{{ form.first_name }}" autofocus></div>
+                            <div class="form-field"><label for="last_name">Last name</label>
+                                <input type="text" id="last_name" name="last_name" required autocomplete="family-name" value="{{ form.last_name }}"></div>
+                        </div>
+                        <div class="form-field"><label for="email">Email</label>
+                            <input type="email" id="email" name="email" required autocomplete="email" inputmode="email" autocapitalize="none" value="{{ form.email }}">
+                            <span class="field-hint" id="email-hint" style="display:none; color:#f87171;">Enter a valid email address.</span></div>
+                        <button type="submit" class="btn btn-primary" style="justify-content:center; padding:12px; font-weight:800;">Send access code</button>
                     </form>
+                    <script>
+                    (function () {
+                        var f = document.querySelector('form[action="/device/"] input[name="email"]'), hint = document.getElementById("email-hint");
+                        if (!f) return;
+                        var ok = function (v) { return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v); };
+                        f.addEventListener("blur", function () { hint.style.display = f.value && !ok(f.value.trim()) ? "block" : "none"; });
+                        f.form.addEventListener("submit", function (e) {
+                            if (!ok(f.value.trim())) { e.preventDefault(); hint.style.display = "block"; f.focus(); }
+                        });
+                    })();
+                    </script>
                 {% endif %}
+
+                {% if code %}<p class="small">Device code <span class="devcode">{{ code }}</span></p>{% endif %}
             </div>
         </div>
     </div>

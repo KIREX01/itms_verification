@@ -18,23 +18,17 @@
     <div class="uganda-flag-ribbon"></div>
     <div class="auth-page-wrapper">
         <div class="auth-card-box">
-            <div class="auth-card-head">
-                <h1 style="font-size:1.35rem; font-weight:800; color:#ffffff;">
-                    CLOSE <span style="color:var(--ug-yellow);">COPILOT</span>
-                </h1>
-                <p style="font-size:0.75rem; color:var(--ug-text-muted); margin-top:2px;">Request access</p>
-            </div>
+            {% include "governance/_auth_brand.html" with subtitle="Request access" %}
 
             <div class="auth-card-body">
             {% if submitted %}
-                <div class="alert-banner success"><span>✓ Request received.</span></div>
-                <p style="font-size:0.85rem; line-height:1.5;">
-                    The administrator will review it. If it is approved you'll get an email with a
-                    6-digit code and a link to create your account. The invite is valid for a limited time.
+                <div class="alert-banner success"><span>Request sent.</span></div>
+                <p style="font-size:0.9rem; line-height:1.5; text-align:center;">
+                    You'll get an email with a link to create your account once it's approved.
                 </p>
                 <a class="btn btn-secondary" href="{% url 'core:login' %}" style="justify-content:center; padding:11px;">Back to sign in</a>
             {% else %}
-                {% if error %}<div class="alert-banner error"><span>⚠️ {{ error }}</span></div>{% endif %}
+                {% if error %}<div class="alert-banner error"><span>{{ error }}</span></div>{% endif %}
                 <form method="POST" action="/access/request/" style="display:flex; flex-direction:column; gap:12px;">
                     {% csrf_token %}
                     <div class="hp-field" aria-hidden="true">
@@ -44,13 +38,12 @@
 
                     <div class="form-field">
                         <label for="full_name">Full name *</label>
-                        <input type="text" id="full_name" name="full_name" value="{{ form_data.full_name|default:'' }}" required autocomplete="name" placeholder="e.g. Okello Samuel">
+                        <input type="text" id="full_name" name="full_name" value="{{ form_data.full_name|default:'' }}" required autocomplete="name">
                     </div>
 
                     <div class="form-field">
-                        <label for="email">Email you'll sign in with *</label>
-                        <input type="email" id="email" name="email" value="{{ form_data.email|default:'' }}" required autocomplete="email" placeholder="any email you use">
-                        <span class="field-hint">Your invite code will be sent here.</span>
+                        <label for="email">Your email *</label>
+                        <input type="email" id="email" name="email" value="{{ form_data.email|default:'' }}" required autocomplete="email">
                     </div>
 
                     <div class="form-row">
@@ -86,7 +79,7 @@
                     </div>
 
                     <div class="form-field">
-                        <label for="message">Anything the administrator should know? (optional)</label>
+                        <label for="message">Note (optional)</label>
                         <textarea id="message" name="message" rows="2">{{ form_data.message|default:'' }}</textarea>
                     </div>
 

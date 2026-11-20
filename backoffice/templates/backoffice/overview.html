@@ -6,6 +6,7 @@
 {% for c in clones %}<div class="bo-msg error">⚠ Install "{{ c.name }}" was copied to another computer (detected {{ c.clone_detected_at|date:"Y-m-d H:i" }} from {{ c.last_ip|default:"unknown IP" }}). It was revoked automatically. <a href="{% url 'backoffice:installs' %}">Installs →</a></div>{% endfor %}
 
 <div class="bo-grid">
+    <a class="bo-stat {% if stats.needs_role %}warn{% endif %}" href="{% url 'backoffice:people_list' %}?needs_role=1"><div class="n">{{ stats.needs_role }}</div><div class="l">New sign-ups waiting for a role</div></a>
     <a class="bo-stat {% if stats.pending_requests %}warn{% endif %}" href="{% url 'backoffice:access_list' %}"><div class="n">{{ stats.pending_requests }}</div><div class="l">Access requests waiting</div></a>
     <a class="bo-stat {% if stats.open_flags %}warn{% endif %}" href="{% url 'backoffice:bonds' %}"><div class="n">{{ stats.open_flags }}</div><div class="l">Open quality flags</div></a>
     <div class="bo-stat"><div class="n">{{ stats.submitted_24h }}</div><div class="l">Submitted (24h)</div></div>

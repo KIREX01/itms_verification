@@ -16,25 +16,42 @@
 <div class="bo-two">
 <div class="bo-card">
     <h2>Roles</h2>
-    <div class="bo-scroll"><table class="bo-table">
-        <tr><th>Bond</th><th>Role</th><th>Status</th><th></th></tr>
-        {% for m in memberships %}
-        <tr><td>{{ m.bond_code }}</td><td>{{ m.get_role_display }}</td>
-            <td><span class="pill {% if m.status == 'ACTIVE' %}ok{% else %}muted{% endif %}">{{ m.get_status_display }}</span>
-                {% if m.status_reason %}<div class="bo-muted">{{ m.status_reason }}</div>{% endif %}</td>
-            <td>{% if m.status == 'ACTIVE' and state.status != 'BURNED' %}
-                <details class="bo-confirm"><summary>Remove</summary>
-                <form method="post" class="bo-inline" style="margin-top:8px;">{% csrf_token %}
-                    <input type="hidden" name="action" value="remove_role"><input type="hidden" name="membership_id" value="{{ m.pk }}">
-                    {% include "backoffice/_confirm.html" %}<button class="bo-btn danger small">Remove role</button></form></details>{% endif %}</td></tr>
-        {% empty %}<tr><td colspan="4" class="bo-muted">No roles yet.</td></tr>{% endfor %}
-    </table></div>
-    {% if state.status != 'BURNED' %}
-    <h2 style="margin-top:16px;">Add a role</h2>
-    <form method="post" class="bo-inline">{% csrf_token %}<input type="hidden" name="action" value="assign_role">
-        <div class="bo-field"><label>Bond</label><select name="bond_code" required>{% for code, name in bonds %}<option value="{{ code }}">{{ name }} ({{ code }})</option>{% endfor %}</select></div>
-        <div class="bo-field"><label>Role</label><select name="role" required>{% for v, l in roles %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
-        {% include "backoffice/_confirm.html" %}<button class="bo-btn primary">Assign</button>
+    <style>
+        .role-switch { display:flex; flex-wrap:wrap; gap:6px; }
+        .role-switch label { cursor:pointer; }
+        .role-switch input { position:absolute; opacity:0; width:1px; height:1px; }
+        .role-switch span { display:inline-block; padding:6px 12px; border-radius:999px; border:1px solid var(--bo-border, #334155);
+                            font-size:13px; user-select:none; }
+        .role-switch input:checked + span { background:var(--bo-accent, #2563eb); border-color:var(--bo-accent, #2563eb); color:#fff; font-weight:600; }
+        .role-switch input:focus-visible + span { outline:2px solid var(--bo-accent, #2563eb); outline-offset:2px; }
+        .role-row { padding:10px 0; border-bottom:1px solid var(--bo-border, #1e293b); }
+    </style>
+    <form method="post" class="role-row">{% csrf_token %}
+        <input type="hidden" name="action" value="set_person_roles">
+        <div class="role-switch">{% for r in role_panel.roles %}
+            <label><input type="checkbox" name="roles" value="{{ r.value }}" {% if r.on %}checked{% endif %} {% if state.status == 'BURNED' %}disabled{% endif %}><span>{{ r.label }}</span></label>{% endfor %}
+        </div>
+        {% if state.status != 'BURNED' %}<div class="bo-inline" style="margin-top:8px;">{% include "backoffice/_confirm.html" %}<button class="bo-btn primary small">Save roles</button></div>{% endif %}
+    </form>
+
+    <h2 style="margin-top:16px;">Bonds</h2>
+    <p class="bo-muted" style="margin-top:0;">From their ITMS account{% if role_panel.itms_bonds %}: {{ role_panel.itms_bonds|join:", " }}{% else %} (not connected yet){% endif %}. Updated on every ITMS sync.</p>
+    {% for b in role_panel.bonds %}
+    <div class="role-row" style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+        <div><strong>{{ b.name }}</strong> <span class="bo-muted">({{ b.bond }})</span>
+            {% if b.itms %}<span class="pill ok">ITMS</span>{% endif %}{% if b.manual %}<span class="pill">added by you</span>{% endif %}
+            <div class="bo-muted">{{ b.roles|join:", " }}</div></div>
+        {% if b.manual and state.status != 'BURNED' %}
+        <details class="bo-confirm"><summary>Remove</summary>
+            <form method="post" class="bo-inline" style="margin-top:6px;">{% csrf_token %}<input type="hidden" name="action" value="remove_manual_bond"><input type="hidden" name="bond_code" value="{{ b.bond }}">
+            {% include "backoffice/_confirm.html" %}<button class="bo-btn danger small">Remove</button></form></details>{% endif %}
+    </div>
+    {% empty %}<p class="bo-muted">{% if role_panel.has_roles %}No bonds yet: they appear when the person connects ITMS.{% else %}Assign a role first.{% endif %}</p>{% endfor %}
+    {% if state.status != 'BURNED' and role_panel.has_roles %}
+    <form method="post" class="role-row">{% csrf_token %}<input type="hidden" name="action" value="add_manual_bond">
+        <div class="bo-field" style="margin-bottom:6px;"><label>Add a bond by hand (e.g. Helpers without ITMS)</label>
+            <select name="bond_code" required><option value="">Choose a bond…</option>{% for code, name in bonds %}<option value="{{ code }}">{{ name }} ({{ code }})</option>{% endfor %}</select></div>
+        <div class="bo-inline">{% include "backoffice/_confirm.html" %}<button class="bo-btn small">Add bond</button></div>
     </form>
     {% endif %}
     <p class="bo-muted" style="margin-bottom:0;">Effective now at {{ effective.active_bond|default:"—" }}: {{ effective.capabilities|join:", "|default:"nothing" }}</p>

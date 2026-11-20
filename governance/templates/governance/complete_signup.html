@@ -16,20 +16,45 @@
     <div class="uganda-flag-ribbon"></div>
     <div class="auth-page-wrapper">
         <div class="auth-card-box">
-            <div class="auth-card-head">
-                <h1 style="font-size:1.35rem; font-weight:800; color:#ffffff;">
-                    CLOSE <span style="color:var(--ug-yellow);">COPILOT</span>
-                </h1>
-                <p style="font-size:0.75rem; color:var(--ug-text-muted); margin-top:2px;">Create your account</p>
-            </div>
+            {% include "governance/_auth_brand.html" with subtitle="Create your account" %}
 
             <div class="auth-card-body">
-            {% if invalid %}
-                <div class="alert-banner error"><span>⚠️ {{ error|default:"This invite link is invalid, already used or expired." }}</span></div>
-                <p style="font-size:0.85rem;">Ask the administrator to re-send your invite, or send a new request.</p>
+            {% if mode == "self" %}
+                {% if error %}<div class="alert-banner error"><span>{{ error }}</span></div>{% endif %}
+                <p style="font-size:0.9rem; text-align:center; margin:0 0 14px;">Email verified: <strong>{{ email }}</strong></p>
+                <form method="POST" action="/signup/" style="display:flex; flex-direction:column; gap:12px;">
+                    {% csrf_token %}
+                    <div class="form-row">
+                        <div class="form-field"><label for="first_name">First name</label>
+                            <input type="text" id="first_name" name="first_name" value="{{ form_data.first_name }}" required autocomplete="given-name"></div>
+                        <div class="form-field"><label for="last_name">Last name</label>
+                            <input type="text" id="last_name" name="last_name" value="{{ form_data.last_name }}" required autocomplete="family-name"></div>
+                    </div>
+                    <div class="form-field"><label for="username">Username</label>
+                        <input type="text" id="username" name="username" value="{{ form_data.username }}" required autocomplete="username"
+                               minlength="3" maxlength="30" pattern="[A-Za-z0-9][A-Za-z0-9._\-]{2,29}" autocapitalize="none" spellcheck="false">
+                        <span class="field-hint">You can also sign in with your email.</span></div>
+                    <div class="form-field"><label for="password">Password</label>
+                        <input type="password" id="password" name="password" required autocomplete="new-password" minlength="8">
+                        <span class="field-hint">At least 8 characters. Not only numbers, and not like your name or email.</span></div>
+                    <div class="form-field"><label for="password_confirm">Confirm password</label>
+                        <input type="password" id="password_confirm" name="password_confirm" required autocomplete="new-password" minlength="8">
+                        <span class="field-hint" id="pw-hint" style="display:none; color:#f87171;">The passwords don't match.</span></div>
+                    <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; padding:12px; font-weight:800;">Create account</button>
+                </form>
+                <script>
+                (function () {
+                    var p = document.getElementById("password"), c = document.getElementById("password_confirm"), h = document.getElementById("pw-hint");
+                    function check() { var bad = c.value && p.value !== c.value; h.style.display = bad ? "block" : "none"; c.setCustomValidity(bad ? "The passwords don't match." : ""); }
+                    p.addEventListener("input", check); c.addEventListener("input", check);
+                })();
+                </script>
+            {% elif invalid %}
+                <div class="alert-banner error"><span>{{ error|default:"This invite link is invalid, already used or expired." }}</span></div>
+                <p style="font-size:0.9rem; text-align:center;">Ask your administrator to send a new invite.</p>
                 <a class="btn btn-secondary" href="/access/request/" style="justify-content:center; padding:11px;">Request access</a>
             {% else %}
-                {% if error %}<div class="alert-banner error"><span>⚠️ {{ error }}</span></div>{% endif %}
+                {% if error %}<div class="alert-banner error"><span>{{ error }}</span></div>{% endif %}
                 <dl style="display:grid; grid-template-columns:max-content 1fr; gap:4px 12px; font-size:0.84rem; margin:0 0 14px;">
                     <dt style="color:var(--ug-text-muted);">Email</dt><dd style="margin:0;">{{ req.email }}</dd>
                     <dt style="color:var(--ug-text-muted);">Role</dt><dd style="margin:0;">{{ req.get_granted_role_display }} @ {{ req.granted_bond }}</dd>
@@ -39,12 +64,18 @@
                     {% csrf_token %}
                     <input type="hidden" name="invite" value="{{ invite_token }}">
                     <div class="form-field">
-                        <label for="code">6-digit code from your email *</label>
+                        <label for="code">Code from your email *</label>
                         <input type="text" id="code" name="code" class="otp-input" maxlength="6" inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code" required autofocus placeholder="------">
                     </div>
                     <div class="form-field">
-                        <label for="username">Choose a username *</label>
-                        <input type="text" id="username" name="username" value="{{ form_data.username|default:'' }}" required autocomplete="username" minlength="3">
+                        <label for="full_name">Full name *</label>
+                        <input type="text" id="full_name" name="full_name" value="{{ form_data.full_name|default:'' }}" required autocomplete="name" minlength="3">
+                    </div>
+                    <div class="form-field">
+                        <label for="username">Username *</label>
+                        <input type="text" id="username" name="username" value="{{ form_data.username|default:'' }}" required autocomplete="username"
+                               minlength="3" maxlength="30" pattern="[A-Za-z0-9][A-Za-z0-9._\-]{2,29}" autocapitalize="none" spellcheck="false">
+                        <span class="field-hint">You can also sign in with {{ req.email }}.</span>
                     </div>
                     <div class="form-row">
                         <div class="form-field">

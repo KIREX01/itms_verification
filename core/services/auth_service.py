@@ -89,23 +89,26 @@ def create_operator_account(
     are never staff/superuser: the administrator account comes from the installer
     (create_superuser_if_none), not from "whoever registers first".
     """
-    username = (username or "").strip()
+    username = (username or "").strip().lower()
     password = (password or "").strip()
     password_hash = (password_hash or "").strip()
-    full_name = (full_name or "").strip()
-    email = (email or "").strip()
+    full_name = " ".join((full_name or "").split())
+    email = (email or "").strip().lower()
 
     if not username:
         return None, "Username cannot be empty."
     if len(username) < 3:
         return None, "Username must be at least 3 characters long."
+    import re as _re
+    if not _re.fullmatch(r"[a-z0-9][a-z0-9._-]{2,29}", username):
+        return None, "Username: 3-30 letters or numbers (dot, dash and underscore allowed), no spaces."
     if not password_hash:
         if not password:
             return None, "Password cannot be empty."
         if len(password) < 6:
             return None, "Password must be at least 6 characters long."
 
-    if User.objects.filter(username=username).exists():
+    if User.objects.filter(username__iexact=username).exists():
         return None, f"Username '{username}' is already taken. Please choose another."
     try:
         from governance.services.identity import is_burned_email

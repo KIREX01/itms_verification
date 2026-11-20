@@ -67,7 +67,7 @@ def show_help():
         from core.version import __version__
         ver = f"v{__version__}"
     except Exception:
-        ver = "v1.3.0"
+        ver = "v1.3.1"
     print(f"""
 ======================================================================
   CLOSE COPILOT {ver} — SYSTEM COMMAND INTERFACE
@@ -822,7 +822,7 @@ def main():
             from core.version import __version__
             print(f"CLOSE Copilot v{__version__}")
         except (ImportError, AttributeError):
-            print("CLOSE Copilot v1.3.0")
+            print("CLOSE Copilot v1.3.1")
         return
 
     if first in ("start", "--daemon", "--bg", "-bg", "bg", "daemon"):

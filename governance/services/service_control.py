@@ -44,7 +44,21 @@ def _order_sync_status() -> Dict[str, Any]:
     d = ShiftOrderSyncDaemon.get_instance().get_status()
     return {"running": bool(d.get("is_running")), "enabled": bool(config_service.get_setting("sync.auto_sync_enabled", True)),
             "interval_seconds": d.get("interval_seconds"), "last_run": d.get("last_run_time"),
-            "runs": d.get("run_count"), "last_result": _short(d.get("last_result"))}
+            "runs": d.get("run_count"), "last_result": _short(d.get("last_result")), **_itms_account()}
+
+
+def _itms_account() -> Dict[str, Any]:
+    """The ITMS session background sync uses (the most recently connected one when no user is involved)."""
+    try:
+        from core.models import OperatorITMSSession
+        s = (OperatorITMSSession.objects.filter(is_authenticated=True).order_by("-saved_at").first()
+             or OperatorITMSSession.objects.order_by("-saved_at").first())
+        if s is None:
+            return {"account": "", "account_note": "No ITMS account connected: sync can't reach ITMS."}
+        return {"account": s.itms_email or "", "account_connected": bool(s.is_authenticated),
+                "account_saved": s.saved_at.isoformat() if s.saved_at else ""}
+    except Exception:
+        return {}
 
 
 def _kit_sync_status() -> Dict[str, Any]:

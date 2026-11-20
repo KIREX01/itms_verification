@@ -83,6 +83,14 @@ def submit_pair(
     ).lower()
     if backend_mode not in ("live_web", "web", "live", "mock", "api"):
         backend_mode = "web"
+    if backend_mode == "mock" and not (backend or "").strip() and not (
+            getattr(settings, "DEBUG", False) or getattr(settings, "IS_TESTING", False)):
+        # Safety net: a stray "mock" in config.json must never turn real submissions into simulated ones.
+        logger.warning("submission.backend=mock ignored outside DEBUG/tests; using %s",
+                       getattr(settings, "ITMS_SUBMISSION_BACKEND", "web"))
+        backend_mode = (getattr(settings, "ITMS_SUBMISSION_BACKEND", "web") or "web").lower()
+        if backend_mode == "mock":
+            backend_mode = "web"
     
     if dry_run is not None:
         is_dry_run = bool(dry_run)

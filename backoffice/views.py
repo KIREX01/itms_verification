@@ -850,6 +850,7 @@ def services(request: HttpRequest) -> HttpResponse:
         for k, lbl in sc.SERVICE_LABELS.items():
             st = m["status"].get(k) or {}
             st = {"error": "", "running": False, "enabled": None, "queued": 0, "failed": 0, "role": "", "stale": False,
+                  "account": "", "account_note": "", "account_connected": None,
                   "detector": "", "char_reader": "", "char_reader_on": False, "interval_seconds": None,
                   "last_result": "", **(st if isinstance(st, dict) else {})}
             m["rows"].append({"key": k, "label": lbl, "st": st,

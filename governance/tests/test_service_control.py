@@ -129,3 +129,21 @@ class ServicesPageTests(TestCase):
         self.c.post("/backoffice/services/", {"kind": "action", "target": "all", "action": "evil",
                                               "confirm_password": "Owner-pass-1"})
         self.assertFalse(InstallCommand.objects.exists())
+
+
+class SubmissionBackendSafetyTests(TestCase):
+    def test_stray_mock_config_ignored_in_production(self):
+        from core.services import submission_worker
+        pair = mock.Mock(order=None, operator=None, id=1)
+        with mock.patch("core.services.config_service.get_setting",
+                        side_effect=lambda k, d=None, *a: "mock" if k == "submission.backend" else d), \
+                override_settings(DEBUG=False, IS_TESTING=False, ITMS_SUBMISSION_BACKEND="web"), \
+                mock.patch.object(submission_worker, "_log"):
+            outcome = submission_worker.submit_pair(pair)
+        self.assertEqual(outcome.backend, "web")
+
+    def test_services_page_shows_sync_account(self):
+        from core.models import OperatorITMSSession
+        user = User.objects.create_user("tl_sync", "tl@example.com", "x")
+        OperatorITMSSession.objects.create(user=user, itms_email="tl@itms-ug.com", is_authenticated=True)
+        self.assertEqual(sc.status_all()["order_sync"]["account"], "tl@itms-ug.com")

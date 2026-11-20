@@ -1,23 +1,31 @@
 [Unit]
-Description=CLOSE Copilot central server (gunicorn)
+Description=CLOSE Copilot (central backoffice, gunicorn)
 After=network.target postgresql.service
 
 [Service]
+Type=simple
 User=www-data
 Group=www-data
 WorkingDirectory=/opt/itms
-EnvironmentFile=-/opt/itms/.env
+# Settings read /opt/itms/.env themselves (django-environ).
 Environment=DEPLOYMENT_ROLE=central
 Environment=DJANGO_SETTINGS_MODULE=itms_project.settings
-# One worker process (sync daemons + check-in live in-process), bounded thread pool.
+# One worker process (ITMS sync daemons + install check-ins live in-process), bounded thread pool.
 ExecStart=/opt/itms/.venv/bin/gunicorn itms_project.wsgi:application \
-    --bind 127.0.0.1:8000 --workers 1 --threads 16 --worker-class gthread \
-    --timeout 120 --graceful-timeout 30 --keep-alive 5 \
-    --max-requests 5000 --max-requests-jitter 500 \
+    --bind 127.0.0.1:8000 --workers 1 --threads 8 --worker-class gthread \
+    --timeout 300 --graceful-timeout 30 --keep-alive 5 \
     --access-logfile - --error-logfile -
 Restart=always
-RestartSec=3
+RestartSec=5
 KillMode=mixed
+StandardOutput=append:/opt/itms/media/itms_web.log
+StandardError=append:/opt/itms/media/itms_web.log
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/itms /var/log
 
 [Install]
 WantedBy=multi-user.target

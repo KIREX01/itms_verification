@@ -4,7 +4,7 @@
 `close.kirex.online`. On the central server, run **gunicorn** behind nginx instead.
 
 ## Why these settings
-- **One worker, many threads** (`--workers 1 --threads 16 -k gthread`). The ITMS sync daemons and the
+- **One worker, many threads** (`--workers 1 --threads 8 -k gthread`). The ITMS sync daemons and the
   check-in handler live inside the web process (`itms_project/wsgi.py`). Several worker *processes* would each
   start their own sync daemons and sync ITMS several times over. Threads keep one copy, and still give a bounded
   thread pool, keep-alive and production-grade request handling.
@@ -17,9 +17,10 @@
 ```bash
 cd /opt/itms
 sudo -u www-data .venv/bin/python manage.py collectstatic --noinput
+cp /etc/systemd/system/itms.service /etc/systemd/system/itms.service.bak
 cp deploy/linux/itms-gunicorn.service /etc/systemd/system/itms.service   # replaces the run_web unit
 systemctl daemon-reload && systemctl restart itms && systemctl status itms --no-pager
 ```
-Add the `location /static/` block from `deploy/linux/nginx-close.conf` to the site, then run `nginx -t && systemctl reload nginx`.
+The close.kirex.online nginx site already serves `/static/` from `/opt/itms/staticfiles/`; `deploy/linux/nginx-close.conf` is the reference for new servers.
 
 **Roll back:** restore the previous unit (`/etc/systemd/system/itms.service.bak`), then run `systemctl daemon-reload && systemctl restart itms`.

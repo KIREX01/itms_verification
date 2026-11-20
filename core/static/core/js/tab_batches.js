@@ -398,7 +398,7 @@ function renderFullScaleBatchPhotos(batchId, images) {
                 return `
                     <div class="batch-photo-card-large" id="photo-card-${escapeHtml(img.id)}">
                         <div class="batch-photo-full-wrap" id="photo-wrap-${escapeHtml(img.id)}">
-                            <img class="batch-photo-full-img" src="${escapeHtml(img.url)}" alt="${escapeHtml(img.file_name)}" onerror="this.onerror=null; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'100\' height=\'100\' viewBox=\'0 0 100 100\'><rect fill=\'%23111\' width=\'100\' height=\'100\'/><text fill=\'%23fff\' x=\'50\' y=\'55\' text-anchor=\'middle\' font-size=\'11\'>Photo Missing</text></svg>';">
+                            <img class="batch-photo-full-img" src="${escapeHtml(img.url)}" alt="${escapeHtml(img.file_name)}" onerror="photoMissingFallback(this)">
                             <span class="batch-photo-orient-badge ${orientTag}">${escapeHtml(img.orientation || 'UNKNOWN')}</span>
                             ${plateHtml}
                             <div class="batch-photo-tools-overlay">

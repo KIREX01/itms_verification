@@ -316,3 +316,32 @@ document.addEventListener("DOMContentLoaded", () => {
         mobileStatusPollInterval = setInterval(pollMobileCompanionStatus, 2500);
     }
 });
+
+/*
+ * Image fallbacks used by inline onerror="" attributes. Kept as named functions: inline handlers built
+ * inside template literals can't safely nest quotes (a `\'` there becomes a bare quote and breaks the code).
+ */
+const PHOTO_MISSING_SRC = "data:image/svg+xml;utf8," + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">' +
+    '<rect fill="#111" width="100" height="100"/>' +
+    '<text fill="#fff" x="50" y="55" text-anchor="middle" font-size="11">Photo Missing</text></svg>');
+
+function photoMissingFallback(img) {
+    if (!img) return;
+    img.onerror = null;
+    img.src = PHOTO_MISSING_SRC;
+}
+
+function previewUnavailableFallback(img) {
+    if (!img) return;
+    img.onerror = null;
+    const box = img.parentElement;
+    if (!box) return;
+    box.innerHTML = '<div style="padding:22px 10px; text-align:center; color:#94a3b8; font-size:0.75rem;">' +
+        '<div style="font-size:1.3rem; margin-bottom:4px;">⚠️</div>Preview unavailable<br>' +
+        '<span style="font-size:0.7rem; color:#64748b;">Direct link active below</span></div>';
+}
+
+window.photoMissingFallback = photoMissingFallback;
+window.previewUnavailableFallback = previewUnavailableFallback;
+

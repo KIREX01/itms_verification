@@ -479,7 +479,7 @@ function renderItmsPhotoCards(photos, isKit = false) {
                 <span class="badge badge-secondary" style="font-size:0.68rem; padding:2px 6px; font-weight:700; color:#ffffff;">${escapeHtml(p.orientation || "EVIDENCE")}</span>
             </div>
             <div class="photo-link-thumb" onclick="if(typeof openLightbox==='function'){openLightbox('${url}')}else{window.open('${url}','_blank')}" title="Click for full view">
-                <img src="${url}" alt="${lbl}" loading="lazy" onerror="this.onerror=null; this.src=''; this.parentElement.innerHTML='<div style=\'padding:22px 10px; text-align:center; color:#94a3b8; font-size:0.75rem;\'><div style=\'font-size:1.3rem; margin-bottom:4px;\'>⚠️</div>Preview unavailable<br><span style=\'font-size:0.7rem; color:#64748b;\'>Direct link active below</span></div>';">
+                <img src="${url}" alt="${lbl}" loading="lazy" onerror="previewUnavailableFallback(this)">
             </div>
             <div class="photo-link-footer" style="display:flex; justify-content:space-between; align-items:center;">
                 <a href="${url}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:none; display:inline-flex; align-items:center; gap:4px; font-weight:700;">

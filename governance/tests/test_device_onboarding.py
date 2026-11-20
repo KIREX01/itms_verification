@@ -3,6 +3,7 @@ import re
 from datetime import timedelta
 from unittest import mock
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.test import Client, TestCase, override_settings
@@ -307,3 +308,41 @@ class RealBrowserCsrfTests(TestCase):
         token = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', login.content.decode()).group(1)
         r = c.post("/login/", {"username": "existing@gmail.com", "password": "Str0ng-pass!x", "csrfmiddlewaretoken": token})
         self.assertEqual(r.status_code, 302)
+
+
+@override_settings(DEPLOYMENT_ROLE="central", CLOSE_DEVICE_ADMISSION=True, CSRF_TRUSTED_ORIGINS=["https://testserver"])
+class HttpsCsrfTests(TestCase):
+    """Over HTTPS Django also checks Origin/Referer; pages must not stop the browser sending them."""
+
+    def test_no_auth_page_sets_no_referrer(self):
+        import glob
+        for f in glob.glob(str(settings.BASE_DIR / "governance" / "templates" / "governance" / "*.html")) + \
+                glob.glob(str(settings.BASE_DIR / "core" / "templates" / "core" / "*.html")):
+            self.assertNotIn('content="no-referrer"', open(f, encoding="utf-8").read(), f)
+
+    def test_signup_post_over_https_with_same_origin_referer(self):
+        cache.clear()
+        c = Client(enforce_csrf_checks=True)
+        token = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', c.get("/", secure=True).content.decode()).group(1)
+        with mock.patch("core.services.email_service.send_device_code_email", return_value=(True, "")) as send:
+            c.post("/device/", {"action": "send", "email": "https@gmail.com", "csrfmiddlewaretoken": token},
+                   secure=True, HTTP_REFERER="https://testserver/", HTTP_ORIGIN="https://testserver")
+        page = c.get("/device/?step=code", secure=True)
+        token = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', page.content.decode()).group(1)
+        c.post("/device/", {"action": "verify", "code": send.call_args.kwargs["code"], "csrfmiddlewaretoken": token},
+               secure=True, HTTP_REFERER="https://testserver/device/?step=code", HTTP_ORIGIN="https://testserver")
+        page = c.get("/signup/", secure=True)
+        token = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', page.content.decode()).group(1)
+        r = c.post("/signup/", {"first_name": "Secure", "last_name": "Person", "username": "secure.person",
+                                "password": "Kampala-Kits-2026", "password_confirm": "Kampala-Kits-2026",
+                                "csrfmiddlewaretoken": token},
+                   secure=True, HTTP_REFERER="https://testserver/signup/", HTTP_ORIGIN="https://testserver")
+        self.assertRedirects(r, "/", fetch_redirect_response=False)
+
+    def test_failure_page_is_friendly(self):
+        r = Client(enforce_csrf_checks=True).post("/signup/", {"username": "x"}, secure=True,
+                                                  HTTP_ORIGIN="null")
+        self.assertEqual(r.status_code, 403)
+        body = r.content.decode()
+        self.assertIn("Reload and try again", body)
+        self.assertNotIn("DEBUG", body)

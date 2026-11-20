@@ -1,0 +1,28 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Page expired - CLOSE Copilot</title>
+    <link rel="shortcut icon" href="{% static 'core/logos/favicon.ico' %}">
+    <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/auth.css' %}">
+</head>
+<body>
+    <div class="uganda-flag-ribbon"></div>
+    <div class="auth-page-wrapper">
+        <div class="auth-card-box">
+            {% include "governance/_auth_brand.html" with subtitle="Page expired" %}
+            <div class="auth-card-body">
+                <p style="font-size:0.95rem; line-height:1.5; text-align:center; margin:0 0 14px;">
+                    This page was open too long or was opened in another tab.<br>Go back, reload the page and try again.
+                </p>
+                <a class="btn btn-primary" href="{{ back_url }}" style="justify-content:center; padding:12px; font-weight:800;">Reload and try again</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -174,6 +174,11 @@ class TUIMasterLockScreen(ModalScreen[bool]):
             err_label.update("[bold yellow]Please enter the 6-digit Master PIN.[/bold yellow]")
             return
 
+        if not config_service.is_tui_master_pin_set():
+            err_label.update("[bold yellow]No Master PIN is set on this computer. "
+                             "Set one with: itms pin set[/bold yellow]")
+            return
+
         if config_service.verify_tui_master_pin(entered_pin):
             self.failed_attempts = 0
             if self._countdown_timer:

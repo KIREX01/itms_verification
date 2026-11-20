@@ -463,6 +463,14 @@ def run_services(args=None):
     call_command("itms_services", *(args or []))
 
 
+def run_pin(args=None):
+    """TUI master PIN: itms pin status | set [PIN]"""
+    import django
+    django.setup()
+    from django.core.management import call_command
+    call_command("itms_pin", *(args or ["status"]))
+
+
 def run_fleet(args=None):
     """Central fleet: itms fleet status | token --bond AGM --seats 5 --hours 24 | directive <install> <ACTION>"""
     import django
@@ -867,6 +875,10 @@ def main():
 
     if first == "fleet":
         run_fleet(args[1:])
+        return
+
+    if first == "pin":
+        run_pin(args[1:])
         return
 
     if first in ("audit", "verify-vault"):

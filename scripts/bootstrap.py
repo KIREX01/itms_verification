@@ -524,6 +524,13 @@ def ensure_database_and_operator(verify_only: bool = False) -> bool:
         operator_count = User.objects.count()
         log_success(f"Operator accounts verified ({operator_count} registered).")
         local_pw = os.environ.get("DJANGO_SUPERUSER_PASSWORD", "")
+        try:
+            from core.services import config_service as _cfg
+            new_pin = _cfg.ensure_tui_master_pin()
+            if new_pin:
+                log_success(f"TUI master PIN: {new_pin}  (shown once - change it with: itms pin set)")
+        except Exception as pin_exc:
+            log_warning(f"Could not create a TUI master PIN: {pin_exc}. Set one with: itms pin set")
         if local_pw and local_pw != "admin":
             log_success(f"Local administrator: admin / {local_pw}  (also in .env; activate this install with: itms enroll <server> <code>)")
         return True

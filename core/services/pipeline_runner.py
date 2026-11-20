@@ -32,6 +32,76 @@ class _InMemoryLogStream(io.StringIO):
         return len(s)
 
 
+def _python_executable() -> str:
+    """The project's interpreter (a Windows service's sys.executable may be pythonservice.exe)."""
+    import sys
+    from pathlib import Path
+    from django.conf import settings
+
+    base = Path(settings.BASE_DIR)
+    for cand in (base / ".venv" / "Scripts" / "python.exe", base / ".venv" / "bin" / "python"):
+        if cand.is_file():
+            return str(cand)
+    exe = Path(sys.executable)
+    if exe.name.lower().startswith("pythonservice"):
+        alt = exe.with_name("python.exe")
+        if alt.is_file():
+            return str(alt)
+    return sys.executable
+
+
+def _use_subprocess() -> bool:
+    from django.conf import settings
+    from core.services import config_service
+
+    if getattr(settings, "IS_TESTING", False):
+        return False
+    return bool(config_service.get_setting("vision.pipeline_in_subprocess", True))
+
+
+def run_management_command(args, out_stream, err_stream) -> None:
+    """
+    Runs a heavy management command (vision / pairing). By default in a separate process with lowered CPU
+    priority, so YOLO / OCR never hold the web server's GIL: the web UI and phone uploads stay responsive.
+    Output lines stream into the runner log as before. Raises RuntimeError when the command fails.
+    """
+    if not _use_subprocess():
+        call_command(*args, stdout=out_stream, stderr=err_stream)
+        return
+
+    import os
+    import subprocess
+    import sys
+    from django.conf import settings
+
+    env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
+    kwargs = {}
+    if sys.platform == "win32":
+        BELOW_NORMAL_PRIORITY_CLASS, CREATE_NO_WINDOW = 0x00004000, 0x08000000
+        kwargs["creationflags"] = BELOW_NORMAL_PRIORITY_CLASS | CREATE_NO_WINDOW
+    else:
+        kwargs["preexec_fn"] = lambda: os.nice(10)
+    cmd = [_python_executable(), str(Path_(settings.BASE_DIR) / "manage.py"), *args]
+    proc = subprocess.Popen(cmd, cwd=str(settings.BASE_DIR), env=env, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", **kwargs)
+    tail = []
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        line = line.rstrip()
+        if line:
+            out_stream.write(line + "\n")
+            tail = (tail + [line])[-5:]
+    code = proc.wait()
+    if code != 0:
+        err_stream.write(f"{args[0]} exited with code {code}\n")
+        raise RuntimeError(f"{args[0]} failed (exit {code}): {tail[-1] if tail else 'no output'}")
+
+
+def Path_(p):
+    from pathlib import Path
+    return Path(p)
+
+
 class PipelineRunner:
     """Manages background task execution for the web dashboard."""
 
@@ -126,7 +196,7 @@ class PipelineRunner:
                 if batch_id:
                     vision_args.append(f"--batch={batch_id}")
 
-                call_command(*vision_args, stdout=out_stream, stderr=err_stream)
+                run_management_command(vision_args, out_stream, err_stream)
 
             if task_type in ("full_pipeline", "matcher"):
                 with self._lock:
@@ -135,7 +205,7 @@ class PipelineRunner:
                     self._status["message"] = "Running pair association and order matching..."
 
                 self._append_log("Running pair association and order matching...", "MATCHER")
-                call_command("associate_pairs", stdout=out_stream, stderr=err_stream)
+                run_management_command(["associate_pairs"], out_stream, err_stream)
 
             if task_type == "sync_orders":
                 with self._lock:

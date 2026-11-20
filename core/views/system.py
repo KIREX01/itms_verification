@@ -123,13 +123,18 @@ def api_stream_events(request: HttpRequest) -> HttpResponse:
     import time
 
     def event_stream():
-        for _ in range(25):  # Stream for up to ~25 seconds per connection
+        # Each connection holds a server thread, so keep it short: stop as soon as the pipeline is idle and
+        # after 15 s at most. The browser reconnects (retry) or falls back to polling.
+        yield "retry: 3000\n\n"
+        for _ in range(15):
             status_data = pipeline_runner.get_status()
             payload = {
                 "timestamp": timezone.now().isoformat(),
                 "pipeline": status_data,
             }
             yield f"data: {json.dumps(payload)}\n\n"
+            if not status_data.get("running"):
+                break
             time.sleep(1)
 
     response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
@@ -927,7 +932,18 @@ def serve_media(request: HttpRequest, path: str) -> HttpResponse:
                 and resolved_target.suffix.lower() not in FORBIDDEN_MEDIA_EXTENSIONS
             ):
                 mime, _ = mimetypes.guess_type(str(resolved_target))
-                return FileResponse(resolved_target.open("rb"), content_type=mime or "image/jpeg")
+                st = resolved_target.stat()
+                etag = f'W/"{st.st_size:x}-{int(st.st_mtime):x}"'
+                if etag in (request.META.get("HTTP_IF_NONE_MATCH") or ""):
+                    not_modified = HttpResponse(status=304)
+                    not_modified["ETag"] = etag
+                    not_modified["Cache-Control"] = "private, max-age=86400"
+                    return not_modified
+                response = FileResponse(resolved_target.open("rb"), content_type=mime or "image/jpeg")
+                response["ETag"] = etag
+                # Private: evidence photos are per-user and must never sit in shared caches.
+                response["Cache-Control"] = "private, max-age=86400"
+                return response
         except (ValueError, RuntimeError, OSError):
             continue
 

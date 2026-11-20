@@ -88,7 +88,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     },
     "security": {
         "tui_master_pin_enabled": True,        # Prompt for master security PIN on TUI launch
-        "tui_master_pin_hash": "",             # PBKDF2 hash of master PIN (empty defaults to 739104)
+        "tui_master_pin_hash": "",             # PBKDF2 hash of master PIN (empty = no PIN set; set with `itms pin set`)
         "tui_lockout_seconds": 60,             # Lockout duration after 3 failed attempts
         "tui_max_failed_attempts": 3,          # Max invalid attempts before temporary lockout
         "tui_auto_lock_minutes": 15,           # Inactivity timeout before re-prompting for Master PIN
@@ -1508,9 +1508,6 @@ def get_active_database_info() -> Dict[str, Any]:
     }
 
 
-DEFAULT_TUI_MASTER_PIN = "739104"
-
-
 def _hash_tui_pin(pin: str, salt: Optional[str] = None) -> str:
     """Hashes a numeric master PIN using PBKDF2 HMAC-SHA256 with 100,000 iterations."""
     if not salt:
@@ -1540,10 +1537,10 @@ def get_tui_master_pin_hash(base_dir: Optional[Path] = None) -> str:
 
 def verify_tui_master_pin(entered_pin: str, base_dir: Optional[Path] = None) -> bool:
     """
-    Verifies entered 6-digit PIN against:
+    Verifies entered PIN against:
     1. TUI_MASTER_PIN environment variable (if explicitly set)
     2. Stored hash in secure/config.json
-    3. Default system master PIN (739104) if no custom PIN was ever set.
+    There is no default PIN: until one is set (bootstrap generates one; `itms pin set`), nothing verifies.
     """
     if not entered_pin:
         return False
@@ -1559,8 +1556,20 @@ def verify_tui_master_pin(entered_pin: str, base_dir: Optional[Path] = None) -> 
     if stored_hash:
         return _verify_tui_pin_hash(clean_pin, stored_hash)
 
-    # 3. Default fallback PIN
-    return hmac.compare_digest(clean_pin, DEFAULT_TUI_MASTER_PIN)
+    return False
+
+
+def is_tui_master_pin_set(base_dir: Optional[Path] = None) -> bool:
+    return bool(os.getenv("TUI_MASTER_PIN", "").strip() or get_tui_master_pin_hash(base_dir))
+
+
+def ensure_tui_master_pin(base_dir: Optional[Path] = None) -> Optional[str]:
+    """Bootstrap: if no PIN exists, generate a random 6-digit one, store its hash and return it (shown once)."""
+    if is_tui_master_pin_set(base_dir):
+        return None
+    pin = f"{secrets.randbelow(10 ** 6):06d}"
+    set_tui_master_pin(pin, base_dir)
+    return pin
 
 
 def set_tui_master_pin(new_pin: str, base_dir: Optional[Path] = None) -> bool:

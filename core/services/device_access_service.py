@@ -410,7 +410,8 @@ def get_security_access_config() -> Dict[str, Any]:
     sec = cfg.get("security_access", {})
     return {
         "mode": sec.get("mode", "STANDARD"),
-        "require_email_approval": bool(sec.get("require_email_approval", False)),
+        # Defence in depth behind device admission: new devices are not auto-approved unless configured.
+        "require_email_approval": bool(sec.get("require_email_approval", True)),
         "max_devices_per_account": int(sec.get("max_devices_per_account", 4) or 4),
         "default_duration_hours": int(sec.get("default_duration_hours", DEFAULT_ACCESS_DURATION_HOURS) or DEFAULT_ACCESS_DURATION_HOURS),
     }
@@ -529,6 +530,28 @@ def _ip_matches_rule(client_ip: str, rule_ip_or_cidr: str) -> bool:
     return False
 
 
+_BLOCKLIST_CACHE_KEY = "close:device-blocklist:v1"
+_BLOCKLIST_TTL = 30
+REFRESH_WRITE_INTERVAL_SECONDS = 60
+
+
+def _blocked_devices() -> list:
+    """Blocked / revoked devices, cached briefly; any device change clears it (see invalidate_blocklist)."""
+    from django.core.cache import cache
+
+    rows = cache.get(_BLOCKLIST_CACHE_KEY)
+    if rows is None:
+        rows = list(AuthorizedDevice.objects.filter(
+            status__in=[AuthorizedDevice.Status.BLOCKED, AuthorizedDevice.Status.REVOKED]))
+        cache.set(_BLOCKLIST_CACHE_KEY, rows, _BLOCKLIST_TTL)
+    return rows
+
+
+def invalidate_blocklist(*args, **kwargs) -> None:
+    from django.core.cache import cache
+    cache.delete(_BLOCKLIST_CACHE_KEY)
+
+
 def is_ip_or_mac_blocked(
     client_ip: str,
     mac_address: str = "",
@@ -536,11 +559,7 @@ def is_ip_or_mac_blocked(
 ) -> Tuple[bool, Optional[AuthorizedDevice], str]:
     """Checks if incoming IP, CIDR subnet, MAC address, or device_id is BLOCKED or REVOKED."""
     try:
-        blocked_qs = list(
-            AuthorizedDevice.objects.filter(
-                status__in=[AuthorizedDevice.Status.BLOCKED, AuthorizedDevice.Status.REVOKED]
-            )
-        )
+        blocked_qs = _blocked_devices()
         for dev in blocked_qs:
             if device_id and dev.device_id == device_id:
                 return True, dev, dev.block_reason or "This device has been blocked."
@@ -596,9 +615,12 @@ def _resolve_email_expiry_for_user(user: Optional[User], email: str = "") -> Tup
 def register_or_refresh_authorized_device(request, *args, **kwargs):
     """Registers / refreshes the requesting device, then records its OS / browser / model."""
     result = _register_or_refresh_authorized_device_impl(request, *args, **kwargs)
+    dev = result[0] if result else None
+    if dev is not None and not getattr(dev, "_close_written", True):
+        return result  # nothing changed within the last minute: skip enrichment writes too
     try:
         from core.services.device_info_service import enrich_device
-        enrich_device(result[0] if result else None, request)
+        enrich_device(dev, request)
     except Exception as exc:
         logger.debug("Device enrichment skipped: %s", exc)
     return result
@@ -657,8 +679,12 @@ def _register_or_refresh_authorized_device_impl(
 
     effective_expires_at = expires_at or email_expires_at
 
+    existing_quick = AuthorizedDevice.objects.filter(device_id=dev_id).first()
+    _fresh = bool(existing_quick and existing_quick.last_seen_at
+                  and (timezone.now() - existing_quick.last_seen_at).total_seconds() < REFRESH_WRITE_INTERVAL_SECONDS)
+
     # Backfill EmailAccessRequest telemetry (MAC / IP / Device ID) automatically if matching email exists
-    if email:
+    if email and not _fresh:
         EmailAccessRequest.objects.filter(email__iexact=email, mac_address="").exclude(
             mac_address=mac_address
         ).update(
@@ -668,7 +694,7 @@ def _register_or_refresh_authorized_device_impl(
             device_name=ident["device_name"],
         )
 
-    existing = AuthorizedDevice.objects.filter(device_id=dev_id).first()
+    existing = existing_quick
     if not existing and mac_address and client_ip not in ("127.0.0.1", "::1", "localhost"):
         existing = AuthorizedDevice.objects.filter(mac_address__iexact=mac_address).first()
 
@@ -698,6 +724,8 @@ def _register_or_refresh_authorized_device_impl(
             return existing, False, f"Device is pinned to IP/Subnet {existing.pinned_ip_cidr} (current IP: {client_ip})."
 
         update_fields = ["ip_address", "last_seen_at", "user_agent", "fingerprint_hash"]
+        _orig = {"ip_address": existing.ip_address, "user_agent": existing.user_agent,
+                 "fingerprint_hash": existing.fingerprint_hash}
         existing.ip_address = client_ip
         existing.last_seen_at = now
         existing.user_agent = ident["user_agent"]
@@ -718,7 +746,14 @@ def _register_or_refresh_authorized_device_impl(
             existing.status = AuthorizedDevice.Status.APPROVED
             existing.approved_at = now
             update_fields.extend(["status", "approved_at"])
-        existing.save(update_fields=list(dict.fromkeys(update_fields)))
+        update_fields = list(dict.fromkeys(update_fields))
+        routine = {"ip_address", "last_seen_at", "user_agent", "fingerprint_hash"}
+        changed_routine = (existing.ip_address != _orig["ip_address"] or existing.user_agent != _orig["user_agent"]
+                           or existing.fingerprint_hash != _orig["fingerprint_hash"])
+        existing._close_written = False
+        if set(update_fields) - routine or changed_routine or not _fresh:
+            existing.save(update_fields=update_fields)
+            existing._close_written = True
         is_ok = (existing.status == AuthorizedDevice.Status.APPROVED)
         return existing, is_ok, "" if is_ok else "Device access is pending or expired."
 

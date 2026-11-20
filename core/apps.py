@@ -35,8 +35,14 @@ def _patch_werkzeug_reloader_fd():
 class CoreConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "core"
-    verbose_name = "ITMS Installation Verification"
+    verbose_name = "CLOSE Copilot"
 
     def ready(self):
         connection_created.connect(_configure_sqlite_connection)
         _patch_werkzeug_reloader_fd()
+        # The per-request device blocklist is cached; any device change clears it immediately.
+        from django.db.models.signals import post_delete, post_save
+        from core.models import AuthorizedDevice
+        from core.services.device_access_service import invalidate_blocklist
+        post_save.connect(invalidate_blocklist, sender=AuthorizedDevice, dispatch_uid="close-blocklist-save")
+        post_delete.connect(invalidate_blocklist, sender=AuthorizedDevice, dispatch_uid="close-blocklist-delete")

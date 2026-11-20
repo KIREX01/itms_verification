@@ -23,9 +23,10 @@ class TUIMasterPINTests(TestCase):
         cfg["security"]["tui_master_pin_enabled"] = True
         config_service.save_config(cfg)
 
-    def test_default_master_pin_verification(self):
-        """Default master PIN (739104) must verify correctly when no custom hash is set."""
-        assert config_service.verify_tui_master_pin("739104") is True
+    def test_no_default_master_pin(self):
+        """There is no built-in PIN: with no hash set nothing verifies (the old public default 739104 is gone)."""
+        assert config_service.is_tui_master_pin_set() is False
+        assert config_service.verify_tui_master_pin("739104") is False
         assert config_service.verify_tui_master_pin("000000") is False
         assert config_service.verify_tui_master_pin("123456") is False
         assert config_service.verify_tui_master_pin("") is False
@@ -47,6 +48,12 @@ class TUIMasterPINTests(TestCase):
         salt, h_val = stored_hash.split("$", 1)
         assert len(salt) == 32
         assert len(h_val) == 64
+
+    def test_bootstrap_generates_random_pin_once(self):
+        pin = config_service.ensure_tui_master_pin()
+        assert pin and len(pin) == 6 and pin.isdigit()
+        assert config_service.verify_tui_master_pin(pin) is True
+        assert config_service.ensure_tui_master_pin() is None  # never overwrites an existing PIN
 
     def test_reject_short_pin(self):
         """PIN with fewer than 4 digits must raise ValueError."""

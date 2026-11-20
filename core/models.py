@@ -18,6 +18,8 @@ from typing import Any, Dict, List, Optional
 
 from django.conf import settings
 from django.db import models
+
+from core.fields import SealedJSONField
 from django.db.models import Q
 from django.utils import timezone
 
@@ -1219,7 +1221,7 @@ class OperatorITMSSession(models.Model):
     itms_email = models.CharField(max_length=255, blank=True, default="")
     itms_user_uuid = models.CharField(max_length=128, blank=True, default="")
     itms_display_name = models.CharField(max_length=255, blank=True, default="")
-    cookies = models.JSONField(default=dict, blank=True)
+    cookies = SealedJSONField(default=dict, blank=True, help_text="ITMS portal cookies, encrypted at rest.")
     csrf_token = models.TextField(blank=True, default="")
     is_authenticated = models.BooleanField(default=False)
     saved_at = models.DateTimeField(auto_now=True)

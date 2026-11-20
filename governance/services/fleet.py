@@ -314,6 +314,8 @@ def check_device_anomalies(request, dev, ip: str) -> bool:
         return True
     if addr.is_loopback:
         return True
+    if not cache.add(f"close:fleet:anomaly-checked:{dev.device_id}:{ip}", 1, 60):
+        return True  # checked this device from this IP within the last minute
 
     if addr.is_private and dev.mac_address:
         from core.services.device_access_service import resolve_client_mac_address

@@ -113,6 +113,27 @@ signed check-in, not as a separate system.
   laptop installs**.
 - **Lost phone:** `itms admin-2fa reset <username>` on the server.
 
+### Security & performance audit fixes
+- **No default TUI PIN.** The public default `739104` is gone. New installs get a random 6-digit PIN, printed
+  once by the bootstrap. Existing laptops set one with `itms pin set` (the lock screen says so).
+- **ITMS session cookies are encrypted at rest** (Fernet, key from `SECRET_KEY`). Existing rows are encrypted
+  during the upgrade. A copied `db.sqlite3` no longer gives away a live ITMS session.
+- **Laptop administrator is break-glass only:** the local superuser signs in only on the PC itself or in the TUI,
+  never from a phone or another computer. The central server is unaffected.
+- **Second line behind device admission:** the older device layer no longer auto-approves new devices by default.
+- **Faster pages:**
+  - Device checks no longer write to the database on every request (at most once a minute per device).
+  - The blocklist is cached and cleared on any change.
+  - The MAC anomaly check runs at most once a minute per device.
+- **Photos cache in the browser:** `/media/` sends `ETag` plus `Cache-Control: private` and answers `304`, so
+  thumbnails aren't downloaded again.
+- **Live progress stream** (`/api/stream/events/`) ends as soon as the pipeline is idle (15 s at most), so open
+  tabs don't hold server threads.
+- **Vision pipeline in its own low-priority process** (below-normal priority on Windows, `nice 10` on Linux), so
+  YOLO/OCR runs no longer freeze the web UI or phone uploads. Turn this off with `vision.pipeline_in_subprocess = false`.
+- **Production web server for the central server:** a gunicorn + nginx template is included
+  (`deploy/linux/itms-gunicorn.service`, `deploy/linux/nginx-close.conf`, `docs/PRODUCTION_SERVER.md`).
+
 ### Fixes
 - **Client IP behind nginx.** `X-Forwarded-For` is now trusted only from the server's own proxy
   (`TRUSTED_PROXY_IPS`), so visitors can no longer spoof their IP.

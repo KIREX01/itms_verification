@@ -29,4 +29,20 @@
 </table>
 <div class="bo-pager">{% if page.has_previous %}<a href="?show={{ show }}&who={{ who }}&page={{ page.previous_page_number }}">← Newer</a>{% endif %} Page {{ page.number }} of {{ page.paginator.num_pages }} {% if page.has_next %}<a href="?show={{ show }}&who={{ who }}&page={{ page.next_page_number }}">Older →</a>{% endif %}</div>
 </div>
+
+<div class="bo-card">
+    <h2>Security events {% if anomalies_7d %}<span class="pill danger">{{ anomalies_7d }} anomal{{ anomalies_7d|pluralize:"y,ies" }} this week</span>{% endif %}</h2>
+    <p class="bo-muted">Device requests, approvals and blocks, QR pairings, 2-step and activation code failures, lockouts and anomalies.
+       A device whose network MAC address no longer matches is sent back to <a href="{% url 'backoffice:devices' %}">Devices → Requests</a> automatically.</p>
+    <div class="bo-scroll"><table class="bo-table">
+        <tr><th>When</th><th>Event</th><th>Who</th><th>IP / device</th><th>Detail</th></tr>
+        {% for e in security_events %}
+        <tr><td class="bo-muted">{{ e.created_at|date:"m-d H:i:s" }}</td>
+            <td><span class="pill {% if 'ANOMALY' in e.event_type or 'FAILED' in e.event_type or 'LOCKED' in e.event_type or 'REFUSED' in e.event_type or e.event_type == 'DEVICE_BLOCKED' %}danger{% elif e.event_type == 'DEVICE_REQUESTED' or e.event_type == 'QR_PAIRED' %}warn{% else %}ok{% endif %}">{{ e.get_event_type_display }}</span></td>
+            <td>{{ e.username|default:"—" }}</td>
+            <td class="bo-muted">{{ e.client_ip|default:"—" }}{% if e.device_id %}<div>{{ e.device_id|truncatechars:22 }}</div>{% endif %}{% if e.mac_address %}<div>{{ e.mac_address }}</div>{% endif %}</td>
+            <td>{{ e.reason|truncatechars:140 }}</td></tr>
+        {% empty %}<tr><td colspan="5" class="bo-muted">No security events yet.</td></tr>{% endfor %}
+    </table></div>
+</div>
 {% endblock %}

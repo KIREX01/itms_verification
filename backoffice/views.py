@@ -575,10 +575,39 @@ def installs(request: HttpRequest) -> HttpResponse:
     from governance.models import InstallRegistration
     from governance.services import policy_sync
 
+    from governance.models import EnrollmentToken, InstallLifecycleEvent
+    from governance.services import fleet
+
     new_code = None
+    new_token = None
     if request.method == "POST":
         action = request.POST.get("action")
-        if action == "create":
+        if action in ("issue_token", "revoke_token", "release_policy"):
+            if not _step_up_ok(request):
+                return redirect("backoffice:installs")
+            try:
+                if action == "issue_token":
+                    token, code = fleet.issue_token(
+                        request.user, bond_code=request.POST.get("bond_code", ""), label=request.POST.get("label", ""),
+                        max_seats=int(request.POST.get("max_seats") or 5), hours=int(request.POST.get("hours") or 24),
+                        allowed_ip_cidr=request.POST.get("allowed_ip_cidr", ""), request=request)
+                    new_token = {"token": token, "code": code,
+                                 "commands": fleet.install_commands(code, request.build_absolute_uri("/").rstrip("/"))}
+                    messages.success(request, "Install link created. Copy it now: it is shown only once.")
+                elif action == "revoke_token":
+                    fleet.revoke_token(get_object_or_404(EnrollmentToken, pk=request.POST.get("token_pk")),
+                                       request.user, request=request)
+                    messages.success(request, "Install link revoked.")
+                else:
+                    fleet.set_release_policy(request.user, request.POST.get("min_version", ""),
+                                             request.POST.get("zip_sha256", ""),
+                                             request.POST.get("auto_update") == "on", request=request)
+                    messages.success(request, "Release policy saved. Installs receive it on their next check-in.")
+            except (ValueError, fleet.FleetError) as exc:
+                messages.error(request, str(exc))
+            if new_token is None:
+                return redirect("backoffice:installs")
+        elif action == "create":
             inst, code = policy_sync.create_install(request.POST.get("name", ""), request.user, request=request)
             new_code = {"name": inst.name, "code": code}
             messages.success(request, f"Install '{inst.name}' created. Enroll it within 24 hours.")
@@ -599,18 +628,23 @@ def installs(request: HttpRequest) -> HttpResponse:
                          target_label=inst.name, before=before, after={"status": inst.status, "locked": inst.locked},
                          reason=reason, request=request)
             messages.success(request, f"{inst.name}: {action} done. It takes effect on the next check-in.")
-        if new_code is None:
+        if new_code is None and new_token is None:
             return redirect("backoffice:installs")
 
     now = timezone.now()
+    policy = fleet.release_policy()
     rows = []
     for inst in InstallRegistration.objects.all():
         age = (now - inst.last_seen_at).total_seconds() if inst.last_seen_at else None
         rows.append({"inst": inst, "online": age is not None and age < 180,
-                     "behind": inst.status == "ACTIVE" and inst.policy_version_acked < policy_sync.policy_version()})
+                     "behind": inst.status == "ACTIVE" and inst.policy_version_acked < policy_sync.policy_version(),
+                     "outdated": inst.status == "ACTIVE" and fleet.is_outdated(inst.app_version, policy),
+                     "disk_free": (inst.device_info or {}).get("disk_free_gb")})
     return render(request, "backoffice/installs.html", _ctx(
-        request, "installs", rows=rows, new_code=new_code, policy_version=policy_sync.policy_version(),
-        central_url=request.build_absolute_uri("/").rstrip("/"),
+        request, "installs", rows=rows, new_code=new_code, new_token=new_token,
+        policy_version=policy_sync.policy_version(), central_url=request.build_absolute_uri("/").rstrip("/"),
+        tokens=EnrollmentToken.objects.select_related("issued_by")[:30], policy=policy, now=now,
+        events=InstallLifecycleEvent.objects.select_related("install", "token")[:50],
     ))
 
 
@@ -633,8 +667,15 @@ def signins(request: HttpRequest) -> HttpResponse:
     since = timezone.now() - login_guard.WINDOW
     hot = (LoginAttempt.objects.filter(success=False, created_at__gte=since).exclude(reason="CLEARED_BY_ADMIN")
            .values("username").annotate(n=Count("id")).filter(n__gte=login_guard.USER_FAIL_LIMIT).order_by("-n"))
+    from governance.models import SecurityEvent
+    events = SecurityEvent.objects.select_related("user")
+    if who:
+        events = events.filter(Q(username__icontains=who) | Q(client_ip__icontains=who) | Q(device_id__icontains=who))
+    anomalies = SecurityEvent.objects.filter(event_type__startswith="ANOMALY_",
+                                             created_at__gte=timezone.now() - timedelta(days=7)).count()
     return render(request, "backoffice/signins.html", _ctx(
-        request, "signins", page=page, show=show, who=who, locked=hot,
+        request, "signins", page=page, show=show, who=who, locked=hot, security_events=events[:60],
+        anomalies_7d=anomalies,
     ))
 
 

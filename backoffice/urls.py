@@ -25,4 +25,6 @@ urlpatterns = [
     # Machine-to-machine policy sync (HMAC-authenticated; central server only)
     path("api/v1/installs/enroll/", sync_api.install_enroll, name="install_enroll"),
     path("api/v1/installs/heartbeat/", sync_api.install_heartbeat, name="install_heartbeat"),
+    path("api/v1/installs/manifest/", sync_api.release_manifest, name="release_manifest"),
+    path("api/v1/installs/script/<str:code>/<str:filename>", sync_api.installer_script, name="installer_script"),
 ]

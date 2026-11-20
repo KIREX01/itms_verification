@@ -12,7 +12,58 @@
 </div>
 {% endif %}
 
+{% if new_token %}
+<div class="bo-card" style="border-color:var(--bo-accent);">
+    <h2>Install link: {{ new_token.token.label|default:new_token.token.bond_code|default:"new" }}</h2>
+    <p>Run one of these on each laptop. It downloads CLOSE Copilot from this server and enrolls automatically
+       ({{ new_token.token.max_seats }} seat{{ new_token.token.max_seats|pluralize }}, until {{ new_token.token.expires_at|date:"Y-m-d H:i" }}).
+       <strong>Copy it now: it is shown only once.</strong></p>
+    <p class="bo-muted" style="margin:6px 0 2px;">Windows (PowerShell)</p>
+    <pre style="background:#0b1220; padding:12px; border-radius:8px; overflow-x:auto;">{{ new_token.commands.windows }}</pre>
+    <p class="bo-muted" style="margin:6px 0 2px;">Linux / macOS</p>
+    <pre style="background:#0b1220; padding:12px; border-radius:8px; overflow-x:auto;">{{ new_token.commands.linux }}</pre>
+    <p class="bo-muted" style="margin-bottom:0;">Already installed? <code>itms enroll {{ central_url }} {{ new_token.code }}</code></p>
+</div>
+{% endif %}
+
 {% if deployment_role == "central" %}
+<div class="bo-two">
+<div class="bo-card">
+    <h2>Install links (enrollment tokens)</h2>
+    <form method="post">{% csrf_token %}<input type="hidden" name="action" value="issue_token">
+        <div class="bo-inline">
+            <div class="bo-field"><label>Bond</label><input name="bond_code" placeholder="AGM" maxlength="12" style="width:90px;"></div>
+            <div class="bo-field"><label>Label</label><input name="label" placeholder="AGM dispatch laptops"></div>
+            <div class="bo-field"><label>Seats</label><input name="max_seats" value="5" inputmode="numeric" style="width:60px;"></div>
+            <div class="bo-field"><label>Valid (hours)</label><input name="hours" value="24" inputmode="numeric" style="width:70px;"></div>
+            <div class="bo-field"><label>Only from IP range (optional)</label><input name="allowed_ip_cidr" placeholder="41.210.0.0/16"></div>
+        </div>
+        <div class="bo-inline" style="margin-top:8px;">{% include "backoffice/_confirm.html" %}<button class="bo-btn primary">Create install link</button></div>
+    </form>
+    <div class="bo-scroll" style="margin-top:12px;"><table class="bo-table">
+        <tr><th>Link</th><th>Bond</th><th>Seats</th><th>Expires</th><th></th></tr>
+        {% for t in tokens %}
+        <tr><td>{{ t.label|default:"—" }}<div class="bo-muted"><code>{{ t.code_hint }}</code>{% if t.allowed_ip_cidr %} · {{ t.allowed_ip_cidr }}{% endif %}</div></td>
+            <td>{{ t.bond_code|default:"any" }}</td><td>{{ t.used_seats }} / {{ t.max_seats }}</td>
+            <td>{% if t.revoked %}<span class="pill danger">revoked</span>{% elif t.expires_at < now %}<span class="pill warn">expired</span>{% else %}{{ t.expires_at|date:"m-d H:i" }}{% endif %}</td>
+            <td>{% if not t.revoked and t.expires_at > now %}<details class="bo-confirm"><summary>Revoke</summary>
+                <form method="post" class="bo-inline">{% csrf_token %}<input type="hidden" name="action" value="revoke_token"><input type="hidden" name="token_pk" value="{{ t.pk }}">
+                {% include "backoffice/_confirm.html" %}<button class="bo-btn danger small">Revoke</button></form></details>{% endif %}</td></tr>
+        {% empty %}<tr><td colspan="5" class="bo-muted">No install links yet.</td></tr>{% endfor %}
+    </table></div>
+</div>
+<div class="bo-card">
+    <h2>Release policy</h2>
+    <p class="bo-muted">This server runs v{{ policy.latest_version }}. Manifest: <code>{{ central_url }}/backoffice/api/v1/installs/manifest/</code></p>
+    <form method="post">{% csrf_token %}<input type="hidden" name="action" value="release_policy">
+        <div class="bo-field"><label>Minimum allowed version</label><input name="min_version" value="{{ policy.min_version }}" placeholder="1.3.0"></div>
+        <div class="bo-field"><label>Pinned update archive SHA-256 (optional)</label><input name="zip_sha256" value="{{ policy.zip_sha256 }}" placeholder="64 hex characters" style="width:100%;"></div>
+        <label style="display:block; margin:8px 0;"><input type="checkbox" name="auto_update" {% if policy.auto_update_outdated %}checked{% endif %}> Automatically update installs below the minimum version</label>
+        <div class="bo-inline">{% include "backoffice/_confirm.html" %}<button class="bo-btn primary">Save policy</button></div>
+    </form>
+</div>
+</div>
+
 <div class="bo-card">
     <form method="post" class="bo-inline">{% csrf_token %}<input type="hidden" name="action" value="create">
         <div class="bo-field" style="min-width:260px;"><label>New install name</label><input type="text" name="name" required placeholder="e.g. AGM dispatch laptop"></div>
@@ -33,7 +84,9 @@
         <td><span class="pill {% if r.inst.status == 'ACTIVE' %}ok{% elif r.inst.status == 'PENDING' %}warn{% else %}danger{% endif %}">{{ r.inst.get_status_display }}</span>
             {% if r.inst.locked %}<span class="pill danger">Locked</span>{% endif %}</td>
         <td>{% if r.inst.last_seen_at %}<span class="pill {% if r.online %}ok{% else %}warn{% endif %}">{{ r.online|yesno:"online,offline" }}</span> {{ r.inst.last_seen_at|timesince }} ago{% else %}never{% endif %}</td>
-        <td>{{ r.inst.app_version|default:"—" }}
+        <td>{{ r.inst.app_version|default:"—" }}{% if r.outdated %} <span class="pill danger">outdated</span>{% endif %}
+            {% if r.inst.bond_code %}<span class="pill">{{ r.inst.bond_code }}</span>{% endif %}
+            <div class="bo-muted">{% if r.inst.health.active_operator %}user {{ r.inst.health.active_operator }} · {% endif %}{% if r.inst.health.ocr_engine %}{{ r.inst.health.ocr_engine }} · {% endif %}{% if r.disk_free %}{{ r.disk_free }} GB free · {% endif %}{% if r.inst.health.service_installed %}service{% else %}no service{% endif %}</div>
             {% if r.inst.device_info %}<details class="bo-confirm"><summary class="bo-muted">{{ r.inst.device_info.hostname|default:"host" }} · {{ r.inst.device_info.os_name }}</summary>
             <dl class="bo-kv" style="font-size:12px;">{% for k, v in r.inst.device_info.items %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl></details>{% endif %}</td>
         <td>{% if r.behind %}<span class="pill warn">v{{ r.inst.policy_version_acked }} (behind)</span>{% elif r.inst.status == 'ACTIVE' %}<span class="pill ok">current</span>{% else %}—{% endif %}</td>
@@ -49,4 +102,20 @@
     </tr>
     {% empty %}<tr><td colspan="7" class="bo-muted">No installs enrolled yet.</td></tr>{% endfor %}
 </table></div>
+
+<div class="bo-card">
+    <h2>Install history</h2>
+    <p class="bo-muted">Installer downloads, installs, enrollments, updates, rollbacks, app starts and uninstalls. Laptops send theirs with the next check-in, even after being offline.</p>
+    <div class="bo-scroll"><table class="bo-table">
+        <tr><th>When</th><th>Install</th><th>Event</th><th>Version</th><th>Detail</th></tr>
+        {% for e in events %}
+        <tr><td class="bo-muted">{{ e.occurred_at|date:"m-d H:i" }}</td>
+            <td>{{ e.install.name|default:"—" }}{% if not e.install and e.token %}<div class="bo-muted">link {{ e.token.label|default:e.token.code_hint }}</div>{% endif %}
+                {% if e.client_ip %}<div class="bo-muted">{{ e.client_ip }}</div>{% endif %}</td>
+            <td><span class="pill {% if not e.ok %}danger{% elif e.event_type == 'UNINSTALL_COMPLETED' %}warn{% else %}ok{% endif %}">{{ e.get_event_type_display }}</span></td>
+            <td class="bo-muted">{% if e.from_version %}{{ e.from_version }} → {% endif %}{{ e.to_version|default:"" }}</td>
+            <td>{{ e.detail|truncatechars:140 }}</td></tr>
+        {% empty %}<tr><td colspan="5" class="bo-muted">Nothing yet.</td></tr>{% endfor %}
+    </table></div>
+</div>
 {% endblock %}

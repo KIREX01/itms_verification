@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# 1-Click Shell Installer for ITMS Verification Copilot (macOS / Linux)
+# 1-Click Shell Installer for CLOSE Copilot (macOS / Linux)
 # Usage: curl -fsSL https://raw.githubusercontent.com/KIREX01/itms_verification/release/linux/install.sh | bash
 #
 
@@ -13,7 +13,7 @@ RELEASE_BRANCH="release/linux"
 ZIP_URL="https://github.com/KIREX01/itms_verification/archive/refs/heads/release/linux.zip"
 
 echo "===================================================================="
-echo "   ITMS VERIFICATION COPILOT - 1-CLICK INSTALLER (macOS / Linux)"
+echo "   CLOSE COPILOT - 1-CLICK INSTALLER (macOS / Linux)"
 echo "===================================================================="
 echo ""
 echo "[>] Target Installation Directory: $INSTALL_DIR"
@@ -94,6 +94,17 @@ echo ""
 echo "[>] Running system bootstrap (AI plate models & migrations)..."
 .venv/bin/python scripts/bootstrap.py
 
+# 4b. Enroll with the central server (token from the gated install link)
+CLOSE_CENTRAL_URL="${CLOSE_CENTRAL_URL:-https://close.kirex.online}"
+if [ -n "${CLOSE_ENROLL_TOKEN:-}" ]; then
+    echo ""
+    echo "[>] Enrolling this computer with $CLOSE_CENTRAL_URL ..."
+    .venv/bin/python itms_cli.py enroll "$CLOSE_CENTRAL_URL" "$CLOSE_ENROLL_TOKEN" || \
+        echo "[!] Enrollment did not complete. Run later: itms enroll $CLOSE_CENTRAL_URL <code>"
+else
+    echo "[i] This install is locked until it is enrolled: itms enroll https://close.kirex.online <code>"
+fi
+
 # 5. Global CLI Command Configuration
 echo ""
 echo "[>] Configuring global system-wide 'itms' command..."
@@ -114,19 +125,19 @@ export ITMS_HOME="$INSTALL_DIR"
 
 echo ""
 echo "===================================================================="
-echo "   [✓] ITMS VERIFICATION COPILOT READY FOR USE!"
+echo "   [✓] CLOSE COPILOT READY FOR USE!"
 echo "===================================================================="
 echo "Location: $INSTALL_DIR"
 echo "Commands: 'itms'       -> Launches Web Operator Console (Default)"
 echo "          'itms --tui' -> Launches Terminal User Interface (TUI)"
 echo "          'itms status'-> Check system health & database"
 echo "Database: SQLite (db.sqlite3)"
-echo "Login:    admin / admin"
+echo "Login:    local administrator password was printed by the bootstrap above (also in .env)"
 echo "===================================================================="
 echo ""
 
 # 6. Launch if running interactively
 if [ -t 0 ] || [ -n "$DISPLAY" ] || [ "$(uname)" = "Darwin" ]; then
-    echo "[>] Starting ITMS Verification Copilot..."
+    echo "[>] Starting CLOSE Copilot..."
     ./itms
 fi

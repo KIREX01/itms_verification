@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
-    1-Click PowerShell Installer for ITMS Verification Copilot.
+    1-Click PowerShell Installer for CLOSE Copilot.
 .DESCRIPTION
-    Installs ITMS Verification Copilot into the user's local application directory,
+    Installs CLOSE Copilot into the user's local application directory,
     creates an isolated Python virtual environment, installs all Python project
     dependencies (requirements.txt), provisions AI models and database,
     creates Desktop and Start Menu shortcuts, and launches the Web Operator Console.
@@ -25,7 +25,7 @@ try {
 } catch {}
 
 Write-Host "====================================================================" -ForegroundColor Cyan
-Write-Host "   ITMS VERIFICATION COPILOT - 1-CLICK POWERSHELL INSTALLER" -ForegroundColor Yellow
+Write-Host "   CLOSE COPILOT - 1-CLICK POWERSHELL INSTALLER" -ForegroundColor Yellow
 Write-Host "====================================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -253,6 +253,22 @@ $bootstrapPy = Join-Path $InstallDir "scripts\bootstrap.py"
 & $venvPy $bootstrapPy
 
 # ------------------------------------------------------------------
+# 5b. Enroll with the central server (token from the gated install link)
+# ------------------------------------------------------------------
+if (-not (Get-Variable -Name EnrollmentToken -ErrorAction SilentlyContinue)) { $EnrollmentToken = $env:CLOSE_ENROLL_TOKEN }
+if (-not (Get-Variable -Name ControlPlaneUrl -ErrorAction SilentlyContinue) -or -not $ControlPlaneUrl) {
+    $ControlPlaneUrl = if ($env:CLOSE_CENTRAL_URL) { $env:CLOSE_CENTRAL_URL } else { "https://close.kirex.online" }
+}
+if ($EnrollmentToken) {
+    Write-Host ""
+    Write-Host "[>] Enrolling this computer with $ControlPlaneUrl ..." -ForegroundColor Cyan
+    & $venvPy (Join-Path $InstallDir "itms_cli.py") enroll $ControlPlaneUrl $EnrollmentToken
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Enrollment did not complete. Run later: itms enroll $ControlPlaneUrl <code>" }
+} else {
+    Write-Host "[i] This install is locked until it is enrolled: itms enroll https://close.kirex.online <code>" -ForegroundColor Yellow
+}
+
+# ------------------------------------------------------------------
 # 6. Create Windows Shortcuts (Desktop & Start Menu)
 # ------------------------------------------------------------------
 Write-Host ""
@@ -264,14 +280,16 @@ try {
 
     # Desktop Shortcut
     $desktopPath = [Environment]::GetFolderPath('Desktop')
-    $desktopLnk = Join-Path $desktopPath "ITMS Verification Copilot.lnk"
+    # Older releases named the shortcut "ITMS Verification Copilot"; replace it.
+    Remove-Item -Path (Join-Path $desktopPath "ITMS Verification Copilot.lnk") -Force -ErrorAction SilentlyContinue
+    $desktopLnk = Join-Path $desktopPath "CLOSE Copilot.lnk"
     $shortcut = $wsh.CreateShortcut($desktopLnk)
     $shortcut.TargetPath = $launcher
     $shortcut.WorkingDirectory = $InstallDir
     if (Test-Path $iconPath) {
         $shortcut.IconLocation = $iconPath
     }
-    $shortcut.Description = "Launch ITMS Verification Copilot Web Operator Console"
+    $shortcut.Description = "Launch the CLOSE Copilot web console"
     $shortcut.Save()
     Write-Host "    [+] Desktop: $desktopLnk" -ForegroundColor Green
 
@@ -279,14 +297,15 @@ try {
     $startMenuPath = [Environment]::GetFolderPath('StartMenu')
     $programsPath = Join-Path $startMenuPath "Programs"
     if (Test-Path $programsPath) {
-        $startMenuLnk = Join-Path $programsPath "ITMS Verification Copilot.lnk"
+        Remove-Item -Path (Join-Path $programsPath "ITMS Verification Copilot.lnk") -Force -ErrorAction SilentlyContinue
+        $startMenuLnk = Join-Path $programsPath "CLOSE Copilot.lnk"
         $shortcut2 = $wsh.CreateShortcut($startMenuLnk)
         $shortcut2.TargetPath = $launcher
         $shortcut2.WorkingDirectory = $InstallDir
         if (Test-Path $iconPath) {
             $shortcut2.IconLocation = $iconPath
         }
-        $shortcut2.Description = "Launch ITMS Verification Copilot Web Operator Console"
+        $shortcut2.Description = "Launch the CLOSE Copilot web console"
         $shortcut2.Save()
         Write-Host "    [+] Start Menu: $startMenuLnk" -ForegroundColor Green
     }
@@ -357,15 +376,15 @@ if (Test-Path $serviceBat) {
 
 Write-Host ""
 Write-Host "====================================================================" -ForegroundColor Green
-Write-Host "   [+] ITMS VERIFICATION COPILOT READY FOR USE!" -ForegroundColor Green
+Write-Host "   [+] CLOSE COPILOT READY FOR USE!" -ForegroundColor Green
 Write-Host "====================================================================" -ForegroundColor Green
 Write-Host "Location: $InstallDir" -ForegroundColor White
-Write-Host "Launcher: Double-click 'ITMS Verification Copilot' on your Desktop" -ForegroundColor Yellow
+Write-Host "Launcher: Double-click the CLOSE Copilot shortcut on your Desktop" -ForegroundColor Yellow
 Write-Host "Commands: 'itms'       -> Launches Web Operator Console (Default)" -ForegroundColor Cyan
 Write-Host "          'itms --tui' -> Launches Terminal User Interface (TUI)" -ForegroundColor Cyan
 Write-Host "          'itms status'-> Check system health & database" -ForegroundColor Gray
 Write-Host "Database: SQLite (db.sqlite3)" -ForegroundColor White
-Write-Host "Login:    admin / admin" -ForegroundColor White
+Write-Host "Login:    local administrator password was printed by the bootstrap above (also in .env)" -ForegroundColor White
 Write-Host "====================================================================" -ForegroundColor Green
 Write-Host ""
 
@@ -373,7 +392,7 @@ Write-Host ""
 # 7. Launch Application
 # ------------------------------------------------------------------
 if (-not $NoLaunch) {
-    Write-Host "[>] Starting ITMS Verification Copilot..." -ForegroundColor Cyan
+    Write-Host "[>] Starting CLOSE Copilot..." -ForegroundColor Cyan
     Write-Host "    Opening Web Console in your default browser..." -ForegroundColor Gray
     Start-Process -FilePath "$InstallDir\itms.cmd" -WorkingDirectory "$InstallDir"
 }

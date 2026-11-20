@@ -106,9 +106,16 @@ def create_install(name: str, actor, request=None) -> Tuple[Any, str]:
 
 @transaction.atomic
 def enroll(code: str, app_version: str = "", ip: str = "", machine_fingerprint: str = "",
-           device_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+           device_info: Optional[Dict[str, Any]] = None, name: str = "") -> Dict[str, Any]:
     from governance.models import InstallRegistration
-    from governance.services import audit
+    from governance.services import audit, fleet
+
+    if fleet.is_token_code(code):
+        # Facility token: create a fresh install for this laptop (one seat) and enroll it.
+        try:
+            _inst, code, _token = fleet.enroll_with_token(code, ip, name, device_info or {})
+        except fleet.FleetError as exc:
+            raise PolicySyncError(str(exc))
 
     inst = (InstallRegistration.objects.select_for_update()
             .filter(enrollment_code_hash=_hash((code or "").strip().upper()),
@@ -127,7 +134,10 @@ def enroll(code: str, app_version: str = "", ip: str = "", machine_fingerprint: 
     inst.save()
     audit.record("system", "install.enrolled", target_type="install", target_id=inst.install_id,
                  target_label=inst.name, after={"ip": ip, "version": app_version}, actor_label=inst.name)
-    return {"install_id": inst.install_id, "secret": inst.secret, "name": inst.name}
+    inst.refresh_from_db(fields=["bond_code", "enrolled_token"])
+    fleet.record_lifecycle(inst, "ENROLLED", ip=ip, to_version=app_version,
+                           metadata={"hostname": (device_info or {}).get("hostname", "")})
+    return {"install_id": inst.install_id, "secret": inst.secret, "name": inst.name, "bond_code": inst.bond_code}
 
 
 HOST_INFO_KEYS = ("hostname", "os_name", "os_release", "os_version", "os_edition", "arch", "cpu", "cpu_cores",
@@ -374,12 +384,17 @@ def handle_heartbeat(install_id: str, body: bytes, ts: str, signature: str, ip: 
                              "device_info", "services"])
     _ingest_device_requests(inst, payload.get("device_requests") or [])
     _ingest_command_results(inst, payload.get("command_results") or [])
+    from governance.services import fleet
+    events_ingested = fleet.ingest_events(inst, payload.get("events") or [], ip=ip)
+    fleet.maybe_queue_auto_update(inst)
     response: Dict[str, Any] = {
         "policy_version": current,
         "lock": {"locked": inst.locked, "reason": inst.lock_reason},
         "server_time": timezone.now().isoformat(),
         "devices": _device_decisions(inst),
         "commands": _pending_commands(inst),
+        "events_ack": events_ingested,
+        "release": fleet.release_policy(),
     }
     if inst.policy_version_acked != current:
         response["snapshot"] = build_snapshot()
@@ -477,6 +492,12 @@ def enroll_with_central(central_url: str, code: str, name: str = "") -> Dict[str
     save_enrollment({"central_url": central_url, "install_id": data["install_id"], "secret": data["secret"],
                      "name": data.get("name", name), "policy_version": 0, "last_sync_ok_at": None,
                      "machine_fingerprint": fingerprint})
+    if data.get("bond_code"):
+        try:
+            from core.services import config_service
+            config_service.set_setting("bond.active_bond_code", data["bond_code"])
+        except Exception as exc:
+            logger.warning("Could not set the active bond from enrollment: %s", exc)
     heartbeat_once()
     return load_enrollment()
 
@@ -491,9 +512,43 @@ def _health() -> Dict[str, Any]:
         health["failed"] = VehicleInstallationPair.objects.filter(verification_status="FAILED").count()
         health["outbox"] = VehicleInstallationPair.objects.filter(verification_status="OFFLINE_OUTBOX").count()
         health["open_flags"] = QualityFlag.objects.filter(status="OPEN").count()
+        from governance.models import LoginAttempt
+        last = LoginAttempt.objects.filter(success=True).order_by("-created_at").first()
+        health["active_operator"] = last.username if last else ""
+        from core.services import config_service
+        vision = config_service.load_config().get("vision", {})
+        health["ocr_engine"] = ("Character reader" if vision.get("use_direct_character_reader", True) else "OCR") + \
+            (" + PaddleOCR" if vision.get("use_paddleocr") else "")
+        health["service_installed"] = _service_installed()
     except Exception:
         pass
     return health
+
+
+def _service_installed() -> bool:
+    import subprocess
+    import sys
+    try:
+        if sys.platform == "win32":
+            res = subprocess.run(["sc", "query", "ITMSVerificationService"], capture_output=True, text=True, timeout=5)
+            return "SERVICE_NAME" in res.stdout
+        return Path("/etc/systemd/system/itms.service").exists() or \
+            (Path.home() / ".config/systemd/user/itms.service").exists()
+    except Exception:
+        return False
+
+
+_SERVICE_STARTED_RECORDED = False
+
+
+def record_service_started() -> None:
+    global _SERVICE_STARTED_RECORDED
+    if _SERVICE_STARTED_RECORDED:
+        return
+    _SERVICE_STARTED_RECORDED = True
+    from core.version import __version__
+    from governance.services import telemetry_outbox
+    telemetry_outbox.record_event("SERVICE_STARTED", to_version=__version__)
 
 
 def _local_services() -> Dict[str, Any]:
@@ -534,8 +589,9 @@ def _run_commands(commands: list) -> None:
             logger.warning("Central command %s failed to start: %s", name, exc)
 
 
-def heartbeat_once() -> Dict[str, Any]:
+def heartbeat_once(timeout: float = 15.0) -> Dict[str, Any]:
     """One check-in. Applies a snapshot / lock when the server sends one. Raises on failure."""
+    from governance.services import telemetry_outbox
     from core.version import __version__
 
     from governance.services.install_guard import machine_fingerprint
@@ -547,15 +603,18 @@ def heartbeat_once() -> Dict[str, Any]:
         raise PolicySyncError("This install's credentials belong to another computer (moved copy).")
     from core.services.device_info_service import host_info
 
+    outbox_events = telemetry_outbox.pending()[:200]
     body = json.dumps({"app_version": __version__, "policy_version": state.get("policy_version", 0),
                        "machine_fingerprint": machine_fingerprint(), "health": _health(),
                        "device_info": host_info(), "device_requests": _local_device_requests(),
-                       "services": _local_services(), "command_results": _local_command_results()}).encode()
+                       "services": _local_services(), "command_results": _local_command_results(),
+                       "events": outbox_events}).encode()
     ts, sig = sign(state["secret"], body)
     status, content, headers = _http_post(
         f"{state['central_url']}/backoffice/api/v1/installs/heartbeat/", body,
         {"Content-Type": "application/json", "X-Close-Install": state["install_id"],
          "X-Close-Timestamp": ts, "X-Close-Signature": sig},
+        timeout=timeout,
     )
     if status != 200:
         try:
@@ -577,6 +636,10 @@ def heartbeat_once() -> Dict[str, Any]:
     _apply_lock(data.get("lock") or {}, state)
     _apply_device_decisions(data.get("devices") or [])
     _run_commands(data.get("commands") or [])
+    if outbox_events and int(data.get("events_ack") or 0) >= 0 and "events_ack" in data:
+        telemetry_outbox.clear(len(outbox_events))
+    if isinstance(data.get("release"), dict):
+        state["release"] = {k: data["release"].get(k) for k in ("latest_version", "min_version", "zip_sha256")}
     state["last_sync_ok_at"] = timezone.now().isoformat()
     save_enrollment(state)
     return data
@@ -715,6 +778,11 @@ def start_policy_sync_daemon() -> None:
     global _daemon
     if getattr(settings, "DEPLOYMENT_ROLE", "edge") == "central" or getattr(settings, "IS_TESTING", False):
         return
+    try:
+        if is_enrolled():
+            record_service_started()
+    except Exception:
+        pass
     if _daemon is None or not _daemon.is_alive():
         _daemon = PolicySyncDaemon()
         _daemon.start()

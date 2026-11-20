@@ -358,6 +358,10 @@ class InstallRegistration(models.Model):
                                    help_text="Host report: hostname, OS, CPU, RAM, disk, IPs, MAC, install path.")
     services = models.JSONField(default=dict, blank=True,
                                 help_text="Last reported status of the install's background services.")
+    bond_code = models.CharField(max_length=32, blank=True, default="",
+                                 help_text="Bond this install was enrolled for (from its enrollment token).")
+    enrolled_token = models.ForeignKey("EnrollmentToken", null=True, blank=True, on_delete=models.SET_NULL,
+                                       related_name="installs")
 
     class Meta:
         ordering = ["name"]
@@ -436,6 +440,106 @@ class InstallCommand(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     sent_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class EnrollmentToken(models.Model):
+    """(Central) A facility enrollment token: gates the installer download and enrolls up to `max_seats` laptops."""
+
+    label = models.CharField(max_length=120, blank=True, default="")
+    bond_code = models.CharField(max_length=32, blank=True, default="")
+    code_hash = models.CharField(max_length=64, unique=True)
+    code_hint = models.CharField(max_length=24, blank=True, default="", help_text="Prefix shown in lists.")
+    max_seats = models.PositiveIntegerField(default=5)
+    used_seats = models.PositiveIntegerField(default=0)
+    allowed_ip_cidr = models.CharField(max_length=200, blank=True, default="",
+                                       help_text="Optional comma-separated CIDRs allowed to download/enroll.")
+    expires_at = models.DateTimeField()
+    revoked = models.BooleanField(default=False)
+    issued_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                  related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class _AppendOnly(models.Model):
+    class Meta:
+        abstract = True
+
+    def save(self, *args, **kwargs):
+        if self.pk and not kwargs.pop("_allow_update", False):
+            raise ValueError(f"{type(self).__name__} is append-only.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError(f"{type(self).__name__} is append-only.")
+
+
+class InstallLifecycleEvent(_AppendOnly):
+    """(Central) Append-only ledger: installer downloads, installs, enrollments, updates, rollbacks, uninstalls."""
+
+    class Type(models.TextChoices):
+        SCRIPT_DOWNLOADED = "SCRIPT_DOWNLOADED", "Installer downloaded"
+        INSTALL_STARTED = "INSTALL_STARTED", "Install started"
+        INSTALL_COMPLETED = "INSTALL_COMPLETED", "Install completed"
+        INSTALL_FAILED = "INSTALL_FAILED", "Install failed"
+        ENROLLED = "ENROLLED", "Enrolled"
+        UPDATE_APPLIED = "UPDATE_APPLIED", "Update applied"
+        UPDATE_FAILED = "UPDATE_FAILED", "Update failed"
+        ROLLBACK_APPLIED = "ROLLBACK_APPLIED", "Rollback applied"
+        SERVICE_STARTED = "SERVICE_STARTED", "App started"
+        UNINSTALL_COMPLETED = "UNINSTALL_COMPLETED", "Uninstalled"
+
+    install = models.ForeignKey("InstallRegistration", null=True, blank=True, on_delete=models.SET_NULL,
+                                related_name="lifecycle_events")
+    token = models.ForeignKey("EnrollmentToken", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    event_type = models.CharField(max_length=24, choices=Type.choices, db_index=True)
+    ok = models.BooleanField(default=True)
+    from_version = models.CharField(max_length=32, blank=True, default="")
+    to_version = models.CharField(max_length=32, blank=True, default="")
+    client_ip = models.CharField(max_length=64, blank=True, default="")
+    user_agent = models.CharField(max_length=300, blank=True, default="")
+    detail = models.TextField(blank=True, default="")
+    metadata = models.JSONField(default=dict, blank=True)
+    occurred_at = models.DateTimeField(default=timezone.now, help_text="When it happened on the machine.")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class SecurityEvent(_AppendOnly):
+    """Append-only access-security ledger (sign-ins live in LoginAttempt; this holds everything else)."""
+
+    class Type(models.TextChoices):
+        DEVICE_REQUESTED = "DEVICE_REQUESTED", "Device requested access"
+        DEVICE_APPROVED = "DEVICE_APPROVED", "Device approved"
+        DEVICE_BLOCKED = "DEVICE_BLOCKED", "Device blocked"
+        QR_PAIRED = "QR_PAIRED", "Phone paired by QR"
+        ADMIN_2FA_OK = "ADMIN_2FA_OK", "Admin 2-step code accepted"
+        ADMIN_2FA_FAILED = "ADMIN_2FA_FAILED", "Admin 2-step code rejected"
+        ACTIVATION_FAILED = "ACTIVATION_FAILED", "Activation code rejected"
+        LOGIN_LOCKED = "LOGIN_LOCKED", "Sign-in locked out"
+        ANOMALY_MAC_MISMATCH = "ANOMALY_MAC_MISMATCH", "MAC address mismatch"
+        ANOMALY_IP_JUMP = "ANOMALY_IP_JUMP", "IP address jump"
+        INSTALL_TOKEN_REFUSED = "INSTALL_TOKEN_REFUSED", "Enrollment token refused"
+
+    event_type = models.CharField(max_length=24, choices=Type.choices, db_index=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                             related_name="+")
+    username = models.CharField(max_length=254, blank=True, default="")
+    device_id = models.CharField(max_length=128, blank=True, default="", db_index=True)
+    client_ip = models.CharField(max_length=64, blank=True, default="")
+    mac_address = models.CharField(max_length=32, blank=True, default="")
+    user_agent = models.CharField(max_length=300, blank=True, default="")
+    bond_code = models.CharField(max_length=32, blank=True, default="")
+    trace_id = models.CharField(max_length=64, blank=True, default="")
+    reason = models.CharField(max_length=300, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
         ordering = ["-created_at"]

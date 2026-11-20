@@ -44,8 +44,13 @@ class DeviceAdmissionMiddleware:
             if is_this_computer(request.META.get("REMOTE_ADDR", "")):
                 return self.get_response(request)  # the enrolled laptop itself
 
-        if device_admission.admitted_device(request) is not None:
-            return self.get_response(request)
+        dev = device_admission.admitted_device(request)
+        if dev is not None:
+            from core.services.security_envelope import extract_client_ip
+            from governance.services.fleet import check_device_anomalies
+            if check_device_anomalies(request, dev, extract_client_ip(request)):
+                return self.get_response(request)
+            return _blocked(request, waiting=True, device=dev)
 
         # A phone scanning a pairing QR: record its request on behalf of the person who showed the QR.
         token = (request.GET.get("pair_token") or "").strip()
@@ -61,6 +66,9 @@ class DeviceAdmissionMiddleware:
                     )
                 except ValueError as exc:
                     return _blocked(request, str(exc))
+                from governance.services.fleet import security_event
+                security_event("QR_PAIRED", request=request, user=paired_user, device_id=dev.device_id,
+                               reason="phone scanned a pairing QR; waiting for approval")
                 response = _blocked(request, waiting=True, device=dev)
                 set_device_cookie(response, request, cookie)
                 return response

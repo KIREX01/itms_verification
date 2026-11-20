@@ -72,8 +72,12 @@ def twofa_verify(request: HttpRequest) -> HttpResponse:
             request.session.cycle_key()
             request.session[totp.SESSION_KEY] = True
             login_guard.record(request.user.username, True, request, user=request.user, reason="2FA_OK")
+            from governance.services.fleet import security_event
+            security_event("ADMIN_2FA_OK", request=request, user=request.user)
             return redirect(_safe_next(request))
         else:
             login_guard.record(request.user.username, False, request, user=request.user, reason="BAD_2FA_CODE")
+            from governance.services.fleet import security_event
+            security_event("ADMIN_2FA_FAILED", request=request, user=request.user)
             messages.error(request, "Incorrect code.")
     return render(request, "backoffice/twofa_verify.html", {"next": _safe_next(request)})

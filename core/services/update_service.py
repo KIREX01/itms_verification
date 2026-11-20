@@ -372,7 +372,20 @@ class UpdateService:
         6. Verifies system integrity.
         """
         UpdateService._record_rollback_point()
+        result = UpdateService._apply_update_inner(download_url)
+        try:
+            from governance.services import telemetry_outbox
+            telemetry_outbox.record_event(
+                "UPDATE_APPLIED" if result.get("success") else "UPDATE_FAILED", ok=bool(result.get("success")),
+                from_version=__version__, to_version=str(result.get("version") or result.get("new_version") or ""),
+                detail="" if result.get("success") else str(result.get("error") or result.get("message") or "")[:500],
+            )
+        except Exception:
+            pass
+        return result
 
+    @staticmethod
+    def _apply_update_inner(download_url: Optional[str] = None) -> Dict[str, Any]:
         if download_url:
             if not UpdateService.validate_download_url(download_url):
                 return {"success": False, "error": f"Untrusted download URL: {download_url}"}
@@ -499,6 +512,14 @@ class UpdateService:
             return {"success": False, "error": f"Git update error: {exc}"}
 
     @staticmethod
+    def _pinned_sha256() -> str:
+        try:
+            from governance.services.policy_sync import load_enrollment
+            return str((load_enrollment(decrypt=False).get("release") or {}).get("zip_sha256") or "")
+        except Exception:
+            return ""
+
+    @staticmethod
     def _apply_zip_update(download_url: Optional[str] = None) -> Dict[str, Any]:
         """Downloads release zip from GitHub and unpacks preserving operator data."""
         if not download_url:
@@ -522,6 +543,14 @@ class UpdateService:
             )
             with urllib.request.urlopen(req, timeout=60) as response, open(zip_path, "wb") as f:
                 shutil.copyfileobj(response, f)
+
+            # 1b. Release policy from the central server may pin the archive's SHA-256.
+            pinned = UpdateService._pinned_sha256()
+            if pinned:
+                from governance.services.fleet import verify_update_archive
+                ok, why = verify_update_archive(zip_path, pinned)
+                if not ok:
+                    return {"success": False, "error": why}
 
             # 2. Extract to temp directory with strict ZipSlip validation
             extract_dir = (temp_dir / "extracted").resolve()

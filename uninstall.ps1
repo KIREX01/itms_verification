@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
-    Complete Uninstaller for ITMS Verification Copilot.
+    Complete Uninstaller for CLOSE Copilot.
 .DESCRIPTION
-    Completely removes ITMS Verification Copilot from the system:
+    Completely removes CLOSE Copilot from the system:
     - Terminates running ITMS processes
     - Removes Desktop and Start Menu shortcuts
     - Deletes 'itms' shims from WindowsApps
@@ -28,7 +28,7 @@ try {
 } catch { Write-Verbose "Service removal note: $_" }
 
 Write-Host "====================================================================" -ForegroundColor Red
-Write-Host "   ITMS VERIFICATION COPILOT - COMPLETE SYSTEM UNINSTALLER" -ForegroundColor Red
+Write-Host "   CLOSE COPILOT - COMPLETE SYSTEM UNINSTALLER" -ForegroundColor Red
 Write-Host "====================================================================" -ForegroundColor Red
 Write-Host ""
 
@@ -56,7 +56,7 @@ if (-not $InstallDir -and (Test-Path "$PSScriptRoot\itms_cli.py")) {
 }
 
 if (-not $InstallDir -or -not (Test-Path $InstallDir)) {
-    Write-Warning "Could not detect an active ITMS Verification Copilot installation."
+    Write-Warning "Could not detect an active CLOSE Copilot installation."
     exit 0
 }
 
@@ -108,15 +108,17 @@ try {
 
 # 4. Remove Shortcuts
 Write-Host "[>] Removing system shortcuts..." -ForegroundColor Cyan
-$desktopLnk = Join-Path ([Environment]::GetFolderPath('Desktop')) "ITMS Verification Copilot.lnk"
-if (Test-Path $desktopLnk) {
-    Remove-Item -Path $desktopLnk -Force -ErrorAction SilentlyContinue
-    Write-Host "    [+] Removed Desktop shortcut" -ForegroundColor Green
-}
-$startMenuLnk = Join-Path ([Environment]::GetFolderPath('StartMenu')) "Programs\ITMS Verification Copilot.lnk"
-if (Test-Path $startMenuLnk) {
-    Remove-Item -Path $startMenuLnk -Force -ErrorAction SilentlyContinue
-    Write-Host "    [+] Removed Start Menu shortcut" -ForegroundColor Green
+foreach ($name in @("CLOSE Copilot.lnk", "ITMS Verification Copilot.lnk")) {
+    $desktopLnk = Join-Path ([Environment]::GetFolderPath('Desktop')) $name
+    if (Test-Path $desktopLnk) {
+        Remove-Item -Path $desktopLnk -Force -ErrorAction SilentlyContinue
+        Write-Host "    [+] Removed Desktop shortcut ($name)" -ForegroundColor Green
+    }
+    $startMenuLnk = Join-Path ([Environment]::GetFolderPath('StartMenu')) "Programs\$name"
+    if (Test-Path $startMenuLnk) {
+        Remove-Item -Path $startMenuLnk -Force -ErrorAction SilentlyContinue
+        Write-Host "    [+] Removed Start Menu shortcut ($name)" -ForegroundColor Green
+    }
 }
 
 # 5. Remove WindowsApps Shims
@@ -164,7 +166,7 @@ try {
 
 Write-Host ""
 Write-Host "====================================================================" -ForegroundColor Green
-Write-Host "   [+] ITMS VERIFICATION COPILOT UNINSTALLED SUCCESSFULLY" -ForegroundColor Green
+Write-Host "   [+] CLOSE COPILOT UNINSTALLED SUCCESSFULLY" -ForegroundColor Green
 Write-Host "====================================================================" -ForegroundColor Green
 Write-Host "The application and all associated data have been completely removed." -ForegroundColor White
 Write-Host ""

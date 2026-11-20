@@ -65,6 +65,46 @@ Sign-ins are recorded and password guessing is locked out, and the backoffice re
 - **Alerts:** the Overview warns when a service is failing on any machine.
 - **Command line:** `itms services status`, `itms services actions`, `itms services run <ACTION>`.
 
+### Fleet: install links, install history, release policy, remote directives
+Implements `docs/ENTERPRISE_DISTRIBUTION_ACCESS_AND_TELEMETRY_ROADMAP.md`. It is built on the existing installs and
+signed check-in, not as a separate system.
+
+- **Install links (enrollment tokens).** *Installs → Install links* creates a link like `CLOSE-AGM-2026-XXXXXXXX`
+  with a bond, a number of seats, an expiry and an optional IP range. It produces ready-to-copy commands:
+  - Windows: `irm https://close.kirex.online/backoffice/api/v1/installs/script/<token>/install.ps1 | iex`
+  - Linux / macOS: `curl -fsSL .../install.sh | bash`
+
+  The server serves the installer with the token and server URL built in, so the laptop **enrolls itself** at the
+  end of the install and takes its bond from the link. Each enrolled laptop uses one seat. Expired, revoked, used-up
+  or out-of-range links are refused and logged, and repeated bad tokens from one IP are throttled.
+- **Install history.** An append-only ledger of installer downloads, install started / completed / failed,
+  enrolled, update applied / failed, rollback, app started and uninstalled. Laptops keep events while offline
+  (`secure/telemetry_outbox.json`) and send them with the next check-in. Uninstalling reports immediately, with a
+  3-second limit.
+- **Release policy.** Set a **minimum allowed version**; older installs show *outdated*, and can optionally be
+  updated automatically. You can also pin the **SHA-256 of the release archive**: a laptop refuses a downloaded
+  update that doesn't match. Public manifest: `/backoffice/api/v1/installs/manifest/`.
+- **More directives** for laptops (Services or `itms fleet directive`): **Wipe ITMS session** (signs the laptop out
+  of ITMS) and **Roll back to the previous version**. These join update, lock (quarantine), sync, vision and outbox.
+- **Fleet columns.** Each install shows its bond, the operator signed in last, the OCR engine, free disk space and
+  whether the background service is installed.
+- **Security events** (Backoffice → Sign-ins). An append-only ledger of:
+  - device requests, approvals and blocks
+  - QR pairings
+  - 2-step code successes and failures
+  - activation-code failures (now also throttled per IP)
+  - sign-in lockouts
+  - refused install links
+  - anomalies
+
+  **MAC mismatch:** if a LAN device's network MAC (read from the ARP table, never from client headers) no longer
+  matches the approved device, it goes back to *Devices → Requests* and its sessions end. **IP jumps** between
+  distant networks within an hour are flagged.
+- **CLI (central):** `itms fleet status`, `itms fleet token --bond AGM --seats 5 --hours 24`,
+  `itms fleet directive <install> <ACTION|lock|unlock>`.
+- **Installers** now say *CLOSE Copilot*, the shortcuts are renamed (old ones are removed), and they no longer
+  print `admin / admin`. Every install already gets its own random local admin password.
+
 ### Administrator 2-step sign-in
 - **Setup.** The first backoffice visit asks you to scan a QR code with an authenticator app. You confirm
   with a code and get 8 single-use recovery codes.

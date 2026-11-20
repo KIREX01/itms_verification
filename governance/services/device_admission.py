@@ -126,6 +126,9 @@ def request_access(request, name: str = "", email: str = "", note: str = "",
         logger.debug("Device description skipped: %s", exc)
     _notify_admins(dev, request)
     cookie = device_access_service.sign_device_trust_token(dev.device_id, dev.request_email or "device")
+    from governance.services.fleet import security_event
+    security_event("DEVICE_REQUESTED", request=request, user=user, device_id=dev.device_id,
+                   reason=(f"{name} <{email}>" if email else name)[:200])
     return dev, cookie
 
 
@@ -169,6 +172,9 @@ def approve(dev, actor, user=None, request=None):
         dev.user = user
         dev.authorized_email = (user.email or "").lower()
     dev.save()
+    from governance.services.fleet import security_event
+    security_event("DEVICE_APPROVED", request=request, user=dev.user, device_id=dev.device_id,
+                   reason=f"by {getattr(actor, 'username', actor)}")
     audit.record(actor, "device.approve", target_type="device", target_id=dev.device_id,
                  target_label=f"{dev.device_name} ({device_code(dev.device_id)})", before=before,
                  after={"status": dev.status, "user": getattr(dev.user, "username", "")}, request=request)
@@ -192,7 +198,33 @@ def block(dev, actor, reason: str = "", request=None):
         UserSessionIndex.objects.filter(device_id=dev.device_id).delete()
     except Exception:
         pass
+    from governance.services.fleet import security_event
+    security_event("DEVICE_BLOCKED", request=request, user=dev.user, device_id=dev.device_id,
+                   reason=(reason or "")[:200])
     audit.record(actor, "device.block", target_type="device", target_id=dev.device_id,
                  target_label=f"{dev.device_name} ({device_code(dev.device_id)})", before=before,
                  after={"status": dev.status, "sessions_killed": killed}, reason=reason, request=request)
     return dev
+
+
+def hold_for_review(dev, reason: str = ""):
+    """Anomaly: send an approved device back to the request queue and end its sessions."""
+    from core.models import AuthorizedDevice
+    from governance.services import audit
+
+    dev.status = AuthorizedDevice.Status.PENDING
+    dev.block_reason = (f"Held for review: {reason}" if reason else "Held for review")[:255]
+    dev.save(update_fields=["status", "block_reason"])
+    try:
+        from django.contrib.sessions.models import Session
+        from governance.models import UserSessionIndex
+        keys = list(UserSessionIndex.objects.filter(device_id=dev.device_id).values_list("session_key", flat=True))
+        Session.objects.filter(session_key__in=keys).delete()
+        UserSessionIndex.objects.filter(device_id=dev.device_id).delete()
+    except Exception:
+        pass
+    audit.record("system", "device.held_for_review", target_type="device", target_id=dev.device_id,
+                 target_label=f"{dev.device_name} ({device_code(dev.device_id)})", reason=reason,
+                 actor_label="anomaly-detection")
+    return dev
+

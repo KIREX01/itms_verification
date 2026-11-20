@@ -568,6 +568,35 @@ def main() -> int:
         run_diagnostics_table()
         return 0
 
+    _telemetry("INSTALL_STARTED")
+    try:
+        code = _bootstrap_steps()
+    except Exception as exc:
+        _telemetry("INSTALL_FAILED", ok=False, detail=f"{type(exc).__name__}: {exc}")
+        raise
+    if code == 0:
+        _telemetry("INSTALL_COMPLETED")
+    else:
+        _telemetry("INSTALL_FAILED", ok=False, detail="bootstrap finished with warnings")
+    return code
+
+
+def _telemetry(event_type: str, ok: bool = True, detail: str = "") -> None:
+    """Queues an install event for the central server (sent on the first check-in). Never fails the install."""
+    try:
+        sys.path.insert(0, str(PROJECT_ROOT))
+        from governance.services import telemetry_outbox
+        try:
+            from core.version import __version__ as version
+        except Exception:
+            version = ""
+        telemetry_outbox.record_event(event_type, ok=ok, to_version=version, detail=detail,
+                                      metadata={"platform": sys.platform}, base_dir=PROJECT_ROOT)
+    except Exception:
+        pass
+
+
+def _bootstrap_steps() -> int:
     # 1. Directories
     ensure_directories()
 

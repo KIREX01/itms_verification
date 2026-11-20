@@ -177,6 +177,34 @@ def _update(args):
     return _short(update_service.apply_update())
 
 
+def _wipe_itms_session(args):
+    """Remote directive: sign this machine out of ITMS (cookies + stored tokens)."""
+    from pathlib import Path
+    from django.conf import settings
+    from core.models import OperatorITMSSession
+
+    n = OperatorITMSSession.objects.count()
+    OperatorITMSSession.objects.all().delete()
+    removed = 0
+    for rel in ("secure/auth/itms_tokens.json", "secure/itms_session.json", "secure/auth/itms_session.json"):
+        path = Path(settings.BASE_DIR) / rel
+        if path.is_file():
+            path.unlink()
+            removed += 1
+    return f"ITMS session wiped ({n} operator session(s), {removed} token file(s))"
+
+
+def _rollback(args):
+    from core.services.update_service import update_service
+    from core.version import __version__
+    from governance.services import telemetry_outbox
+    result = update_service.rollback_version(args.get("target") or None)
+    if result.get("success"):
+        telemetry_outbox.record_event("ROLLBACK_APPLIED", from_version=__version__,
+                                      to_version=str(result.get("target") or result.get("version") or ""))
+    return _short(result)
+
+
 ACTIONS: Dict[str, Dict[str, Any]] = {
     "order_sync.run_now": {"service": "order_sync", "label": "Sync orders now", "fn": _order_sync_now},
     "kit_sync.run_now": {"service": "kit_sync", "label": "Sync kits now", "fn": _kit_sync_now},
@@ -188,6 +216,8 @@ ACTIONS: Dict[str, Dict[str, Any]] = {
     "housekeeping.clean": {"service": "housekeeping", "label": "Clean old crops & exports", "fn": _clean_storage},
     "housekeeping.optimize_db": {"service": "housekeeping", "label": "Optimise database", "fn": _optimize_db},
     "update.apply": {"service": "update", "label": "Update to latest release", "fn": _update},
+    "update.rollback": {"service": "update", "label": "Roll back to the previous version", "fn": _rollback},
+    "itms.wipe_session": {"service": "itms", "label": "Wipe ITMS session (sign out of ITMS)", "fn": _wipe_itms_session},
 }
 
 

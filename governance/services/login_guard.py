@@ -63,7 +63,7 @@ def record(username: str, success: bool, request=None, user=None, reason: str = 
 
     ip, device, ua = _client(request)
     try:
-        return LoginAttempt.objects.create(
+        attempt = LoginAttempt.objects.create(
             username=(username or "").strip().lower()[:150],
             user=user if getattr(user, "pk", None) else None,
             success=success,
@@ -75,6 +75,18 @@ def record(username: str, success: bool, request=None, user=None, reason: str = 
         )
     except Exception:
         return None
+    if not success:
+        try:
+            locked, _minutes = lock_status(username, request)
+            if locked:
+                from django.core.cache import cache
+                if cache.add(f"close:lockevent:{(username or '').lower()}:{ip}", 1, int(WINDOW.total_seconds())):
+                    from governance.services.fleet import security_event
+                    security_event("LOGIN_LOCKED", request=request, user=user, username=username, ip=ip,
+                                   device_id=device, reason="too many failed sign-ins")
+        except Exception:
+            pass
+    return attempt
 
 
 def clear_failures(username: str) -> int:

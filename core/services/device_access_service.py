@@ -1472,7 +1472,14 @@ def activate_with_code(
 
     throttle_key = _activation_throttle_key(clean_email)
     failures = int(cache.get(throttle_key, 0) or 0)
-    if failures >= ACTIVATION_CODE_MAX_FAILURES:
+    try:
+        from core.services.security_envelope import extract_client_ip
+        _ip = extract_client_ip(request) if request is not None else ""
+    except Exception:
+        _ip = ""
+    ip_key = f"itms_activation_fail_ip:{_ip}"
+    ip_failures = int(cache.get(ip_key, 0) or 0) if _ip else 0
+    if failures >= ACTIVATION_CODE_MAX_FAILURES or ip_failures >= ACTIVATION_CODE_MAX_FAILURES:
         return False, "Too many incorrect codes. Please wait 15 minutes and try again.", None
 
     req_obj = EmailAccessRequest.objects.filter(
@@ -1484,6 +1491,14 @@ def activate_with_code(
 
     if not req_obj:
         cache.set(throttle_key, failures + 1, ACTIVATION_CODE_LOCKOUT_SECONDS)
+        if _ip:
+            cache.set(ip_key, ip_failures + 1, ACTIVATION_CODE_LOCKOUT_SECONDS)
+        try:
+            from governance.services.fleet import security_event
+            security_event("ACTIVATION_FAILED", request=request, username=clean_email,
+                           reason=f"failure {failures + 1} for this email")
+        except Exception:
+            pass
         return False, "Invalid email or activation code.", None
     cache.delete(throttle_key)
 

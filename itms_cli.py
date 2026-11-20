@@ -463,6 +463,14 @@ def run_services(args=None):
     call_command("itms_services", *(args or []))
 
 
+def run_fleet(args=None):
+    """Central fleet: itms fleet status | token --bond AGM --seats 5 --hours 24 | directive <install> <ACTION>"""
+    import django
+    django.setup()
+    from django.core.management import call_command
+    call_command("itms_fleet", *(args or []))
+
+
 def run_admin_2fa(args=None):
     """Administrator 2-step sign-in: itms admin-2fa status|reset <username>"""
     import django
@@ -633,8 +641,23 @@ def run_update(extra_args=None):
         print(f"[!] Post-update task notice: {post_exc}")
 
 
+def _report_uninstall():
+    """Tell the central server this laptop is being uninstalled (3-second limit; never blocks uninstall)."""
+    try:
+        import django
+        django.setup()
+        from core.version import __version__
+        from governance.services import policy_sync, telemetry_outbox
+        if policy_sync.is_enrolled():
+            telemetry_outbox.record_event("UNINSTALL_COMPLETED", from_version=__version__)
+            policy_sync.heartbeat_once(timeout=3)
+    except Exception:
+        pass
+
+
 def run_uninstall(extra_args=None):
     """Triggers complete application uninstallation."""
+    _report_uninstall()
     if sys.platform == "win32":
         # First stop and remove Windows Service if installed
         try:
@@ -840,6 +863,10 @@ def main():
 
     if first in ("services", "service"):
         run_services(args[1:])
+        return
+
+    if first == "fleet":
+        run_fleet(args[1:])
         return
 
     if first in ("audit", "verify-vault"):

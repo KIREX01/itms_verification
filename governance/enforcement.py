@@ -36,6 +36,7 @@ VIEW_CAPABILITIES: Dict[str, Dict[str, Spec]] = {
     "api_me_profile": {"GET": PUBLIC},
     "api_me_device_info": {"POST": PUBLIC},  # any signed-in device describes itself
     "install_view": {"GET": PUBLIC, "POST": PUBLIC},  # self-protecting: administrator-only POST
+    "device_access_view": {"GET": PUBLIC, "POST": PUBLIC},  # unknown devices request access
 
     # --- ITMS connection & orders ---
     "api_itms_connect": {"POST": C.ITMS_CONNECT},

@@ -1411,6 +1411,14 @@ class AuthorizedDevice(models.Model):
     device_model = models.CharField(max_length=80, blank=True, default="")
     device_info = models.JSONField(default=dict, blank=True,
                                    help_text="Client hints + browser report (screen, time zone, CPU, GPU, ...).")
+    # Device admission: an unknown device asks for access; the administrator approves or blocks it.
+    request_name = models.CharField(max_length=150, blank=True, default="",
+                                    help_text="Who the person said they are when requesting device access.")
+    request_email = models.CharField(max_length=254, blank=True, default="")
+    request_note = models.CharField(max_length=300, blank=True, default="")
+    requested_at = models.DateTimeField(null=True, blank=True)
+    install_id = models.CharField(max_length=64, blank=True, default="", db_index=True,
+                                  help_text="Laptop install the device connects through (empty = central server).")
     status = models.CharField(
         max_length=16,
         choices=Status.choices,

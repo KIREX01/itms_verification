@@ -1,6 +1,6 @@
 from django.urls import path
 
-from backoffice import sync_api, views
+from backoffice import sync_api, twofa_views, views
 
 app_name = "backoffice"
 
@@ -17,6 +17,9 @@ urlpatterns = [
     path("audit/", views.audit_log, name="audit"),
     path("technical/", views.technical, name="technical"),
     path("installs/", views.installs, name="installs"),
+    path("signins/", views.signins, name="signins"),
+    path("2fa/", twofa_views.twofa_verify, name="twofa_verify"),
+    path("2fa/setup/", twofa_views.twofa_setup, name="twofa_setup"),
     # Machine-to-machine policy sync (HMAC-authenticated; central server only)
     path("api/v1/installs/enroll/", sync_api.install_enroll, name="install_enroll"),
     path("api/v1/installs/heartbeat/", sync_api.install_heartbeat, name="install_heartbeat"),

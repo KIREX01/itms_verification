@@ -193,6 +193,100 @@ def build_snapshot() -> Dict[str, Any]:
     }
 
 
+DEVICE_REQUEST_FIELDS = {"device_name": 150, "device_type": 16, "request_name": 150, "request_email": 254,
+                         "request_note": 300, "ip_address": 64, "mac_address": 32, "user_agent": 500,
+                         "os_name": 40, "os_version": 40, "browser": 40, "browser_version": 40,
+                         "device_model": 80}
+
+
+def _ingest_device_requests(inst, requests_: list) -> None:
+    """Central: file an install's pending device requests in the backoffice Devices queue."""
+    from core.models import AuthorizedDevice
+
+    for item in requests_[:50]:
+        if not isinstance(item, dict):
+            continue
+        device_id = str(item.get("device_id") or "")[:96]
+        if not device_id.startswith("DEV-"):
+            continue
+        dev = AuthorizedDevice.objects.filter(device_id=device_id).first()
+        if dev is not None and dev.install_id and dev.install_id != inst.install_id:
+            continue  # never let one install touch another install's devices
+        if dev is None:
+            dev = AuthorizedDevice(device_id=device_id, status=AuthorizedDevice.Status.PENDING,
+                                   install_id=inst.install_id)
+        for field, max_len in DEVICE_REQUEST_FIELDS.items():
+            value = item.get(field)
+            if value not in (None, ""):
+                setattr(dev, field, str(value)[:max_len])
+        info = item.get("device_info")
+        if isinstance(info, dict):
+            dev.device_info = {k: info[k] for k in ("client", "server") if isinstance(info.get(k), dict)}
+        username = str(item.get("username") or "")
+        if username and dev.user_id is None:
+            from django.contrib.auth.models import User
+            dev.user = User.objects.filter(username=username).first()
+        dev.requested_at = dev.requested_at or timezone.now()
+        dev.install_id = inst.install_id
+        dev.save()
+
+
+def _device_decisions(inst) -> list:
+    """Central: the administrator's decisions for devices that connect through this install."""
+    from core.models import AuthorizedDevice
+
+    return [
+        {"device_id": d.device_id, "status": d.status, "block_reason": d.block_reason,
+         "username": d.user.username if d.user_id else ""}
+        for d in AuthorizedDevice.objects.filter(install_id=inst.install_id).select_related("user")[:500]
+    ]
+
+
+def _local_device_requests() -> list:
+    """Edge: pending device requests made on this install, to be decided centrally."""
+    from core.models import AuthorizedDevice
+
+    out = []
+    for d in AuthorizedDevice.objects.filter(status=AuthorizedDevice.Status.PENDING,
+                                             device_id__startswith="DEV-").select_related("user")[:50]:
+        item = {f: getattr(d, f) for f in DEVICE_REQUEST_FIELDS}
+        item.update({"device_id": d.device_id, "device_info": d.device_info or {},
+                     "username": d.user.username if d.user_id else ""})
+        out.append(item)
+    return out
+
+
+def _apply_device_decisions(decisions: list) -> None:
+    """Edge: apply the administrator's approve / block decisions locally."""
+    from django.contrib.auth.models import User
+    from core.models import AuthorizedDevice
+
+    for item in decisions or []:
+        if not isinstance(item, dict) or not item.get("device_id"):
+            continue
+        status = item.get("status")
+        if status not in AuthorizedDevice.Status.values:
+            continue
+        dev = AuthorizedDevice.objects.filter(device_id=item["device_id"]).first()
+        if dev is None:
+            continue
+        changed = dev.status != status
+        dev.status = status
+        dev.block_reason = str(item.get("block_reason") or "")[:255]
+        if item.get("username"):
+            dev.user = User.objects.filter(username=item["username"]).first() or dev.user
+        dev.save()
+        if changed and status in (AuthorizedDevice.Status.BLOCKED, AuthorizedDevice.Status.REVOKED):
+            try:
+                from django.contrib.sessions.models import Session
+                from governance.models import UserSessionIndex
+                keys = list(UserSessionIndex.objects.filter(device_id=dev.device_id)
+                            .values_list("session_key", flat=True))
+                Session.objects.filter(session_key__in=keys).delete()
+            except Exception:
+                pass
+
+
 def handle_heartbeat(install_id: str, body: bytes, ts: str, signature: str, ip: str = "") -> Dict[str, Any]:
     from governance.models import InstallRegistration
 
@@ -230,10 +324,12 @@ def handle_heartbeat(install_id: str, body: bytes, ts: str, signature: str, ip: 
         inst.device_info = _clean_host_info(payload["device_info"])
     inst.save(update_fields=["last_seen_at", "last_ip", "app_version", "policy_version_acked", "health",
                              "device_info"])
+    _ingest_device_requests(inst, payload.get("device_requests") or [])
     response: Dict[str, Any] = {
         "policy_version": current,
         "lock": {"locked": inst.locked, "reason": inst.lock_reason},
         "server_time": timezone.now().isoformat(),
+        "devices": _device_decisions(inst),
     }
     if inst.policy_version_acked != current:
         response["snapshot"] = build_snapshot()
@@ -365,7 +461,7 @@ def heartbeat_once() -> Dict[str, Any]:
 
     body = json.dumps({"app_version": __version__, "policy_version": state.get("policy_version", 0),
                        "machine_fingerprint": machine_fingerprint(), "health": _health(),
-                       "device_info": host_info()}).encode()
+                       "device_info": host_info(), "device_requests": _local_device_requests()}).encode()
     ts, sig = sign(state["secret"], body)
     status, content, headers = _http_post(
         f"{state['central_url']}/backoffice/api/v1/installs/heartbeat/", body,
@@ -390,6 +486,7 @@ def heartbeat_once() -> Dict[str, Any]:
         apply_snapshot(data["snapshot"])
         state["policy_version"] = data["snapshot"].get("policy_version", data.get("policy_version", 0))
     _apply_lock(data.get("lock") or {}, state)
+    _apply_device_decisions(data.get("devices") or [])
     state["last_sync_ok_at"] = timezone.now().isoformat()
     save_enrollment(state)
     return data

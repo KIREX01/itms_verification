@@ -23,9 +23,11 @@ from django.views.decorators.http import require_http_methods, require_POST
 from governance.capabilities import Role
 from governance.models import (
     AccessRequest, AccountState, AdminAuditLog, BondMembership, BurnedIdentity, CompanyEmailLink,
-    FeatureFlag, InstallRegistration, ItmsWarehouseAccess,
+    FeatureFlag, InstallRegistration, ItmsWarehouseAccess, LoginAttempt,
 )
-from governance.services import accounts, audit, authz, flags, identity, memberships, onboarding, switches
+from governance.services import (
+    accounts, audit, authz, flags, identity, login_guard, memberships, onboarding, switches,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +38,9 @@ def admin_required(view):
     def wrapper(request: HttpRequest, *args, **kwargs):
         # The central server is the only control centre: installed apps have no backoffice.
         if getattr(settings, "DEPLOYMENT_ROLE", "edge") != "central":
-            raise Http404("The backoffice is only available on the central server.")
+            return render(request, "backoffice/edge_no_backoffice.html", {
+                "central_url": getattr(settings, "CLOSE_CENTRAL_URL", "https://close.kirex.online").rstrip("/"),
+            }, status=404)
         user = getattr(request, "user", None)
         if not (user and user.is_authenticated):
             return redirect(f"/login/?next={request.path}")
@@ -44,6 +48,12 @@ def admin_required(view):
             return render(request, "governance/no_access.html",
                           {"message": "The backoffice is for the administrator only.", "code": "ADMIN_REQUIRED"},
                           status=403)
+        # 2-step sign-in: set up an authenticator once, then enter its code once per session.
+        from governance.services import totp
+        if not totp.is_enrolled(user):
+            return redirect("backoffice:twofa_setup")
+        if not request.session.get(totp.SESSION_KEY):
+            return redirect(f"/backoffice/2fa/?next={request.path}")
         if request.method == "POST" and _is_managed_edge():
             messages.error(request, "This install is managed by the central server. Make changes in the central "
                                     "backoffice; they arrive here on the next check-in.")
@@ -71,6 +81,11 @@ def _step_up_ok(request: HttpRequest) -> bool:
 def _ctx(request, active, **extra):
     pending = AccessRequest.objects.filter(status=AccessRequest.Status.PENDING).count()
     try:
+        from core.models import AuthorizedDevice
+        pending_devices = AuthorizedDevice.objects.filter(status=AuthorizedDevice.Status.PENDING).count()
+    except Exception:
+        pending_devices = 0
+    try:
         from core.models import QualityFlag
         open_flags = QualityFlag.objects.filter(status=QualityFlag.Status.OPEN).count()
     except Exception:
@@ -81,6 +96,7 @@ def _ctx(request, active, **extra):
         "enrollment": load_enrollment() if _is_managed_edge() else {},
         "active": active,
         "nav_pending_requests": pending,
+        "nav_pending_devices": pending_devices,
         "nav_open_flags": open_flags,
         "deployment_role": getattr(settings, "DEPLOYMENT_ROLE", "edge"),
     }
@@ -228,7 +244,7 @@ def person_detail(request: HttpRequest, pk: int) -> HttpResponse:
         action = request.POST.get("action", "")
         reason = request.POST.get("reason", "").strip()
         dangerous = {"suspend", "burn", "assign_role", "remove_role", "reinstate", "attach_company_email",
-                     "revoke_company_email", "force_logout"}
+                     "revoke_company_email", "force_logout", "end_session", "reset_2fa"}
         if action in dangerous and not _step_up_ok(request):
             return redirect("backoffice:person_detail", pk=pk)
         try:
@@ -244,6 +260,26 @@ def person_detail(request: HttpRequest, pk: int) -> HttpResponse:
                     return redirect("backoffice:person_detail", pk=pk)
                 accounts.burn(person, reason, actor=request.user, request=request)
                 messages.success(request, f"{person.username} is burned. This cannot be undone.")
+            elif action == "end_session":
+                from django.contrib.sessions.models import Session
+                from governance.models import UserSessionIndex
+                key = request.POST.get("session_key", "")
+                Session.objects.filter(session_key=key).delete()
+                UserSessionIndex.objects.filter(session_key=key, user=person).delete()
+                audit.record(request.user, "account.end_session", target_type="user", target_id=person.pk,
+                             target_label=person.username, request=request)
+                messages.success(request, "Session ended.")
+            elif action == "unlock_signin":
+                n = login_guard.clear_failures(person.username)
+                audit.record(request.user, "account.unlock_signin", target_type="user", target_id=person.pk,
+                             target_label=person.username, after={"cleared": n}, request=request)
+                messages.success(request, "Sign-in unlocked.")
+            elif action == "reset_2fa":
+                from governance.services import totp
+                totp.reset(person)
+                audit.record(request.user, "admin.2fa_reset", target_type="user", target_id=person.pk,
+                             target_label=person.username, request=request)
+                messages.success(request, "2-step sign-in reset; it will be set up again at next backoffice visit.")
             elif action == "force_logout":
                 n = accounts.kill_sessions(person)
                 audit.record(request.user, "account.force_logout", target_type="user", target_id=person.pk,
@@ -291,7 +327,18 @@ def person_detail(request: HttpRequest, pk: int) -> HttpResponse:
         history=AdminAuditLog.objects.filter(target_type="user", target_id=str(person.pk))[:30],
         roles=[(r.value, r.label) for r in Role], bonds=sorted(_bond_names().items()),
         effective=authz.capability_summary(person),
+        sessions=_sessions_for(person),
+        signins=LoginAttempt.objects.filter(username=person.username.lower())[:20],
+        signin_locked=login_guard.lock_status(person.username)[0],
     ))
+
+
+def _sessions_for(person):
+    from django.contrib.sessions.models import Session
+    from governance.models import UserSessionIndex
+
+    live = set(Session.objects.filter(expire_date__gt=timezone.now()).values_list("session_key", flat=True))
+    return [s for s in UserSessionIndex.objects.filter(user=person).order_by("-created_at") if s.session_key in live]
 
 
 # ---------------------------------------------------------------------------
@@ -383,6 +430,20 @@ def devices(request: HttpRequest) -> HttpResponse:
     from core.models import AuthorizedDevice
     from core.services import device_access_service
 
+    if request.method == "POST" and request.POST.get("device_pk"):
+        from governance.services import device_admission
+        dev = get_object_or_404(AuthorizedDevice, pk=request.POST.get("device_pk"))
+        action = request.POST.get("action")
+        if action == "approve_device":
+            person = User.objects.filter(pk=request.POST.get("user_pk") or 0).first()
+            device_admission.approve(dev, request.user, user=person, request=request)
+            messages.success(request, f"Approved {dev.device_name} ({device_admission.device_code(dev.device_id)})"
+                                      + (f" for {person.username}." if person else "."))
+        elif action == "block_device":
+            device_admission.block(dev, request.user, reason=request.POST.get("reason", ""), request=request)
+            messages.success(request, f"Blocked {dev.device_name}; its sessions were ended.")
+        return redirect(f"/backoffice/devices/?status={request.GET.get('status', '')}")
+
     if request.method == "POST":
         action = request.POST.get("action")
         target = request.POST.get("target", "").strip()
@@ -398,14 +459,19 @@ def devices(request: HttpRequest) -> HttpResponse:
         (messages.success if ok else messages.error)(request, msg)
         return redirect("backoffice:devices")
 
-    status = (request.GET.get("status") or "").upper()
-    qs = AuthorizedDevice.objects.select_related("user").order_by("-last_seen_at")
+    from governance.services.device_admission import device_code
+    has_pending = AuthorizedDevice.objects.filter(status=AuthorizedDevice.Status.PENDING).exists()
+    status = (request.GET.get("status") if "status" in request.GET else ("PENDING" if has_pending else "")).upper()
+    qs = AuthorizedDevice.objects.select_related("user").order_by("-requested_at", "-last_seen_at")
     if status:
         qs = qs.filter(status=status)
     page = Paginator(qs, 50).get_page(request.GET.get("page"))
+    for d in page:
+        d.code = device_code(d.device_id)
     return render(request, "backoffice/devices.html", _ctx(
         request, "devices", page=page, status=status,
-        statuses=["", "APPROVED", "PENDING", "BLOCKED", "REVOKED", "EXPIRED"],
+        statuses=["PENDING", "APPROVED", "BLOCKED", "REVOKED", "EXPIRED", ""],
+        people=User.objects.filter(is_active=True).order_by("username"),
     ))
 
 
@@ -535,5 +601,29 @@ def installs(request: HttpRequest) -> HttpResponse:
     return render(request, "backoffice/installs.html", _ctx(
         request, "installs", rows=rows, new_code=new_code, policy_version=policy_sync.policy_version(),
         central_url=request.build_absolute_uri("/").rstrip("/"),
+    ))
+
+
+# ---------------------------------------------------------------------------
+# Sign-ins (history + lockouts)
+# ---------------------------------------------------------------------------
+@admin_required
+def signins(request: HttpRequest) -> HttpResponse:
+    from governance.models import LoginAttempt
+    from governance.services import login_guard
+
+    qs = LoginAttempt.objects.select_related("user")
+    show = (request.GET.get("show") or "").lower()
+    who = (request.GET.get("who") or "").strip().lower()
+    if show == "failed":
+        qs = qs.filter(success=False)
+    if who:
+        qs = qs.filter(Q(username__icontains=who) | Q(ip_address__icontains=who))
+    page = Paginator(qs, 100).get_page(request.GET.get("page"))
+    since = timezone.now() - login_guard.WINDOW
+    hot = (LoginAttempt.objects.filter(success=False, created_at__gte=since).exclude(reason="CLEARED_BY_ADMIN")
+           .values("username").annotate(n=Count("id")).filter(n__gte=login_guard.USER_FAIL_LIMIT).order_by("-n"))
+    return render(request, "backoffice/signins.html", _ctx(
+        request, "signins", page=page, show=show, who=who, locked=hot,
     ))
 

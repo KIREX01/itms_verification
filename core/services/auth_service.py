@@ -42,32 +42,35 @@ SHIELD_BANNER_ANS = Path("assets/shield_banner.ans")
 SHIELD_EMBLEM_PNG = Path("assets/shield_emblem.png")
 
 
-def authenticate_operator(username: str, password: str) -> Tuple[Optional[User], str]:
-    """Authenticates an operator using Django's standard authentication backend."""
+def authenticate_operator(username: str, password: str, request=None) -> Tuple[Optional[User], str]:
+    """
+    Authenticates an operator. Every attempt is recorded (sign-in history) and repeated failures
+    lock the username / IP for a while. Error messages never reveal whether a username exists.
+    """
+    from governance.services import login_guard
+
     if not username or not password:
         return None, "Username and password are required."
 
-    user = authenticate(username=username, password=password)
+    locked, minutes = login_guard.lock_status(username, request)
+    if locked:
+        login_guard.record(username, False, request, reason="LOCKED")
+        return None, f"Too many failed sign-in attempts. Try again in {minutes} minute(s)."
+
+    user = authenticate(request, username=username, password=password)
+    if user is None and not User.objects.filter(username=username).exists():
+        # Legacy: accounts kept in another local database are synced in once, then retried.
+        try:
+            from core.services.config_service import ensure_operator_accounts_synced
+            if ensure_operator_accounts_synced() > 0:
+                user = authenticate(request, username=username, password=password)
+        except Exception:
+            pass
+
     if user is None:
-        # Before failing, if the user is missing in this database, attempt auto-sync from SQLite
-        if not User.objects.filter(username=username).exists():
-            try:
-                from core.services.config_service import ensure_operator_accounts_synced
-                if ensure_operator_accounts_synced() > 0:
-                    user = authenticate(username=username, password=password)
-                    if user is not None and user.is_active:
-                        return user, ""
-            except Exception:
-                pass
-
-        # Check if username even exists to give a helpful message
-        if not User.objects.filter(username=username).exists():
-            return None, f"User '{username}' does not exist in active database. Did you mean to create an account or switch database?"
-        return None, "Invalid password. Please check your credentials."
-
+        return None, "Incorrect username or password."
     if not user.is_active:
-        return None, "This operator account is deactivated. Contact an administrator."
-
+        return None, "This account is not active. Contact the administrator."
     return user, ""
 
 

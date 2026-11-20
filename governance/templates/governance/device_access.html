@@ -1,0 +1,84 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Device Not Authorized - CLOSE Copilot</title>
+    <link rel="shortcut icon" href="{% static 'core/logos/favicon.ico' %}">
+    <link rel="stylesheet" href="{% static 'core/css/uganda_theme.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/app_layout.css' %}">
+    <link rel="stylesheet" href="{% static 'core/css/auth.css' %}">
+    <style>
+        .device-code { font-family: var(--font-mono, monospace); font-size: 1.6rem; font-weight: 800;
+                       letter-spacing: 3px; color: var(--ug-yellow); text-align: center; margin: 8px 0 4px; }
+        .hp-field { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+    </style>
+</head>
+<body>
+    <div class="uganda-flag-ribbon"></div>
+    <div class="auth-page-wrapper">
+        <div class="auth-card-box">
+            <div class="auth-card-head">
+                <h1 style="font-size:1.3rem; font-weight:800; color:#ffffff;">CLOSE <span style="color:var(--ug-yellow);">COPILOT</span></h1>
+            </div>
+            <div class="auth-card-body">
+                {% if error %}<div class="alert-banner error"><span>⚠️ {{ error }}</span></div>{% endif %}
+                {% if status == "BLOCKED" or status == "REVOKED" %}
+                    <div class="alert-banner error"><span>⛔ This device has been blocked by the administrator.</span></div>
+                {% elif waiting %}
+                    <div class="alert-banner warning"><span>⏳ Request sent. This device is waiting for the administrator's approval.</span></div>
+                    <p style="font-size:0.85rem; margin:6px 0 0;">Give the administrator this device code:</p>
+                    <div class="device-code">{{ code }}</div>
+                    <p style="font-size:0.78rem; color:var(--ug-text-muted);">Once it is approved, reload this page.</p>
+                    <a class="btn btn-secondary" href="/device/" style="justify-content:center; padding:10px;">Check again</a>
+                {% else %}
+                    <div class="alert-banner error"><span>🔒 {{ message }}</span></div>
+                    <p style="font-size:0.84rem; line-height:1.5;">Every phone and computer must be approved by the administrator before it can be used. Send a request from this device:</p>
+                    <form method="POST" action="/device/" id="device-request-form" style="display:flex; flex-direction:column; gap:12px;">
+                        {% csrf_token %}
+                        <div class="hp-field" aria-hidden="true"><label for="website">Website</label><input type="text" id="website" name="website" tabindex="-1" autocomplete="off"></div>
+                        <input type="hidden" name="client_report" id="client_report" value="{}">
+                        <div class="form-field"><label for="name">Your name *</label><input type="text" id="name" name="name" required autocomplete="name"></div>
+                        <div class="form-field"><label for="email">Your email</label><input type="email" id="email" name="email" autocomplete="email"></div>
+                        <div class="form-field"><label for="note">Why do you need access? (optional)</label><input type="text" id="note" name="note" placeholder="e.g. AGM bond, new Team Leader laptop"></div>
+                        <button type="submit" class="btn btn-primary" style="justify-content:center; padding:12px; font-weight:800;">Request device access</button>
+                    </form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <script>
+    (function () {
+        var field = document.getElementById("client_report");
+        if (!field) return;
+        var n = navigator, s = window.screen || {};
+        var report = {
+            screen: (s.width || 0) + "x" + (s.height || 0),
+            pixel_ratio: window.devicePixelRatio || 1,
+            timezone: (Intl.DateTimeFormat().resolvedOptions().timeZone) || "",
+            languages: (n.languages || [n.language]).join(","),
+            platform: n.platform || "",
+            hardware_concurrency: n.hardwareConcurrency || "",
+            device_memory_gb: n.deviceMemory || "",
+            max_touch_points: n.maxTouchPoints || 0
+        };
+        try {
+            var c = document.createElement("canvas"), gl = c.getContext("webgl");
+            var ext = gl && gl.getExtension("WEBGL_debug_renderer_info");
+            if (ext) report.gpu = String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL));
+        } catch (e) {}
+        function done() { field.value = JSON.stringify(report); }
+        if (n.userAgentData && n.userAgentData.getHighEntropyValues) {
+            n.userAgentData.getHighEntropyValues(["platformVersion", "model", "architecture"]).then(function (h) {
+                report.ua_platform_version = h.platformVersion || "";
+                report.ua_model = h.model || "";
+                report.ua_arch = h.architecture || "";
+                done();
+            }).catch(done);
+        } else { done(); }
+    })();
+    </script>
+</body>
+</html>

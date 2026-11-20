@@ -60,7 +60,7 @@ def login_view(request: HttpRequest) -> HttpResponse:
         password = request.POST.get("password", "").strip()
         remember = bool(request.POST.get("remember"))
 
-        user, err = auth_service.authenticate_operator(username, password)
+        user, err = auth_service.authenticate_operator(username, password, request=request)
         if user is None:
             inactive_user = User.objects.filter(username=username, is_active=False).first()
             if inactive_user:
@@ -509,7 +509,7 @@ def access_activate_view(request: HttpRequest) -> HttpResponse:
 
     user = User.objects.filter(email__iexact=email, is_active=True).first()
     if user:
-        auth_login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+        auth_login(request, user, backend="governance.auth_backend.LockoutModelBackend")
         auth_service.save_remembered_session(user, remember=True)
         resp = _redirect_after_auth(request)
     else:

@@ -44,3 +44,4 @@ GOVERNANCE_ENFORCE = False
 # Install gates are exercised explicitly in governance/tests/test_install_guard.py.
 CLOSE_REQUIRE_ENROLLMENT = False
 CLOSE_LOCAL_ACCESS = "open"
+CLOSE_DEVICE_ADMISSION = False

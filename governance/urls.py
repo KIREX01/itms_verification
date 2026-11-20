@@ -1,6 +1,6 @@
 from django.urls import path
 
-from governance import install_views, views
+from governance import device_views, install_views, views
 
 app_name = "governance"
 
@@ -10,4 +10,5 @@ urlpatterns = [
     path("api/team/", views.api_team, name="api_team"),
     path("api/me/device-info/", views.api_me_device_info, name="api_me_device_info"),
     path("install/", install_views.install_view, name="install"),
+    path("device/", device_views.device_access_view, name="device_access"),
 ]

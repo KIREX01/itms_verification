@@ -1,0 +1,26 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>2-Step Sign-In - CLOSE Copilot</title>
+    <link rel="stylesheet" href="{% static 'backoffice/backoffice.css' %}?v=2">
+</head>
+<body class="bo">
+<main class="bo-main" style="max-width:460px; margin:0 auto;">
+    {% for m in messages %}<div class="bo-msg {{ m.tags }}">{{ m }}</div>{% endfor %}
+    <div class="bo-card">
+        <h2>2-step sign-in</h2>
+        <p>Enter the 6-digit code from your authenticator app, or one of your recovery codes.</p>
+        <form method="post" class="bo-inline">{% csrf_token %}
+            <input type="hidden" name="next" value="{{ next }}">
+            <div class="bo-field"><label for="code">Code</label>
+                <input type="text" id="code" name="code" required autofocus autocomplete="one-time-code" maxlength="9"></div>
+            <button class="bo-btn primary">Continue</button>
+        </form>
+        <p class="bo-muted" style="margin-bottom:0;"><a href="/logout/">Sign out</a></p>
+    </div>
+</main>
+</body>
+</html>

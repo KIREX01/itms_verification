@@ -19,7 +19,8 @@
             <a href="{% url 'backoffice:people_list' %}" class="{% if active == 'people' %}active{% endif %}">People &amp; roles</a>
             <a href="{% url 'backoffice:bonds' %}" class="{% if active == 'bonds' %}active{% endif %}">Bonds {% if nav_open_flags %}<span class="bo-count" title="Open quality flags">{{ nav_open_flags }}</span>{% endif %}</a>
             <a href="{% url 'backoffice:controls' %}" class="{% if active == 'controls' %}active{% endif %}">Kill switches &amp; policy</a>
-            <a href="{% url 'backoffice:devices' %}" class="{% if active == 'devices' %}active{% endif %}">Devices</a>
+            <a href="{% url 'backoffice:devices' %}" class="{% if active == 'devices' %}active{% endif %}">Devices {% if nav_pending_devices %}<span class="bo-count" title="Device requests waiting">{{ nav_pending_devices }}</span>{% endif %}</a>
+            <a href="{% url 'backoffice:signins' %}" class="{% if active == 'signins' %}active{% endif %}">Sign-ins</a>
             <a href="{% url 'backoffice:reports' %}" class="{% if active == 'reports' %}active{% endif %}">Reports</a>
             <a href="{% url 'backoffice:audit' %}" class="{% if active == 'audit' %}active{% endif %}">Audit log</a>
             <a href="{% url 'backoffice:installs' %}" class="{% if active == 'installs' %}active{% endif %}">Installs</a>

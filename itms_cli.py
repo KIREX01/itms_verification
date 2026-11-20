@@ -67,7 +67,7 @@ def show_help():
         from core.version import __version__
         ver = f"v{__version__}"
     except Exception:
-        ver = "v1.2.1"
+        ver = "v1.3.0"
     print(f"""
 ======================================================================
   CLOSE COPILOT {ver} — SYSTEM COMMAND INTERFACE
@@ -447,6 +447,22 @@ def run_enroll(args=None):
     call_command("itms_enroll", *(args or []))
 
 
+def run_device(args=None):
+    """Device admission: itms device list | approve <CODE> [--user NAME] | block <CODE> [--reason TEXT]"""
+    import django
+    django.setup()
+    from django.core.management import call_command
+    call_command("itms_device", *(args or []))
+
+
+def run_admin_2fa(args=None):
+    """Administrator 2-step sign-in: itms admin-2fa status|reset <username>"""
+    import django
+    django.setup()
+    from django.core.management import call_command
+    call_command("itms_admin_2fa", *(args or []))
+
+
 def run_audit(args=None):
     """Verifies SHA-256 cryptographic hashes of all vaulted photos."""
     print("[*] Running cryptographic SHA-256 vault integrity audit...")
@@ -767,7 +783,7 @@ def main():
             from core.version import __version__
             print(f"CLOSE Copilot v{__version__}")
         except (ImportError, AttributeError):
-            print("CLOSE Copilot v1.2.1")
+            print("CLOSE Copilot v1.3.0")
         return
 
     if first in ("start", "--daemon", "--bg", "-bg", "bg", "daemon"):
@@ -804,6 +820,14 @@ def main():
 
     if first in ("enroll",):
         run_enroll(args[1:])
+        return
+
+    if first in ("device", "devices"):
+        run_device(args[1:])
+        return
+
+    if first in ("admin-2fa", "admin_2fa"):
+        run_admin_2fa(args[1:])
         return
 
     if first in ("audit", "verify-vault"):

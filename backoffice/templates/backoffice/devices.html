@@ -1,33 +1,59 @@
 {% extends "backoffice/base.html" %}
 {% block title %}Devices{% endblock %}
 {% block content %}
-<div class="bo-head"><div><h1>Devices</h1><p>Laptops, phones and terminals that have signed in. Block a device, MAC address, IP or subnet.</p></div></div>
+<div class="bo-head"><div><h1>Devices</h1><p>Only devices you approve can open CLOSE Copilot. Unknown devices see "not authorized" and can only send you a request.</p></div></div>
+
+<div class="bo-filters">{% for s in statuses %}<a class="{% if s == status %}on{% endif %}" href="?status={{ s }}">{% if s == "PENDING" %}Requests{% if nav_pending_devices %} ({{ nav_pending_devices }}){% endif %}{% else %}{{ s|default:"All"|title }}{% endif %}</a>{% endfor %}</div>
+
+<div class="bo-card bo-scroll"><table class="bo-table">
+    <tr><th>Device</th><th>Requested by</th><th>OS / browser / hardware</th><th>Network</th><th>Status</th><th></th></tr>
+    {% for d in page %}
+    <tr>
+        <td><strong>{{ d.device_name|default:"—"|truncatechars:30 }}</strong>
+            <div><code style="color:var(--bo-accent);">{{ d.code }}</code> <span class="bo-muted">{{ d.device_type }}</span></div>
+            {% if d.user %}<div>for <a href="{% url 'backoffice:person_detail' d.user.pk %}">{{ d.user.username }}</a></div>{% endif %}</td>
+        <td>{{ d.request_name|default:"—" }}<div class="bo-muted">{{ d.request_email }}</div>
+            {% if d.request_note %}<div class="bo-muted">"{{ d.request_note|truncatechars:80 }}"</div>{% endif %}
+            {% if d.requested_at %}<div class="bo-muted">{{ d.requested_at|date:"Y-m-d H:i" }}</div>{% endif %}
+            {% if d.install_id %}<div class="bo-muted">via laptop install</div>{% endif %}</td>
+        <td>{{ d.os_name|default:"—" }} {{ d.os_version }}{% if d.device_model %} · {{ d.device_model }}{% endif %}
+            <div class="bo-muted">{{ d.browser }} {{ d.browser_version }}</div>
+            {% with c=d.device_info.client %}{% if c %}<div class="bo-muted">{{ c.screen }} · {{ c.timezone }}{% if c.gpu %} · {{ c.gpu|truncatechars:30 }}{% endif %}</div>
+            <details class="bo-confirm"><summary class="bo-muted">all details</summary><dl class="bo-kv" style="font-size:12px;">{% for k, v in c.items %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}
+            {% for k, v in d.device_info.server.hints.items %}<dt>hint {{ k }}</dt><dd>{{ v|truncatechars:60 }}</dd>{% endfor %}</dl></details>{% endif %}{% endwith %}</td>
+        <td>{{ d.ip_address|default:"—" }}<div class="bo-muted">{{ d.mac_address }}</div><div class="bo-muted">seen {{ d.last_seen_at|date:"Y-m-d H:i"|default:"—" }}</div></td>
+        <td><span class="pill {% if d.status == 'APPROVED' %}ok{% elif d.status == 'PENDING' %}warn{% else %}danger{% endif %}">{{ d.get_status_display }}</span>
+            {% if d.block_reason %}<div class="bo-muted">{{ d.block_reason|truncatechars:40 }}</div>{% endif %}
+            {% if d.approved_by %}<div class="bo-muted">by {{ d.approved_by.username }}</div>{% endif %}</td>
+        <td style="min-width:220px;">
+            {% if d.status != "APPROVED" %}
+            <form method="post" class="bo-inline" style="margin-bottom:6px;">{% csrf_token %}
+                <input type="hidden" name="device_pk" value="{{ d.pk }}"><input type="hidden" name="action" value="approve_device">
+                <div class="bo-field" style="min-width:140px;"><label>Belongs to</label><select name="user_pk"><option value="">(not linked)</option>
+                    {% for p in people %}<option value="{{ p.pk }}" {% if d.user_id == p.pk %}selected{% endif %}>{{ p.username }}</option>{% endfor %}</select></div>
+                <button class="bo-btn ok small">Approve</button>
+            </form>{% endif %}
+            {% if d.status != "BLOCKED" %}
+            <form method="post" class="bo-inline">{% csrf_token %}
+                <input type="hidden" name="device_pk" value="{{ d.pk }}"><input type="hidden" name="action" value="block_device">
+                <input type="text" name="reason" placeholder="reason" style="max-width:120px; background:#0b1220; color:#fff; border:1px solid #263244; border-radius:6px; padding:4px 6px;">
+                <button class="bo-btn danger small">Block</button>
+            </form>{% endif %}
+        </td>
+    </tr>
+    {% empty %}<tr><td colspan="6" class="bo-muted">{% if status == "PENDING" %}No device requests waiting.{% else %}No devices.{% endif %}</td></tr>{% endfor %}
+</table>
+<div class="bo-pager">{% if page.has_previous %}<a href="?status={{ status }}&page={{ page.previous_page_number }}">← Previous</a>{% endif %} Page {{ page.number }} of {{ page.paginator.num_pages }} {% if page.has_next %}<a href="?status={{ status }}&page={{ page.next_page_number }}">Next →</a>{% endif %}</div>
+</div>
+
 <div class="bo-card">
+    <h2>Network rules</h2>
+    <p class="bo-muted" style="margin-top:0;">Block by MAC address, IP or subnet (applies before device approval).</p>
     <form method="post" class="bo-inline">{% csrf_token %}
         <div class="bo-field" style="min-width:260px;"><label>Device ID, MAC, IP or CIDR</label><input type="text" name="target" required placeholder="e.g. AA:BB:CC:DD:EE:FF or 10.0.0.0/24"></div>
         <div class="bo-field"><label>Reason</label><input type="text" name="reason"></div>
         <button class="bo-btn danger" name="action" value="block">Block</button>
         <button class="bo-btn" name="action" value="unblock">Unblock</button>
     </form>
-</div>
-<div class="bo-filters">{% for s in statuses %}<a class="{% if s == status %}on{% endif %}" href="?status={{ s }}">{{ s|default:"All"|title }}</a>{% endfor %}</div>
-<div class="bo-card bo-scroll"><table class="bo-table">
-    <tr><th>Device</th><th>Person</th><th>Type</th><th>OS / browser</th><th>IP / MAC</th><th>Status</th><th>Expires</th><th>Last seen</th></tr>
-    {% for d in page %}
-    <tr><td>{{ d.device_name|default:"—"|truncatechars:30 }}<div class="bo-muted">{{ d.device_id|truncatechars:24 }}</div></td>
-        <td>{% if d.user %}<a href="{% url 'backoffice:person_detail' d.user.pk %}">{{ d.user.username }}</a>{% else %}{{ d.authorized_email|default:"—" }}{% endif %}</td>
-        <td>{{ d.device_type }}</td>
-        <td>{{ d.os_name|default:"—" }} {{ d.os_version }}{% if d.device_model %}<div>{{ d.device_model }}</div>{% endif %}
-            <div class="bo-muted">{{ d.browser }} {{ d.browser_version }}</div>
-            {% if d.device_info.client %}<details class="bo-confirm"><summary class="bo-muted">details</summary>
-            <dl class="bo-kv" style="font-size:12px;">{% for k, v in d.device_info.client.items %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}
-            {% for k, v in d.device_info.server.hints.items %}<dt>hint {{ k }}</dt><dd>{{ v|truncatechars:60 }}</dd>{% endfor %}</dl></details>{% endif %}</td>
-        <td>{{ d.ip_address|default:"—" }}<div class="bo-muted">{{ d.mac_address }}</div></td>
-        <td><span class="pill {% if d.status == 'APPROVED' %}ok{% elif d.status == 'PENDING' %}warn{% else %}danger{% endif %}">{{ d.status }}</span>
-            {% if d.block_reason %}<div class="bo-muted">{{ d.block_reason|truncatechars:40 }}</div>{% endif %}</td>
-        <td>{{ d.expires_at|date:"Y-m-d H:i"|default:"—" }}</td><td>{{ d.last_seen_at|date:"Y-m-d H:i" }}</td></tr>
-    {% empty %}<tr><td colspan="8" class="bo-muted">No devices.</td></tr>{% endfor %}
-</table>
-<div class="bo-pager">{% if page.has_previous %}<a href="?status={{ status }}&page={{ page.previous_page_number }}">← Previous</a>{% endif %} Page {{ page.number }} of {{ page.paginator.num_pages }} {% if page.has_next %}<a href="?status={{ status }}&page={{ page.next_page_number }}">Next →</a>{% endif %}</div>
 </div>
 {% endblock %}

@@ -10,6 +10,20 @@ from governance.capabilities import Role
 from governance.models import AccessRequest, AccountState, AdminAuditLog, BondMembership, CompanyEmailLink
 from governance.services import onboarding
 
+def admin_client_with_2fa(admin):
+    """A signed-in administrator client that has completed 2-step sign-in for this session."""
+    from governance.models import AdminTOTP
+    from governance.services import totp
+    AdminTOTP.objects.update_or_create(user=admin, defaults={"secret_sealed": totp._seal("JBSWY3DPEHPK3PXP"),
+                                                             "confirmed": True})
+    c = Client()
+    c.force_login(admin)
+    session = c.session
+    session[totp.SESSION_KEY] = True
+    session.save()
+    return c
+
+
 PAGES = ["/backoffice/", "/backoffice/access/", "/backoffice/people/", "/backoffice/bonds/",
          "/backoffice/controls/", "/backoffice/devices/", "/backoffice/reports/", "/backoffice/audit/",
          "/backoffice/technical/"]
@@ -22,8 +36,7 @@ class BackofficeTests(TestCase):
     def setUp(self):
         cache.clear()
         self.admin = User.objects.create_superuser("owner", "owner@example.com", "Owner-pass-1")
-        self.c = Client()
-        self.c.force_login(self.admin)
+        self.c = admin_client_with_2fa(self.admin)
         self.tl = User.objects.create_user("tl_bo", "tl.bo@gmail.com", "Tl-pass-123!")
         BondMembership.objects.create(user=self.tl, bond_code="AGM", role=Role.TEAM_LEADER)
         CompanyEmailLink.objects.create(user=self.tl, email="tl.bo@itms-ug.com", status="VERIFIED")

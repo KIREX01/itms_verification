@@ -116,7 +116,7 @@ def complete_signup_view(request: HttpRequest) -> HttpResponse:
             ctx.update({"req": still_live, "error": str(exc),
                         "form_data": {"username": request.POST.get("username", "")}})
             return render(request, "governance/complete_signup.html", ctx, status=400)
-        auth_login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+        auth_login(request, user, backend="governance.auth_backend.LockoutModelBackend")
         return redirect("/")
     return render(request, "governance/complete_signup.html", ctx)
 

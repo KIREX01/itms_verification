@@ -817,7 +817,7 @@ def evaluate_request_access(request: HttpRequest) -> Dict[str, Any]:
                 }
             from django.contrib.auth import login as auth_login
             if not (getattr(request, "user", None) and request.user.is_authenticated):
-                auth_login(request, paired_user, backend="django.contrib.auth.backends.ModelBackend")
+                auth_login(request, paired_user, backend="governance.auth_backend.LockoutModelBackend")
             dev, _, _ = register_or_refresh_authorized_device(
                 request,
                 user=paired_user,

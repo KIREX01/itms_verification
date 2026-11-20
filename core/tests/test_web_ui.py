@@ -130,7 +130,7 @@ class WebUITestCase(TestCase):
             "password": "wrong_password",
         })
         self.assertEqual(res.status_code, 200)
-        self.assertContains(res, "Invalid password")
+        self.assertContains(res, "Incorrect username or password")  # never reveals which one
 
 
     def test_logout_clears_session(self):

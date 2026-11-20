@@ -47,11 +47,13 @@ PUBLIC_PREFIXES = (
     "/admin/",
     "/backoffice/api/v1/installs/",  # install enrollment / check-in (HMAC-authenticated)
     "/install/",  # install activation status (activation itself is administrator-only)
+    "/device/",  # device access request page (device admission)
 )
 
 # Paths always reachable even when a device/IP/MAC is blocked or pending approval
 # so legitimate operators can submit an email activation request or enter an unlock code:
 ACCESS_PORTAL_PREFIXES = (
+    "/device/",
     "/access/",
     "/logout/",
     "/static/",

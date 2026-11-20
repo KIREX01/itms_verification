@@ -95,6 +95,31 @@
 {% endif %}
 
 <div class="bo-two">
+<div class="bo-card"><h2>Active sessions</h2><div class="bo-scroll"><table class="bo-table">
+    <tr><th>Since</th><th>IP</th><th>Device / browser</th><th></th></tr>
+    {% for s in sessions %}<tr><td>{{ s.created_at|date:"Y-m-d H:i" }}</td><td>{{ s.ip_address|default:"—" }}</td>
+        <td class="bo-muted">{{ s.device_id|truncatechars:18|default:"—" }}<div>{{ s.user_agent|truncatechars:48 }}</div></td>
+        <td><details class="bo-confirm"><summary>End</summary><form method="post" class="bo-inline" style="margin-top:6px;">{% csrf_token %}
+            <input type="hidden" name="action" value="end_session"><input type="hidden" name="session_key" value="{{ s.session_key }}">
+            {% include "backoffice/_confirm.html" %}<button class="bo-btn danger small">End session</button></form></details></td></tr>
+    {% empty %}<tr><td colspan="4" class="bo-muted">No active sessions.</td></tr>{% endfor %}
+</table></div></div>
+<div class="bo-card"><h2>Recent sign-ins {% if signin_locked %}<span class="pill danger">locked</span>{% endif %}</h2>
+    {% if signin_locked %}<form method="post" class="bo-inline" style="margin-bottom:8px;">{% csrf_token %}<input type="hidden" name="action" value="unlock_signin">
+        <button class="bo-btn small">Unlock sign-in</button></form>{% endif %}
+    <div class="bo-scroll"><table class="bo-table">
+    {% for a in signins %}<tr><td>{{ a.created_at|date:"Y-m-d H:i" }}</td>
+        <td><span class="pill {% if a.success %}ok{% else %}warn{% endif %}">{{ a.success|yesno:"OK,FAILED" }}</span> <span class="bo-muted">{{ a.reason }}</span></td>
+        <td>{{ a.ip_address }}</td><td class="bo-muted">{{ a.channel }}</td></tr>
+    {% empty %}<tr><td class="bo-muted">No sign-ins yet.</td></tr>{% endfor %}
+    </table></div>
+    {% if person.is_superuser %}<details class="bo-confirm" style="margin-top:10px;"><summary>Reset 2-step sign-in</summary>
+        <form method="post" class="bo-inline" style="margin-top:6px;">{% csrf_token %}<input type="hidden" name="action" value="reset_2fa">
+        {% include "backoffice/_confirm.html" %}<button class="bo-btn danger small">Reset</button></form></details>{% endif %}
+</div>
+</div>
+
+<div class="bo-two">
 <div class="bo-card"><h2>Devices</h2><div class="bo-scroll"><table class="bo-table">
     <tr><th>Device</th><th>OS / browser</th><th>IP</th><th>Status</th><th>Last seen</th></tr>
     {% for d in devices %}<tr><td>{{ d.device_name|default:d.device_id|truncatechars:28 }}{% if d.device_model %}<div class="bo-muted">{{ d.device_model }}</div>{% endif %}</td>

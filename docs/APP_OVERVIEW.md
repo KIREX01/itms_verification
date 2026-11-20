@@ -1,7 +1,7 @@
 # CLOSE Copilot / ITMS Verification Copilot — Master Application & Documentation Overview
 
 **The Definitive Operational, Architectural & Technical Reference Guide for Supervisors, Stakeholders, and Engineering Leadership**  
-**Application Version:** v1.2.1 (Production Status: **Active & Deployed**)  
+**Application Version:** v1.3.0 (Production Status: **Active & Deployed**)  
 **Live Production Host:** [https://close.kirex.online/](https://close.kirex.online/)  
 **Documentation Date:** 28 October 2026  
 **Source of Truth:** Production Codebase (`itms_project`, `core`, Textual TUI, CLI Service Manager, and the `docs/` repository library)

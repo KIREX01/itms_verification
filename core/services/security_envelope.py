@@ -49,11 +49,24 @@ class OperatorRequestEnvelope:
 
 
 def extract_client_ip(request: HttpRequest) -> str:
-    """Extracts client IP address respecting reverse proxies."""
+    """
+    The client's IP address. X-Forwarded-For is only trusted when the request arrives from one of
+    our own reverse proxies (settings.TRUSTED_PROXY_IPS, default: this machine's nginx); then the
+    right-most address not belonging to a trusted proxy is the real client. Anything else uses the
+    socket address, so a client cannot claim to be someone else by sending its own header.
+    """
+    from django.conf import settings
+
+    remote = str(request.META.get("REMOTE_ADDR") or "127.0.0.1").strip()
+    trusted = set(getattr(settings, "TRUSTED_PROXY_IPS", ("127.0.0.1", "::1")))
     xff = request.META.get("HTTP_X_FORWARDED_FOR")
-    if xff:
-        return str(xff).split(",")[0].strip()
-    return str(request.META.get("REMOTE_ADDR") or "127.0.0.1")
+    if xff and remote in trusted:
+        hops = [h.strip() for h in str(xff).split(",") if h.strip()]
+        for hop in reversed(hops):
+            if hop not in trusted:
+                return hop
+        return hops[0] if hops else remote
+    return remote
 
 
 def build_operator_envelope(request: HttpRequest) -> OperatorRequestEnvelope:

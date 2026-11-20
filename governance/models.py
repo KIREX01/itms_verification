@@ -202,6 +202,8 @@ class UserSessionIndex(models.Model):
     session_key = models.CharField(max_length=64, unique=True)
     ip_address = models.CharField(max_length=64, blank=True, default="")
     created_at = models.DateTimeField(default=timezone.now)
+    device_id = models.CharField(max_length=96, blank=True, default="")
+    user_agent = models.CharField(max_length=300, blank=True, default="")
 
 
 class BurnedIdentity(models.Model):
@@ -337,3 +339,37 @@ class InstallRegistration(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} [{self.status}]"
+
+
+class LoginAttempt(models.Model):
+    """Every sign-in attempt (web, TUI, Django admin): lockout + sign-in history."""
+
+    username = models.CharField(max_length=150, db_index=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                             related_name="+")
+    success = models.BooleanField(default=False, db_index=True)
+    reason = models.CharField(max_length=64, blank=True, default="")
+    ip_address = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    device_id = models.CharField(max_length=96, blank=True, default="")
+    user_agent = models.CharField(max_length=300, blank=True, default="")
+    channel = models.CharField(max_length=16, blank=True, default="web")
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.created_at:%Y-%m-%d %H:%M} {self.username} {'ok' if self.success else 'FAIL'} {self.ip_address}"
+
+
+class AdminTOTP(models.Model):
+    """Authenticator-app second factor for administrators (backoffice / Django admin)."""
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="admin_totp")
+    secret_sealed = models.TextField(help_text="Base32 TOTP secret, encrypted with the server key.")
+    confirmed = models.BooleanField(default=False)
+    last_used_step = models.BigIntegerField(default=0, help_text="Replay protection: last accepted time step.")
+    recovery_hashes = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+

@@ -169,6 +169,8 @@ MIDDLEWARE = [
     "governance.install_middleware.LocalAccessMiddleware",
     # Ask browsers for detailed device client hints (OS version, phone model, CPU architecture).
     "core.middleware.client_hints_middleware.ClientHintsMiddleware",
+    # Every device must be approved by the administrator; unknown devices see only a blocked page.
+    "governance.device_gate.DeviceAdmissionMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -177,6 +179,8 @@ MIDDLEWARE = [
     "core.middleware.maintenance_middleware.MaintenanceModeMiddleware",
     # Laptop installs must be enrolled with the central server and run on the enrolled computer.
     "governance.install_middleware.InstallGateMiddleware",
+    # Django admin: off on laptops; 2-step sign-in on the central server.
+    "governance.admin_guard.AdminSiteGuardMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "core.middleware.envelope_middleware.EnvelopeTracingMiddleware",
@@ -186,6 +190,10 @@ MIDDLEWARE = [
 ]
 
 # --- Governance ---------------------------------------------------------------
+# Every sign-in (web, TUI, Django admin) is recorded and password guessing is locked out.
+AUTHENTICATION_BACKENDS = ["governance.auth_backend.LockoutModelBackend"]
+# Reverse proxies whose X-Forwarded-For header is trusted (the server's own nginx).
+TRUSTED_PROXY_IPS = [ip.strip() for ip in os.environ.get("TRUSTED_PROXY_IPS", "127.0.0.1,::1").split(",") if ip.strip()]
 # Role/capability enforcement. Always on in production; off by default only inside test runs
 # (legacy suites predate roles) - governance tests switch it on explicitly.
 # Strict test detection (not the loose IS_TESTING substring match, which a server installed
@@ -198,6 +206,8 @@ DEPLOYMENT_ROLE = os.environ.get("DEPLOYMENT_ROLE", "edge").strip().lower() or "
 # computer). Developers working on a local checkout can set CLOSE_REQUIRE_ENROLLMENT=0 in .env.
 CLOSE_REQUIRE_ENROLLMENT = safe_env_bool("CLOSE_REQUIRE_ENROLLMENT", default=not _STRICT_TEST_RUN)
 CLOSE_CENTRAL_URL = os.environ.get("CLOSE_CENTRAL_URL", "https://close.kirex.online").strip()
+# Device admission: only administrator-approved devices may open the app (off only in test runs).
+CLOSE_DEVICE_ADMISSION = safe_env_bool("CLOSE_DEVICE_ADMISSION", default=not _STRICT_TEST_RUN)
 # Who may open a laptop install's web pages: "pc_and_paired" (this computer + QR-paired phones) or "open".
 CLOSE_LOCAL_ACCESS = os.environ.get(
     "CLOSE_LOCAL_ACCESS", "open" if _STRICT_TEST_RUN else "pc_and_paired").strip().lower()

@@ -20,8 +20,16 @@ def _index_session(sender, request, user, **kwargs):
         ip = extract_client_ip(request) or ""
     except Exception:
         pass
+    device_id = ""
+    try:
+        from governance.services.device_admission import _verified_device_id
+        device_id = _verified_device_id(request)
+    except Exception:
+        pass
     UserSessionIndex.objects.update_or_create(
-        session_key=session.session_key, defaults={"user": user, "ip_address": ip}
+        session_key=session.session_key,
+        defaults={"user": user, "ip_address": ip, "device_id": device_id,
+                  "user_agent": request.META.get("HTTP_USER_AGENT", "")[:300]},
     )
 
 

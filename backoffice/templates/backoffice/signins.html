@@ -1,0 +1,32 @@
+{% extends "backoffice/base.html" %}
+{% block title %}Sign-ins{% endblock %}
+{% block content %}
+<div class="bo-head"><div><h1>Sign-ins</h1><p>Every sign-in attempt on this server: web, TUI and 2-step codes. Five wrong passwords lock an account for 15 minutes.</p></div></div>
+
+{% if locked %}
+<div class="bo-card danger"><h2>Locked right now</h2>
+    {% for l in locked %}<span class="pill danger">{{ l.username }} · {{ l.n }} failures</span>{% endfor %}
+    <p class="bo-muted" style="margin-bottom:0;">Unlock a person from their page in People &amp; roles (if it's really them).</p>
+</div>
+{% endif %}
+
+<div class="bo-card">
+    <form method="get" class="bo-inline">
+        <div class="bo-field"><label>Username or IP</label><input type="search" name="who" value="{{ who }}"></div>
+        <div class="bo-field"><label>Show</label><select name="show"><option value="">All</option><option value="failed" {% if show == "failed" %}selected{% endif %}>Failed only</option></select></div>
+        <button class="bo-btn">Filter</button>
+    </form>
+</div>
+<div class="bo-card bo-scroll"><table class="bo-table">
+    <tr><th>When</th><th>Username</th><th>Result</th><th>IP</th><th>Device</th><th>Channel</th><th>Browser</th></tr>
+    {% for a in page %}
+    <tr><td style="white-space:nowrap;">{{ a.created_at|date:"Y-m-d H:i:s" }}</td>
+        <td>{% if a.user %}<a href="{% url 'backoffice:person_detail' a.user.pk %}">{{ a.username }}</a>{% else %}{{ a.username }}{% endif %}</td>
+        <td><span class="pill {% if a.success %}ok{% elif a.reason == 'LOCKED' %}danger{% else %}warn{% endif %}">{{ a.success|yesno:"OK,FAILED" }}</span> <span class="bo-muted">{{ a.reason }}</span></td>
+        <td>{{ a.ip_address|default:"—" }}</td><td class="bo-muted">{{ a.device_id|truncatechars:18|default:"—" }}</td>
+        <td>{{ a.channel }}</td><td class="bo-muted">{{ a.user_agent|truncatechars:50 }}</td></tr>
+    {% empty %}<tr><td colspan="7" class="bo-muted">No sign-ins recorded yet.</td></tr>{% endfor %}
+</table>
+<div class="bo-pager">{% if page.has_previous %}<a href="?show={{ show }}&who={{ who }}&page={{ page.previous_page_number }}">← Newer</a>{% endif %} Page {{ page.number }} of {{ page.paginator.num_pages }} {% if page.has_next %}<a href="?show={{ show }}&who={{ who }}&page={{ page.next_page_number }}">Older →</a>{% endif %}</div>
+</div>
+{% endblock %}

@@ -10,7 +10,7 @@
         <div class="modal-body" style="gap: 14px; overflow-y: auto;">
             <!-- Single Input / Type Area -->
             <div style="position:relative; width:100%;">
-                <span style="position:absolute; left:14px; top:50%; transform:translateY(-50%); font-size:1.15rem; color:var(--ug-yellow);">🔍</span>
+                <span style="position:absolute; left:14px; top:50%; transform:translateY(-50%); font-size:1.15rem; color:var(--ug-yellow);"><span class="ico ico-search" aria-hidden="true"></span></span>
                 <input type="text" id="input-edit-plate"
                        style="width:100%; box-sizing:border-box; padding:12px 14px 12px 42px; font-family:var(--font-mono); font-size:1.2rem; font-weight:800; text-transform:uppercase; color:var(--ug-yellow); background:var(--ug-black-surface); border:2px solid var(--ug-border); border-radius:var(--radius-md); outline:none; transition:border-color 0.2s;"
                        placeholder="Type plate (e.g. UMA 946DQ) or search Order # / VIN..."
@@ -63,7 +63,7 @@
                                 <!-- Pre-Submission Physical Discrepancy Banner (Section 16.3 B) -->
                 <div id="sub-confirm-discrepancy-banner" style="display:none; background:rgba(245,158,11,0.12); border:1px solid #f59e0b; border-radius:var(--radius-md); padding:12px; color:#fde047; font-size:0.82rem; line-height:1.45;">
                     <div style="font-weight:800; margin-bottom:4px; font-size:0.86rem; color:#fcd34d; display:flex; align-items:center; gap:6px;">
-                        <span>⚠️</span> <span>Partial Batch Submission Detected:</span>
+                        <span><span class="ico ico-alert" aria-hidden="true"></span></span> <span>Partial Batch Submission Detected:</span>
                     </div>
                     <div>
                         Only <strong id="sub-discrepancy-approved-count" style="color:#ffffff;">0</strong> of <strong id="sub-discrepancy-total-count" style="color:#ffffff;">0</strong> pairs in this scope are <strong>APPROVED</strong>.
@@ -114,7 +114,7 @@
                 </button>
                 <div style="display:flex; gap:8px;">
                     <button type="button" class="btn btn-warning" id="btn-sub-review-conflicts" onclick="reviewConflictsFromSubmitModal()" style="display:none; font-weight:700;">
-                        🔍 Review Conflicts First
+                        <span class="ico ico-search" aria-hidden="true"></span> Review Conflicts First
                     </button>
                     <button class="btn btn-primary" id="btn-sub-start-confirm" onclick="startSubmissionExecution()" style="background:var(--ug-green); border-color:var(--ug-green); font-weight:800; box-shadow:0 4px 14px rgba(16,185,129,0.35);">
                         🚀 Confirm &amp; Submit [Enter]
@@ -179,7 +179,7 @@
                 <!-- Truthful Exception Summary List (Section 16.3 C) -->
                 <div id="sub-exception-summary" style="display:none; background:rgba(239,68,68,0.12); border:1px solid var(--ug-red); border-radius:var(--radius-md); padding:10px 14px;">
                     <div style="font-weight:800; font-size:0.82rem; color:#fca5a5; display:flex; align-items:center; gap:6px; margin-bottom:4px;">
-                        <span>⚠️</span> <span>Submission Exceptions &amp; Failures Encountered:</span>
+                        <span><span class="ico ico-alert" aria-hidden="true"></span></span> <span>Submission Exceptions &amp; Failures Encountered:</span>
                     </div>
                     <div id="sub-exception-list" style="max-height:90px; overflow-y:auto; font-family:var(--font-mono); font-size:0.75rem; color:#ffffff; line-height:1.4;"></div>
                 </div>
@@ -204,7 +204,7 @@
                         🗕 Run in Background
                     </button>
                     <button type="button" class="btn btn-warning" id="btn-sub-jump-failed" onclick="jumpToFailedPairsInQueue()" style="display:none; font-weight:700;">
-                        🔍 Jump to Failed Pairs in Queue
+                        <span class="ico ico-search" aria-hidden="true"></span> Jump to Failed Pairs in Queue
                     </button>
                     <button class="btn btn-primary" id="btn-sub-done" onclick="closeSubmissionModal()" style="display:none;">
                         ✓ Done / Close
@@ -487,7 +487,7 @@
                         📁 View Photos
                     </button>
                     <button class="btn btn-primary" id="btn-ingest-open-queue" onclick="jumpToNewBatchInQueue()" style="font-size:0.8rem; padding:6px 14px; display:none; background:var(--ug-green); border-color:var(--ug-green); color:#ffffff;">
-                        🔍 Open Review Queue (View New Batch)
+                        <span class="ico ico-search" aria-hidden="true"></span> Open Review Queue (View New Batch)
                     </button>
                     <button class="btn btn-secondary" id="btn-ingest-done" onclick="closeBatchUploadModal()" style="font-size:0.8rem; padding:6px 14px; display:none;">
                         ✓ Done / Close
@@ -831,14 +831,14 @@
     <div class="modal-box" style="max-width:500px; border-top:4px solid var(--ug-red);">
         <div class="modal-header">
             <span class="modal-title" style="color:var(--ug-red); display:flex; align-items:center; gap:8px;">
-                <span>🗑️</span>
+                <span><span class="ico ico-delete" aria-hidden="true"></span></span>
                 <span>Delete Vehicle Pair</span>
             </span>
             <button type="button" class="modal-close" onclick="closeModal('modal-delete-pair')" aria-label="Close">&times;</button>
         </div>
         <div class="modal-body" style="display:flex; flex-direction:column; gap:14px; padding:20px;">
             <div style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:12px; display:flex; gap:10px; align-items:flex-start;">
-                <span style="font-size:1.5rem; line-height:1;">⚠️</span>
+                <span style="font-size:1.5rem; line-height:1;"><span class="ico ico-alert" aria-hidden="true"></span></span>
                 <div style="font-size:0.84rem; line-height:1.45; color:#fca5a5;">
                     Are you sure you want to delete pair <strong id="delete-pair-plate-label" style="color:#ffffff;">---</strong> (Pair ID #<span id="delete-pair-id-label">--</span>)?
                     <p style="margin:6px 0 0; color:var(--ug-text-dim); font-size:0.78rem;">
@@ -861,7 +861,7 @@
             <div style="display:flex; gap:8px;">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('modal-delete-pair')">Cancel</button>
                 <button type="button" class="btn btn-danger" id="btn-confirm-delete-pair" onclick="confirmDeletePair()" style="background:var(--ug-red); border-color:var(--ug-red); font-weight:800; display:flex; align-items:center; gap:6px;">
-                    <span>🗑️ Confirm Delete &amp; Purge</span>
+                    <span><span class="ico ico-delete" aria-hidden="true"></span> Confirm Delete &amp; Purge</span>
                 </button>
             </div>
         </div>
@@ -1103,7 +1103,7 @@
     <div class="modal-box" style="width: 780px; max-width: 95vw; max-height: 92vh; display:flex; flex-direction:column;">
         <div class="modal-header">
             <span class="modal-title" style="display:flex; align-items:center; gap:8px; color:#ffffff !important; font-weight:800;">
-                <span>✏️</span> Edit Daily Stock Ledger (9-Row Overrides)
+                <span><span class="ico ico-edit" aria-hidden="true"></span></span> Edit Daily Stock Ledger (9-Row Overrides)
             </span>
             <button type="button" class="modal-close" onclick="closeModal('modal-edit-ledger')">&times;</button>
         </div>

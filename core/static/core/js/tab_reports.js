@@ -4,7 +4,7 @@
  * warehouse inventory allocations, and shift productivity metrics.
  */
 
-let reportCurrentScope = "ALL";
+let reportCurrentScope = "TODAY";  // always one working day (v1.3.2)
 let reportCurrentDate = "";
 let isFetchingReportTotals = false;
 let cachedUnallocatedItems = [];
@@ -25,9 +25,10 @@ async function fetchReportTotals() {
     isFetchingReportTotals = true;
 
     try {
-        let url = `/api/reports/totals/?scope=${encodeURIComponent(reportCurrentScope)}`;
-        if (reportCurrentDate) {
-            url += `&date=${encodeURIComponent(reportCurrentDate)}`;
+        const day = (typeof workingDaySuffix === "function" && workingDaySuffix()) || reportCurrentDate;
+        let url = `/api/reports/totals/?scope=TODAY`;
+        if (day) {
+            url += `&date=${encodeURIComponent(day)}`;
         }
 
         const resp = await fetch(url);
@@ -72,7 +73,7 @@ window.addEventListener('shiftDateChanged', (e) => {
     const detail = e.detail;
     if (detail) {
         updateReportActiveShiftDisplay(detail);
-        if (detail.suffix && detail.suffix !== reportCurrentDate && reportCurrentDate !== "ALL") {
+        if (detail.suffix && detail.suffix !== reportCurrentDate) {
             reportCurrentDate = detail.suffix;
             void fetchReportTotals();
         }

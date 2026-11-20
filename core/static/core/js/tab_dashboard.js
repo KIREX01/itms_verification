@@ -35,7 +35,7 @@ function updateDashboardDisplay() {
         total_photos: 0,
     };
 
-    const isShift = (dashboardViewMode === "SHIFT");
+    const isShift = true;  // always one working day (v1.3.2)
 
     // Header Shift Banner
     const shiftBadge = document.getElementById("dash-shift-badge");
@@ -43,7 +43,8 @@ function updateDashboardDisplay() {
     const shiftSummary = document.getElementById("dash-shift-summary-text");
     if (shiftBadge) {
         shiftBadge.className = isShift ? "badge badge-green" : "badge badge-cyan";
-        shiftBadge.innerText = isShift ? "● TODAY'S SHIFT" : "🌐 ALL-TIME TOTALS";
+        const info = window.activeShiftDateInfo || {};
+        shiftBadge.innerText = info.is_today === false ? "● SELECTED DAY" : "● TODAY";
     }
     if (shiftDateText) {
         shiftDateText.innerText = isShift ? `Shift: ${shift.date}` : "Cumulative Total";

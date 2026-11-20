@@ -1,0 +1,11 @@
+<!-- Working day: the first control on every tab. One day at a time, per person. -->
+<div class="day-bar" id="day-bar" role="group" aria-label="Working day">
+    <button type="button" class="day-bar-btn" id="day-bar-prev" onclick="shiftWorkingDay(-1)" title="Previous day" aria-label="Previous day">&#9664;</button>
+    <label class="day-bar-date" title="Pick a day (hotkey D)">
+        <span class="ico ico-calendar" aria-hidden="true"></span>
+        <input type="date" id="day-bar-input" aria-label="Working day" onchange="if (this.value) setWorkingDay(this.value)">
+    </label>
+    <button type="button" class="day-bar-btn" id="day-bar-next" onclick="shiftWorkingDay(1)" title="Next day" aria-label="Next day">&#9654;</button>
+    <button type="button" class="day-bar-today" id="day-bar-today" onclick="setWorkingDay('today')">Today</button>
+    <span class="day-bar-label" id="day-bar-label" aria-live="polite"></span>
+</div>

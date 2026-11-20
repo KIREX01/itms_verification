@@ -22,7 +22,7 @@
                 <div class="batches-toolbar-controls">
                     <!-- Search Filter -->
                     <div class="batch-search-wrap">
-                        <input type="text" id="batch-search-input" class="batch-search-field" placeholder="🔍 Search batches by ID or label..." oninput="filterBatchesStream()">
+                        <input type="text" id="batch-search-input" class="batch-search-field" placeholder="Search batches by ID or label..." oninput="filterBatchesStream()">
                     </div>
                     
                     <!-- Stream View Mode Density Switcher -->
@@ -51,30 +51,10 @@
                             📷 + Upload Batch
                         </button>
                     </div>
-                    <!-- Mobile Date Scope Toggle (Inside Drawer on Phone) -->
-                    <div class="scope-pills-group hide-desktop" style="display:flex; gap:6px; width:100%; padding-top:4px; border-top:1px solid rgba(255,255,255,0.08);">
-                        <button type="button" class="scope-pill-btn active" id="btn-bscope-shift-mob" onclick="setBatchesScopeMode('SHIFT')" style="flex:1; text-align:center; font-size:0.75rem; padding:6px 8px; font-weight:700;">📅 Shift Batches</button>
-                        <button type="button" class="scope-pill-btn" id="btn-bscope-all-mob" onclick="setBatchesScopeMode('ALL')" style="flex:1; text-align:center; font-size:0.75rem; padding:6px 8px; font-weight:700;">🌐 All Batches</button>
-                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- Batches Date Scope Bar (Desktop Toolbar) -->
-        <div class="scope-filter-bar hide-mobile">
-            <div class="scope-filter-bar-left">
-                <span class="scope-filter-label" style="color:#ffffff !important; font-weight:800;">📅 SCOPE:</span>
-                <div class="scope-pills-group">
-                    <button type="button" class="scope-pill-btn active" id="btn-bscope-shift" onclick="setBatchesScopeMode('SHIFT')" title="Filter batches for active operating shift date selected in top header">
-                        📅 Shift Batches
-                    </button>
-                    <button type="button" class="scope-pill-btn" id="btn-bscope-all" onclick="setBatchesScopeMode('ALL')" title="All batches across history">
-                        🌐 All Batches
-                    </button>
-                </div>
-            </div>
-            <span class="scope-summary-tag" id="batches-scope-summary-tag" style="color:rgba(255,255,255,0.85) !important;">Shift Batches</span>
-        </div>
 
         <!-- Full-Width Batches Accordion Stream -->
         <div class="batches-stream-scroll" id="batches-stream-container">

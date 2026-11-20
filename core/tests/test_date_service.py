@@ -129,8 +129,6 @@ class DateServiceTestCase(TestCase):
             data='{"target_date": "ALL"}',
             content_type="application/json"
         )
-        self.assertEqual(res_post4.status_code, 200)
-        data_post4 = res_post4.json()
-        self.assertTrue(data_post4["success"])
-        self.assertEqual(data_post4["active_shift"]["suffix"], "ALL")
-        self.assertEqual(data_post4["active_shift"]["formatted_date"], "All Dates")
+        # v1.3.2: always one working day; "All dates" is refused.
+        self.assertEqual(res_post4.status_code, 400)
+        self.assertFalse(res_post4.json()["success"])

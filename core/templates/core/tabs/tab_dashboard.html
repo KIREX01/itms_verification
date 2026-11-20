@@ -8,17 +8,6 @@
                 <span class="dash-shift-date" id="dash-shift-date-text">Shift: Loading...</span>
                 <span class="dash-shift-summary" id="dash-shift-summary-text">Loading today's metrics...</span>
             </div>
-            <div class="dash-view-toggle">
-                <span class="dash-toggle-label">VIEW MODE:</span>
-                <div class="scope-pills-group">
-                    <button type="button" class="scope-pill-btn active" id="btn-dash-mode-shift" onclick="setDashboardViewMode('SHIFT')" title="Show today's active shift metrics">
-                        🔥 Today's Shift
-                    </button>
-                    <button type="button" class="scope-pill-btn" id="btn-dash-mode-all" onclick="setDashboardViewMode('ALL_TIME')" title="Show all-time cumulative system totals">
-                        🌐 All-Time
-                    </button>
-                </div>
-            </div>
         </div>
 
         <!-- Operational KPI Metrics Cards Row (5-Column Grid, Pure White Text Standard) -->
@@ -26,7 +15,7 @@
             <div class="dash-metric-card border-review" onclick="switchNavTab(4); setWorkQueueFilter('PENDING');" title="Click to view Review Queue">
                 <div class="dash-metric-header">
                     <span class="dash-metric-label">Pending Review</span>
-                    <span class="dash-metric-icon">🔍</span>
+                    <span class="dash-metric-icon"><span class="ico ico-search" aria-hidden="true"></span></span>
                 </div>
                 <div class="dash-metric-val" id="kpi-review">0</div>
                 <span class="dash-metric-sub">Pairs awaiting inspection</span>
@@ -56,7 +45,7 @@
             <div class="dash-metric-card border-issues" onclick="switchNavTab(4); setWorkQueueFilter('ISSUES');" title="Click to view Issues">
                 <div class="dash-metric-header">
                     <span class="dash-metric-label">Issues / Incomplete</span>
-                    <span class="dash-metric-icon">⚠️</span>
+                    <span class="dash-metric-icon"><span class="ico ico-alert" aria-hidden="true"></span></span>
                 </div>
                 <div class="dash-metric-val" id="kpi-issues">0</div>
                 <span class="dash-metric-sub">Missing angles or OCR conflicts</span>
@@ -129,7 +118,7 @@
                 </div>
                 <div class="stock-kpi-card" id="kpi-card-physical" title="Audited safe room physical count and variance delta" style="background:linear-gradient(180deg, rgba(245, 158, 11, 0.08) 0%, #111622 100%); border:1px solid rgba(255,255,255,0.1); border-top:3px solid #f59e0b; border-radius:6px; padding:8px 10px; display:flex; flex-direction:column; gap:3px;">
                     <div class="stock-kpi-header" style="display:flex; align-items:center; gap:5px;">
-                        <span class="stock-kpi-icon">🔍</span>
+                        <span class="stock-kpi-icon"><span class="ico ico-search" aria-hidden="true"></span></span>
                         <span class="stock-kpi-label" style="font-size:0.68rem; font-weight:700; text-transform:uppercase; color:rgba(255,255,255,0.75);">Physical Count</span>
                     </div>
                     <div class="stock-kpi-val" id="kpi-val-physical" style="font-size:1.3rem; font-weight:800; font-family:var(--font-mono, monospace); color:#ffffff;">0</div>
@@ -212,7 +201,7 @@
                         <option value="">Detecting interfaces...</option>
                     </select>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="openMobileConnectModal()">
-                        🔍 Full Setup Guide
+                        <span class="ico ico-search" aria-hidden="true"></span> Full Setup Guide
                     </button>
                 </div>
             </div>
@@ -307,7 +296,7 @@
                         <span class="launchpad-label">Add Photos <span class="hotkey">I</span></span>
                         <span class="launchpad-sub">Batch Ingest</span>
                     </button>
-                    <a href="/api/export/report/" class="launchpad-btn" style="text-decoration:none;">
+                    <a data-cap="reports.export" href="/api/export/report/" class="launchpad-btn" style="text-decoration:none;">
                         <span class="launchpad-icon">📊</span>
                         <span class="launchpad-label">Export CSV <span class="hotkey">E</span></span>
                         <span class="launchpad-sub">Shift report</span>

@@ -175,6 +175,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "core.middleware.working_day_middleware.WorkingDayMiddleware",
     # After AuthenticationMiddleware so superusers can be recognised during maintenance.
     "core.middleware.maintenance_middleware.MaintenanceModeMiddleware",
     # Laptop installs must be enrolled with the central server and run on the enrolled computer.

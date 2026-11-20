@@ -93,7 +93,7 @@ async function fetchBatchesList(shiftDate = null) {
     const countBadge = document.getElementById("batches-count-badge");
     const summaryTag = document.getElementById("batches-scope-summary-tag");
     try {
-        const isAll = (currentBatchesDateScope === "ALL");
+        const isAll = false;  // always one working day (v1.3.2)
         const currentShiftDate = shiftDate || (window.activeShiftDateInfo && (window.activeShiftDateInfo.date || window.activeShiftDateInfo.suffix)) || "";
         let url = isAll ? "/api/batches/?scope=ALL" : "/api/batches/?scope=SHIFT";
         if (!isAll && currentShiftDate && currentShiftDate !== "ALL") {
@@ -124,9 +124,6 @@ async function fetchBatchesList(shiftDate = null) {
                             </p>
                             <div style="display:flex; gap:8px; margin-top:12px;">
                                 ${!isAll ? `
-                                    <button class="btn btn-secondary" onclick="setBatchesScopeMode('ALL')">
-                                        🌐 All Batches
-                                    </button>
                                 ` : ''}
                                 <button class="btn btn-primary" onclick="openBatchUploadModal()">
                                     📷 + New Upload Batch

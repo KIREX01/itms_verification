@@ -1034,25 +1034,24 @@ def api_shift_date(request: HttpRequest) -> JsonResponse:
         else:
             target = request.POST.get("target_date") or request.POST.get("date") or request.POST.get("suffix") or request.POST.get("mode") or ""
 
+        # The working day is per person (session); it never changes anyone else's day or the server default.
         target_str = str(target).strip()
-        if target_str.lower() in ("today", "live"):
-            config_service.set_setting("sync.shift_target_date_mode", "today")
-            config_service.set_setting("sync.manual_target_date", "")
+        today = date_service.today_kampala()
+        if target_str.lower() in ("today", "live", ""):
+            day = today
         elif target_str.lower() == "yesterday":
-            config_service.set_setting("sync.shift_target_date_mode", "yesterday")
-            config_service.set_setting("sync.manual_target_date", "")
-        elif target_str.upper() == "ALL":
-            config_service.set_setting("sync.shift_target_date_mode", "all")
-            config_service.set_setting("sync.manual_target_date", "ALL")
+            day = date_service.yesterday_kampala()
         else:
-            parsed_d = date_service.parse_date_input(target_str)
-            if parsed_d:
-                config_service.set_setting("sync.shift_target_date_mode", "manual")
-                config_service.set_setting("sync.manual_target_date", date_service.format_readable_date(parsed_d))
-            else:
-                return JsonResponse({"success": False, "error": f"Invalid date: '{target_str}'"}, status=400)
-
-        active_shift = date_service.get_active_shift_info()
+            day = date_service.parse_date_input(target_str) if target_str.upper() != "ALL" else None
+            if day is None:
+                return JsonResponse({"success": False, "error": "Choose a day."}, status=400)
+        day = date_service.clamp_working_day(day)
+        request.session[date_service.WORKING_DAY_SESSION_KEY] = day.isoformat()
+        tokens = date_service.set_request_working_day(day)
+        try:
+            active_shift = date_service.get_active_shift_info()
+        finally:
+            date_service.reset_request_working_day(tokens)
         try:
             from core.services.order_sync import ShiftOrderSyncDaemon
             ShiftOrderSyncDaemon.get_instance().notify_day_orders_detected(

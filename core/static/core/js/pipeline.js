@@ -963,14 +963,7 @@ window.populateAllShiftDropdowns = function(dates, activeShift) {
         const currentSelected = sel.value || activeSfx;
         sel.innerHTML = "";
 
-        // Standard All Dates (Aggregate) option
-        const optAll = document.createElement("option");
-        optAll.value = "ALL";
-        optAll.textContent = "All Dates (Aggregate)";
-        if (currentSelected === "ALL" || (!currentSelected && activeSfx === "ALL")) {
-            optAll.selected = true;
-        }
-        sel.appendChild(optAll);
+        // v1.3.2: always one working day; no "All dates" option.
 
         if (Array.isArray(dates) && dates.length > 0) {
             dates.forEach(d => {
@@ -997,7 +990,7 @@ window.setGlobalShiftDate = async function(targetVal) {
     if (!targetVal) return;
     try {
         if (typeof showToast === "function") {
-            showToast(`📅 Synchronizing application to shift ${targetVal}...`, "info");
+            showToast("Loading the day…", "info");
         }
         const csrf = typeof getCsrfToken === "function" ? getCsrfToken() : "";
         const res = await fetch("/api/settings/shift-date/", {
@@ -1013,7 +1006,7 @@ window.setGlobalShiftDate = async function(targetVal) {
             window.activeShiftDateInfo = data.active_shift;
             syncAllDateSelectorsUI(data.active_shift);
             if (typeof showToast === "function") {
-                showToast(`✓ All features mounted to shift: ${data.active_shift.display}`, "success");
+                showToast(`Working day: ${data.active_shift.formatted_date || data.active_shift.display}`, "success");
             }
 
             // Dispatch global event

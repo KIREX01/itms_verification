@@ -52,15 +52,17 @@ def device_access_view(request: HttpRequest) -> HttpResponse:
             return _blocked(request, error=str(exc), step="code")
         if user is not None:
             return redirect("/login/?unlocked=1")
-        first, _, last = (dev.request_name or "").partition(" ")
+        named = (dev.request_name or "") != dev.access_code_email.split("@")[0]
+        first, _, last = (dev.request_name or "").partition(" ") if named else ("", "", "")
         onboarding.start_verified_signup(request, dev.access_code_email, first, last, dev.device_id)
         return redirect("/signup/")
 
     form = {k: (request.POST.get(k) or "").strip() for k in ("first_name", "last_name", "email")}
     form["email"] = form["email"].lower()
+    # Names are optional here (sign-up asks for them); when given they must look like names.
     try:
-        first = onboarding.clean_name(form["first_name"], "first name")
-        last = onboarding.clean_name(form["last_name"], "last name")
+        first = onboarding.clean_name(form["first_name"], "first name") if form["first_name"] else ""
+        last = onboarding.clean_name(form["last_name"], "last name") if form["last_name"] else ""
     except onboarding.OnboardingError as exc:
         return _blocked(request, error=str(exc), form=form)
     try:
@@ -73,7 +75,8 @@ def device_access_view(request: HttpRequest) -> HttpResponse:
     codes = device_admission.email_codes_available()
     try:
         dev, cookie = device_admission.request_access(
-            request, name=f"{first} {last}", email=email, client_report=_client_report(request),
+            request, name=(f"{first} {last}".strip() or (user.get_full_name() if user else "") or email.split("@")[0]),
+            email=email, client_report=_client_report(request),
             user=user, install_id=_local_install_id(), notify_admins=not codes,
         )
     except ValueError as exc:

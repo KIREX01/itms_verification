@@ -60,6 +60,7 @@
             <div class="queue-controls-top">
                 <!-- Status Filter Pills (Subnavigation for Quick Access) -->
                 <div class="queue-subnav-strip">
+                    <span class="view-only-chip gov-hidden" data-cap-missing="queue.edit queue.approve"><span class="ico ico-view" aria-hidden="true"></span> View only</span>
                     <div class="queue-filter-pills" role="tablist">
                         <button type="button" class="queue-filter-pill active" data-filter="ALL" onclick="setWorkQueueFilter('ALL')" title="All items in queue">
                             All <span class="pill-count" id="qcount-all"></span>
@@ -71,7 +72,7 @@
                             Approved <span class="pill-count" id="qcount-approved"></span>
                         </button>
                         <button type="button" class="queue-filter-pill" data-filter="ISSUES" onclick="setWorkQueueFilter('ISSUES')" title="Needs operator attention">
-                            ⚠️ Issues <span class="pill-count" id="qcount-issues"></span>
+                            <span class="ico ico-alert" aria-hidden="true"></span> Issues <span class="pill-count" id="qcount-issues"></span>
                         </button>
                         <button type="button" class="queue-filter-pill" data-filter="SUBMITTED" onclick="setWorkQueueFilter('SUBMITTED')" title="Successfully submitted">
                             Done <span class="pill-count" id="qcount-done"></span>
@@ -82,7 +83,7 @@
                 <!-- Centralized Search & Scope Toolbar -->
                 <div class="queue-central-toolbar">
                     <div class="queue-search-wrap">
-                        <span class="queue-search-icon">🔍</span>
+                        <span class="queue-search-icon"><span class="ico ico-search" aria-hidden="true"></span></span>
                         <input type="text" class="queue-search-input" id="queue-search-input" placeholder="Search Plate, Order, VIN... (Esc)" oninput="onQueueSearchInput(this.value)">
                         <button type="button" class="queue-search-clear" id="queue-search-clear" onclick="clearQueueSearch()" title="Clear search" style="display:none;" aria-label="Clear Search">✕</button>
                     </div>
@@ -129,7 +130,7 @@
         <!-- Right Column: Inspection & Action Studio -->
         <div class="inspection-studio-pane" id="queue-inspection-pane">
             <div class="studio-empty-state" id="queue-studio-empty">
-                <span class="hide-mobile" style="font-size:3rem;">🔍</span>
+                <span class="hide-mobile" style="font-size:3rem;"><span class="ico ico-search" aria-hidden="true"></span></span>
                 <h3 style="color:#fff; font-size:1.1rem; font-weight:800;">No vehicle pair selected</h3>
                 <p style="font-size:0.85rem; max-width:380px;">Select a pair from the queue on the left to inspect evidence photos, match plates, and submit.</p>
             </div>
@@ -139,7 +140,7 @@
                 <!-- Conflict / Unlinked Order Warning Banner -->
                 <div id="qdetail-conflict-banner" style="display:none; background:rgba(239,68,68,0.15); border:1px solid #ef4444; border-radius:var(--radius-md); padding:10px 14px; margin-bottom:8px; align-items:center; justify-content:space-between; gap:12px;">
                     <div style="display:flex; align-items:center; gap:10px;">
-                        <span style="font-size:1.3rem;">⚠️</span>
+                        <span style="font-size:1.3rem;"><span class="ico ico-alert" aria-hidden="true"></span></span>
                         <div>
                             <div style="font-size:0.85rem; font-weight:800; color:#ef4444;" id="qdetail-conflict-title">Order Unassigned / Missing</div>
                             <div style="font-size:0.75rem; color:#e2e8f0;" id="qdetail-conflict-msg">This pair lacks a linked ITMS order. All new upload batches start in Conflict until linked to an active unassigned order.</div>
@@ -336,10 +337,10 @@
                         ⇄ Swap <span class="hotkey hide-mobile">S</span>
                     </button>
                     <button class="btn-decision btn-secondary" data-cap="queue.edit" onclick="openEditPlateModal()" title="Edit plate, change verification status, or link ITMS order (Hotkeys: E or L)">
-                        ✏️ Edit Plate <span class="hotkey hide-mobile">E / L</span>
+                        <span class="ico ico-edit" aria-hidden="true"></span> Edit Plate <span class="hotkey hide-mobile">E / L</span>
                     </button>
                     <button class="btn-decision btn-danger" id="btn-action-delete" data-cap="pair.delete" onclick="openDeletePairModal()" title="Delete pair and purge evidence files">
-                        🗑️ Delete Pair
+                        <span class="ico ico-delete" aria-hidden="true"></span> Delete Pair
                     </button>
                     <button class="btn-decision btn-warning" id="btn-action-flag" data-cap="flag.raise" onclick="openFlagForSelectedPair()" title="Flag a problem with this pair, its order or kit (blocks submission until the Team Leader resolves it)">
                         🚩 Flag

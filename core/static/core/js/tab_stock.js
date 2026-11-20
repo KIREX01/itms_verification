@@ -1629,6 +1629,7 @@ async function refreshStockTab() {
 
 async function refreshStockLedger() {
     try {
+        if (typeof workingDaySuffix === "function" && workingDaySuffix()) currentStockDateSuffix = workingDaySuffix();
         const url = `/api/stock/reconciliation/?date_suffix=${currentStockDateSuffix}`;
         const res = await fetch(url);
         const data = await res.json();
@@ -2460,3 +2461,12 @@ function fallbackCopy(text, label) {
         console.error('Copy fallback failed:', e);
     }
 }
+
+// v1.3.2: the working day bar drives Stock.
+window.addEventListener("shiftDateChanged", (e) => {
+    if (e && e.detail && e.detail.suffix) {
+        currentStockDateSuffix = e.detail.suffix;
+        if (typeof refreshStockLedger === "function") void refreshStockLedger();
+    }
+});
+

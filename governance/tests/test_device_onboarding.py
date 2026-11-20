@@ -119,7 +119,7 @@ class DeviceCodeFlowTests(TestCase):
             self.assertIn(text, body)
 
     def test_validation(self):
-        for bad in ({**DETAILS, "email": "not-an-email"}, {**DETAILS, "first_name": ""}, {**DETAILS, "last_name": "1"}):
+        for bad in ({**DETAILS, "email": "not-an-email"}, {**DETAILS, "email": ""}, {**DETAILS, "last_name": "1"}):
             r, send = self._send(bad)
             self.assertEqual(r.status_code, 403)
             send.assert_not_called()

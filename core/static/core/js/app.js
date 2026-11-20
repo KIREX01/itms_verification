@@ -66,7 +66,11 @@ document.addEventListener("DOMContentLoaded", () => {
         } else if (key === "b") {
             triggerBatchSubmit(typeof currentQueueDateScope !== "undefined" ? currentQueueDateScope : "TODAY");
         } else if (key === "d") {
-            if (activeNavTab === 7 && typeof toggleReportScope === "function") {
+            const dayInput = document.getElementById("day-bar-input");
+            if (dayInput) {
+                dayInput.focus();
+                try { if (typeof dayInput.showPicker === "function") dayInput.showPicker(); } catch (err) { /* ignore */ }
+            } else if (activeNavTab === 7 && typeof toggleReportScope === "function") {
                 toggleReportScope();
             } else if (activeNavTab === 4 && typeof cycleQueueDateScope === "function") {
                 cycleQueueDateScope();

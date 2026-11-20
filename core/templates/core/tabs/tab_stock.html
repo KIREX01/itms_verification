@@ -97,11 +97,8 @@
         <!-- LEFT PANE: Main Operations (65%) -->
         <div class="itms-table-panel" style="padding: 14px;">
             <div class="pane-header hide-mobile">
-                <h2>🏭 Bond Stock & Logistics</h2>
+                <h2>🏭 Bond Stock & Logistics <span class="view-only-chip gov-hidden" data-cap-missing="stock.edit stock.scan"><span class="ico ico-view" aria-hidden="true"></span> View only</span></h2>
                 <div class="header-actions" style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-                    <button class="btn btn-secondary" onclick="stockPrevDay()" title="Previous Shift">◀</button>
-                    <button class="btn btn-primary" onclick="stockToday()" title="Today's Shift">Today</button>
-                    <button class="btn btn-secondary" onclick="stockNextDay()" title="Next Shift">▶</button>
                     <button class="btn btn-secondary" id="btn-refresh-stock-tab" onclick="refreshStockTab()" style="font-weight: 700; display: inline-flex; align-items: center; gap: 5px;" title="Centralized atomic refresh of stock ledger, subtabs, and KPIs (Hotkey: R)">
                         <span id="btn-refresh-stock-spinner">🔄</span> Refresh <span class="hotkey">R</span>
                     </button>
@@ -124,7 +121,7 @@
                         🚚 Movements
                     </button>
                     <button class="btn btn-secondary stock-mode-btn" id="btn-mode-audit" onclick="setStockMode('audit')">
-                        🔍 Safe Audit
+                        <span class="ico ico-search" aria-hidden="true"></span> Safe Audit
                     </button>
                     <button class="btn btn-secondary stock-mode-btn" id="btn-mode-ledger" onclick="setStockMode('ledger')">
                         📊 Ledger
@@ -146,7 +143,7 @@
                     <input type="text" id="stock-universal-scan" class="form-control" style="flex: 1;" placeholder="Scan barcode or type plate... (Press / to focus)" autocomplete="off" aria-label="Universal barcode scan or registration plate input">
                     <div class="stock-command-bar-actions">
                         <button class="btn btn-warning" id="btn-view-blocked-stock" onclick="openNotOnStockModal()" style="display: none; font-size: 0.85rem; font-weight: 700; align-items: center; gap: 4px;" title="View plates not on stock needing ITMS transfer">
-                            ⚠️ Not On Stock (<span id="lbl-blocked-stock-count">0</span>)
+                            <span class="ico ico-alert" aria-hidden="true"></span> Not On Stock (<span id="lbl-blocked-stock-count">0</span>)
                         </button>
                         <button class="btn btn-secondary" onclick="openStockPasteModal()" title="Paste registration numbers from Excel (V)">📋 Paste <span class="hotkey">V</span></button>
                         <a href="/mobile/" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="display:inline-flex; align-items:center; gap:6px; font-weight:700; color:#38bdf8; text-decoration:none;" title="Open Mobile Scanner Companion">
@@ -168,10 +165,10 @@
                                     🚚 Inbound Movements &amp; Transfers CSV
                                 </a>
                                 <a href="javascript:void(0)" onclick="exportAuditCSV()" style="display:block; padding:8px 12px; color:#e2e8f0; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
-                                    🔍 Safe Room Audit Scans CSV
+                                    <span class="ico ico-search" aria-hidden="true"></span> Safe Room Audit Scans CSV
                                 </a>
                                 <a href="javascript:void(0)" onclick="exportUnregistered()" style="display:block; padding:8px 12px; color:#f87171; text-decoration:none; font-size:0.8rem; font-weight:600; border-bottom:1px solid #1e293b;">
-                                    ⚠️ Unregistered Safe Kits CSV
+                                    <span class="ico ico-alert" aria-hidden="true"></span> Unregistered Safe Kits CSV
                                 </a>
                                 <a href="javascript:void(0)" onclick="exportCategoryFromStock('blocked')" style="display:block; padding:8px 12px; color:#f59e0b; text-decoration:none; font-size:0.8rem; font-weight:600;">
                                     🚫 Blocked / Not On Stock CSV
@@ -202,10 +199,10 @@
                         ✓ In Stock (<span id="count-disp-valid">0</span>)
                     </button>
                     <button type="button" class="btn btn-warning btn-sm stock-table-filter-pill" id="btn-filter-disp-blocked" onclick="filterDispatchTable('blocked')" style="padding: 3px 10px; font-size: 0.78rem; font-weight: 700; color: #fca5a5; background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444;">
-                        ⚠️ Not On Stock (<span id="count-disp-blocked">0</span>)
+                        <span class="ico ico-alert" aria-hidden="true"></span> Not On Stock (<span id="count-disp-blocked">0</span>)
                     </button>
                     <button type="button" class="btn btn-secondary btn-sm stock-table-filter-pill" id="btn-filter-disp-unalloc" onclick="filterDispatchTable('unallocated')" style="padding: 3px 10px; font-size: 0.78rem;">
-                        ❌ Unallocated Floor (<span id="count-disp-unalloc">0</span>)
+                        <span class="ico ico-no" aria-hidden="true"></span> Unallocated Floor (<span id="count-disp-unalloc">0</span>)
                     </button>
                 </div>
                 <div class="itms-table-scroll">
@@ -324,7 +321,7 @@
                     </table>
                 </div>
                 <div class="table-pagination-bar" style="margin-top: auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 0 0 0;">
-                    <button class="btn btn-primary" id="btn-open-edit-ledger" onclick="openEditLedgerModal()" style="font-size: 0.85rem; font-weight: 700;" title="Edit Daily Stock Ledger: Opening Balances, Targets, Overrides & Notes (Hotkey: O)">✏️ Edit Ledger <span class="hotkey">O</span></button>
+                    <button class="btn btn-primary" id="btn-open-edit-ledger" onclick="openEditLedgerModal()" style="font-size: 0.85rem; font-weight: 700;" title="Edit Daily Stock Ledger: Opening Balances, Targets, Overrides & Notes (Hotkey: O)"><span class="ico ico-edit" aria-hidden="true"></span> Edit Ledger <span class="hotkey">O</span></button>
                     <button class="btn btn-primary" id="btn-open-email-report" onclick="openEmailStockReportModal()" style="font-size: 0.85rem; font-weight: 700; background: #2563eb; border-color: #3b82f6;" title="Email official 9-row daily reconciliation report">📧 Email Report</button>
                     <button class="btn btn-secondary" onclick="refreshStockLedger()" style="font-size: 0.85rem;">🔄 Refresh Ledger <span class="hotkey">R</span></button>
                     <button class="btn btn-success" id="btn-export-ledger" onclick="exportStockCSV()" style="font-size: 0.85rem; font-weight: 700;" title="Export full daily reconciliation ledger as CSV">📊 Export Reconciliation CSV</button>
@@ -515,7 +512,7 @@
             <button class="btn btn-secondary" onclick="openMobileConnectModal()">📱 Scan with Mobile</button>
             <div style="display: flex; gap: 8px;">
                 <button class="btn btn-secondary" onclick="closeStockPasteModal()">Cancel</button>
-                <button class="btn btn-warning" id="btn-paste-check-stock" onclick="checkStockPasteAvailability()" title="Check stock availability and report unlisted plates without dispatching">🔍 Check Stock Only</button>
+                <button class="btn btn-warning" id="btn-paste-check-stock" onclick="checkStockPasteAvailability()" title="Check stock availability and report unlisted plates without dispatching"><span class="ico ico-search" aria-hidden="true"></span> Check Stock Only</button>
                 <button class="btn btn-primary" id="btn-process-stock-paste" onclick="processStockPaste()" title="Process pasted plates">⚡ Dispatch Plates</button>
             </div>
         </div>
@@ -527,7 +524,7 @@
     <div class="modal-box" style="width: 740px; max-width: 95vw; max-height: 90vh; display: flex; flex-direction: column;">
         <div class="modal-header" style="background: rgba(220, 53, 69, 0.12); border-bottom: 1px solid rgba(220, 53, 69, 0.3);">
             <h3 class="modal-title" style="color: #ff6b6b; display: flex; align-items: center; gap: 8px;">
-                <span>⚠️</span> Plates Not On Stock (ITMS Transfer Required)
+                <span><span class="ico ico-alert" aria-hidden="true"></span></span> Plates Not On Stock (ITMS Transfer Required)
             </h3>
             <button class="modal-close" onclick="closeNotOnStockModal()">×</button>
         </div>
@@ -603,7 +600,7 @@
 <div class="modal-overlay" id="modal-edit-ledger">
     <div class="modal-box" style="width: 680px; max-width: 95vw; max-height: 90vh; display: flex; flex-direction: column;">
         <div class="modal-header">
-            <h3 class="modal-title"><span>✏️</span> Edit Daily Stock Ledger</h3>
+            <h3 class="modal-title"><span><span class="ico ico-edit" aria-hidden="true"></span></span> Edit Daily Stock Ledger</h3>
             <button class="modal-close" onclick="closeEditLedgerModal()">×</button>
         </div>
         <div class="modal-body" style="overflow-y: auto; flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 14px;">

@@ -318,7 +318,7 @@ async function fetchHistoryEvents() {
     }
 
     try {
-        const activeDateScope = currentHistoryDateScope || "TODAY";
+        const activeDateScope = "TODAY";  // the working day (v1.3.2)
         const res = await fetch(`/api/history/?filter=ALL&date_scope=${encodeURIComponent(activeDateScope)}`);
         const data = await res.json();
         if (data.success && data.items) {

@@ -427,7 +427,8 @@ def get_system_totals(scope: str = "ALL", target_date: Optional[str] = None) -> 
         Structured dictionary of counts, breakdowns, percentages, warehouse stats,
         and date_driven categories.
     """
-    today = timezone.localdate()
+    from core.services import date_service as _ds
+    today = _ds.get_active_shift_date()  # the person's working day
 
     # ──────────────────────────────────────────────────────────────────────────
     # 1. Evidence Photos Totals

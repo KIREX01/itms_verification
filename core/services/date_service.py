@@ -258,13 +258,43 @@ def parse_target_date_suffix(date_input: Optional[Any]) -> Optional[str]:
     return None
 
 
+# Per-person working day (v1.3.2). Set for each web request by WorkingDayMiddleware from the session, so one
+# person changing the day never changes it for anyone else. Outside a request (TUI, daemons, CLI) the
+# configured default below applies.
+from contextvars import ContextVar
+
+_working_day: ContextVar[Optional[date]] = ContextVar("close_working_day", default=None)
+_in_web_request: ContextVar[bool] = ContextVar("close_in_web_request", default=False)
+
+WORKING_DAY_SESSION_KEY = "close_working_day"
+WORKING_DAY_PAST_DAYS = 365
+WORKING_DAY_FUTURE_DAYS = 7
+
+
+def clamp_working_day(d: date) -> date:
+    today = today_kampala()
+    low, high = today - timedelta(days=WORKING_DAY_PAST_DAYS), today + timedelta(days=WORKING_DAY_FUTURE_DAYS)
+    return min(max(d, low), high)
+
+
+def set_request_working_day(d: Optional[date]):
+    """Called by the middleware; returns tokens for reset_request_working_day()."""
+    return _working_day.set(d), _in_web_request.set(True)
+
+
+def reset_request_working_day(tokens) -> None:
+    _working_day.reset(tokens[0])
+    _in_web_request.reset(tokens[1])
+
+
 def get_active_shift_date() -> date:
     """
-    Returns the system's active operating shift date as configured in Settings.
-    - 'today': today in Kampala
-    - 'yesterday': yesterday in Kampala
-    - 'manual': configured manual_target_date (falls back to today if invalid)
+    The working day.
+    - In a web request: the person's own day (session), else today in Kampala.
+    - Elsewhere (TUI, daemons): the configured default ('today' / 'yesterday' / 'manual').
     """
+    if _in_web_request.get():
+        return _working_day.get() or today_kampala()
     try:
         from core.services import config_service
         mode = config_service.get_setting("sync.shift_target_date_mode", "today")
@@ -307,16 +337,9 @@ def get_active_shift_info() -> Dict[str, Any]:
     except Exception:
         pass
 
-    if mode == "all" or manual_raw.strip().upper() == "ALL":
-        return {
-            "mode": "all",
-            "manual_date": "ALL",
-            "date": "ALL",
-            "suffix": "ALL",
-            "formatted_date": "All Dates",
-            "display": "All Dates (Aggregate)",
-            "is_today": False,
-        }
+    if _in_web_request.get():
+        mode = "today" if active_d == today_d else ("yesterday" if active_d == yesterday_kampala() else "manual")
+        manual_raw = "" if mode == "today" else formatted
 
     return {
         "mode": mode,

@@ -27,7 +27,7 @@
         </div>
 
         <!-- 1. Facility & Operating Bonded Warehouse -->
-        <div class="settings-card">
+        <div class="settings-card" data-cap="itms.connect">
             <div class="settings-card-header">
                 <div class="settings-card-title">
                     <span>🏢 Operating Facility &amp; Bonded Warehouse</span>
@@ -73,44 +73,8 @@
             </div>
         </div>
 
-        <!-- 2. Operating Shift Target Date -->
-        <div class="settings-card">
-            <div class="settings-card-header">
-                <div class="settings-card-title">
-                    <span>📅 Operating Shift Date</span>
-                </div>
-                <span id="settings-active-shift-badge" class="badge badge-green" style="font-weight:700; font-family:var(--font-mono);">Active: Loading...</span>
-            </div>
 
-            <div class="settings-row">
-                <div class="settings-label-group">
-                    <span class="settings-label-title">Shift Target Date</span>
-                    <span class="settings-label-desc">Active shift date for Queue, Stock Dispatch, and Reports (East Africa Time).</span>
-                </div>
-                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                    <select id="settings-shift-mode-select"
-                            style="padding: 6px 12px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem;"
-                            onchange="onSettingsShiftModeChanged(this.value)">
-                        <option value="today" {% if user_settings.sync_shift_target_date_mode.value == 'today' %}selected{% endif %}>Today (Live Shift)</option>
-                        <option value="yesterday" {% if user_settings.sync_shift_target_date_mode.value == 'yesterday' %}selected{% endif %}>Yesterday</option>
-                        <option value="manual" {% if user_settings.sync_shift_target_date_mode.value == 'manual' %}selected{% endif %}>Manual Date</option>
-                    </select>
-
-                    <input type="text" id="settings-manual-date-input" placeholder="e.g. 30.09.2026"
-                           value="{{ user_settings.sync_manual_target_date.value|default:'' }}"
-                           style="width: 120px; padding: 6px 10px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #fff; border-radius: var(--radius-md); font-size: 0.85rem; font-family:var(--font-mono);"
-                           onchange="onSettingsManualDateChanged(this.value.trim())">
-
-                    <input type="date" id="settings-manual-date-picker"
-                           title="Select Calendar Date"
-                           style="padding: 5px 8px; background-color: var(--ug-black-surface); border: 1px solid var(--ug-border); color: #38bdf8; border-radius: var(--radius-md); font-size: 0.85rem; cursor:pointer;"
-                           onchange="onSettingsDatePickerChanged(this.value)">
-                </div>
-            </div>
-        </div>
-
-        <!-- 3. Submission Mode & ITMS Identity -->
-        <div class="settings-card">
+        <div class="settings-card" data-cap="itms.connect">
             <div class="settings-card-header">
                 <div class="settings-card-title">
                     <span>🛡️ Submission Mode &amp; ITMS Identity</span>
@@ -191,7 +155,7 @@
         </div>
 
         <!-- 5. System Version & Updates -->
-        <div class="settings-card">
+        <div class="settings-card" data-cap="platform.admin">
             <div class="settings-card-header">
                 <div class="settings-card-title">
                     <span>📦 System Version &amp; Updates</span>

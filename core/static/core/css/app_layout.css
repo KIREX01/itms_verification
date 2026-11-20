@@ -880,3 +880,44 @@ footer.app-footer {
         align-items: center;
     }
 }
+
+/* ---------------------------------------------------------------------------
+   Icons (Django admin / Font Awesome shapes, MIT; see core/static/core/icons/LICENSE).
+   Mask-based, so an icon takes the text colour and size: <span class="ico ico-edit"></span>
+   --------------------------------------------------------------------------- */
+.ico { display: inline-block; width: 1em; height: 1em; vertical-align: -0.125em; flex: none;
+       background-color: currentColor; -webkit-mask: var(--ico) center / contain no-repeat; mask: var(--ico) center / contain no-repeat; }
+.ico-add { --ico: url("../icons/add.svg"); }
+.ico-edit { --ico: url("../icons/edit.svg"); }
+.ico-delete { --ico: url("../icons/delete.svg"); }
+.ico-view { --ico: url("../icons/view.svg"); }
+.ico-hide { --ico: url("../icons/hide.svg"); }
+.ico-yes { --ico: url("../icons/yes.svg"); }
+.ico-no { --ico: url("../icons/no.svg"); }
+.ico-alert { --ico: url("../icons/alert.svg"); }
+.ico-calendar { --ico: url("../icons/calendar.svg"); }
+.ico-clock { --ico: url("../icons/clock.svg"); }
+.ico-search { --ico: url("../icons/search.svg"); }
+
+/* ---------------------------------------------------------------------------
+   Working day bar: first control on every tab
+   --------------------------------------------------------------------------- */
+.day-bar { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+           padding: 8px 16px; background: #0c1017; border-bottom: 1px solid var(--ug-border, #1f293d); }
+.day-bar-btn, .day-bar-today { min-height: 36px; min-width: 36px; padding: 0 12px; border-radius: 8px; font-weight: 700;
+                               border: 1px solid var(--ug-border, #1f293d); background: #111827; color: #fff; cursor: pointer; }
+.day-bar-btn:hover, .day-bar-today:hover { border-color: var(--ug-yellow, #ffd100); }
+.day-bar-btn:focus-visible, .day-bar-today:focus-visible, .day-bar-date input:focus-visible { outline: 2px solid var(--ug-yellow, #ffd100); outline-offset: 2px; }
+.day-bar-today.is-today { background: var(--ug-yellow, #ffd100); color: #0c1017; border-color: var(--ug-yellow, #ffd100); }
+.day-bar-date { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 10px; border-radius: 8px;
+                border: 1px solid var(--ug-border, #1f293d); background: #111827; color: var(--ug-yellow, #ffd100); cursor: pointer; }
+.day-bar-date input { background: transparent; border: 0; color: #fff; font-weight: 700; font-size: 0.95rem; color-scheme: dark; }
+.day-bar-label { font-size: 0.9rem; font-weight: 700; color: #fff; margin-left: 4px; }
+.day-bar.not-today .day-bar-label { color: var(--ug-yellow, #ffd100); }
+@media (max-width: 640px) {
+  .day-bar { padding: 8px 12px; gap: 6px; }
+  .day-bar-label { flex-basis: 100%; margin-left: 0; font-size: 0.82rem; }
+}
+/* Read-only roles: a small chip in tab headers */
+.view-only-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 0.72rem;
+                  font-weight: 700; color: #cbd5e1; border: 1px solid #334155; }

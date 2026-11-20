@@ -185,19 +185,11 @@
             <div class="history-toolbar-right">
                 <!-- Date Scope Filter & Actions -->
                 <div class="scope-pills-group" style="margin-left:0; display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
-                    <button class="scope-pill-btn active" id="btn-hscope-today" onclick="setHistoryDateScope('TODAY')" title="Show audit logs from active/today shift (Hotkey: D)">
-                        <i class="fas fa-calendar-day text-warning"></i>
-                        <span>Today<span class="hide-mobile">'s Shift</span></span>
-                    </button>
-                    <button class="scope-pill-btn" id="btn-hscope-all" onclick="setHistoryDateScope('ALL')" title="Show all audit logs across entire history">
-                        <i class="fas fa-globe text-primary"></i>
-                        <span>All<span class="hide-mobile"> Time</span></span>
-                    </button>
                     <button class="scope-pill-btn" id="btn-hist-refresh" onclick="fetchHistoryEvents()" title="Refresh records">
                         <i class="fas fa-sync-alt text-cyan"></i>
                         <span>Refresh</span>
                     </button>
-                    <a href="/api/export/report/" class="scope-pill-btn" id="btn-hist-csv" style="text-decoration:none; color:#10b981 !important;" title="Export Shift Audit Report CSV">
+                    <a data-cap="reports.export" href="/api/export/report/" class="scope-pill-btn" id="btn-hist-csv" style="text-decoration:none; color:#10b981 !important;" title="Export Shift Audit Report CSV">
                         <i class="fas fa-file-csv"></i>
                         <span>CSV</span>
                     </a>
@@ -271,16 +263,10 @@
 
                     <!-- Scope Pills Group (Mobile Mirror) -->
                     <div class="scope-pills-group hide-desktop" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; width:100%;">
-                        <button class="scope-pill-btn active" id="btn-hscope-today-m" onclick="window.setHistoryDateScope('TODAY')" style="flex:1; text-align:center;">
-                            <i class="fas fa-calendar-day"></i> <span>Today</span>
-                        </button>
-                        <button class="scope-pill-btn" id="btn-hscope-all-m" onclick="window.setHistoryDateScope('ALL')" style="flex:1; text-align:center;">
-                            <i class="fas fa-globe"></i> <span>All Dates</span>
-                        </button>
                         <button class="scope-pill-btn" onclick="window.fetchHistoryEvents()" style="flex:1; text-align:center;">
                             <i class="fas fa-sync-alt"></i> <span>Refresh</span>
                         </button>
-                        <a href="{% url 'core:api_export_report' %}" class="scope-pill-btn" style="flex:1; text-align:center; text-decoration:none;">
+                        <a data-cap="reports.export" href="{% url 'core:api_export_report' %}" class="scope-pill-btn" style="flex:1; text-align:center; text-decoration:none;">
                             <i class="fas fa-file-csv"></i> <span>CSV</span>
                         </a>
                     </div>

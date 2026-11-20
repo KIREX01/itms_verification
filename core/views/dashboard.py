@@ -17,7 +17,7 @@ from core.models import (
     SubmissionAuditLog,
     VehicleInstallationPair,
 )
-from core.services import auth_service, config_service, device_service
+from core.services import auth_service, config_service, date_service, device_service
 from core.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ def api_stats(request: HttpRequest) -> JsonResponse:
     if not (request.user and getattr(request.user, "is_authenticated", False)):
         return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
 
-    today = timezone.localdate()
+    today = date_service.get_active_shift_date()  # the person's working day
 
     total_orders = InstallationOrder.objects.count()
     pending_orders = InstallationOrder.objects.filter(status=InstallationOrder.Status.PENDING).count()
@@ -190,7 +190,7 @@ def api_history_list(request: HttpRequest) -> JsonResponse:
     if not (request.user and getattr(request.user, "is_authenticated", False)):
         return JsonResponse({"success": False, "error": "Authentication required.", "code": "AUTHENTICATION_REQUIRED"}, status=401)
 
-    today = timezone.localdate()
+    today = date_service.get_active_shift_date()  # the person's working day
 
     flt = request.GET.get("filter", "ALL").strip().upper()
     date_scope = request.GET.get("date_scope", "TODAY").strip().upper()

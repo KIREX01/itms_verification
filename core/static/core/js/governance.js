@@ -21,13 +21,71 @@ window.CLOSE_GOV = {
 const NAV_TAB_CAPS = {
     1: ["dashboard.view"],
     2: ["orders.view"],
-    3: ["queue.view", "capture.upload"],
+    3: ["capture.upload", "pipeline.run"],      // photo batches: Team Leader (Helpers use the phone)
     4: ["queue.view"],
     5: ["stock.view", "stock.scan"],
     6: ["reports.view"],
-    7: ["settings.operator"],
+    7: ["settings.operator"],                   // everyone: My account; TL-only cards are gated inside
     8: ["history.view"],
 };
+
+/*
+ * Buttons are gated by the function they call, so rows drawn later by the tab scripts are covered too.
+ * A button shows when the person has ANY of the listed capabilities. Unlisted functions (views, filters,
+ * navigation, closing dialogs) are always shown. The server enforces every one of these regardless.
+ */
+const ACTION_CAPS = {
+    // Queue
+    openEditPlateModal: ["queue.edit"], openLinkOrderModal: ["queue.edit"], linkOrderToPair: ["queue.edit"],
+    submitUnifiedLinkOrder: ["queue.edit"], unlinkOrderFromSelectedPair: ["queue.edit"],
+    openReplaceImageModal: ["queue.edit"], openReplaceBatchImageModal: ["queue.edit"], submitReplaceImage: ["queue.edit"],
+    openCurrentOrderInInstallModal: ["queue.edit"], saveOrderStep1: ["queue.edit"], submitOrderDirect: ["queue.edit"],
+    openDeletePairModal: ["pair.delete"], confirmDeletePair: ["pair.delete"],
+    triggerBatchSubmit: ["itms.submit"], startSubmissionExecution: ["itms.submit"],
+    reviewConflictsFromSubmitModal: ["itms.submit"], abortBatchSubmission: ["itms.submit"],
+    // Vision & photos
+    triggerPipeline: ["pipeline.run"], triggerMatching: ["pipeline.run"],
+    openBatchUploadModal: ["capture.upload"], submitTabBatchUpload: ["capture.upload"],
+    triggerOrderPhotoUpload: ["capture.upload", "queue.edit"], openMobileConnectModal: ["capture.upload", "queue.edit"],
+    // ITMS
+    triggerSyncOrders: ["itms.connect"], syncItmsAll: ["itms.connect"], syncReportShiftOrders: ["itms.connect"],
+    syncBondsFromITMS: ["itms.connect"], submitItmsConnect: ["itms.connect"], submitItmsCredentials: ["itms.connect"],
+    disconnectItms: ["itms.connect"], openStockKitSyncModal: ["itms.connect"], submitStockKitSync: ["itms.connect"],
+    syncStock: ["itms.connect"],
+    // Stock
+    openEditLedgerModal: ["stock.edit"], submitEditLedger: ["stock.edit"], prefillEditLedgerFromCurrent: ["stock.edit"],
+    autoCarryPreviousClosing: ["stock.edit"], commitMovement: ["stock.edit"], clearMovementStaged: ["stock.edit"],
+    openShiftReconcileModal: ["stock.edit"], submitShiftReconciliation: ["stock.edit"],
+    openQuickDeliveryModal: ["stock.edit"], submitQuickDelivery: ["stock.edit"], setManualAuditCount: ["stock.edit"],
+    recheckBlockedPlatesLive: ["stock.edit"], clearDispatchesToday: ["stock.edit"],
+    openStockPasteModal: ["stock.scan", "stock.edit"], processStockPaste: ["stock.scan", "stock.edit"],
+    checkStockPasteAvailability: ["stock.scan", "stock.edit"], dispatchResolvedStockPlates: ["stock.scan", "stock.edit"],
+    // Reports & exports
+    exportAuditCSV: ["reports.export"], exportCategoryFromStock: ["reports.export"], exportDispatchCSV: ["reports.export"],
+    exportMovementsCSV: ["reports.export"], exportQueueCSV: ["reports.export"], exportStockCSV: ["reports.export"],
+    exportUnregistered: ["reports.export"], downloadReportCsv: ["reports.export"],
+    downloadShiftCsvFromModal: ["reports.export"], downloadNotOnStockDocket: ["reports.export"],
+    copyMvrDocket: ["reports.export"], openEmailStockReportModal: ["reports.export"],
+    submitEmailStockReport: ["reports.export"], toggleShiftCsvMenu: ["reports.export"],
+    toggleStockExportMenu: ["reports.export"],
+    // Team & flags
+    sendTimeBoundEmailInvite: ["team.invite"],
+    openFlagForSelectedPair: ["flag.raise"], submitFlag: ["flag.raise"], resolveFlag: ["flag.resolve"],
+    // Platform only (the administrator works in the backoffice)
+    applySystemUpdate: ["platform.admin"], checkForUpdates: ["platform.admin"], toggleDryRun: ["platform.admin"],
+};
+
+// executePairAction('approve' | 'swap' | 'submit') needs a capability per action.
+const PAIR_ACTION_CAPS = { approve: ["queue.approve"], swap: ["queue.edit"], submit: ["itms.submit"] };
+
+const ONCLICK_FN = /^\s*(?:return\s+)?(?:void\s+)?(?:window\.)?([A-Za-z_]\w*)\s*\(\s*(?:["']([a-z_]+)["'])?/;
+
+function actionCapsFor(el) {
+    const m = ONCLICK_FN.exec(el.getAttribute("onclick") || "");
+    if (!m) return null;
+    if (m[1] === "executePairAction") return PAIR_ACTION_CAPS[m[2]] || ["queue.edit", "queue.approve"];
+    return ACTION_CAPS[m[1]] || null;
+}
 
 const ROLE_LABELS = {
     HELPER: "Helper",
@@ -51,6 +109,16 @@ function applyCapabilityVisibility(root = document) {
     root.querySelectorAll("[data-cap]").forEach(el => {
         const caps = (el.getAttribute("data-cap") || "").split(/\s+/).filter(Boolean);
         el.classList.toggle("gov-hidden", caps.length > 0 && !hasCap(...caps));
+    });
+    // Shown only when the person LACKS all of these (e.g. the "View only" chip).
+    root.querySelectorAll("[data-cap-missing]").forEach(el => {
+        const caps = (el.getAttribute("data-cap-missing") || "").split(/\s+/).filter(Boolean);
+        el.classList.toggle("gov-hidden", hasCap(...caps));
+    });
+    root.querySelectorAll("[onclick]").forEach(el => {
+        if (el.hasAttribute("data-cap")) return;
+        const caps = actionCapsFor(el);
+        if (caps) el.classList.toggle("gov-hidden", !hasCap(...caps));
     });
     for (const n of Object.keys(NAV_TAB_CAPS)) {
         const btn = document.getElementById(`nav-tab-${n}`);
@@ -82,6 +150,14 @@ async function loadCapabilities() {
         gov.isAdmin = !!data.is_platform_admin;
         applyCapabilityVisibility();
         renderRoleBadge();
+        watchForNewButtons();
+        // First visit (no saved tab, no #hash): open the role's start page.
+        let savedTab = null;
+        try { savedTab = localStorage.getItem("itms_active_nav_tab"); } catch (e) { savedTab = null; }
+        if (!savedTab && !window.location.hash && typeof switchNavTab === "function") {
+            const home = roleStartTab();
+            if (home && navTabAllowed(home)) switchNavTab(home);
+        }
         // If the current tab is not allowed, move to the first allowed tab.
         const active = document.querySelector(".nav-tab-item.active");
         const activeNum = active ? Number((active.id || "").replace("nav-tab-", "")) : 1;
@@ -92,6 +168,26 @@ async function loadCapabilities() {
     } catch (err) {
         console.warn("Capability load failed", err);
     }
+}
+
+function roleStartTab() {
+    // Team Leader: dashboard. Supervisor: reports. Quality Inspector: queue.
+    if (hasCap("itms.submit")) return 1;
+    if (hasCap("reports.view")) return 6;
+    if (hasCap("queue.view")) return 4;
+    return 1;
+}
+
+let _govObserverStarted = false;
+function watchForNewButtons() {
+    if (_govObserverStarted || typeof MutationObserver === "undefined") return;
+    _govObserverStarted = true;
+    let pending = null;
+    const observer = new MutationObserver(() => {
+        if (pending) return;
+        pending = setTimeout(() => { pending = null; applyCapabilityVisibility(document); }, 120);
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
 }
 
 // Guard tab switching (keyboard shortcuts included).
